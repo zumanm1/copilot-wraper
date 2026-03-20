@@ -1,0 +1,143 @@
+# ============================================================
+# Copilot OpenAI-Compatible API Wrapper — Docker Compose
+#
+# Two-container architecture:
+#
+#   Container 1 (app)            — FastAPI OpenAI-compatible API
+#                                  Wraps Microsoft Copilot via WebSocket
+#                                  Exposes: http://localhost:8000
+#
+#   Container 2 (agent-terminal) — Interactive AI Agent Terminal
+#                                  Runs Aider / OpenCode
+#                                  Uses Container 1 for inference
+#
+# ── Quick start ───────────────────────────────────────────────
+#
+#   # 1. Start the API server (Container 1):
+#   docker compose up app -d
+#
+#   # 2. Launch an interactive AI agent session (Container 2):
+#   docker compose run --rm agent-terminal
+#
+#   # 3. Run automated Playwright tests:
+#   docker compose run --rm test
+#
+#   # 4. Stop everything:
+#   docker compose down
+# ============================================================
+
+services:
+
+  # ──────────────────────────────────────────────────────────
+  # Container 1: FastAPI Copilot API Wrapper
+  #
+  # OpenAI-compatible REST API backed by Microsoft Copilot.
+  # All other services use this as their inference backend.
+  # ──────────────────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: copilot-api:latest
+    container_name: copilot-api
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - RELOAD=false
+      - REQUEST_TIMEOUT=60
+      - CONNECT_TIMEOUT=15
+      - POOL_WARM_COUNT=2
+      - AGENT_MAX_HISTORY=1000
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+    networks:
+      - copilot-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ──────────────────────────────────────────────────────────
+  # Container 2: Interactive AI Agent Terminal
+  #
+  # Terminal AI agents pre-configured to use Container 1
+  # (copilot-api) as their OpenAI-compatible inference backend.
+  #
+  # Included agents:
+  #   - Aider    (recommended — terminal coding agent)
+  #   - OpenCode (modern terminal AI agent)
+  #
+  # How to use:
+  #   docker compose up app -d          # start Container 1 first
+  #   docker compose run --rm agent-terminal   # launch agent
+  #
+  # The agent will show a menu to choose between Aider / OpenCode / bash.
+  # Files in ./workspace/ are mounted at /workspace inside the container.
+  # ──────────────────────────────────────────────────────────
+  agent-terminal:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    image: copilot-agent-terminal:latest
+    container_name: copilot-agent-terminal
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      # All agents point to the copilot-api service via internal DNS
+      - OPENAI_API_BASE=http://app:8000/v1
+      - OPENAI_API_KEY=not-needed
+      - AIDER_MODEL=openai/copilot
+      # Disable telemetry and auto-update checks
+      - AIDER_ANALYTICS=false
+      - AIDER_NO_CHECK_UPDATE=true
+      - DO_NOT_TRACK=1
+    volumes:
+      # Mount workspace so agents can read/edit your project files
+      - ./workspace:/workspace
+    networks:
+      - copilot-net
+    # Required for interactive terminal sessions
+    stdin_open: true
+    tty: true
+    restart: "no"
+
+  # ──────────────────────────────────────────────────────────
+  # Test Runner: Playwright automated test suite (45 tests)
+  #
+  # How to use:
+  #   docker compose run --rm test
+  # ──────────────────────────────────────────────────────────
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    container_name: copilot-tests
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      - BASE_URL=http://app:8000
+      - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+    volumes:
+      - ./tests/reports:/tests/reports
+    networks:
+      - copilot-net
+    restart: "no"
+
+# ── Shared network ────────────────────────────────────────────
+# All containers communicate via this bridge network.
+# Container 2 reaches Container 1 at http://app:8000
+networks:
+  copilot-net:
+    driver: bridge

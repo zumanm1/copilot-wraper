@@ -1,0 +1,19 @@
+# ============================================================
+# Playwright Test Container
+# Uses Microsoft's official Playwright Python image (includes
+# all browser binaries + system dependencies pre-installed)
+# ============================================================
+FROM mcr.microsoft.com/playwright/python:v1.49.0-jammy
+
+WORKDIR /tests
+
+# Install test dependencies
+COPY tests/requirements-test.txt .
+RUN pip install --no-cache-dir -r requirements-test.txt
+
+# Copy the test suite
+COPY tests/ .
+
+# Default: run tests with verbose output
+CMD ["python", "-m", "pytest", "test_playwright.py", "-v", "--tb=short", \
+     "--html=reports/report.html", "--self-contained-html"]
