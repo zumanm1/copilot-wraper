@@ -213,3 +213,47 @@ class AgentClearHistoryResponse(BaseModel):
     """Response from DELETE /v1/agent/history."""
     cleared: int
     message: str
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Anthropic-compatible Models  (POST /v1/messages)
+# ─────────────────────────────────────────────────────────────────────
+
+class AnthropicContentBlock(BaseModel):
+    """A content block in Anthropic message format."""
+    type: Literal["text"] = "text"
+    text: str = ""
+
+
+class AnthropicMessage(BaseModel):
+    """A message in Anthropic format (role + content list)."""
+    role: Literal["user", "assistant"]
+    content: str | list[AnthropicContentBlock]
+
+
+class AnthropicRequest(BaseModel):
+    """Request body for POST /v1/messages (Anthropic SDK format)."""
+    model: str = "claude-3-5-sonnet-20241022"
+    messages: list[AnthropicMessage]
+    system: str | None = None
+    max_tokens: int = 4096
+    temperature: float | None = None
+    top_p: float | None = None
+    stream: bool = False
+
+
+class AnthropicUsage(BaseModel):
+    input_tokens: int = 0
+    output_tokens: int = 0
+
+
+class AnthropicResponse(BaseModel):
+    """Response body matching Anthropic Messages API format."""
+    id: str = Field(default_factory=lambda: f"msg_{int(time.time())}")
+    type: str = "message"
+    role: str = "assistant"
+    content: list[AnthropicContentBlock]
+    model: str
+    stop_reason: str = "end_turn"
+    stop_sequence: str | None = None
+    usage: AnthropicUsage = Field(default_factory=AnthropicUsage)

@@ -25,6 +25,7 @@ from typing import AsyncGenerator
 from cachetools import TTLCache
 from sydney import SydneyClient
 import config
+from circuit_breaker import get_circuit_breaker, CircuitOpenError
 
 # ── Response cache (module-level, shared across all pool instances) ──────────
 _response_cache: TTLCache = TTLCache(maxsize=200, ttl=300)
@@ -139,7 +140,15 @@ class CopilotBackend:
                 _in_flight.pop(key, None)
 
     async def _do_chat_completion(self, prompt, attachment_path, context, search):
-        """Raw Microsoft Copilot call, no caching."""
+        """Raw Microsoft Copilot call, no caching — wrapped by circuit breaker."""
+        breaker = get_circuit_breaker(
+            threshold=config.CIRCUIT_BREAKER_THRESHOLD,
+            timeout_seconds=config.CIRCUIT_BREAKER_TIMEOUT,
+        )
+        return await breaker.call(self._raw_copilot_call, prompt, attachment_path, context, search)
+
+    async def _raw_copilot_call(self, prompt, attachment_path, context, search):
+        """Actual network call to Microsoft Copilot (no circuit-breaker logic here)."""
         client = await self._get_client()
         try:
             response = await asyncio.wait_for(

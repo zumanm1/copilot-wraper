@@ -32,6 +32,13 @@ POOL_WARM_COUNT = int(os.getenv("POOL_WARM_COUNT", "2"))
 # Agent settings
 AGENT_MAX_HISTORY = int(os.getenv("AGENT_MAX_HISTORY", "1000"))
 
+# Circuit breaker settings
+CIRCUIT_BREAKER_THRESHOLD = int(os.getenv("CIRCUIT_BREAKER_THRESHOLD", "5"))
+CIRCUIT_BREAKER_TIMEOUT   = int(os.getenv("CIRCUIT_BREAKER_TIMEOUT", "60"))
+
+# Rate limiting (slowapi format, e.g. "20/minute", "100/hour", "" to disable)
+RATE_LIMIT = os.getenv("RATE_LIMIT", "20/minute")
+
 # Model mapping
 MODEL_MAP = {
     "copilot": "copilot",
