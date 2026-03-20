@@ -1,0 +1,3 @@
+pycryptodome>=3.20.0   # AES-128-CBC decryption for Chrome cookies
+schedule>=1.2.0        # Periodic task runner for the 15-minute refresh loop
+httpx>=0.26.0          # Async HTTP client for hot-reload signaling

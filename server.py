@@ -212,6 +212,34 @@ async def cache_stats():
     return get_cache_stats()
 
 
+@app.post("/v1/reload-config", tags=["Admin"])
+async def reload_config():
+    """
+    Hot-reload BING_COOKIES (and other env vars) from .env without restarting
+    the server.  Called automatically by cookie_manager/service.py after it
+    updates the .env file.
+
+    Steps:
+      1. Re-read .env into the process environment (override=True).
+      2. Reload the config module so BING_COOKIES etc. pick up new values.
+      3. Reset the connection pool so the next acquire() uses the new cookie.
+    """
+    try:
+        from dotenv import load_dotenv
+        import importlib
+        import config as _config
+
+        load_dotenv(override=True)
+        importlib.reload(_config)
+
+        from copilot_backend import close_connection_pool
+        await close_connection_pool()
+
+        return {"status": "ok", "message": "Config reloaded and connection pool reset."}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 # ══════════════════════════════════════════════════════════════════════
 # Agent Management Endpoints
 # ══════════════════════════════════════════════════════════════════════
