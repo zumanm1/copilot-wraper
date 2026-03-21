@@ -11,6 +11,17 @@ VNC_PORT=5900
 NOVNC_PORT=6080
 API_PORT=8001
 
+# Remove stale Chrome profile lock files (left by previous container runs).
+# Chrome uses dangling symlinks for locking, so we must use [ -L ] (symlink test)
+# NOT [ -e ] (existence test) — [ -e ] returns false for dangling symlinks.
+PROFILE_DIR="${BROWSER_PROFILE_DIR:-/browser-profile}"
+for lock in SingletonLock SingletonCookie SingletonSocket; do
+    if [ -L "$PROFILE_DIR/$lock" ] || [ -f "$PROFILE_DIR/$lock" ]; then
+        rm -f "$PROFILE_DIR/$lock"
+        echo "[browser-auth] Removed stale Chrome lock: $lock"
+    fi
+done
+
 echo "[browser-auth] Starting display server..."
 
 # 1. Start virtual display (Xvfb)
