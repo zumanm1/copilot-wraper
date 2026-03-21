@@ -1,0 +1,40 @@
+# ============================================================
+# Container 3: Headless Chrome Cookie Extractor
+#
+# Uses Playwright + Chromium to:
+#   1. Launch a headed browser (via noVNC/VNC for visibility)
+#   2. Navigate to copilot.microsoft.com
+#   3. Wait for user to authenticate (if not already)
+#   4. Extract all session cookies via CDP
+#   5. POST them to Container 1 (/v1/reload-config)
+#
+# Access the browser UI at: http://localhost:6080 (noVNC)
+# Trigger extraction:        POST http://localhost:8001/extract
+# ============================================================
+
+FROM mcr.microsoft.com/playwright/python:v1.44.0-jammy
+
+WORKDIR /browser-auth
+
+# Install noVNC + VNC server for headed browser access
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    x11vnc \
+    xvfb \
+    novnc \
+    websockify \
+    net-tools \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python deps
+COPY browser_auth/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Install Playwright Chromium
+RUN playwright install chromium
+
+COPY browser_auth/ .
+
+# noVNC runs on 6080, our FastAPI on 8001
+EXPOSE 6080 8001
+
+CMD ["/browser-auth/entrypoint.sh"]

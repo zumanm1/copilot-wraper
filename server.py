@@ -232,6 +232,20 @@ async def cache_stats():
     return get_cache_stats()
 
 
+@app.post("/v1/reload-config")
+async def reload_config():
+    """Hot-reload cookies from .env without restarting the server.
+    Called by Container 3 (browser-auth) after extracting fresh cookies."""
+    from dotenv import load_dotenv
+    import importlib
+    load_dotenv(override=True)
+    import config as _config
+    importlib.reload(_config)
+    from copilot_backend import close_connection_pool
+    await close_connection_pool()
+    return {"status": "ok", "message": "Config reloaded and connection pool reset"}
+
+
 # ══════════════════════════════════════════════════════════════════════
 # Anthropic-compatible Endpoint  (POST /v1/messages)
 # ══════════════════════════════════════════════════════════════════════
@@ -388,6 +402,81 @@ async def reset_circuit_breaker():
     )
     await cb.reset()
     return {"status": "ok", "message": "Circuit breaker reset to CLOSED."}
+
+
+@app.post("/v1/cookies/extract", tags=["Admin"])
+async def extract_cookies_endpoint():
+    """
+    Container 1 extracts fresh cookies from the mounted Chrome data directory.
+
+    Requires docker-compose volumes:
+      - ~/Library/Application Support/Google/Chrome:/chrome-data:ro
+    Requires env vars:
+      - CHROME_KEY_PASSWORD  (Chrome Safe Storage Keychain password from host)
+      - CHROME_DATA_PATH     (default: /chrome-data)
+
+    After extraction:
+      1. Updates BING_COOKIES in the live config
+      2. Resets the connection pool so the new cookie is used immediately
+      3. Returns extracted service names and cookie counts
+    """
+    chrome_data = os.getenv("CHROME_DATA_PATH", "/chrome-data")
+    chrome_key  = os.getenv("CHROME_KEY_PASSWORD", "")
+
+    if not chrome_key:
+        raise HTTPException(
+            status_code=503,
+            detail="CHROME_KEY_PASSWORD env var not set. "
+                   "Run: export CHROME_KEY_PASSWORD=$(security find-generic-password "
+                   "-w -s 'Chrome Safe Storage' -a 'Chrome') on the host, "
+                   "then restart the container.",
+        )
+    if not os.path.isdir(chrome_data):
+        raise HTTPException(
+            status_code=503,
+            detail=f"Chrome data not mounted at {chrome_data}. "
+                   "Check docker-compose volumes configuration.",
+        )
+
+    try:
+        from cookie_extractor_linux import extract_cookies, patch_env_file
+        import importlib
+        import config as _config
+
+        # Run extraction (CPU-bound but fast — do in thread to not block event loop)
+        loop = asyncio.get_event_loop()
+        cookies = await loop.run_in_executor(
+            None, extract_cookies, chrome_data, chrome_key
+        )
+
+        found    = {k: v for k, v in cookies.items() if v}
+        missing  = [k for k, v in cookies.items() if not v]
+
+        # Update live env + .env file
+        for env_key, cookie_str in found.items():
+            os.environ[env_key] = cookie_str
+
+        env_path = "/app/.env"
+        if found:
+            await loop.run_in_executor(None, patch_env_file, env_path, found)
+            # Reload config module and reset pool
+            from dotenv import load_dotenv
+            load_dotenv(override=True)
+            importlib.reload(_config)
+            from copilot_backend import close_connection_pool
+            await close_connection_pool()
+            from circuit_breaker import get_circuit_breaker
+            await get_circuit_breaker().reset()
+
+        return {
+            "status": "ok",
+            "extracted": {k: f"{len(v.split(';'))} cookies" for k, v in found.items()},
+            "missing":   missing,
+            "pool_reset": bool(found),
+        }
+
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 @app.post("/v1/reload-config", tags=["Admin"])

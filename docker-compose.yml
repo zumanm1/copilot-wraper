@@ -51,6 +51,15 @@ services:
       - CONNECT_TIMEOUT=15
       - POOL_WARM_COUNT=2
       - AGENT_MAX_HISTORY=1000
+      # Cookie extraction: host Chrome data mounted at /chrome-data (read-only)
+      # CHROME_KEY_PASSWORD is derived from macOS Keychain on the host and passed in
+      - CHROME_KEY_PASSWORD=${CHROME_KEY_PASSWORD:-}
+      - CHROME_DATA_PATH=/chrome-data
+      # COPILOT_COOKIES and BING_COOKIES come from env_file: .env
+    volumes:
+      # Mount host Chrome profile directory read-only into Container 1
+      # Container 1 reads the encrypted SQLite DB and decrypts using CHROME_KEY_PASSWORD
+      - "${HOME}/Library/Application Support/Google/Chrome:/chrome-data:ro"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c",
@@ -135,9 +144,48 @@ services:
       - copilot-net
     restart: "no"
 
+  # ──────────────────────────────────────────────────────────
+  # Container 3: Headless Chrome Cookie Extractor
+  #
+  # Runs Playwright/Chromium + noVNC so user can authenticate
+  # via browser UI, then extracts session cookies automatically.
+  #
+  # How to use:
+  #   docker compose up browser-auth -d
+  #   open http://localhost:6080         ← browser UI (noVNC)
+  #   Log in to copilot.microsoft.com in that browser
+  #   curl -X POST http://localhost:8001/extract   ← extract cookies
+  # ──────────────────────────────────────────────────────────
+  browser-auth:
+    build:
+      context: .
+      dockerfile: Dockerfile.browser
+    image: copilot-browser-auth:latest
+    container_name: copilot-browser-auth
+    ports:
+      - "6080:6080"    # noVNC web UI
+      - "8001:8001"    # Cookie extractor API
+    environment:
+      - ENV_PATH=/app/.env
+      - API1_URL=http://app:8000
+      - VNC_RESOLUTION=1280x800x24
+    volumes:
+      # Share .env with Container 1 so extracted cookies persist
+      - ./.env:/app/.env
+      # Persistent browser profile (survives container restarts)
+      - copilot-browser-profile:/browser-profile
+    networks:
+      - copilot-net
+    shm_size: '2gb'    # Chrome needs shared memory
+    restart: "no"
+
 # ── Shared network ────────────────────────────────────────────
 # All containers communicate via this bridge network.
 # Container 2 reaches Container 1 at http://app:8000
 networks:
   copilot-net:
     driver: bridge
+
+# ── Named volumes ─────────────────────────────────────────────
+volumes:
+  copilot-browser-profile:

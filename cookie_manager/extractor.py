@@ -64,6 +64,12 @@ COOKIE_TARGETS: dict[str, dict] = {
                     "__Host-next-auth.csrf-token"],
         "required": ["sessionKey"],
     },
+    "COPILOT_COOKIES": {
+        "domains": ["copilot.microsoft.com", "%.microsoft.com"],
+        "names":   ["__cf_bm", "_C_ETH", "_EDGE_S", "MUID", "MUIDB",
+                    "_EDGE_V", "MSFPC", "__Host-copilot-anon"],
+        "required": ["MUID"],
+    },
 }
 
 # Chromium-family browser Keychain service names
@@ -96,20 +102,24 @@ def _chrome_profiles(browser_name: str) -> list[str]:
 
 
 def _get_chrome_key(service: str, account: str) -> bytes | None:
-    """Retrieve the Chrome Safe Storage password from macOS Keychain."""
+    """Retrieve the Chrome Safe Storage password from macOS Keychain.
+    Falls back to CHROME_KEY_PASSWORD env var if Keychain is unavailable."""
     try:
         result = subprocess.run(
             ["security", "find-generic-password",
              "-w", "-s", service, "-a", account],
             capture_output=True, text=True, timeout=10,
         )
-        if result.returncode != 0:
-            return None
-        pw = result.stdout.strip().encode("utf-8")
-        # Derive 128-bit key via PBKDF2-SHA1, salt='saltysalt', 1003 rounds
-        return pbkdf2_hmac("sha1", pw, b"saltysalt", 1003, dklen=16)
+        if result.returncode == 0:
+            pw = result.stdout.strip().encode("utf-8")
+            return pbkdf2_hmac("sha1", pw, b"saltysalt", 1003, dklen=16)
     except Exception:
-        return None
+        pass
+    # Fallback: use CHROME_KEY_PASSWORD env var (set from host Keychain previously)
+    stored_pw = os.environ.get("CHROME_KEY_PASSWORD", "")
+    if stored_pw:
+        return pbkdf2_hmac("sha1", stored_pw.encode("utf-8"), b"saltysalt", 1003, dklen=16)
+    return None
 
 
 def _decrypt_chrome_value(encrypted: bytes, key: bytes) -> str | None:
@@ -126,8 +136,10 @@ def _decrypt_chrome_value(encrypted: bytes, key: bytes) -> str | None:
         return encrypted.decode("utf-8", errors="replace")
     try:
         cipher = AES.new(key, AES.MODE_CBC, iv=b" " * 16)
-        decrypted = cipher.decrypt(ciphertext)
-        return unpad(decrypted, AES.block_size).decode("utf-8", errors="replace")
+        plaintext = unpad(cipher.decrypt(ciphertext), AES.block_size)
+        # Chrome prepends 32 bytes of random padding before the actual cookie value
+        plaintext = plaintext[32:] if len(plaintext) > 32 else plaintext
+        return plaintext.decode("utf-8", errors="replace")
     except Exception:
         return None
 
