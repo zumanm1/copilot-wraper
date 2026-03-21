@@ -14,27 +14,42 @@
 
 FROM mcr.microsoft.com/playwright/python:v1.44.0-jammy
 
+# Prevent interactive apt prompts (fixes tzdata hang)
+ENV DEBIAN_FRONTEND=noninteractive
+ENV TZ=UTC
+
 WORKDIR /browser-auth
 
-# Install noVNC + VNC server for headed browser access
+# Install VNC + noVNC for headed browser access via web browser
 RUN apt-get update && apt-get install -y --no-install-recommends \
     x11vnc \
     xvfb \
     novnc \
-    websockify \
     net-tools \
+    python3-websockify \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python deps
 COPY browser_auth/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright Chromium
-RUN playwright install chromium
+# Playwright Chromium is pre-installed in the base image
+# but we ensure it's present and updated
+RUN playwright install chromium --with-deps 2>/dev/null || playwright install chromium
 
+# Copy application code
 COPY browser_auth/ .
 
-# noVNC runs on 6080, our FastAPI on 8001
+# Make entrypoint executable
+RUN chmod +x /browser-auth/entrypoint.sh
+
+# Create browser profile directory
+RUN mkdir -p /browser-profile
+
+# noVNC web UI on 6080, FastAPI cookie API on 8001
 EXPOSE 6080 8001
+
+HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
+    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')" || exit 1
 
 CMD ["/browser-auth/entrypoint.sh"]
