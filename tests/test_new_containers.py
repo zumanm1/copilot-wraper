@@ -52,6 +52,12 @@ SCREENSHOTS_DIR = REPORTS_DIR / "screenshots"
 REPORTS_DIR.mkdir(exist_ok=True)
 SCREENSHOTS_DIR.mkdir(exist_ok=True)
 
+# Full stack is only reachable on copilot-net (docker compose `test` service sets this).
+pytestmark = pytest.mark.skipif(
+    os.getenv("RUN_CONTAINER_E2E", "").lower() not in ("1", "true", "yes"),
+    reason="Container E2E: run via `docker compose run --rm test` (sets RUN_CONTAINER_E2E=1).",
+)
+
 
 def screenshot(page: Page, name: str) -> pathlib.Path:
     path = SCREENSHOTS_DIR / f"{name}_{int(time.time())}.png"

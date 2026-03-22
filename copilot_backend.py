@@ -20,14 +20,19 @@ import asyncio
 import hashlib
 import json
 import os
-import re
 import uuid
+import sys
 from typing import AsyncGenerator
 
 import aiohttp
+import logging
 from cachetools import TTLCache
 import config
 from circuit_breaker import get_circuit_breaker, CircuitOpenError
+
+# ── Logging ──────────────────────────────────────────────────────────────────
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s:%(name)s:%(message)s")
 
 # ── Streaming event protocol ──────────────────────────────────────────────────
 _WS_BASE = "wss://copilot.microsoft.com/c/api/chat"
@@ -42,6 +47,26 @@ _cache_misses: int = 0
 # ── In-flight deduplication ───────────────────────────────────────────────────
 _in_flight: dict[str, asyncio.Future] = {}
 _in_flight_lock = asyncio.Lock()
+
+# ── Shared TLS connector (reuse TCP to copilot.microsoft.com; sessions stay per-call for cookie safety)
+_shared_connector: aiohttp.TCPConnector | None = None
+_connector_lock = asyncio.Lock()
+
+
+async def _get_shared_connector() -> aiohttp.TCPConnector:
+    global _shared_connector
+    async with _connector_lock:
+        if _shared_connector is None or _shared_connector.closed:
+            kwargs: dict = {
+                "ssl": True,
+                "limit": 20,
+                "enable_cleanup_closed": True,
+            }
+            try:
+                _shared_connector = aiohttp.TCPConnector(**kwargs, tcp_nodelay=True)
+            except TypeError:
+                _shared_connector = aiohttp.TCPConnector(**kwargs)
+        return _shared_connector
 
 
 def get_cache_stats() -> dict:
@@ -59,8 +84,8 @@ def _cache_key(style: str, prompt: str) -> str:
 
 
 def _make_cookie_header() -> str:
-    """Build Cookie header from COPILOT_COOKIES env var."""
-    return config.COPILOT_COOKIES or ""
+    """Build Cookie header from environment (allows real-time updates)."""
+    return os.getenv("COPILOT_COOKIES") or os.getenv("BING_COOKIES") or ""
 
 
 def _make_headers() -> dict:
@@ -84,6 +109,7 @@ class CopilotBackend:
         self.persona = persona or config.COPILOT_PERSONA
         self._conversation_id: str | None = None
         self._lock = asyncio.Lock()
+        self._last_suggestions: list[str] = []
 
     async def _ensure_conversation(self, session: aiohttp.ClientSession) -> str:
         """Create a new conversation if we don't have one."""
@@ -148,32 +174,66 @@ class CopilotBackend:
             threshold=config.CIRCUIT_BREAKER_THRESHOLD,
             timeout_seconds=config.CIRCUIT_BREAKER_TIMEOUT,
         )
-        return await breaker.call(self._raw_copilot_call, prompt, context)
 
-    async def _raw_copilot_call(self, prompt: str, context) -> str:
+        try:
+            return await breaker.call(self._raw_copilot_call, prompt, context, attachment_path)
+        except RuntimeError as exc:
+            msg = str(exc).lower()
+            # If we hit a challenge or auth failure, try to trigger a refresh
+            if "verification required" in msg or "unauthorized" in msg or "handshake" in msg:
+                logger.info("Auth failure/Challenge detected. Triggering automated cookie refresh...")
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        # Call the browser-auth extract endpoint (internal Docker network)
+                        async with session.post("http://browser-auth:8001/extract", timeout=15) as resp:
+                            if resp.status == 200:
+                                logger.info("Cookie refresh successful. Waiting 5s for persistent sync...")
+                                # Increased delay for file system / cluster sync
+                                await asyncio.sleep(5)
+                                # Start a fresh conversation after refresh
+                                await self.reset_conversation()
+                                logger.info("Retrying chat completion after refresh...")
+                                # Retry once
+                                return await breaker.call(self._raw_copilot_call, prompt, context, attachment_path)
+                            else:
+                                logger.error("Cookie refresh failed: HTTP %s", resp.status)
+                except Exception as refresh_exc:
+                    logger.error("Automated cookie refresh failed: %s", refresh_exc)
+            
+            # If not a challenge or refresh failed, re-raise
+            raise
+
+    async def _raw_copilot_call(self, prompt: str, context, attachment_path=None) -> str:
         """Accumulates all appendText events into a single string."""
         chunks = []
-        async for chunk in self._ws_stream(prompt, context):
+        async for chunk in self._ws_stream(prompt, context, attachment_path):
             chunks.append(chunk)
         return "".join(chunks)
 
-    async def _ws_stream(self, prompt: str, context) -> AsyncGenerator[str, None]:
+    async def _ws_stream(self, prompt: str, context, attachment_path=None) -> AsyncGenerator[str, None]:
         """Low-level WebSocket streaming generator."""
+        logger.info("WS_STREAM: prompt='%s', attachment=%s", prompt[:50], attachment_path)
+        
+        # Always re-read cookies from environment to ensure latest C3 sync
         headers = _make_headers()
-        connector = aiohttp.TCPConnector(ssl=True)
+
+        connector = await _get_shared_connector()
         timeout = aiohttp.ClientTimeout(
             total=config.REQUEST_TIMEOUT,
             connect=config.CONNECT_TIMEOUT,
         )
 
         async with aiohttp.ClientSession(
-            connector=connector, timeout=timeout,
+            connector=connector,
+            connector_owner=False,
+            timeout=timeout,
             headers={k: v for k, v in headers.items() if k != "Cookie"},
             cookie_jar=aiohttp.CookieJar(unsafe=True),
         ) as session:
-            # Set cookies manually
-            if headers.get("Cookie"):
-                for pair in headers["Cookie"].split(";"):
+            # Set cookies manually from the verified headers
+            cookie_str = headers.get("Cookie", "")
+            if cookie_str:
+                for pair in cookie_str.split(";"):
                     pair = pair.strip()
                     if "=" in pair:
                         name, _, val = pair.partition("=")
@@ -186,7 +246,7 @@ class CopilotBackend:
             ws_headers = {
                 "Origin": headers["Origin"],
                 "User-Agent": headers["User-Agent"],
-                "Cookie": headers["Cookie"],
+                "Cookie": cookie_str,
             }
 
             async with session.ws_connect(
@@ -195,9 +255,13 @@ class CopilotBackend:
                 timeout=aiohttp.ClientWSTimeout(ws_receive=config.REQUEST_TIMEOUT),
             ) as ws:
                 # Wait for connected event
-                hello = json.loads(await asyncio.wait_for(ws.receive_str(), timeout=10))
+                hello = json.loads(await asyncio.wait_for(ws.receive_str(), timeout=15))
                 if hello.get("event") != "connected":
                     raise RuntimeError(f"Unexpected hello: {hello}")
+                
+                # BOUNTY HUNTER HEARTBEAT
+                sys.stderr.write(f"Bounty Hunter: WS_LINK_ESTABLISHED conv={conv_id}\n")
+                sys.stderr.flush()
 
                 # Map legacy style names to new copilot.microsoft.com API modes
                 # Valid modes: smart, chat, research, reasoning, study, smart-latest
@@ -213,14 +277,37 @@ class CopilotBackend:
                 }
                 mode = _MODE_MAP.get(self.style, "smart")
 
+                content_payload = [{"type": "text", "text": prompt}]
+                if attachment_path:
+                    abs_path = os.path.abspath(attachment_path)
+                    if os.path.exists(abs_path):
+                        import base64
+                        sz = os.path.getsize(abs_path)
+                        if sz > config.MAX_IMAGE_BYTES:
+                            raise ValueError(
+                                f"Image file exceeds MAX_IMAGE_BYTES ({config.MAX_IMAGE_BYTES})"
+                            )
+                        with open(abs_path, "rb") as f:
+                            b64 = base64.b64encode(f.read()).decode("utf-8")
+                        content_payload.append({
+                            "type": "image",
+                            "imageUrl": f"data:image/jpeg;base64,{b64}"
+                        })
+                        sys.stderr.write(f"Encoding image as JPEG (Base64 length: {len(b64)}) from: {abs_path}\n")
+                        sys.stderr.flush()
+                    else:
+                        logger.warning("Attachment path not found: %s", abs_path)
+
                 # Send message
                 payload = {
                     "event": "send",
                     "conversationId": conv_id,
-                    "content": [{"type": "text", "text": prompt}],
+                    "content": content_payload,
                     "mode": mode,
                     "context": context or {},
                 }
+                sys.stderr.write(f"WS_SEND: {json.dumps(payload)[:200]}\n")
+                sys.stderr.flush()
                 await ws.send_str(json.dumps(payload))
 
                 # Stream response
@@ -228,10 +315,10 @@ class CopilotBackend:
                     if msg.type == aiohttp.WSMsgType.TEXT:
                         data = json.loads(msg.data)
                         ev = data.get("event", "")
+                        sys.stderr.write(f"WS_RECV_EVENT: {ev}\n")
+                        sys.stderr.flush()
                         if ev == "appendText":
-                            text = data.get("text", "")
-                            if text:
-                                yield text
+                            yield data.get("text", "")
                         elif ev == "challenge":
                             # Copilot bot-verification challenge.
                             # method="copilot": solve cubic formula mod 22 and reply.
@@ -248,7 +335,13 @@ class CopilotBackend:
                                     "method": "copilot",
                                     "token": token,
                                 }))
-                            # Other methods (hashcash, cloudflare): skip for now
+                            else:
+                                # Other methods (hashcash, cloudflare) or failed copilot challenge
+                                raise RuntimeError(
+                                    f"Copilot verification required (method: {method or ev}). "
+                                    "Please refresh cookies via Container 3 (browser-auth) "
+                                    "or solve the challenge in the noVNC browser."
+                                )
                         elif ev in _DONE_EVENTS:
                             if ev == "error":
                                 raise RuntimeError(
@@ -256,14 +349,37 @@ class CopilotBackend:
                                 )
                             if ev == "throttled":
                                 raise RuntimeError("Copilot rate limited (throttled)")
+                            
+                            # Capture suggested follow-up prompts
+                            self._last_suggestions = data.get("suggestedResponses", [])
+                            if self._last_suggestions:
+                                sys.stderr.write(f"Bounty Hunter Trace: SUGGESTIONS_CAPTURED count={len(self._last_suggestions)}\n")
+                                sys.stderr.flush()
                             break
                     elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                         break
 
     async def chat_completion_stream(self, prompt: str, attachment_path=None, context=None) -> AsyncGenerator[str, None]:
         """Streaming interface — yields text tokens as they arrive."""
-        async for token in self._ws_stream(prompt, context):
-            yield token
+        try:
+            async for token in self._ws_stream(prompt, context, attachment_path):
+                yield token
+        except RuntimeError as exc:
+            msg = str(exc).lower()
+            if "verification required" in msg or "unauthorized" in msg or "handshake" in msg:
+                logger.info("Auth failure/Challenge detected in stream. Triggering automated cookie refresh...")
+                try:
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post("http://browser-auth:8001/extract", timeout=15) as resp:
+                            if resp.status == 200:
+                                await asyncio.sleep(2)
+                                await self.reset_conversation()
+                                async for token in self._ws_stream(prompt, context, attachment_path):
+                                    yield token
+                                return
+                except Exception as refresh_exc:
+                    logger.error("Automated cookie refresh failed in stream: %s", refresh_exc)
+            raise
 
     async def reset_conversation(self):
         """Start a fresh conversation on next request."""
@@ -338,7 +454,11 @@ def get_connection_pool() -> CopilotConnectionPool:
 
 
 async def close_connection_pool() -> None:
-    global _connection_pool
+    global _connection_pool, _shared_connector
     if _connection_pool:
         await _connection_pool.close_all()
         _connection_pool = None
+    async with _connector_lock:
+        if _shared_connector is not None and not _shared_connector.closed:
+            await _shared_connector.close()
+        _shared_connector = None

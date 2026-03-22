@@ -19,7 +19,8 @@ parser.add_argument("--format", choices=["openai", "anthropic"], default="openai
 parser.add_argument("--api-key", default="sk-ant-not-needed-xxxxxxxxxxxxx", help="API key (Anthropic format only)")
 args = parser.parse_args()
 
-history_file = f"/tmp/{args.agent_id}_history.json"
+history_dir = "/workspace/.history"
+history_file = f"{history_dir}/{args.agent_id}_history.json"
 prompt_file = "/workspace/professor_prompt.txt"
 
 # ── Load system prompt ────────────────────────────────────────────────────────
@@ -31,6 +32,8 @@ except Exception:
 
 # ── Load conversation history (EC2: reset on corruption) ─────────────────────
 try:
+    if not os.path.exists(history_dir):
+        os.makedirs(history_dir, exist_ok=True)
     with open(history_file) as f:
         history = json.load(f)
     if not isinstance(history, list):
@@ -124,8 +127,11 @@ if "error" in d:
 
 try:
     if args.format == "openai":
-        response_text = d["choices"][0]["message"]["content"]
+        choice = d["choices"][0]
+        response_text = choice["message"]["content"]
         usage = d.get("usage", {})
+        suggestions = choice.get("suggested_responses", [])
+        
         if not response_text and usage.get("completion_tokens", 1) == 0:
             print(f"", file=sys.stderr)
             print(f"  ⚠️  C1 is up but Copilot returned an empty reply (0 completion tokens).", file=sys.stderr)
@@ -133,9 +139,34 @@ try:
             print(f"     docker compose up browser-auth -d", file=sys.stderr)
             print(f"", file=sys.stderr)
             sys.exit(1)
+            
         print(response_text)
         print()
         print(f"  [tokens: {usage.get('total_tokens', '?')} | model: {d.get('model', '?')} | session: {args.agent_id}]")
+        
+        # Display suggestions
+        if suggestions:
+            print(f"\n  💡 Suggested follow-ups:")
+            for i, s in enumerate(suggestions, 1):
+                print(f"    {i}. {s}")
+            print(f"    Enter number to select or press Enter to skip.")
+            try:
+                # Wait for user input if in interactive terminal
+                if sys.stdin.isatty():
+                    choice_idx = input("  > ").strip()
+                    if choice_idx.isdigit() and 1 <= int(choice_idx) <= len(suggestions):
+                        selected = suggestions[int(choice_idx)-1]
+                        print(f"  Selected: {selected}")
+                        # Re-run ask_helper with the selected suggestion
+                        # This works because the script persists history below
+                        history.append({"role": "assistant", "content": response_text})
+                        with open(history_file, "w") as f:
+                            json.dump(history, f, indent=2)
+                        
+                        os.execvp("python3", ["python3", sys.argv[0], selected] + sys.argv[2:])
+            except EOFError:
+                pass
+
     else:
         response_text = ""
         for block in d.get("content", []):
@@ -143,6 +174,8 @@ try:
                 response_text = block["text"]
                 break
         usage = d.get("usage", {})
+        suggestions = d.get("suggested_responses", [])
+        
         if not response_text and usage.get("output_tokens", 1) == 0:
             print(f"", file=sys.stderr)
             print(f"  ⚠️  C1 is up but Copilot returned an empty reply (0 output tokens).", file=sys.stderr)
@@ -150,9 +183,30 @@ try:
             print(f"     docker compose up browser-auth -d", file=sys.stderr)
             print(f"", file=sys.stderr)
             sys.exit(1)
+            
         print(response_text)
         print()
         print(f"  [in: {usage.get('input_tokens', '?')} | out: {usage.get('output_tokens', '?')} | session: {args.agent_id}]")
+        
+        # Display suggestions
+        if suggestions:
+            print(f"\n  💡 Suggested follow-ups:")
+            for i, s in enumerate(suggestions, 1):
+                print(f"    {i}. {s}")
+            print(f"    Enter number to select or press Enter to skip.")
+            try:
+                if sys.stdin.isatty():
+                    choice_idx = input("  > ").strip()
+                    if choice_idx.isdigit() and 1 <= int(choice_idx) <= len(suggestions):
+                        selected = suggestions[int(choice_idx)-1]
+                        print(f"  Selected: {selected}")
+                        history.append({"role": "assistant", "content": response_text})
+                        with open(history_file, "w") as f:
+                            json.dump(history, f, indent=2)
+                        os.execvp("python3", ["python3", sys.argv[0], selected] + sys.argv[2:])
+            except EOFError:
+                pass
+
 except (KeyError, IndexError) as e:
     print(f"  Error extracting response: {e}", file=sys.stderr)
     print(f"  Raw: {result.stdout[:400]}", file=sys.stderr)

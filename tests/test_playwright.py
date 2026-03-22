@@ -34,7 +34,7 @@ SCREENSHOTS_DIR = REPORTS_DIR / "screenshots"
 REPORTS_DIR.mkdir(exist_ok=True)
 SCREENSHOTS_DIR.mkdir(exist_ok=True)
 
-TIMEOUT_MS = 30_000  # 30 seconds for all requests
+TIMEOUT_MS = 90_000  # 90 seconds for all requests
 
 # ─────────────────────────── Fixtures ─────────────────────────────────
 
@@ -282,7 +282,7 @@ class TestChatCompletionsValidation:
                     }}
                 ]
             }]
-        }))
+        }), timeout=TIMEOUT_MS)
         assert resp.status in (200, 500), \
             f"Multimodal request rejected at schema: {resp.status}: {resp.text()}"
 
@@ -300,7 +300,7 @@ class TestChatCompletionsStreaming:
             "model": "copilot",
             "messages": [{"role": "user", "content": "Tell me a joke."}],
             "stream": True
-        }))
+        }), timeout=TIMEOUT_MS)
         assert resp.status in (200, 500), \
             f"Streaming request rejected: {resp.status}: {resp.text()}"
 
@@ -310,7 +310,7 @@ class TestChatCompletionsStreaming:
             "model": "copilot",
             "messages": [{"role": "user", "content": "Hello"}],
             "stream": True
-        }))
+        }), timeout=TIMEOUT_MS)
         if resp.status == 200:
             ct = resp.headers.get("content-type", "")
             assert "text/event-stream" in ct, \

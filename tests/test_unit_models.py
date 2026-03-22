@@ -39,9 +39,9 @@ class TestChatCompletionRequest:
         with pytest.raises(ValidationError):
             ChatCompletionRequest(model="copilot")
 
-    def test_requires_model(self):
-        with pytest.raises(ValidationError):
-            ChatCompletionRequest(messages=[ChatMessage(role="user", content="hi")])
+    def test_default_model_when_omitted(self):
+        req = ChatCompletionRequest(messages=[ChatMessage(role="user", content="hi")])
+        assert req.model == "copilot"
 
     def test_valid_minimal_request(self):
         req = ChatCompletionRequest(

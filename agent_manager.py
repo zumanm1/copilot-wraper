@@ -9,15 +9,17 @@ State machine:
   RUNNING ──task()───► BUSY ──► RUNNING  (task completes/fails)
   RUNNING / PAUSED / BUSY ──stop()──► STOPPED
 
-The manager wraps a persistent CopilotBackend so that
-conversation history is maintained across tasks in the same session.
+Named sessions: multiple AgentManager instances keyed by session_name
+(default "default"). Each wraps a persistent CopilotBackend.
 ============================================================
 """
 from __future__ import annotations
 
 import asyncio
 import os
+import re
 import subprocess
+import time
 import uuid
 from datetime import datetime, timezone
 from enum import Enum
@@ -34,7 +36,7 @@ class AgentStatus(str, Enum):
     STOPPED  = "stopped"
     RUNNING  = "running"
     PAUSED   = "paused"
-    BUSY     = "busy"        # actively executing a task
+    BUSY     = "busy"
 
 
 class TaskStatus(str, Enum):
@@ -47,13 +49,33 @@ class TaskStatus(str, Enum):
 
 # ─────────────────────────── Tool definitions ─────────────────────────
 
+MAX_TOOL_ITERATIONS = 5
+TOOL_LINE_RE = re.compile(
+    r"(?m)^\s*TOOL:\s*([a-zA-Z_]\w*)\s*\(([^)]*)\)\s*$",
+)
+
+_FORBIDDEN_PY = (
+    "import os", "import subprocess", "open(", "eval(", "exec(",
+    "__import__", "import pathlib", "shutil", "socket",
+)
+
 AGENT_SYSTEM_PROMPT = """\
 You are an intelligent AI agent powered by Microsoft Copilot.
 You can answer questions, reason through problems, write and explain code,
 analyse data, and assist with complex tasks.
 You maintain full conversation context across multiple turns.
 When solving math or logic questions, show your reasoning step by step.
-Be concise, accurate, and helpful."""
+Be concise, accurate, and helpful.
+
+To call a built-in tool, output EXACTLY one line at the start of your reply:
+  TOOL: tool_name("arg")
+Allowed tools:
+  TOOL: get_current_time()
+  TOOL: get_weather("CityName")
+  TOOL: list_directory("/path")
+  TOOL: read_file("/path")
+  TOOL: run_python_code("print(1+1)")
+After a tool runs, you will receive its output and should continue with a normal answer."""
 
 
 def _tool_get_time() -> str:
@@ -107,7 +129,7 @@ def _tool_read_file(path: str) -> str:
         return f"Error: {exc}"
 
 
-TOOL_REGISTRY: dict[str, callable] = {
+TOOL_REGISTRY: dict[str, object] = {
     "get_current_time": _tool_get_time,
     "get_weather":      _tool_get_weather,
     "list_directory":   _tool_list_directory,
@@ -116,26 +138,91 @@ TOOL_REGISTRY: dict[str, callable] = {
 }
 
 
+def _parse_quoted_arg(inner: str) -> str:
+    inner = inner.strip()
+    if not inner:
+        return ""
+    if (inner.startswith('"') and inner.endswith('"')) or (
+        inner.startswith("'") and inner.endswith("'")
+    ):
+        return inner[1:-1]
+    return inner
+
+
+def _sanitize_python_snippet(code: str) -> tuple[str | None, str | None]:
+    c = code.strip()
+    if len(c) > 2000:
+        return None, "code too long"
+    low = c.lower()
+    for bad in _FORBIDDEN_PY:
+        if bad.lower() in low:
+            return None, f"forbidden pattern: {bad}"
+    return c, None
+
+
+async def _dispatch_tool(name: str, inner: str) -> str:
+    if name not in TOOL_REGISTRY:
+        return f"Unknown tool: {name}"
+    if name == "get_current_time":
+        fn = TOOL_REGISTRY[name]
+        assert callable(fn)
+        return str(fn())  # type: ignore[operator]
+    if name == "get_weather":
+        city = _parse_quoted_arg(inner) or inner.strip() or "London"
+        fn = TOOL_REGISTRY[name]
+        return await fn(city)  # type: ignore[misc]
+    if name in ("list_directory", "read_file"):
+        path = _parse_quoted_arg(inner) or inner.strip()
+        if not path:
+            return "Error: missing path"
+        fn = TOOL_REGISTRY[name]
+        assert callable(fn)
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, fn, path)  # type: ignore[arg-type]
+    if name == "run_python_code":
+        raw = _parse_quoted_arg(inner) if inner.strip() else inner
+        code, err = _sanitize_python_snippet(raw)
+        if err:
+            return f"Error: {err}"
+        if not code:
+            return "Error: empty code"
+        loop = asyncio.get_event_loop()
+        fn = _tool_run_python
+        return await loop.run_in_executor(None, fn, code)
+    return "Unsupported tool"
+
+
+def _find_tool_invocation(text: str) -> tuple[str, str] | None:
+    m = TOOL_LINE_RE.search(text.strip())
+    if not m:
+        return None
+    name, inner = m.group(1), m.group(2)
+    if name not in TOOL_REGISTRY:
+        return None
+    return name, inner
+
+
 # ─────────────────────────── Task record ──────────────────────────────
 
 class AgentTask:
     """Represents a single task submitted to the agent."""
 
     def __init__(self, task_id: str, prompt: str):
-        self.task_id   = task_id
-        self.prompt    = prompt
-        self.status    = TaskStatus.PENDING
-        self.result:   Optional[str]      = None
-        self.error:    Optional[str]      = None
-        self.tool_calls: list[dict]       = []
-        self.created_at   = datetime.now(timezone.utc)
+        self.task_id:      str = task_id
+        self.prompt:       str = prompt
+        self.status:       TaskStatus = TaskStatus.PENDING
+        self.result:       Optional[str] = None
+        self.error:        Optional[str] = None
+        self.tool_calls:   list[dict] = []
+        self.created_at:   datetime = datetime.now(timezone.utc)
         self.completed_at: Optional[datetime] = None
+        self.suggested_responses: list[str] = []
 
     def to_dict(self) -> dict:
         return {
             "task_id":      self.task_id,
             "prompt":       self.prompt,
-            "status":       self.status,
+            "status":       self.status.value,
             "result":       self.result,
             "error":        self.error,
             "tool_calls":   self.tool_calls,
@@ -147,15 +234,10 @@ class AgentTask:
 # ─────────────────────────── Agent Manager ────────────────────────────
 
 class AgentManager:
-    """
-    Singleton that manages the agent's lifecycle.
+    """Per-session agent lifecycle and task queue (one task at a time per manager)."""
 
-    Thread-safety: all mutations are guarded by an asyncio.Lock.
-    The underlying CopilotBackend + SydneyClient maintains WebSocket
-    conversation history for the duration of a session.
-    """
-
-    def __init__(self):
+    def __init__(self, session_key: str = "default"):
+        self._session_key = session_key
         self._status:     AgentStatus       = AgentStatus.STOPPED
         self._session_id: Optional[str]     = None
         self._backend:    Optional[CopilotBackend] = None
@@ -165,8 +247,6 @@ class AgentManager:
         self._paused_at:   Optional[datetime] = None
         self._system_prompt: str = AGENT_SYSTEM_PROMPT
 
-    # ── Public state properties ───────────────────────────────────────
-
     @property
     def status(self) -> AgentStatus:
         return self._status
@@ -175,17 +255,13 @@ class AgentManager:
     def session_id(self) -> Optional[str]:
         return self._session_id
 
-    # ── Lifecycle operations ──────────────────────────────────────────
-
     async def start(self, system_prompt: Optional[str] = None) -> dict:
-        """Start a new agent session. Raises if already running."""
         async with self._lock:
             if self._status in (AgentStatus.RUNNING, AgentStatus.BUSY):
                 raise ValueError(
                     f"Agent is already {self._status.value}. "
                     "Stop it first before starting a new session."
                 )
-            # Clean up any previous backend
             if self._backend:
                 try:
                     await self._backend.close()
@@ -208,7 +284,6 @@ class AgentManager:
             }
 
     async def stop(self) -> dict:
-        """Stop the agent and close the Copilot connection."""
         async with self._lock:
             if self._status == AgentStatus.STOPPED:
                 raise ValueError("Agent is already stopped.")
@@ -237,7 +312,6 @@ class AgentManager:
             return summary
 
     async def pause(self) -> dict:
-        """Pause the agent. New task submissions will be rejected until resumed."""
         async with self._lock:
             if self._status == AgentStatus.BUSY:
                 raise ValueError(
@@ -258,7 +332,6 @@ class AgentManager:
             }
 
     async def resume(self) -> dict:
-        """Resume a paused agent."""
         async with self._lock:
             if self._status != AgentStatus.PAUSED:
                 raise ValueError(
@@ -273,14 +346,7 @@ class AgentManager:
                 "message":    "Agent resumed successfully.",
             }
 
-    # ── Task execution ────────────────────────────────────────────────
-
     async def run_task(self, task_prompt: str) -> AgentTask:
-        """
-        Submit a task to the running agent and await the result.
-        Maintains full conversation history through the SydneyClient session.
-        """
-        # Pre-flight checks
         async with self._lock:
             self._check_can_run_task()
             self._status = AgentStatus.BUSY
@@ -295,26 +361,35 @@ class AgentManager:
             self._task_history = self._task_history[-config.AGENT_MAX_HISTORY:]
 
         try:
-            # Prepend system prompt on first task so Copilot has context
             effective_prompt = (
                 f"{self._system_prompt}\n\nUser task: {task_prompt}"
-                if not self._task_history or len(self._task_history) == 1
+                if len(self._task_history) == 1
                 else task_prompt
             )
 
-            response = await self._backend.chat_completion(
-                prompt=effective_prompt,
-            )
-
+            assert self._backend is not None
+            response = await self._backend.chat_completion(prompt=effective_prompt)
+            for _ in range(MAX_TOOL_ITERATIONS):
+                inv = _find_tool_invocation(response)
+                if not inv:
+                    break
+                name, inner = inv
+                out = await _dispatch_tool(name, inner)
+                task.tool_calls.append({"tool": name, "args_preview": inner[:200]})
+                follow = (
+                    f"[Tool {name} result]\n{out}\n\n"
+                    "Continue your answer for the user. Do not repeat the same TOOL line."
+                )
+                response = await self._backend.chat_completion(prompt=follow)
             task.status       = TaskStatus.COMPLETED
             task.result       = response
             task.completed_at = datetime.now(timezone.utc)
+            task.suggested_responses = self._backend._last_suggestions
 
         except Exception as exc:
             task.status       = TaskStatus.FAILED
             task.error        = str(exc)
             task.completed_at = datetime.now(timezone.utc)
-            # Reset backend on failure so next task can reconnect
             try:
                 await self._backend.close()
             except Exception:
@@ -329,11 +404,6 @@ class AgentManager:
         return task
 
     async def run_task_stream(self, task_prompt: str) -> AsyncGenerator[str, None]:
-        """
-        Submit a task and stream tokens back in real-time.
-        Yields raw text tokens as they arrive from Copilot.
-        """
-        # Pre-flight checks
         async with self._lock:
             self._check_can_run_task()
             self._status = AgentStatus.BUSY
@@ -346,7 +416,7 @@ class AgentManager:
         self._task_history.append(task)
         if len(self._task_history) > config.AGENT_MAX_HISTORY:
             self._task_history = self._task_history[-config.AGENT_MAX_HISTORY:]
-        accumulated = []
+        accumulated: list[str] = []
 
         try:
             effective_prompt = (
@@ -355,15 +425,38 @@ class AgentManager:
                 else task_prompt
             )
 
+            full_text: list[str] = []
             async for token in self._backend.chat_completion_stream(
                 prompt=effective_prompt
             ):
+                full_text.append(token)
                 accumulated.append(token)
                 yield token
+
+            response = "".join(full_text)
+            for _ in range(MAX_TOOL_ITERATIONS):
+                inv = _find_tool_invocation(response)
+                if not inv:
+                    break
+                name, inner = inv
+                out = await _dispatch_tool(name, inner)
+                task.tool_calls.append({"tool": name, "args_preview": inner[:200]})
+                yield f"\n[tool:{name}]\n"
+                follow = (
+                    f"[Tool {name} result]\n{out}\n\n"
+                    "Continue your answer for the user."
+                )
+                more: list[str] = []
+                async for token in self._backend.chat_completion_stream(prompt=follow):
+                    more.append(token)
+                    accumulated.append(token)
+                    yield token
+                response = "".join(more)
 
             task.status       = TaskStatus.COMPLETED
             task.result       = "".join(accumulated)
             task.completed_at = datetime.now(timezone.utc)
+            task.suggested_responses = self._backend._last_suggestions
 
         except Exception as exc:
             task.status       = TaskStatus.FAILED
@@ -380,8 +473,6 @@ class AgentManager:
             async with self._lock:
                 if self._status == AgentStatus.BUSY:
                     self._status = AgentStatus.RUNNING
-
-    # ── Status & history ──────────────────────────────────────────────
 
     def get_status(self) -> dict:
         return {
@@ -412,10 +503,7 @@ class AgentManager:
         self._task_history = []
         return {"cleared": count, "message": f"Cleared {count} task(s) from history."}
 
-    # ── Private helpers ───────────────────────────────────────────────
-
     def _check_can_run_task(self):
-        """Raise if the agent cannot accept a new task right now."""
         if self._status == AgentStatus.STOPPED:
             raise ValueError(
                 "Agent is not started. POST /v1/agent/start first."
@@ -430,14 +518,60 @@ class AgentManager:
             )
 
 
-# ─────────────────────────── Global singleton ─────────────────────────
+# ───────────────── Named session registry ─────────────────────────────
 
-_agent_manager: Optional[AgentManager] = None
+_registry: dict[str, AgentManager] = {}
+_registry_lock = asyncio.Lock()
+_registry_last_used: dict[str, float] = {}
 
 
-def get_agent_manager() -> AgentManager:
-    """Return (and lazily create) the global AgentManager singleton."""
-    global _agent_manager
-    if _agent_manager is None:
-        _agent_manager = AgentManager()
-    return _agent_manager
+def _sanitize_session_name(name: str) -> str:
+    n = (name or "default").strip()
+    if not re.match(r"^[a-zA-Z0-9_-]{1,64}$", n):
+        raise ValueError(
+            "Invalid session_name: use 1-64 characters [a-zA-Z0-9_-] only"
+        )
+    return n
+
+
+async def get_agent_manager(session_name: str = "default") -> AgentManager:
+    key = _sanitize_session_name(session_name)
+    async with _registry_lock:
+        if key not in _registry:
+            _registry[key] = AgentManager(session_key=key)
+        _registry_last_used[key] = time.time()
+        return _registry[key]
+
+
+async def list_agent_api_sessions() -> dict:
+    async with _registry_lock:
+        return {k: v.get_status() for k, v in _registry.items()}
+
+
+async def agent_registry_reaper_loop() -> None:
+    """Remove STOPPED named sessions idle longer than AGENT_API_SESSION_TTL."""
+    while True:
+        await asyncio.sleep(300)
+        now = time.time()
+        ttl = config.AGENT_API_SESSION_TTL
+        async with _registry_lock:
+            to_drop: list[str] = []
+            for name, mgr in list(_registry.items()):
+                if mgr.status != AgentStatus.STOPPED:
+                    continue
+                last = _registry_last_used.get(name, 0)
+                if now - last > ttl:
+                    to_drop.append(name)
+            for name in to_drop:
+                m = _registry.pop(name, None)
+                _registry_last_used.pop(name, None)
+                if m and m._backend:
+                    try:
+                        await m._backend.close()
+                    except Exception:
+                        pass
+
+
+def reset_agent_registry_for_tests() -> None:
+    _registry.clear()
+    _registry_last_used.clear()

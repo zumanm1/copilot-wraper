@@ -23,27 +23,38 @@ class TestExtractUserPrompt:
         from models import ChatMessage
         return ChatMessage(role=role, content=content)
 
-    def test_returns_last_user_content(self):
+    def test_joins_multiple_user_turns(self):
         from server import extract_user_prompt
         msgs = [self._msg("user", "first"), self._msg("user", "second")]
-        assert extract_user_prompt(msgs) == "second"
+        assert extract_user_prompt(msgs) == "first\nsecond"
 
     def test_returns_empty_for_no_messages(self):
         from server import extract_user_prompt
         assert extract_user_prompt([]) == ""
 
-    def test_system_message_included_as_prefix(self):
+    def test_system_and_user_in_transcript(self):
         from server import extract_user_prompt
         msgs = [self._msg("system", "Be helpful."), self._msg("user", "Hello")]
         result = extract_user_prompt(msgs)
-        assert result == "Hello"  # returns last part
+        assert "[System]: Be helpful." in result
+        assert "Hello" in result
 
-    def test_returns_empty_when_only_system(self):
+    def test_assistant_turn_included(self):
+        from server import extract_user_prompt
+        msgs = [
+            self._msg("user", "Hi"),
+            self._msg("assistant", "Hello there"),
+            self._msg("user", "Bye"),
+        ]
+        out = extract_user_prompt(msgs)
+        assert "[Assistant]: Hello there" in out
+        assert "Bye" in out
+
+    def test_system_only_transcript(self):
         from server import extract_user_prompt
         msgs = [self._msg("system", "You are helpful.")]
-        # System-only returns the system content as last part
         result = extract_user_prompt(msgs)
-        assert "[System]" in result or result == ""
+        assert "[System]:" in result
 
 
 # ── extract_image ────────────────────────────────────────────────────

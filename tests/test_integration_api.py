@@ -1,11 +1,11 @@
 """
 Integration tests for the full API lifecycle using FastAPI TestClient.
-SydneyClient is mocked at the module boundary — no real network calls.
+Copilot WebSocket I/O is stubbed via `conftest` (`_ws_stream` patch) — no real network calls.
 """
 from __future__ import annotations
 import json
 import pytest
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 from tests.validators import (
     validate_chat_completion_response, validate_models_list,
@@ -90,6 +90,108 @@ class TestStreamingChatCompletion:
                       if l.startswith("data: ") and l != "data: [DONE]"]
         last = json.loads(data_lines[-1][len("data: "):])
         assert last["choices"][0]["finish_reason"] == "stop"
+
+    def test_streaming_yields_multiple_content_chunks(self, test_app):
+        r = test_app.post("/v1/chat/completions", json={
+            "model": "copilot",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+        })
+        assert r.status_code == 200
+        data_lines = [l for l in r.text.splitlines()
+                      if l.startswith("data: ") and l != "data: [DONE]"
+                      and not l.startswith("data: {\"error\"")]
+        # init + heartbeat + one chunk per stub token (Mocked,  Copilot,  response)
+        content_deltas = [
+            json.loads(l[len("data: "):])["choices"][0]["delta"].get("content")
+            for l in data_lines
+        ]
+        non_empty = [c for c in content_deltas if c]
+        assert len(non_empty) >= 3
+
+    def test_streaming_max_tokens_sets_finish_reason_length(self, test_app):
+        r = test_app.post("/v1/chat/completions", json={
+            "model": "copilot",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+            "max_tokens": 2,
+        })
+        assert r.status_code == 200
+        data_lines = [l for l in r.text.splitlines()
+                      if l.startswith("data: ") and l != "data: [DONE]"]
+        last = json.loads(data_lines[-1][len("data: "):])
+        assert last["choices"][0]["finish_reason"] == "length"
+
+
+class TestAnthropicMessages:
+    def test_non_streaming_schema(self, test_app):
+        r = test_app.post(
+            "/v1/messages",
+            json={
+                "model": "claude-3-5-sonnet-20241022",
+                "max_tokens": 256,
+                "messages": [{"role": "user", "content": "Say hello"}],
+            },
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["role"] == "assistant"
+        assert body["type"] == "message"
+        assert len(body["content"]) >= 1
+        assert body["content"][0]["type"] == "text"
+        assert len(body["content"][0]["text"]) > 0
+        assert "usage" in body
+        assert body["usage"]["input_tokens"] >= 0
+        assert body["usage"]["output_tokens"] >= 0
+
+    def test_streaming_emits_anthropic_events(self, test_app):
+        r = test_app.post(
+            "/v1/messages",
+            json={
+                "model": "claude-3-5-sonnet-20241022",
+                "max_tokens": 256,
+                "messages": [{"role": "user", "content": "Hi"}],
+                "stream": True,
+            },
+        )
+        assert r.status_code == 200
+        assert "text/event-stream" in r.headers.get("content-type", "")
+        types = []
+        for line in r.text.splitlines():
+            if line.startswith("data: ") and line != "data: [DONE]":
+                obj = json.loads(line[len("data: "):])
+                types.append(obj.get("type"))
+        assert "message_start" in types
+        assert "content_block_delta" in types
+        assert types[-1] == "message_stop"
+
+    def test_streaming_error_has_no_success_tail(self, test_app):
+        async def failing_stream(self, *args, **kwargs):
+            raise RuntimeError("simulated stream failure")
+            yield ""  # pragma: no cover
+
+        with patch("copilot_backend.CopilotBackend.chat_completion_stream", failing_stream):
+            r = test_app.post(
+                "/v1/messages",
+                json={
+                    "model": "claude-3-5-sonnet-20241022",
+                    "max_tokens": 256,
+                    "messages": [{"role": "user", "content": "Hi"}],
+                    "stream": True,
+                },
+            )
+        assert r.status_code == 200
+        types = []
+        for line in r.text.splitlines():
+            if line.startswith("data: "):
+                try:
+                    obj = json.loads(line[len("data: "):])
+                except json.JSONDecodeError:
+                    continue
+                types.append(obj.get("type"))
+        assert "error" in types
+        assert "message_stop" not in types
+        assert "content_block_stop" not in types
 
 
 class TestAgentLifecycle:

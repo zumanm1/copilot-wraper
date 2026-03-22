@@ -41,17 +41,28 @@ CIRCUIT_BREAKER_TIMEOUT   = int(os.getenv("CIRCUIT_BREAKER_TIMEOUT", "60"))
 # Rate limiting (slowapi format, e.g. "20/minute", "100/hour", "" to disable)
 RATE_LIMIT = os.getenv("RATE_LIMIT", "20/minute")
 
-# Model mapping
+# Model ID → CopilotBackend.style (see copilot_backend._MODE_MAP for style→WS mode)
 MODEL_MAP = {
-    "copilot": "copilot",
-    "gpt-4": "copilot",
-    "gpt-4o": "copilot",
-    "gpt-4-turbo": "copilot",
-    "gpt-3.5-turbo": "copilot",
-    "copilot-balanced": "copilot",
-    "copilot-creative": "copilot",
-    "copilot-precise": "copilot",
+    "copilot": "smart",
+    "gpt-4": "smart",
+    "gpt-4o": "smart",
+    "gpt-4-turbo": "smart",
+    "gpt-3.5-turbo": "smart",
+    "copilot-balanced": "balanced",
+    "copilot-creative": "creative",
+    "copilot-precise": "precise",
+    "o1": "reasoning",
+    "o1-mini": "reasoning",
 }
+
+# Stateless chat: max characters sent to Copilot (system prefix preserved when truncating)
+MAX_CONTEXT_CHARS = int(os.getenv("MAX_CONTEXT_CHARS", "32000"))
+
+# Multimodal: reject attachments larger than this (bytes)
+MAX_IMAGE_BYTES = int(os.getenv("MAX_IMAGE_BYTES", str(4 * 1024 * 1024)))
+
+# Named agent API sessions: idle TTL for stopped sessions (seconds)
+AGENT_API_SESSION_TTL = int(os.getenv("AGENT_API_SESSION_TTL", "1800"))
 
 def validate_config():
     """Validate that required configuration is present."""

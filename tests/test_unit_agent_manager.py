@@ -3,21 +3,12 @@ Unit tests for AgentManager state machine and task execution.
 CopilotBackend is mocked so no real network I/O occurs.
 """
 from __future__ import annotations
-import asyncio
 import pytest
+import pytest_asyncio
 from unittest.mock import AsyncMock, patch
 
 
 pytestmark = pytest.mark.asyncio
-
-
-@pytest.fixture(autouse=True)
-def reset_agent_manager():
-    """Give each test a fresh AgentManager singleton."""
-    import agent_manager as am
-    am._agent_manager = None
-    yield
-    am._agent_manager = None
 
 
 @pytest.fixture
@@ -35,11 +26,12 @@ def mock_backend():
     return b
 
 
-@pytest.fixture
-def manager(mock_backend):
+@pytest_asyncio.fixture
+async def manager(mock_backend):
     with patch("agent_manager.CopilotBackend", return_value=mock_backend):
         from agent_manager import get_agent_manager
-        return get_agent_manager(), mock_backend
+        mgr = await get_agent_manager("default")
+        yield mgr, mock_backend
 
 
 # ── Lifecycle state transitions ──────────────────────────────────────
@@ -199,11 +191,42 @@ async def test_clear_history(manager):
     assert mgr.get_history() == []
 
 
-async def test_history_cap_enforced(manager, mock_backend):
+async def test_history_cap_enforced(mock_backend):
     """History must not exceed AGENT_MAX_HISTORY entries."""
     with patch("agent_manager.config.AGENT_MAX_HISTORY", 3):
-        mgr, _ = manager
+        with patch("agent_manager.CopilotBackend", return_value=mock_backend):
+            from agent_manager import get_agent_manager
+            mgr = await get_agent_manager("histcap")
+            await mgr.start()
+            for i in range(5):
+                await mgr.run_task(f"Task {i}")
+            assert len(mgr._task_history) <= 3
+
+
+async def test_named_sessions_isolated(mock_backend):
+    with patch("agent_manager.CopilotBackend", return_value=mock_backend):
+        from agent_manager import get_agent_manager
+        a = await get_agent_manager("alpha")
+        b = await get_agent_manager("beta")
+        assert a is not b
+        await a.start()
+        with pytest.raises(ValueError, match="not started"):
+            await b.run_task("x")
+
+
+async def test_tool_loop_invokes_registry(mock_backend):
+    mock_backend.chat_completion = AsyncMock(
+        side_effect=[
+            'TOOL: get_current_time()\n',
+            "Final answer after tool.",
+        ]
+    )
+    with patch("agent_manager.CopilotBackend", return_value=mock_backend):
+        from agent_manager import get_agent_manager
+        mgr = await get_agent_manager("tooltest")
         await mgr.start()
-        for i in range(5):
-            await mgr.run_task(f"Task {i}")
-        assert len(mgr._task_history) <= 3
+        task = await mgr.run_task("What time?")
+        assert task.status.value == "completed"
+        assert len(task.tool_calls) >= 1
+        assert task.tool_calls[0]["tool"] == "get_current_time"
+        assert mock_backend.chat_completion.call_count >= 2

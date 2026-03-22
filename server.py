@@ -1,6 +1,24 @@
-from __future__ import annotations
-import asyncio, time, uuid, base64, tempfile, os, logging
-from fastapi import FastAPI, HTTPException, Request
+import asyncio, time, uuid, base64, tempfile, os, logging, sys
+from fastapi import FastAPI, HTTPException, Request, Query
+from fastapi.responses import StreamingResponse, JSONResponse
+from models import (
+    ChatCompletionRequest, ChatCompletionResponse, ChatCompletionChoice,
+    ChatCompletionChunk, ChatCompletionChunkChoice, ChatCompletionChunkDelta,
+    ChatMessage, UsageInfo, ModelList, ModelInfo,
+    AnthropicRequest, AnthropicResponse, AnthropicContentBlock, AnthropicUsage,
+    AgentStartRequest, AgentStartResponse, AgentStopResponse, AgentPauseResponse,
+    AgentResumeResponse, AgentTaskRequest, AgentTaskResponse,
+    AgentStatusResponse, AgentHistoryResponse, AgentClearHistoryResponse,
+)
+from copilot_backend import CopilotBackend, get_connection_pool, get_cache_stats
+from circuit_breaker import get_circuit_breaker
+from agent_manager import (
+    get_agent_manager,
+    list_agent_api_sessions,
+    agent_registry_reaper_loop,
+)
+from token_counting import count_tokens, truncate_by_approx_tokens
+import config
 
 logger = logging.getLogger(__name__)
 
@@ -57,24 +75,7 @@ async def _session_reaper() -> None:
                     except Exception:
                         pass
                 logger.info("Agent session expired (idle): %s", aid)
-from fastapi.responses import StreamingResponse
-from models import (
-    # Chat completion models
-    ChatCompletionRequest, ChatCompletionResponse, ChatCompletionChoice,
-    ChatCompletionChunk, ChatCompletionChunkChoice, ChatCompletionChunkDelta,
-    ChatMessage, UsageInfo, ModelList, ModelInfo,
-    # Anthropic-compatible models
-    AnthropicRequest, AnthropicResponse, AnthropicContentBlock, AnthropicUsage,
-    # Agent management models
-    AgentStartRequest, AgentStartResponse,
-    AgentStopResponse, AgentPauseResponse, AgentResumeResponse,
-    AgentTaskRequest, AgentTaskResponse,
-    AgentStatusResponse, AgentHistoryResponse, AgentClearHistoryResponse,
-)
-from copilot_backend import CopilotBackend, get_connection_pool, get_cache_stats
-from circuit_breaker import get_circuit_breaker
-from agent_manager import get_agent_manager
-import config
+# Imports moved to top
 
 # ── Fast JSON serialization ───────────────────────────────────────────────────
 # orjson is 2-3× faster than stdlib json for small SSE payloads.
@@ -104,6 +105,23 @@ except ImportError:
 
 app = FastAPI(title="Copilot OpenAI-Compatible API", version="1.1.0")
 
+# ── GZip (compress JSON/SSE bodies above threshold) ──────────────────────────
+from starlette.middleware.gzip import GZipMiddleware
+
+app.add_middleware(GZipMiddleware, minimum_size=500)
+
+# ── CORS Middleware ──────────────────────────────────────────────────────────
+from fastapi.middleware.cors import CORSMiddleware
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # In production, restrict this to internal container hostnames
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["X-Agent-ID", "x-generation-params-note"],
+)
+
 if _limiter:
     app.state.limiter = _limiter
     app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
@@ -120,12 +138,12 @@ async def startup_event():
     warm_tasks = [_warm_one(pool) for _ in range(config.POOL_WARM_COUNT)]
     await asyncio.gather(*warm_tasks, return_exceptions=True)
     asyncio.create_task(_session_reaper())
+    asyncio.create_task(agent_registry_reaper_loop())
 
 
 async def _warm_one(pool):
     try:
         b = CopilotBackend()
-        await b._get_client()
         await pool.release(b)
     except Exception:
         pass
@@ -141,10 +159,29 @@ async def shutdown_event():
 # Utility helpers
 # ══════════════════════════════════════════════════════════════════════
 
+def _truncate_context_chars(text: str) -> str:
+    m = config.MAX_CONTEXT_CHARS
+    if len(text) <= m:
+        return text
+    sys_prefix = ""
+    rest = text
+    if rest.startswith("[System]:"):
+        br = rest.find("\n")
+        if br != -1:
+            sys_prefix = rest[: br + 1]
+            rest = rest[br + 1 :]
+    budget = m - len(sys_prefix) - 40
+    if budget < 100:
+        return text[:m]
+    if len(rest) > budget:
+        rest = "[...truncated...]\n" + rest[-budget:]
+    return sys_prefix + rest
+
+
 def extract_user_prompt(messages):
     parts = []
     for msg in messages:
-        if msg.role == "system":
+        if msg.role == "system" and msg.content is not None:
             parts.append(f"[System]: {msg.content}")
         elif msg.role == "user":
             if isinstance(msg.content, str):
@@ -153,7 +190,35 @@ def extract_user_prompt(messages):
                 for p in msg.content:
                     if p.type == "text" and p.text:
                         parts.append(p.text)
-    return parts[-1] if parts else ""
+        elif msg.role == "assistant" and msg.content is not None:
+            if isinstance(msg.content, str):
+                parts.append(f"[Assistant]: {msg.content}")
+        elif msg.role == "tool" and msg.content is not None:
+            parts.append(f"[Tool]: {msg.content}")
+    raw = "\n".join(parts) if parts else ""
+    return _truncate_context_chars(raw)
+
+
+def resolve_chat_style(model_id: str, temperature: float) -> str:
+    """Map OpenAI model id + temperature → CopilotBackend.style."""
+    if model_id in config.MODEL_MAP:
+        return config.MODEL_MAP[model_id]
+    if temperature <= 0.3:
+        return "precise"
+    if temperature <= 0.8:
+        return "smart"
+    return "creative"
+
+
+def resolve_anthropic_style(model_id: str, temperature: float | None) -> str:
+    t = 0.7 if temperature is None else float(temperature)
+    if model_id in config.MODEL_MAP:
+        return config.MODEL_MAP[model_id]
+    if t <= 0.3:
+        return "precise"
+    if t <= 0.8:
+        return "smart"
+    return "creative"
 
 
 def extract_image(messages):
@@ -165,9 +230,16 @@ def extract_image(messages):
                     url = p.image_url.url
                     if url.startswith("data:"):
                         _, data = url.split(",", 1)
-                        fd, path = tempfile.mkstemp(suffix=".png")
+                        raw = base64.b64decode(data)
+                        if len(raw) > config.MAX_IMAGE_BYTES:
+                            raise HTTPException(
+                                status_code=413,
+                                detail=f"Image exceeds MAX_IMAGE_BYTES ({config.MAX_IMAGE_BYTES})",
+                            )
+                        fd, path = tempfile.mkstemp(suffix=".png", dir="/tmp")
                         with os.fdopen(fd, "wb") as f:
-                            f.write(base64.b64decode(data))
+                            f.write(raw)
+                        logger.info("Extracted image to: %s", path)
                         return path
     return None
 
@@ -201,12 +273,17 @@ async def list_models():
 
 @app.post("/v1/chat/completions")
 async def create_chat_completion(request: ChatCompletionRequest, raw_request: Request):
+    # CRITICAL: Always print to stderr for Docker logs visibility
+    print(f"Bounty Hunter Trace: API_ENTRY model={request.model} streaming={request.stream}", file=sys.stderr, flush=True)
     agent_id = raw_request.headers.get("X-Agent-ID")
     prompt = extract_user_prompt(request.messages)
+    try:
+        attachment = extract_image(request.messages)
+    except HTTPException:
+        raise
+    logger.info("Chat request: prompt='%s', attachment=%s, stream=%s", prompt[:50], attachment, request.stream)
     if not prompt:
-        raise HTTPException(status_code=400, detail="No user message found")
-
-    attachment = extract_image(request.messages)
+        raise HTTPException(status_code=400, detail="No prompt found in messages")
     pool = get_connection_pool()
 
     # Route to per-agent dedicated backend or shared pool
@@ -215,31 +292,51 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
         release_fn = _noop_release
     else:
         backend = await pool.acquire()
+        backend.style = resolve_chat_style(request.model, request.temperature)
         release_fn = pool.release
+
+    temp_map = "off" if request.model in config.MODEL_MAP else "on"
+    gen_note = (
+        f"copilot_style={backend.style};temperature_mapping={temp_map};"
+        f"max_tokens={'word_truncation' if request.max_tokens else 'none'}"
+    )
 
     # ── Streaming path ────────────────────────────────────────────────
     if request.stream:
         return StreamingResponse(
-            stream_gen(release_fn, backend, prompt, attachment, request.model),
+            stream_gen(
+                release_fn, backend, prompt, attachment, request.model, request.max_tokens,
+            ),
             media_type="text/event-stream",
+            headers={"x-generation-params-note": gen_note},
         )
 
     # ── Non-streaming path ────────────────────────────────────────────
     try:
         response = await backend.chat_completion(prompt=prompt, attachment_path=attachment)
-        return ChatCompletionResponse(
+        sys.stderr.write(f"Bounty Hunter Trace: RESPONSE_CONTENT='{response[:100]}...'\n")
+        sys.stderr.flush()
+        response, truncated = truncate_by_approx_tokens(response, request.max_tokens)
+        if truncated:
+            gen_note = gen_note + ";truncated=1"
+        img_extra = 85 if attachment else 0
+        pt = count_tokens(prompt) + img_extra
+        ct = count_tokens(response)
+        body = ChatCompletionResponse(
             model=request.model,
+            usage=UsageInfo(
+                prompt_tokens=pt,
+                completion_tokens=ct,
+                total_tokens=pt + ct,
+            ),
             choices=[ChatCompletionChoice(
                 index=0,
                 message=ChatMessage(role="assistant", content=response),
-                finish_reason="stop",
+                finish_reason="length" if truncated else "stop",
+                suggested_responses=backend._last_suggestions,
             )],
-            usage=UsageInfo(
-                prompt_tokens=len(prompt.split()),
-                completion_tokens=len(response.split()),
-                total_tokens=len(prompt.split()) + len(response.split()),
-            ),
-        )
+        ).model_dump()
+        return JSONResponse(content=body, headers={"x-generation-params-note": gen_note})
     except HTTPException:
         raise
     except Exception as e:
@@ -249,7 +346,7 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
         _cleanup_attachment(attachment)
 
 
-async def stream_gen(release_fn, backend, prompt, attachment, model):
+async def stream_gen(release_fn, backend, prompt, attachment, model, max_tokens):
     """SSE generator — releases backend (or no-ops for agent sessions) after streaming."""
     chat_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())   # computed once, not per-token
@@ -260,8 +357,29 @@ async def stream_gen(release_fn, backend, prompt, attachment, model):
             "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": None}],
         }
         yield f"data: {_dumps(init)}\n\n"
+        # Immediate heartbeat (empty content) to satisfy Playwright/client timeouts
+        yield f"data: {_dumps({'id': chat_id, 'object': 'chat.completion.chunk', 'choices': [{'index': 0, 'delta': {'content': ''}, 'finish_reason': None}]})}\n\n"
 
+        sys.stderr.write(f"Starting stream for prompt='{prompt[:50]}', attachment={attachment}\n")
+        sys.stderr.flush()
+        end_fr = "stop"
+        sent_text = ""
         async for token in backend.chat_completion_stream(prompt=prompt, attachment_path=attachment):
+            if max_tokens:
+                candidate = sent_text + token
+                if count_tokens(candidate) > max_tokens:
+                    trunc, _ = truncate_by_approx_tokens(candidate, max_tokens)
+                    suffix = trunc[len(sent_text) :]
+                    if suffix:
+                        chunk = {
+                            "id": chat_id, "object": "chat.completion.chunk",
+                            "created": created, "model": model,
+                            "choices": [{"index": 0, "delta": {"content": suffix}, "finish_reason": None}],
+                        }
+                        yield f"data: {_dumps(chunk)}\n\n"
+                    end_fr = "length"
+                    break
+                sent_text = candidate
             chunk = {
                 "id": chat_id, "object": "chat.completion.chunk",
                 "created": created, "model": model,
@@ -269,12 +387,18 @@ async def stream_gen(release_fn, backend, prompt, attachment, model):
             }
             yield f"data: {_dumps(chunk)}\n\n"
 
-        end = {
+        # Final chunk with finish_reason and suggestions
+        final = {
             "id": chat_id, "object": "chat.completion.chunk",
             "created": created, "model": model,
-            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+            "choices": [{
+                "index": 0,
+                "delta": {},
+                "finish_reason": end_fr,
+                "suggested_responses": backend._last_suggestions,
+            }]
         }
-        yield f"data: {_dumps(end)}\n\n"
+        yield f"data: {_dumps(final)}\n\n"
         yield "data: [DONE]\n\n"
 
     except Exception as e:
@@ -288,6 +412,13 @@ async def stream_gen(release_fn, backend, prompt, attachment, model):
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "copilot-openai-wrapper"}
+
+@app.get("/v1/debug/log-test")
+async def log_test():
+    print("DEBUG_LOG_TEST_PRINT", flush=True)
+    sys.stdout.write("DEBUG_LOG_TEST_STDOUT\n")
+    sys.stdout.flush()
+    return {"message": "logs sent"}
 
 
 @app.get("/v1/cache/stats")
@@ -311,20 +442,6 @@ async def list_agent_sessions():
         "total": len(_agent_sessions),
         "ttl_seconds": AGENT_SESSION_TTL,
     }
-
-
-@app.post("/v1/reload-config")
-async def reload_config():
-    """Hot-reload cookies from .env without restarting the server.
-    Called by Container 3 (browser-auth) after extracting fresh cookies."""
-    from dotenv import load_dotenv
-    import importlib
-    load_dotenv(override=True)
-    import config as _config
-    importlib.reload(_config)
-    from copilot_backend import close_connection_pool
-    await close_connection_pool()
-    return {"status": "ok", "message": "Config reloaded and connection pool reset"}
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -386,6 +503,7 @@ async def anthropic_messages(request: AnthropicRequest, raw_request: Request):
         release_fn = _noop_release
     else:
         backend = await pool.acquire()
+        backend.style = resolve_anthropic_style(request.model, request.temperature)
         release_fn = pool.release
 
     # ── Streaming path ──────────────────────────────────────────────────
@@ -398,8 +516,10 @@ async def anthropic_messages(request: AnthropicRequest, raw_request: Request):
     # ── Non-streaming path ──────────────────────────────────────────────
     try:
         response_text = await backend.chat_completion(prompt=prompt)
-        token_in  = len(prompt.split())
-        token_out = len(response_text.split())
+        token_in = count_tokens(prompt)
+        token_out = count_tokens(response_text)
+        sys.stderr.write(f"Bounty Hunter Trace: ANTHROPIC_RESPONSE_CONTENT='{response_text[:100]}...'\n")
+        sys.stderr.flush()
         return AnthropicResponse(
             model=request.model,
             content=[AnthropicContentBlock(type="text", text=response_text)],
@@ -416,27 +536,29 @@ async def anthropic_messages(request: AnthropicRequest, raw_request: Request):
 async def _anthropic_stream_gen(release_fn, backend, prompt: str, model: str):
     """SSE generator in Anthropic streaming format."""
     msg_id  = f"msg_{uuid.uuid4().hex[:20]}"
-    created = int(time.time())
 
     # message_start
-    yield f"data: {_dumps({'type': 'message_start', 'message': {'id': msg_id, 'type': 'message', 'role': 'assistant', 'content': [], 'model': model, 'stop_reason': None, 'usage': {'input_tokens': len(prompt.split()), 'output_tokens': 0}}})}\n\n"
+    yield f"data: {_dumps({'type': 'message_start', 'message': {'id': msg_id, 'type': 'message', 'role': 'assistant', 'content': [], 'model': model, 'stop_reason': None, 'usage': {'input_tokens': count_tokens(prompt), 'output_tokens': 0}}})}\n\n"
     # content_block_start
     yield f"data: {_dumps({'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'text', 'text': ''}})}\n\n"
     yield f"data: {_dumps({'type': 'ping'})}\n\n"
 
     total_tokens = 0
+    stream_ok = False
     try:
         async for token in backend.chat_completion_stream(prompt=prompt):
-            total_tokens += len(token.split())
+            total_tokens += count_tokens(token)
             yield f"data: {_dumps({'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'text_delta', 'text': token}})}\n\n"
+        stream_ok = True
     except Exception as exc:
         yield f"data: {_dumps({'type': 'error', 'error': {'type': 'server_error', 'message': str(exc)}})}\n\n"
     finally:
         await release_fn(backend)
 
-    yield f"data: {_dumps({'type': 'content_block_stop', 'index': 0})}\n\n"
-    yield f"data: {_dumps({'type': 'message_delta', 'delta': {'stop_reason': 'end_turn', 'stop_sequence': None}, 'usage': {'output_tokens': total_tokens}})}\n\n"
-    yield f"data: {_dumps({'type': 'message_stop'})}\n\n"
+    if stream_ok:
+        yield f"data: {_dumps({'type': 'content_block_stop', 'index': 0})}\n\n"
+        yield f"data: {_dumps({'type': 'message_delta', 'delta': {'stop_reason': 'end_turn', 'stop_sequence': None}, 'usage': {'output_tokens': total_tokens}})}\n\n"
+        yield f"data: {_dumps({'type': 'message_stop'})}\n\n"
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -615,7 +737,7 @@ async def reload_config():
     tags=["Agent"],
 )
 async def agent_start(request: AgentStartRequest = AgentStartRequest()):
-    manager = get_agent_manager()
+    manager = await get_agent_manager(request.session_name)
     try:
         result = await manager.start(system_prompt=request.system_prompt)
         return AgentStartResponse(**result)
@@ -635,8 +757,8 @@ async def agent_start(request: AgentStartRequest = AgentStartRequest()):
     ),
     tags=["Agent"],
 )
-async def agent_stop():
-    manager = get_agent_manager()
+async def agent_stop(session_name: str = Query("default")):
+    manager = await get_agent_manager(session_name)
     try:
         result = await manager.stop()
         return AgentStopResponse(**result)
@@ -656,8 +778,8 @@ async def agent_stop():
     ),
     tags=["Agent"],
 )
-async def agent_pause():
-    manager = get_agent_manager()
+async def agent_pause(session_name: str = Query("default")):
+    manager = await get_agent_manager(session_name)
     try:
         result = await manager.pause()
         return AgentPauseResponse(**result)
@@ -674,8 +796,8 @@ async def agent_pause():
     description="Resumes a paused agent so it can accept new tasks again.",
     tags=["Agent"],
 )
-async def agent_resume():
-    manager = get_agent_manager()
+async def agent_resume(session_name: str = Query("default")):
+    manager = await get_agent_manager(session_name)
     try:
         result = await manager.resume()
         return AgentResumeResponse(**result)
@@ -697,7 +819,7 @@ async def agent_resume():
     tags=["Agent"],
 )
 async def agent_task(request: AgentTaskRequest):
-    manager = get_agent_manager()
+    manager = await get_agent_manager(request.session_name)
 
     # ── Streaming response ────────────────────────────────────────────
     if request.stream:
@@ -745,14 +867,15 @@ async def agent_task(request: AgentTaskRequest):
     try:
         task = await manager.run_task(request.task)
         return AgentTaskResponse(
-            task_id      = task.task_id,
-            session_id   = manager.session_id,
-            status       = task.status.value,
-            prompt       = task.prompt,
-            result       = task.result,
-            error        = task.error,
-            created_at   = task.created_at.isoformat(),
-            completed_at = task.completed_at.isoformat() if task.completed_at else None,
+            task_id=task.task_id,
+            session_id=manager.session_id,
+            status=task.status.value,
+            prompt=task.prompt,
+            result=task.result,
+            error=task.error,
+            created_at=task.created_at.isoformat(),
+            completed_at=task.completed_at.isoformat() if task.completed_at else None,
+            suggested_responses=task.suggested_responses,
         )
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
@@ -767,8 +890,8 @@ async def agent_task(request: AgentTaskRequest):
     description="Returns the current status of the agent and task statistics.",
     tags=["Agent"],
 )
-async def agent_status():
-    manager = get_agent_manager()
+async def agent_status(session_name: str = Query("default")):
+    manager = await get_agent_manager(session_name)
     return AgentStatusResponse(**manager.get_status())
 
 
@@ -779,8 +902,8 @@ async def agent_status():
     description="Returns the full list of tasks submitted in the current session.",
     tags=["Agent"],
 )
-async def agent_history():
-    manager = get_agent_manager()
+async def agent_history(session_name: str = Query("default")):
+    manager = await get_agent_manager(session_name)
     tasks = manager.get_history()
     return AgentHistoryResponse(
         session_id=manager.session_id,
@@ -795,8 +918,8 @@ async def agent_history():
     description="Returns the details of a single task by its task_id.",
     tags=["Agent"],
 )
-async def agent_get_task(task_id: str):
-    manager = get_agent_manager()
+async def agent_get_task(task_id: str, session_name: str = Query("default")):
+    manager = await get_agent_manager(session_name)
     task = manager.get_task(task_id)
     if task is None:
         raise HTTPException(status_code=404, detail=f"Task '{task_id}' not found.")
@@ -810,13 +933,62 @@ async def agent_get_task(task_id: str):
     description="Clears all task history for the current session (does not stop the agent).",
     tags=["Agent"],
 )
-async def agent_clear_history():
-    manager = get_agent_manager()
+async def agent_clear_history(session_name: str = Query("default")):
+    manager = await get_agent_manager(session_name)
     result = manager.clear_history()
     return AgentClearHistoryResponse(**result)
 
 
+@app.get(
+    "/v1/agent/sessions",
+    tags=["Agent"],
+    summary="List named agent API sessions",
+    description="Returns status for each session_name registry entry (management API).",
+)
+async def agent_named_sessions():
+    return await list_agent_api_sessions()
+
+
+# ── Helper functions for token counting and style resolution ─────────────────
+
+def resolve_chat_style(model: str, temperature: float | None = None) -> str:
+    """Map OpenAI model and temperature to Copilot chat style."""
+    if model in config.MODEL_MAP:
+        return config.MODEL_MAP[model]
+    
+    # Heuristic based on temperature if no direct model match
+    if temperature is not None:
+        if temperature >= 0.7:
+            return "creative"
+        if temperature <= 0.3:
+            return "precise"
+    return "balanced"
+
+
+def count_tokens(text: str) -> int:
+    """Approximate token count (4 chars ~ 1 token)."""
+    if not text:
+        return 0
+    return max(1, len(text) // 4)
+
+
+def truncate_by_approx_tokens(text: str, max_tokens: int | None) -> tuple[str, bool]:
+    """Truncate text by approximate token count if max_tokens is set."""
+    if not max_tokens or not text:
+        return text, False
+    
+    char_limit = max_tokens * 4
+    if len(text) <= char_limit:
+        return text, False
+    
+    # Simple truncation at character level (approximate tokens)
+    return text[:char_limit] + " [truncated]", True
+
+
 if __name__ == "__main__":
     import uvicorn
+    # Start the session reaper in the background
+    asyncio.create_task(_session_reaper())
+    
     config.validate_config()
     uvicorn.run("server:app", host=config.HOST, port=config.PORT, reload=config.RELOAD)

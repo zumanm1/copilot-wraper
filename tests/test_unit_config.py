@@ -16,13 +16,12 @@ def reload_config():
 
 def test_validate_config_raises_when_no_cookie(monkeypatch):
     monkeypatch.delenv("BING_COOKIES", raising=False)
-    import config
-    importlib.reload(config)
-    # After reload, BING_COOKIES is "" (the default)
-    import importlib as _il
+    monkeypatch.delenv("COPILOT_COOKIES", raising=False)
+    import dotenv
+    monkeypatch.setattr(dotenv, "load_dotenv", lambda *args, **kwargs: None)
     import config as cfg
-    _il.reload(cfg)
-    with pytest.raises(ValueError, match="BING_COOKIES"):
+    importlib.reload(cfg)
+    with pytest.raises(ValueError, match="COPILOT_COOKIES"):
         cfg.validate_config()
 
 

@@ -54,10 +54,14 @@ services:
       - .env
     environment:
       - RELOAD=false
-      - REQUEST_TIMEOUT=60
+      - PYTHONUNBUFFERED=1
+      - REQUEST_TIMEOUT=90
       - CONNECT_TIMEOUT=15
-      - POOL_WARM_COUNT=2
-      - AGENT_MAX_HISTORY=1000
+      - CIRCUIT_BREAKER_THRESHOLD=50
+      - BING_COOKIES=${BING_COOKIES}
+      - COPILOT_COOKIES=${COPILOT_COOKIES}
+      - CHROME_KEY_PASSWORD=${CHROME_KEY_PASSWORD}
+      - RATE_LIMIT="100/minute"
       # Cookie extraction: host Chrome data mounted at /chrome-data (read-only)
       # CHROME_KEY_PASSWORD is derived from macOS Keychain on the host and passed in
       - CHROME_KEY_PASSWORD=${CHROME_KEY_PASSWORD:-}
@@ -65,8 +69,9 @@ services:
       # COPILOT_COOKIES and BING_COOKIES come from env_file: .env
     volumes:
       # Mount host Chrome profile directory read-only into Container 1
-      # Container 1 reads the encrypted SQLite DB and decrypts using CHROME_KEY_PASSWORD
       - "${HOME}/Library/Application Support/Google/Chrome:/chrome-data:ro"
+      # Enable hot-reloading for development/debugging
+      - .:/app
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c",
@@ -108,6 +113,8 @@ services:
     container_name: C2_agent-terminal
     depends_on:
       app:
+        condition: service_healthy
+      browser-auth:
         condition: service_healthy
     environment:
       # All agents point to the copilot-api service via internal DNS
@@ -160,6 +167,8 @@ services:
     container_name: C7a_openclaw-gateway
     depends_on:
       app:
+        condition: service_healthy
+      browser-auth:
         condition: service_healthy
     ports:
       - "18789:18789"
@@ -253,6 +262,8 @@ services:
     depends_on:
       app:
         condition: service_healthy
+      browser-auth:
+        condition: service_healthy
     environment:
       # Route Claude Code through Container 1's /v1/messages endpoint
       - ANTHROPIC_BASE_URL=http://app:8000
@@ -292,6 +303,8 @@ services:
     depends_on:
       app:
         condition: service_healthy
+      browser-auth:
+        condition: service_healthy
     environment:
       - OPENAI_API_BASE=http://app:8000/v1
       - OPENAI_API_KEY=not-needed
@@ -321,7 +334,10 @@ services:
     depends_on:
       app:
         condition: service_healthy
+      browser-auth:
+        condition: service_healthy
     environment:
+      - RUN_CONTAINER_E2E=1
       - BASE_URL=http://app:8000
       - C3_URL=http://browser-auth:8001
       - C6_URL=http://kilocode-server:9001
@@ -367,6 +383,12 @@ services:
       - copilot-net
     shm_size: '2gb'    # Chrome needs shared memory
     restart: "no"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
 
 # ── Shared network ────────────────────────────────────────────
 # All containers communicate via this bridge network.

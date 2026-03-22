@@ -11,6 +11,9 @@ WORKDIR /tests
 COPY tests/requirements-test.txt .
 RUN pip install --no-cache-dir -r requirements-test.txt
 
+# Copy source files needed for tests (agent_manager, models, etc.)
+COPY *.py .
+
 # Copy the test suite
 COPY tests/ .
 

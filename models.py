@@ -56,6 +56,7 @@ class ChatCompletionChoice(BaseModel):
     index: int = 0
     message: ChatMessage
     finish_reason: Literal["stop", "length", "tool_calls"] | None = "stop"
+    suggested_responses: list[str] | None = None
 
 
 class ChatCompletionResponse(BaseModel):
@@ -80,6 +81,7 @@ class ChatCompletionChunkChoice(BaseModel):
     index: int = 0
     delta: ChatCompletionChunkDelta = Field(default_factory=ChatCompletionChunkDelta)
     finish_reason: str | None = None
+    suggested_responses: list[str] | None = None
 
 
 class ChatCompletionChunk(BaseModel):
@@ -129,6 +131,12 @@ class AgentStartRequest(BaseModel):
         description="Optional custom system prompt for the agent. "
                     "Defaults to the built-in Copilot agent prompt.",
     )
+    session_name: str = Field(
+        default="default",
+        description="Named session key (1-64 chars: letters, digits, _ -). "
+                    "Multiple isolated agent sessions can run in parallel.",
+        pattern=r"^[a-zA-Z0-9_-]{1,64}$",
+    )
 
 
 class AgentStartResponse(BaseModel):
@@ -176,6 +184,11 @@ class AgentTaskRequest(BaseModel):
         default=False,
         description="If true, stream the response as Server-Sent Events.",
     )
+    session_name: str = Field(
+        default="default",
+        description="Must match the session_name used with /v1/agent/start.",
+        pattern=r"^[a-zA-Z0-9_-]{1,64}$",
+    )
 
 
 class AgentTaskResponse(BaseModel):
@@ -188,6 +201,7 @@ class AgentTaskResponse(BaseModel):
     error:        str | None
     created_at:   str
     completed_at: str | None
+    suggested_responses: list[str] | None = None
 
 
 class AgentStatusResponse(BaseModel):

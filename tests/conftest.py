@@ -2,65 +2,53 @@
 Shared fixtures for the unit + integration test suite.
 """
 from __future__ import annotations
-import asyncio
 import pytest
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 
-# ── AsyncMock SydneyClient ────────────────────────────────────────────────────
+@pytest.fixture(autouse=True)
+def _reset_agent_registry_between_tests():
+    """Default session is global on the FastAPI app; clear between tests for isolation."""
+    from agent_manager import reset_agent_registry_for_tests
 
-@pytest.fixture
-def mock_sydney_client():
-    """A fully mocked SydneyClient that returns a canned response."""
-    client = AsyncMock()
-    client.ask = AsyncMock(return_value="Mocked Copilot response")
-    client.start_conversation = AsyncMock()
-    client.close_conversation = AsyncMock()
-    client.reset_conversation = AsyncMock()
-
-    async def _fake_ask_stream(*args, **kwargs):
-        for token in ["Hello", " ", "world", "!"]:
-            yield token
-
-    client.ask_stream = _fake_ask_stream
-    return client
+    reset_agent_registry_for_tests()
+    yield
+    reset_agent_registry_for_tests()
 
 
-@pytest.fixture
-def mock_copilot_backend(mock_sydney_client):
-    """A CopilotBackend whose SydneyClient is replaced with mock_sydney_client."""
-    from copilot_backend import CopilotBackend
-    backend = CopilotBackend()
-    backend._client = mock_sydney_client
-    return backend
+def pytest_collection_modifyitems(config, items):
+    """Run Playwright/network container tests last; they leave a running asyncio loop that breaks pytest-asyncio."""
+    def sort_key(item):
+        node = item.nodeid
+        late = node.startswith("tests/test_new_containers") or node.startswith(
+            "tests/test_playwright"
+        )
+        return (1 if late else 0, node)
+
+    items.sort(key=sort_key)
+
+
+async def _fake_ws_stream(self, prompt, context, attachment_path=None):
+    """Avoid real HTTP/WebSocket; yields canned tokens."""
+    yield "Mocked"
+    yield " Copilot"
+    yield " response"
 
 
 # ── FastAPI TestClient ────────────────────────────────────────────────────────
 
 @pytest.fixture
-def test_app(mock_sydney_client):
-    """FastAPI app with all Copilot I/O mocked at the SydneyClient level."""
+def test_app():
+    """FastAPI app with Copilot WebSocket I/O stubbed via _ws_stream."""
     import os
     os.environ.setdefault("BING_COOKIES", "test-cookie")
 
-    # Patch SydneyClient globally so every CopilotBackend uses the mock
-    with patch("copilot_backend.SydneyClient", return_value=mock_sydney_client):
-        # Also patch pool warm-up so startup event doesn't fail
+    with patch("copilot_backend.CopilotBackend._ws_stream", _fake_ws_stream):
         with patch("server.config.POOL_WARM_COUNT", 0):
             from fastapi.testclient import TestClient
             import server as srv
-            # Reset the singleton pool between tests
             import copilot_backend as cb
             cb._connection_pool = None
             client = TestClient(srv.app, raise_server_exceptions=False)
             yield client
             cb._connection_pool = None
-
-
-# ── Event loop ────────────────────────────────────────────────────────────────
-
-@pytest.fixture(scope="session")
-def event_loop():
-    loop = asyncio.new_event_loop()
-    yield loop
-    loop.close()
