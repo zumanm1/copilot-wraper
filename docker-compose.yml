@@ -132,10 +132,17 @@ services:
       - ./workspace:/workspace
     networks:
       - copilot-net
-    # Required for interactive terminal sessions
+    # Default: standby health server. Interactive: docker compose exec C2_agent-terminal bash
+    command: ["standby"]
     stdin_open: true
     tty: true
-    restart: "no"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
 
   # ──────────────────────────────────────────────────────────
   # C7a: OpenClaw Gateway
@@ -237,9 +244,16 @@ services:
       - ./workspace:/workspace
     networks:
       - copilot-net
+    command: ["standby"]
     stdin_open: true
     tty: true
-    restart: "no"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
 
   # ──────────────────────────────────────────────────────────
   # C5: Claude Code CLI Terminal
@@ -276,9 +290,16 @@ services:
       - ./workspace:/workspace
     networks:
       - copilot-net
+    command: ["standby"]
     stdin_open: true
     tty: true
-    restart: "no"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
 
   # ──────────────────────────────────────────────────────────
   # C6: KiloCode CLI Terminal
@@ -316,9 +337,16 @@ services:
       - ./workspace:/workspace
     networks:
       - copilot-net
+    command: ["standby"]
     stdin_open: true
     tty: true
-    restart: "no"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
 
   # ──────────────────────────────────────────────────────────
   # CT: Playwright automated test suite (45 tests)

@@ -159,6 +159,21 @@ RC
 # ── Route subcommands ─────────────────────────────────────────────────────────
 if [ $# -gt 0 ]; then
     case "$1" in
+        standby)
+            echo "[C5] Standby mode — health server on port 8080"
+            exec python3 -c "
+import http.server,json,urllib.request
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        try: urllib.request.urlopen('${API_ROOT}/health',timeout=3); c1='online'
+        except: c1='offline'
+        s=200 if c1=='online' else 503
+        self.send_response(s);self.send_header('Content-Type','application/json');self.end_headers()
+        self.wfile.write(json.dumps({'container':'C5','status':'standby','c1':c1}).encode())
+    def log_message(self,*a):pass
+http.server.HTTPServer(('0.0.0.0',8080),H).serve_forever()
+"
+            ;;
         ask)
             shift
             cmd_ask "$@"
