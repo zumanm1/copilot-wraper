@@ -17,8 +17,3 @@ cachetools>=5.3.0
 uvloop>=0.19.0
 orjson>=3.9.0
 tiktoken>=0.7.0
-
-# Dev / testing dependencies
-pytest>=8.0
-pytest-asyncio>=0.23
-aioresponses>=0.7.6

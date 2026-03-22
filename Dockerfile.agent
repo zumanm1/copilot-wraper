@@ -42,14 +42,10 @@ RUN npm install -g opencode-ai 2>/dev/null \
 
 # ── Copy launcher + config files ─────────────────────────────
 COPY agent-terminal/ /agent-terminal/
-RUN chmod +x /agent-terminal/start.sh
-
-# Pre-configure OpenCode to use the copilot-api backend
-RUN mkdir -p /root/.config/opencode && \
-    cp /agent-terminal/opencode.json /root/.config/opencode/opencode.json
-
-# Pre-configure Aider (home dir config)
-RUN cp /agent-terminal/.aider.conf.yml /root/.aider.conf.yml
+RUN chmod +x /agent-terminal/start.sh \
+    && mkdir -p /root/.config/opencode \
+    && cp /agent-terminal/opencode.json /root/.config/opencode/opencode.json \
+    && cp /agent-terminal/.aider.conf.yml /root/.aider.conf.yml
 
 # ── Default environment (overridden by docker-compose) ───────
 ENV OPENAI_API_BASE=http://app:8000/v1

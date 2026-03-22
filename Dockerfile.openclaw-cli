@@ -24,21 +24,14 @@
 #   docker compose run --rm openclaw-cli gateway status
 #   docker compose run --rm openclaw-cli config set gateway.bind lan
 # ============================================================
-FROM node:20-slim
+FROM node:20-alpine
 
-# System utilities: curl for health checks, python3 for ask_helper.py, git for agents
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    curl ca-certificates bash git python3 procps \
-    && rm -rf /var/lib/apt/lists/*
-
-# Install OpenClaw CLI via npm (confirmed working)
-RUN npm install -g openclaw 2>&1 | tail -5 \
-    && echo "✅ OpenClaw installed: $(openclaw --version 2>/dev/null || openclaw version 2>/dev/null || echo ok)"
-
-# Git identity (required for workspace operations)
-RUN git config --global user.email "agent@copilot-wrapper" && \
-    git config --global user.name "OpenClaw CLI" && \
-    git config --global init.defaultBranch main
+RUN apk add --no-cache curl ca-certificates bash git python3 \
+    && npm install -g openclaw 2>&1 | tail -5 \
+    && npm cache clean --force \
+    && git config --global user.email "agent@copilot-wrapper" \
+    && git config --global user.name "OpenClaw CLI" \
+    && git config --global init.defaultBranch main
 
 # Timezone (reference doc default: Africa/Johannesburg)
 ENV TZ="Africa/Johannesburg"

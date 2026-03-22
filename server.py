@@ -363,13 +363,14 @@ async def stream_gen(release_fn, backend, prompt, attachment, model, max_tokens)
         sys.stderr.write(f"Starting stream for prompt='{prompt[:50]}', attachment={attachment}\n")
         sys.stderr.flush()
         end_fr = "stop"
-        sent_text = ""
+        char_budget = max_tokens * 4 if max_tokens else 0
+        chars_sent = 0
         async for token in backend.chat_completion_stream(prompt=prompt, attachment_path=attachment):
-            if max_tokens:
-                candidate = sent_text + token
-                if count_tokens(candidate) > max_tokens:
-                    trunc, _ = truncate_by_approx_tokens(candidate, max_tokens)
-                    suffix = trunc[len(sent_text) :]
+            if char_budget:
+                chars_sent += len(token)
+                if chars_sent > char_budget:
+                    overflow = chars_sent - char_budget
+                    suffix = token[: len(token) - overflow] if overflow < len(token) else ""
                     if suffix:
                         chunk = {
                             "id": chat_id, "object": "chat.completion.chunk",
@@ -379,7 +380,6 @@ async def stream_gen(release_fn, backend, prompt, attachment, model, max_tokens)
                         yield f"data: {_dumps(chunk)}\n\n"
                     end_fr = "length"
                     break
-                sent_text = candidate
             chunk = {
                 "id": chat_id, "object": "chat.completion.chunk",
                 "created": created, "model": model,
@@ -543,11 +543,11 @@ async def _anthropic_stream_gen(release_fn, backend, prompt: str, model: str):
     yield f"data: {_dumps({'type': 'content_block_start', 'index': 0, 'content_block': {'type': 'text', 'text': ''}})}\n\n"
     yield f"data: {_dumps({'type': 'ping'})}\n\n"
 
-    total_tokens = 0
+    total_chars = 0
     stream_ok = False
     try:
         async for token in backend.chat_completion_stream(prompt=prompt):
-            total_tokens += count_tokens(token)
+            total_chars += len(token)
             yield f"data: {_dumps({'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'text_delta', 'text': token}})}\n\n"
         stream_ok = True
     except Exception as exc:
@@ -556,6 +556,7 @@ async def _anthropic_stream_gen(release_fn, backend, prompt: str, model: str):
         await release_fn(backend)
 
     if stream_ok:
+        total_tokens = max(1, total_chars // 4)
         yield f"data: {_dumps({'type': 'content_block_stop', 'index': 0})}\n\n"
         yield f"data: {_dumps({'type': 'message_delta', 'delta': {'stop_reason': 'end_turn', 'stop_sequence': None}, 'usage': {'output_tokens': total_tokens}})}\n\n"
         yield f"data: {_dumps({'type': 'message_stop'})}\n\n"
@@ -709,7 +710,8 @@ async def reload_config():
         load_dotenv(override=True)
         importlib.reload(_config)
 
-        from copilot_backend import close_connection_pool
+        from copilot_backend import close_connection_pool, reload_cookies
+        reload_cookies()
         await close_connection_pool()
 
         # Fresh cookies mean the backend should be reachable — reset circuit breaker

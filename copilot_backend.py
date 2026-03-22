@@ -83,9 +83,19 @@ def _cache_key(style: str, prompt: str) -> str:
     return hashlib.sha256(f"{style}:{prompt}".encode()).hexdigest()
 
 
+_cached_cookie: str | None = None
+
 def _make_cookie_header() -> str:
-    """Build Cookie header from environment (allows real-time updates)."""
-    return os.getenv("COPILOT_COOKIES") or os.getenv("BING_COOKIES") or ""
+    """Return cached Cookie header; refreshed on reload_cookies()."""
+    global _cached_cookie
+    if _cached_cookie is None:
+        _cached_cookie = os.getenv("COPILOT_COOKIES") or os.getenv("BING_COOKIES") or ""
+    return _cached_cookie
+
+def reload_cookies() -> None:
+    """Invalidate the cached cookie so the next call re-reads the env."""
+    global _cached_cookie
+    _cached_cookie = None
 
 
 def _make_headers() -> dict:

@@ -10,23 +10,15 @@
 #   docker compose run --rm claude-code-terminal bash
 #   docker compose run --rm claude-code-terminal ask "question"
 # ============================================================
-FROM node:20-slim
+FROM node:20-alpine
 
-# System deps
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    git curl ca-certificates bash python3 procps \
-    && rm -rf /var/lib/apt/lists/*
-
-# ── Install Claude Code CLI from official npm registry ───────
-# Source: https://www.npmjs.com/package/@anthropic-ai/claude-code
-RUN npm install -g @anthropic-ai/claude-code 2>&1 | tail -3 \
-    && echo "✅ Claude Code installed: $(claude --version 2>/dev/null || echo 'ok')"
-
-# ── Git identity ───────────────────────────────────────────────
-RUN git config --global user.email "agent@copilot-wrapper" && \
-    git config --global user.name "Claude Code Agent" && \
-    git config --global init.defaultBranch main && \
-    git config --global core.editor "true"
+RUN apk add --no-cache git curl ca-certificates bash python3 \
+    && npm install -g @anthropic-ai/claude-code 2>&1 | tail -3 \
+    && npm cache clean --force \
+    && git config --global user.email "agent@copilot-wrapper" \
+    && git config --global user.name "Claude Code Agent" \
+    && git config --global init.defaultBranch main \
+    && git config --global core.editor "true"
 
 WORKDIR /workspace
 
