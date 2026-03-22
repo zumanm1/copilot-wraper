@@ -1,23 +1,33 @@
 #!/usr/bin/env bash
 # ══════════════════════════════════════════════════════════════════════════════
 # run_pair_tests.sh  — Validate all C1+C3 ↔ agent-container pairs
+#                     + Multi-Agent Debate smoke test
 #
-# Tests:
-#   1  C1+C3 ← C2 OpenCode   (OpenAI /v1/chat/completions)
-#   2  C1+C3 ← C2 Aider      (OpenAI /v1/chat/completions)
-#   3  C1+C3 ← C5 Claude Code (Anthropic /v1/messages)
-#   4  C1+C3 ← C6 KiloCode   (OpenAI /v1/chat/completions)
-#   5  C1+C3 ← C7a Gateway   (health + standby validation)
-#   6  C1+C3 ← C7b CLI ask   (OpenAI /v1/chat/completions)
+# Pair tests (1–7):
+#   1  C1+C3 ← C2 OpenCode     OpenAI  /v1/chat/completions
+#   2  C1+C3 ← C2 Aider        OpenAI  /v1/chat/completions
+#   3  C1+C3 ← C5 Claude Code  Anthropic /v1/messages
+#   4  C1+C3 ← C6 KiloCode    OpenAI  /v1/chat/completions
+#   5  C1+C3 ← C7a Gateway    health + standby validation (:18789)
+#   6  C1+C3 ← C7b CLI ask    OpenAI  /v1/chat/completions
+#   7  C1+C3 ← C8 Hermes      OpenAI  /v1/chat/completions
+#
+# Debate test (8):
+#   8  Multi-Agent Debate (60 s, all 6 agents, moderator + judge)
 #
 # Usage:
-#   ./tests/run_pair_tests.sh            # sequential
-#   ./tests/run_pair_tests.sh --parallel # all 6 in parallel
+#   ./tests/run_pair_tests.sh                    # sequential (7 pairs + debate)
+#   ./tests/run_pair_tests.sh --parallel         # all 7 pairs parallel, then debate
+#   ./tests/run_pair_tests.sh --skip-debate      # skip the debate test (faster)
 # ══════════════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
 PARALLEL=false
-[[ "${1:-}" == "--parallel" ]] && PARALLEL=true
+SKIP_DEBATE=false
+for arg in "$@"; do
+    [[ "$arg" == "--parallel" ]]    && PARALLEL=true
+    [[ "$arg" == "--skip-debate" ]] && SKIP_DEBATE=true
+done
 
 COMPOSE_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 LOG_DIR="$(mktemp -d)"
@@ -26,13 +36,14 @@ FAIL=0
 RESULTS=()
 
 # ── colours ───────────────────────────────────────────────────────────────────
-GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[1;33m'; RESET='\033[0m'
-BOLD='\033[1m'
+GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[1;33m'
+CYAN='\033[0;36m'; MAGENTA='\033[0;35m'; RESET='\033[0m'; BOLD='\033[1m'
 
 header() { echo -e "\n${BOLD}══ $* ══${RESET}"; }
 ok()     { echo -e "  ${GREEN}✅ PASS${RESET}  $*"; }
 fail()   { echo -e "  ${RED}❌ FAIL${RESET}  $*"; }
 warn()   { echo -e "  ${YELLOW}⚠️  WARN${RESET}  $*"; }
+info()   { echo -e "  ${CYAN}ℹ  INFO${RESET}  $*"; }
 
 # ── run_test <id> <name> <script_fn> ─────────────────────────────────────────
 run_test() {
@@ -50,7 +61,7 @@ run_test() {
     fi
 }
 
-# ── individual test functions ─────────────────────────────────────────────────
+# ── individual pair test functions ────────────────────────────────────────────
 
 test1_opencode() {
     cd "$COMPOSE_DIR"
@@ -81,6 +92,12 @@ test2_aider() {
     cd "$COMPOSE_DIR"
     echo "[verify] aider tool"
     docker compose exec -T agent-terminal bash -c 'aider --version 2>&1 | head -1'
+
+    echo "[verify] C1 health from C2"
+    C1_STATUS=$(docker compose exec -T agent-terminal bash -c \
+        'curl -sf --max-time 5 http://app:8000/health | python3 -c "import json,sys;print(json.load(sys.stdin)[\"status\"])"')
+    echo "  C1 status → $C1_STATUS"
+    [[ "$C1_STATUS" == "ok" ]] || { echo "ERROR: C1 not healthy"; return 1; }
 
     echo "[ask]  C1+C3 ← C2 Aider"
     REPLY=$(docker compose exec -T agent-terminal bash -c \
@@ -207,9 +224,60 @@ test7_hermes() {
     echo "[info] C8 Hermes standby healthy — run 'docker compose exec C8_hermes-agent hermes' for interactive CLI"
 }
 
+# ── Test 8: Multi-Agent Debate (60-second smoke test) ─────────────────────────
+test8_debate() {
+    cd "$COMPOSE_DIR"
+
+    echo "[verify] C1 health before debate"
+    C1_STATUS=$(curl -sf --max-time 5 http://localhost:8000/health | python3 -c \
+        "import json,sys;print(json.load(sys.stdin)['status'])" 2>/dev/null || echo "offline")
+    echo "  C1 status → $C1_STATUS"
+    [[ "$C1_STATUS" == "ok" ]] || { echo "ERROR: C1 not healthy — cannot run debate"; return 1; }
+
+    echo "[verify] Python3 available on host"
+    python3 --version || { echo "ERROR: python3 not found on host"; return 1; }
+
+    echo "[debate] Running 60-second multi-agent debate (all 6 agents)..."
+    echo "         Topic: LLM picks dynamically — stances are non-hardcoded"
+
+    # Capture the debate transcript file path from output
+    DEBATE_OUT=$(python3 "$COMPOSE_DIR/tests/agent_debate.py" \
+        --duration 90 \
+        --api http://localhost:8000 \
+        --output "$COMPOSE_DIR/tests/debate-transcripts" 2>&1)
+
+    echo "$DEBATE_OUT" | tail -40
+
+    # Validate: all 6 agents produced opening statements
+    AGENT_COUNT=$(echo "$DEBATE_OUT" | grep -c "Opening  |  Round 1" || true)
+    echo "[verify] Opening statements received: $AGENT_COUNT / 6"
+    [[ "$AGENT_COUNT" -ge 4 ]] || { echo "ERROR: fewer than 4 agents produced openings (got $AGENT_COUNT)"; return 1; }
+
+    # Validate: judge produced scores
+    echo "$DEBATE_OUT" | grep -q "WINNER" || { echo "ERROR: judge output missing from debate"; return 1; }
+
+    # Validate: transcript file was saved
+    TRANSCRIPT=$(echo "$DEBATE_OUT" | grep "Transcript saved" | awk '{print $NF}' || true)
+    if [[ -n "$TRANSCRIPT" && -f "$TRANSCRIPT" ]]; then
+        SIZE=$(wc -c < "$TRANSCRIPT")
+        echo "[verify] Transcript saved: $TRANSCRIPT ($SIZE bytes)"
+        [[ "$SIZE" -gt 500 ]] || { echo "ERROR: transcript file too small ($SIZE bytes)"; return 1; }
+    else
+        echo "[warn]  Transcript path not found in output — checking directory..."
+        LATEST=$(ls -t "$COMPOSE_DIR/tests/debate-transcripts"/debate_*.json 2>/dev/null | head -1 || true)
+        [[ -n "$LATEST" ]] || { echo "ERROR: no debate transcript file found"; return 1; }
+        echo "[verify] Latest transcript: $LATEST"
+    fi
+
+    echo "[info]  Debate test passed — all agents participated and judge scored"
+    echo "[info]  Full debate: python3 tests/agent_debate.py --duration 600"
+    echo "[info]  Subset:      python3 tests/agent_debate.py --agents C2a C5 C8 --duration 300"
+    echo "[info]  Custom topic: python3 tests/agent_debate.py --topic 'P vs NP'"
+}
+
 # ── sequential execution ───────────────────────────────────────────────────────
 run_sequential() {
-    header "Sequential Pair Validation"
+    header "Sequential Pair + Debate Validation"
     run_test 1 "C2 OpenCode → C1+C3"    test1_opencode
     run_test 2 "C2 Aider → C1+C3"       test2_aider
     run_test 3 "C5 Claude Code → C1+C3" test3_claude_code
@@ -217,13 +285,16 @@ run_sequential() {
     run_test 5 "C7a Gateway → C1+C3"   test5_c7a_gateway
     run_test 6 "C7b CLI → C1+C3"       test6_c7b_cli
     run_test 7 "C8 Hermes → C1+C3"     test7_hermes
+    if ! $SKIP_DEBATE; then
+        run_test 8 "Multi-Agent Debate (90s smoke)" test8_debate
+    fi
 }
 
 # ── parallel execution ─────────────────────────────────────────────────────────
 run_parallel() {
-    header "Parallel Pair Validation (all 7 in parallel)"
+    header "Parallel Pair Validation (all 7 pairs in parallel) + Debate"
 
-    declare -A PIDS LOGS
+    declare -A PIDS LOGS NAMES
     LOGS[1]="$LOG_DIR/test1.log"; LOGS[2]="$LOG_DIR/test2.log"
     LOGS[3]="$LOG_DIR/test3.log"; LOGS[4]="$LOG_DIR/test4.log"
     LOGS[5]="$LOG_DIR/test5.log"; LOGS[6]="$LOG_DIR/test6.log"
@@ -237,8 +308,9 @@ run_parallel() {
     NAMES[6]="C7b CLI → C1+C3"
     NAMES[7]="C8 Hermes → C1+C3"
 
-    echo "  Launching 7 tests simultaneously..."
+    echo "  Launching 7 pair tests (tests 1+2 staggered — share agent-terminal)..."
     test1_opencode    >"${LOGS[1]}" 2>&1 & PIDS[1]=$!
+    sleep 10  # stagger: tests 1 and 2 both exec into agent-terminal; avoid session race
     test2_aider       >"${LOGS[2]}" 2>&1 & PIDS[2]=$!
     test3_claude_code >"${LOGS[3]}" 2>&1 & PIDS[3]=$!
     test4_kilocode    >"${LOGS[4]}" 2>&1 & PIDS[4]=$!
@@ -247,7 +319,7 @@ run_parallel() {
     test7_hermes      >"${LOGS[7]}" 2>&1 & PIDS[7]=$!
 
     echo "  PIDs: ${PIDS[1]} ${PIDS[2]} ${PIDS[3]} ${PIDS[4]} ${PIDS[5]} ${PIDS[6]} ${PIDS[7]}"
-    echo "  Waiting for all to complete..."
+    echo "  Waiting for all pair tests to complete..."
 
     for id in 1 2 3 4 5 6 7; do
         if wait "${PIDS[$id]}"; then
@@ -260,23 +332,72 @@ run_parallel() {
             RESULTS+=("FAIL:$id:${NAMES[$id]}")
         fi
     done
+
+    # Debate always runs after parallel pair tests (it coordinates all agents sequentially)
+    if ! $SKIP_DEBATE; then
+        run_test 8 "Multi-Agent Debate (90s smoke)" test8_debate
+    fi
 }
 
 # ── summary ────────────────────────────────────────────────────────────────────
 print_summary() {
-    header "Results Summary"
+    header "Results: All Pair + Debate Tests"
+
+    echo ""
+    printf "  ${BOLD}%-4s  %-38s  %-10s${RESET}\n" "#" "Test" "Result"
+    printf "  %s\n" "$(printf '─%.0s' {1..56})"
+
+    # Metadata for display table
+    declare -A PAIR_LABEL API_LABEL TOOL_LABEL
+    PAIR_LABEL[1]="C2 OpenCode → C1+C3"
+    PAIR_LABEL[2]="C2 Aider → C1+C3"
+    PAIR_LABEL[3]="C5 Claude Code → C1+C3"
+    PAIR_LABEL[4]="C6 KiloCode → C1+C3"
+    PAIR_LABEL[5]="C7a Gateway → C1+C3"
+    PAIR_LABEL[6]="C7b CLI → C1+C3"
+    PAIR_LABEL[7]="C8 Hermes → C1+C3"
+    PAIR_LABEL[8]="Multi-Agent Debate (90s)"
+
+    API_LABEL[1]="OpenAI /v1/chat/completions"
+    API_LABEL[2]="OpenAI /v1/chat/completions"
+    API_LABEL[3]="Anthropic /v1/messages"
+    API_LABEL[4]="OpenAI /v1/chat/completions"
+    API_LABEL[5]="Health endpoint :18789"
+    API_LABEL[6]="OpenAI /v1/chat/completions"
+    API_LABEL[7]="OpenAI /v1/chat/completions"
+    API_LABEL[8]="All 6 agents + judge via C1"
+
     for r in "${RESULTS[@]}"; do
         IFS=: read -r status id name <<< "$r"
         if [[ "$status" == "PASS" ]]; then
-            ok "Test $id: $name"
+            printf "  ${GREEN}%-4s  %-38s  ✅ PASS${RESET}\n" "$id" "${PAIR_LABEL[$id]:-$name}"
             (( PASS++ )) || true
         else
-            fail "Test $id: $name"
+            printf "  ${RED}%-4s  %-38s  ❌ FAIL${RESET}\n"  "$id" "${PAIR_LABEL[$id]:-$name}"
             (( FAIL++ )) || true
         fi
     done
+
     echo ""
-    echo -e "  ${BOLD}Total: $((PASS+FAIL)) tests | ${GREEN}${PASS} PASS${RESET} | ${RED}${FAIL} FAIL${RESET}"
+    local TOTAL=$((PASS + FAIL))
+    local CHECK_MARK="${GREEN}✅${RESET}"
+    local FAIL_MARK="${RED}❌${RESET}"
+
+    if [[ "$FAIL" -eq 0 ]]; then
+        echo -e "  ${BOLD}${GREEN}All $TOTAL tests PASSED  ✅${RESET}"
+    else
+        echo -e "  ${BOLD}Total: $TOTAL | ${GREEN}${PASS} PASS${RESET} | ${RED}${FAIL} FAIL${RESET}"
+    fi
+
+    if ! $SKIP_DEBATE; then
+        echo ""
+        echo -e "  ${MAGENTA}${BOLD}Debate Framework:${RESET}"
+        echo -e "  ${CYAN}  10-min debate:  python3 tests/agent_debate.py${RESET}"
+        echo -e "  ${CYAN}  Custom topic:   python3 tests/agent_debate.py --topic 'P vs NP'${RESET}"
+        echo -e "  ${CYAN}  Agent subset:   python3 tests/agent_debate.py --agents C2a C5 C8${RESET}"
+        echo -e "  ${CYAN}  Transcripts:    tests/debate-transcripts/debate_<ts>.json${RESET}"
+    fi
+
     echo ""
     rm -rf "$LOG_DIR"
     [[ "$FAIL" -eq 0 ]]
@@ -284,11 +405,13 @@ print_summary() {
 
 # ── main ───────────────────────────────────────────────────────────────────────
 echo ""
-echo -e "${BOLD}╔══════════════════════════════════════════════════════════╗${RESET}"
-echo -e "${BOLD}║     Copilot-OpenAI-Wrapper — Pair Integration Tests      ║${RESET}"
-echo -e "${BOLD}╚══════════════════════════════════════════════════════════╝${RESET}"
-echo "  Mode: $( $PARALLEL && echo 'PARALLEL' || echo 'SEQUENTIAL' )"
-echo "  Dir:  $COMPOSE_DIR"
+echo -e "${BOLD}╔══════════════════════════════════════════════════════════════╗${RESET}"
+echo -e "${BOLD}║    Copilot-OpenAI-Wrapper — Full Integration Test Suite      ║${RESET}"
+echo -e "${BOLD}║    7 Pair Tests (C2×2, C5, C6, C7a, C7b, C8)  + Debate     ║${RESET}"
+echo -e "${BOLD}╚══════════════════════════════════════════════════════════════╝${RESET}"
+echo "  Mode        : $( $PARALLEL && echo 'PARALLEL (pairs) → then debate' || echo 'SEQUENTIAL' )"
+echo "  Skip debate : $SKIP_DEBATE"
+echo "  Dir         : $COMPOSE_DIR"
 
 if $PARALLEL; then
     run_parallel

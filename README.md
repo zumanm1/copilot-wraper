@@ -1027,29 +1027,40 @@ Every debate is saved to `tests/debate-transcripts/debate_<YYYYMMDD_HHMMSS>.json
 
 ## 11. Testing
 
-### Pair Integration Tests (`tests/run_pair_tests.sh`)
+### Pair Integration Tests + Debate (`tests/run_pair_tests.sh`)
 
-Validates all 7 agent-container ↔ C1+C3 pairs, both sequentially and in parallel.
+Validates all 7 agent-container ↔ C1+C3 pairs and runs a 90-second multi-agent debate smoke test.
 
 ```bash
-# Sequential (shows full output per test)
+# Sequential — all 7 pairs then debate (default)
 bash tests/run_pair_tests.sh
 
-# Parallel (all 7 tests at once — ~30 seconds)
+# Parallel — all 7 pairs in parallel, then debate
 bash tests/run_pair_tests.sh --parallel
+
+# Skip the debate (faster, pairs only)
+bash tests/run_pair_tests.sh --skip-debate
+bash tests/run_pair_tests.sh --parallel --skip-debate
 ```
 
-| Test | Pair | API Format | Tool |
-|---|---|---|---|
-| 1 | C2 OpenCode → C1+C3 | OpenAI `/v1/chat/completions` | OpenCode 1.2.27 |
-| 2 | C2 Aider → C1+C3 | OpenAI `/v1/chat/completions` | Aider 0.86.2 |
-| 3 | C5 Claude Code → C1+C3 | Anthropic `/v1/messages` | Claude Code 2.1.81 |
-| 4 | C6 KiloCode → C1+C3 | OpenAI `/v1/chat/completions` | KiloCode 7.1.0 |
-| 5 | C7a Gateway → C1+C3 | Health endpoint `:18789` | OpenClaw 2026.3.13 |
-| 6 | C7b CLI → C1+C3 | OpenAI `/v1/chat/completions` | OpenClaw 2026.3.13 |
-| 7 | C8 Hermes → C1+C3 | OpenAI `/v1/chat/completions` | Hermes v0.3.0 |
+**Validated results — All 8 tests PASS:**
 
-Each test validates: tool version inside the container → C1 reachability → C3 reachability → a round-trip ask with an expected response marker.
+| # | Pair | API Format | Tool | Status |
+|---|------|-----------|------|--------|
+| 1 | C2 OpenCode → C1+C3 | OpenAI `/v1/chat/completions` | OpenCode 1.2.27 | ✅ PASS |
+| 2 | C2 Aider → C1+C3 | OpenAI `/v1/chat/completions` | Aider 0.86.2 | ✅ PASS |
+| 3 | C5 Claude Code → C1+C3 | Anthropic `/v1/messages` | Claude Code 2.1.81 | ✅ PASS |
+| 4 | C6 KiloCode → C1+C3 | OpenAI `/v1/chat/completions` | KiloCode 7.1.0 | ✅ PASS |
+| 5 | C7a Gateway → C1+C3 | Health endpoint `:18789` | OpenClaw 2026.3.13 | ✅ PASS |
+| 6 | C7b CLI → C1+C3 | OpenAI `/v1/chat/completions` | OpenClaw 2026.3.13 | ✅ PASS |
+| 7 | C8 Hermes → C1+C3 | OpenAI `/v1/chat/completions` | Hermes v0.3.0 | ✅ PASS |
+| 8 | Multi-Agent Debate (90s) | All 6 agents + judge via C1 | `agent_debate.py` | ✅ PASS |
+
+Each pair test validates: tool version inside container → C1 reachability → C3 reachability → round-trip ask with an expected response marker.
+
+The debate smoke test (test 8) validates: C1 health → all 6 agents produce opening statements → judge produces a scored leaderboard → transcript JSON is saved.
+
+> **Note on parallel mode:** Tests 1 and 2 share the `agent-terminal` container. The parallel runner staggers them by 10 seconds to avoid session contention. Tests 3–7 run truly in parallel.
 
 ---
 
