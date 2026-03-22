@@ -1,0 +1,9 @@
+{
+  "kilocode.apiProvider": "openai-compatible",
+  "kilocode.openAiCompatible.baseUrl": "http://app:8000/v1",
+  "kilocode.openAiCompatible.apiKey": "not-needed",
+  "kilocode.openAiCompatible.modelId": "copilot",
+  "editor.fontSize": 14,
+  "workbench.colorTheme": "Default Dark+",
+  "telemetry.telemetryLevel": "off"
+}

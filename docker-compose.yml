@@ -111,12 +111,127 @@ services:
       - AIDER_ANALYTICS=false
       - AIDER_NO_CHECK_UPDATE=true
       - DO_NOT_TRACK=1
+      # Session identity — routes requests to a dedicated C1 backend
+      - AGENT_ID=c2-aider
     volumes:
       # Mount workspace so agents can read/edit your project files
       - ./workspace:/workspace
     networks:
       - copilot-net
     # Required for interactive terminal sessions
+    stdin_open: true
+    tty: true
+    restart: "no"
+
+  # ──────────────────────────────────────────────────────────
+  # Container 4: OpenClaw AI Agent Terminal
+  #
+  # Official source: https://openclaw.ai
+  # Install: curl -fsSL https://openclaw.ai/install.sh | bash
+  # Autonomous AI agent routed through Container 1 as backend.
+  #
+  # How to use:
+  #   docker compose run --rm openclaw-terminal             # menu
+  #   docker compose run --rm openclaw-terminal bash        # bash
+  #   docker compose run --rm openclaw-terminal openclaw    # direct
+  #   docker compose run --rm openclaw-terminal ask "q"     # one-shot
+  #   docker compose run --rm openclaw-terminal status      # health
+  # ──────────────────────────────────────────────────────────
+  openclaw-terminal:
+    build:
+      context: .
+      dockerfile: Dockerfile.openclaw
+    image: copilot-openclaw-terminal:latest
+    container_name: copilot-openclaw-terminal
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      # Route OpenClaw through Container 1's /v1/messages endpoint
+      - ANTHROPIC_BASE_URL=http://app:8000
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-sk-ant-not-needed-xxxxxxxxxxxxx}
+      - DO_NOT_TRACK=1
+      # Session identity — routes requests to a dedicated C1 backend
+      - AGENT_ID=c4-openclaw
+    volumes:
+      - ./workspace:/workspace
+    networks:
+      - copilot-net
+    stdin_open: true
+    tty: true
+    restart: "no"
+
+  # ──────────────────────────────────────────────────────────
+  # Container 5: Claude Code CLI Terminal
+  #
+  # Official source: https://www.npmjs.com/package/@anthropic-ai/claude-code
+  # Anthropic's Claude Code CLI routed through Container 1 via
+  # ANTHROPIC_BASE_URL → /v1/messages (Anthropic-compat endpoint).
+  #
+  # How to use:
+  #   docker compose run --rm claude-code-terminal         # menu
+  #   docker compose run --rm claude-code-terminal bash    # direct bash
+  #   docker compose run --rm claude-code-terminal ask "q" # one-shot
+  # ──────────────────────────────────────────────────────────
+  claude-code-terminal:
+    build:
+      context: .
+      dockerfile: Dockerfile.claude-code
+    image: copilot-claude-code-terminal:latest
+    container_name: copilot-claude-code-terminal
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      # Route Claude Code through Container 1's /v1/messages endpoint
+      - ANTHROPIC_BASE_URL=http://app:8000
+      # Format-valid placeholder key (auth bypassed by custom base URL)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-sk-ant-not-needed-xxxxxxxxxxxxx}
+      - DO_NOT_TRACK=1
+      # Session identity — routes requests to a dedicated C1 backend
+      - AGENT_ID=c5-claude-code
+    volumes:
+      - ./workspace:/workspace
+    networks:
+      - copilot-net
+    stdin_open: true
+    tty: true
+    restart: "no"
+
+  # ──────────────────────────────────────────────────────────
+  # Container 6: KiloCode CLI Terminal
+  #
+  # Official source: https://www.npmjs.com/package/@kilocode/cli
+  # Install: npm install -g @kilocode/cli
+  # KiloCode terminal TUI configured to use Container 1.
+  #
+  # How to use:
+  #   docker compose run --rm kilocode-terminal             # menu
+  #   docker compose run --rm kilocode-terminal bash        # bash
+  #   docker compose run --rm kilocode-terminal kilo        # direct
+  #   docker compose run --rm kilocode-terminal ask "q"     # one-shot
+  #   docker compose run --rm kilocode-terminal status      # health
+  # ──────────────────────────────────────────────────────────
+  kilocode-terminal:
+    build:
+      context: .
+      dockerfile: Dockerfile.kilocode
+    image: copilot-kilocode-terminal:latest
+    container_name: copilot-kilocode-terminal
+    depends_on:
+      app:
+        condition: service_healthy
+    environment:
+      - OPENAI_API_BASE=http://app:8000/v1
+      - OPENAI_API_KEY=not-needed
+      - KILO_MODEL=copilot
+      - DO_NOT_TRACK=1
+      # Session identity — routes requests to a dedicated C1 backend
+      - AGENT_ID=c6-kilocode
+    volumes:
+      - ./workspace:/workspace
+    networks:
+      - copilot-net
     stdin_open: true
     tty: true
     restart: "no"
@@ -137,9 +252,12 @@ services:
         condition: service_healthy
     environment:
       - BASE_URL=http://app:8000
+      - C3_URL=http://browser-auth:8001
+      - C6_URL=http://kilocode-server:9001
       - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
     volumes:
       - ./tests/reports:/tests/reports
+      - ./workspace:/workspace
     networks:
       - copilot-net
     restart: "no"

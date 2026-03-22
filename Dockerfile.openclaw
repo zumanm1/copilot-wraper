@@ -1,0 +1,37 @@
+# ============================================================
+# Container 4 — OpenClaw AI Agent Terminal
+#
+# Official source: https://openclaw.ai
+# Install: curl -fsSL https://openclaw.ai/install.sh | bash
+#
+# Usage:
+#   docker compose run --rm openclaw-terminal
+#   docker compose run --rm openclaw-terminal bash
+#   docker compose run --rm openclaw-terminal ask "question"
+#   docker compose run --rm openclaw-terminal status
+# ============================================================
+FROM node:20-slim
+
+# System deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates bash git python3 procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Install OpenClaw via npm (node:20-slim already has Node.js) ──
+# The official install.sh uses npm internally; we call it directly here
+# for a faster, reproducible, non-interactive build.
+RUN npm install -g openclaw 2>&1 | tail -5 \
+    && echo "✅ OpenClaw installed: $(openclaw --version 2>/dev/null || openclaw version 2>/dev/null || echo ok)"
+
+# ── Git identity (required for file operations) ───────────────
+RUN git config --global user.email "agent@copilot-wrapper" && \
+    git config --global user.name "OpenClaw Agent" && \
+    git config --global init.defaultBranch main && \
+    git config --global core.editor "true"
+
+WORKDIR /workspace
+
+COPY openclaw-terminal/ /openclaw-terminal/
+RUN chmod +x /openclaw-terminal/start.sh
+
+ENTRYPOINT ["/openclaw-terminal/start.sh"]

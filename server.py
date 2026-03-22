@@ -1,6 +1,63 @@
 from __future__ import annotations
-import asyncio, time, uuid, base64, tempfile, os
+import asyncio, time, uuid, base64, tempfile, os, logging
 from fastapi import FastAPI, HTTPException, Request
+
+logger = logging.getLogger(__name__)
+
+# ── Per-agent session registry ────────────────────────────────────────────────
+# Containers send X-Agent-ID header; each ID gets its own dedicated
+# CopilotBackend so conversations stay isolated across C2/C4/C5/C6.
+_agent_sessions: dict[str, CopilotBackend] = {}          # type: ignore[name-defined]
+_agent_session_last_used: dict[str, float] = {}
+_agent_session_lock: asyncio.Lock | None = None
+AGENT_SESSION_TTL: int = int(os.getenv("AGENT_SESSION_TTL", "1800"))   # 30 min idle expiry
+
+
+def _get_session_lock() -> asyncio.Lock:
+    global _agent_session_lock
+    if _agent_session_lock is None:
+        _agent_session_lock = asyncio.Lock()
+    return _agent_session_lock
+
+
+async def _get_or_create_agent_session(agent_id: str) -> "CopilotBackend":
+    """Return the dedicated backend for agent_id, creating it on first call."""
+    lock = _get_session_lock()
+    async with lock:
+        if agent_id not in _agent_sessions:
+            backend = CopilotBackend()       # type: ignore[name-defined]
+            await backend._get_client()
+            _agent_sessions[agent_id] = backend
+            logger.info("Agent session created: %s (total active: %d)", agent_id, len(_agent_sessions))
+        _agent_session_last_used[agent_id] = time.time()
+    return _agent_sessions[agent_id]
+
+
+async def _noop_release(backend: "CopilotBackend") -> None:
+    """Agent session backends are persistent — never returned to the pool."""
+    pass
+
+
+async def _session_reaper() -> None:
+    """Background task: removes agent sessions idle longer than AGENT_SESSION_TTL."""
+    while True:
+        await asyncio.sleep(300)   # check every 5 minutes
+        now = time.time()
+        lock = _get_session_lock()
+        async with lock:
+            stale = [
+                aid for aid, last in _agent_session_last_used.items()
+                if now - last > AGENT_SESSION_TTL
+            ]
+            for aid in stale:
+                backend = _agent_sessions.pop(aid, None)
+                _agent_session_last_used.pop(aid, None)
+                if backend:
+                    try:
+                        await backend.close()
+                    except Exception:
+                        pass
+                logger.info("Agent session expired (idle): %s", aid)
 from fastapi.responses import StreamingResponse
 from models import (
     # Chat completion models
@@ -59,10 +116,11 @@ if _limiter:
 
 @app.on_event("startup")
 async def startup_event():
-    """Pre-warm the connection pool so the first real request is fast."""
+    """Pre-warm the connection pool and start the agent session reaper."""
     pool = get_connection_pool()
     warm_tasks = [_warm_one(pool) for _ in range(config.POOL_WARM_COUNT)]
     await asyncio.gather(*warm_tasks, return_exceptions=True)
+    asyncio.create_task(_session_reaper())
 
 
 async def _warm_one(pool):
@@ -143,7 +201,8 @@ async def list_models():
 
 
 @app.post("/v1/chat/completions")
-async def create_chat_completion(request: ChatCompletionRequest):
+async def create_chat_completion(request: ChatCompletionRequest, raw_request: Request):
+    agent_id = raw_request.headers.get("X-Agent-ID")
     prompt = extract_user_prompt(request.messages)
     if not prompt:
         raise HTTPException(status_code=400, detail="No user message found")
@@ -151,16 +210,22 @@ async def create_chat_completion(request: ChatCompletionRequest):
     attachment = extract_image(request.messages)
     pool = get_connection_pool()
 
+    # Route to per-agent dedicated backend or shared pool
+    if agent_id:
+        backend = await _get_or_create_agent_session(agent_id)
+        release_fn = _noop_release
+    else:
+        backend = await pool.acquire()
+        release_fn = pool.release
+
     # ── Streaming path ────────────────────────────────────────────────
     if request.stream:
-        backend = await pool.acquire()
         return StreamingResponse(
-            stream_gen(pool, backend, prompt, attachment, request.model),
+            stream_gen(release_fn, backend, prompt, attachment, request.model),
             media_type="text/event-stream",
         )
 
     # ── Non-streaming path ────────────────────────────────────────────
-    backend = await pool.acquire()
     try:
         response = await backend.chat_completion(prompt=prompt, attachment_path=attachment)
         return ChatCompletionResponse(
@@ -181,12 +246,12 @@ async def create_chat_completion(request: ChatCompletionRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
     finally:
-        await pool.release(backend)
+        await release_fn(backend)
         _cleanup_attachment(attachment)
 
 
-async def stream_gen(pool, backend, prompt, attachment, model):
-    """SSE generator — owns the pool backend and temp file for the lifetime of the stream."""
+async def stream_gen(release_fn, backend, prompt, attachment, model):
+    """SSE generator — releases backend (or no-ops for agent sessions) after streaming."""
     chat_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())   # computed once, not per-token
     try:
@@ -217,7 +282,7 @@ async def stream_gen(pool, backend, prompt, attachment, model):
         yield f"data: {_dumps({'error': {'message': str(e), 'type': 'server_error'}})}\n\n"
         yield "data: [DONE]\n\n"
     finally:
-        await pool.release(backend)
+        await release_fn(backend)
         _cleanup_attachment(attachment)
 
 
@@ -230,6 +295,23 @@ async def health():
 async def cache_stats():
     """Returns response-cache hit/miss counters."""
     return get_cache_stats()
+
+
+@app.get("/v1/sessions", tags=["Agent"])
+async def list_agent_sessions():
+    """Returns all active per-agent backend sessions (created via X-Agent-ID header)."""
+    now = time.time()
+    return {
+        "sessions": {
+            aid: {
+                "connected": True,
+                "idle_seconds": round(now - _agent_session_last_used.get(aid, now)),
+            }
+            for aid in _agent_sessions
+        },
+        "total": len(_agent_sessions),
+        "ttl_seconds": AGENT_SESSION_TTL,
+    }
 
 
 @app.post("/v1/reload-config")
@@ -291,23 +373,30 @@ def _anthropic_messages_to_prompt(request: AnthropicRequest) -> str:
         "Python SDK, Claude Code, and Cursor in Anthropic mode."
     ),
 )
-async def anthropic_messages(request: AnthropicRequest):
+async def anthropic_messages(request: AnthropicRequest, raw_request: Request):
+    agent_id = raw_request.headers.get("X-Agent-ID")
     prompt = _anthropic_messages_to_prompt(request)
     if not prompt:
         raise HTTPException(status_code=400, detail="No message content found")
 
     pool = get_connection_pool()
 
+    # Route to per-agent dedicated backend or shared pool
+    if agent_id:
+        backend = await _get_or_create_agent_session(agent_id)
+        release_fn = _noop_release
+    else:
+        backend = await pool.acquire()
+        release_fn = pool.release
+
     # ── Streaming path ──────────────────────────────────────────────────
     if request.stream:
-        backend = await pool.acquire()
         return StreamingResponse(
-            _anthropic_stream_gen(pool, backend, prompt, request.model),
+            _anthropic_stream_gen(release_fn, backend, prompt, request.model),
             media_type="text/event-stream",
         )
 
     # ── Non-streaming path ──────────────────────────────────────────────
-    backend = await pool.acquire()
     try:
         response_text = await backend.chat_completion(prompt=prompt)
         token_in  = len(prompt.split())
@@ -322,10 +411,10 @@ async def anthropic_messages(request: AnthropicRequest):
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     finally:
-        await pool.release(backend)
+        await release_fn(backend)
 
 
-async def _anthropic_stream_gen(pool, backend, prompt: str, model: str):
+async def _anthropic_stream_gen(release_fn, backend, prompt: str, model: str):
     """SSE generator in Anthropic streaming format."""
     msg_id  = f"msg_{uuid.uuid4().hex[:20]}"
     created = int(time.time())
@@ -344,7 +433,7 @@ async def _anthropic_stream_gen(pool, backend, prompt: str, model: str):
     except Exception as exc:
         yield f"data: {_dumps({'type': 'error', 'error': {'type': 'server_error', 'message': str(exc)}})}\n\n"
     finally:
-        await pool.release(backend)
+        await release_fn(backend)
 
     yield f"data: {_dumps({'type': 'content_block_stop', 'index': 0})}\n\n"
     yield f"data: {_dumps({'type': 'message_delta', 'delta': {'stop_reason': 'end_turn', 'stop_sequence': None}, 'usage': {'output_tokens': total_tokens}})}\n\n"
