@@ -14,9 +14,11 @@
 6. [API Reference](#6-api-reference)
 7. [Agent Management API](#7-agent-management-api)
 8. [AI Agent Containers](#8-ai-agent-containers)
-9. [Testing](#9-testing)
-10. [Configuration Reference](#10-configuration-reference)
-11. [Troubleshooting](#11-troubleshooting)
+9. [Terminal Commands Reference](#9-terminal-commands-reference)
+10. [Multi-Agent Debate Framework](#10-multi-agent-debate-framework)
+11. [Testing](#11-testing)
+12. [Configuration Reference](#12-configuration-reference)
+13. [Troubleshooting](#13-troubleshooting)
 
 ---
 
@@ -717,7 +719,313 @@ HERMES_HOME=/root/.hermes   (persisted via Docker volume)
 
 ---
 
-## 9. Testing
+## 9. Terminal Commands Reference
+
+All commands are run from the project root directory on your **host machine**. All containers must be running (`docker compose up -d`).
+
+### Health checks
+
+```bash
+# ── C1 backbone (required by all agents) ──────────────────────────────────────
+curl -s http://localhost:8000/health | python3 -m json.tool
+
+# ── C2 — Agent Terminal ───────────────────────────────────────────────────────
+docker compose exec agent-terminal curl -sf http://localhost:8080/health | python3 -m json.tool
+
+# ── C5 — Claude Code Terminal ─────────────────────────────────────────────────
+docker compose exec claude-code-terminal curl -sf http://localhost:8080/health | python3 -m json.tool
+
+# ── C6 — KiloCode Terminal ────────────────────────────────────────────────────
+docker compose exec kilocode-terminal curl -sf http://localhost:8080/health | python3 -m json.tool
+
+# ── C7a — OpenClaw Gateway ────────────────────────────────────────────────────
+curl -s http://localhost:18789/
+
+# ── C7b — OpenClaw CLI ────────────────────────────────────────────────────────
+docker compose exec openclaw-cli curl -sf http://localhost:8080/health | python3 -m json.tool
+
+# ── C8 — Hermes Agent ─────────────────────────────────────────────────────────
+docker compose exec hermes-agent curl -sf http://localhost:8080/health | python3 -m json.tool
+```
+
+**All 6 health checks in parallel:**
+
+```bash
+echo "=== C1 ===" && curl -s http://localhost:8000/health &
+echo "=== C7a ===" && curl -s http://localhost:18789/ &
+echo "=== C2 ===" && docker compose exec agent-terminal curl -sf http://localhost:8080/health &
+echo "=== C5 ===" && docker compose exec claude-code-terminal curl -sf http://localhost:8080/health &
+echo "=== C6 ===" && docker compose exec kilocode-terminal curl -sf http://localhost:8080/health &
+echo "=== C7b ===" && docker compose exec openclaw-cli curl -sf http://localhost:8080/health &
+echo "=== C8 ===" && docker compose exec hermes-agent curl -sf http://localhost:8080/health &
+wait
+```
+
+---
+
+### C2 — Agent Terminal (Aider + OpenCode)
+
+```bash
+# Interactive menu — choose Aider or OpenCode
+docker compose run --rm agent-terminal
+
+# Launch Aider directly (full coding assistant with repo context)
+docker compose run --rm agent-terminal aider
+
+# Launch OpenCode directly
+docker compose run --rm agent-terminal opencode
+
+# One-shot ask via C1 (no interactive session)
+docker compose run --rm agent-terminal ask "What is the halting problem?"
+
+# Health status (checks C1 reachability, prints versions)
+docker compose run --rm agent-terminal status
+
+# Drop into a bash shell with ask/status helpers pre-loaded
+docker compose run --rm agent-terminal bash
+
+# Attach to the running standby container
+docker compose exec agent-terminal bash
+```
+
+---
+
+### C5 — Claude Code Terminal
+
+```bash
+# Interactive menu
+docker compose run --rm claude-code-terminal
+
+# Launch Claude Code CLI directly (routes to C1 via ANTHROPIC_BASE_URL)
+docker compose run --rm claude-code-terminal claude
+
+# One-shot ask via C1
+docker compose run --rm claude-code-terminal ask "Explain attention mechanisms"
+
+# Health status
+docker compose run --rm claude-code-terminal status
+
+# Bash shell
+docker compose run --rm claude-code-terminal bash
+
+# Attach to the running standby container
+docker compose exec claude-code-terminal bash
+```
+
+---
+
+### C6 — KiloCode Terminal
+
+```bash
+# Interactive menu
+docker compose run --rm kilocode-terminal
+
+# Launch KiloCode CLI directly
+docker compose run --rm kilocode-terminal kilocode
+
+# One-shot ask via C1
+docker compose run --rm kilocode-terminal ask "What is gradient descent?"
+
+# Health status
+docker compose run --rm kilocode-terminal status
+
+# Bash shell
+docker compose run --rm kilocode-terminal bash
+
+# Attach to the running standby container
+docker compose exec kilocode-terminal bash
+```
+
+---
+
+### C7a — OpenClaw Gateway
+
+```bash
+# Check gateway status (standby JSON or live gateway info)
+curl -s http://localhost:18789/
+
+# Run the interactive onboarding wizard (required once before gateway is live)
+docker compose exec openclaw-gateway openclaw onboard
+
+# After onboarding, restart to activate the real gateway
+docker compose restart openclaw-gateway
+
+# Attach to the running container
+docker compose exec openclaw-gateway sh
+
+# Tail gateway logs
+docker compose logs openclaw-gateway --tail 50 -f
+```
+
+---
+
+### C7b — OpenClaw CLI
+
+```bash
+# Interactive menu
+docker compose run --rm openclaw-cli
+
+# One-shot ask via C1
+docker compose run --rm openclaw-cli ask "What is reinforcement learning?"
+
+# Health status
+docker compose run --rm openclaw-cli status
+
+# Bash shell
+docker compose run --rm openclaw-cli bash
+
+# Attach to the running standby container
+docker compose exec openclaw-cli bash
+```
+
+---
+
+### C8 — Hermes Agent
+
+```bash
+# Interactive menu (choose Hermes CLI or bash shell)
+docker compose run --rm hermes-agent
+
+# Launch Hermes interactive CLI (persistent memory + skills + cron scheduling)
+docker compose run --rm hermes-agent hermes
+
+# One-shot ask via C1 (fast, no Hermes overhead)
+docker compose run --rm hermes-agent ask "Explain transformer architecture"
+
+# One-shot ask via Hermes native CLI (uses Hermes memory + skills)
+docker compose run --rm hermes-agent hermes-chat "What is entropy?"
+
+# Full health status (checks C1, C3, Hermes version, hermes doctor output)
+docker compose run --rm hermes-agent status
+
+# Bash shell with ask/status/hermes-chat helpers pre-loaded
+docker compose run --rm hermes-agent bash
+
+# Attach to the running standby container and open Hermes CLI
+docker compose exec C8_hermes-agent hermes
+```
+
+---
+
+### Quick reference table
+
+| Container | Health check | Interactive menu | One-shot ask |
+|-----------|-------------|-----------------|--------------|
+| C2 | `docker compose exec agent-terminal curl -sf http://localhost:8080/health` | `docker compose run --rm agent-terminal` | `docker compose run --rm agent-terminal ask "..."` |
+| C5 | `docker compose exec claude-code-terminal curl -sf http://localhost:8080/health` | `docker compose run --rm claude-code-terminal` | `docker compose run --rm claude-code-terminal ask "..."` |
+| C6 | `docker compose exec kilocode-terminal curl -sf http://localhost:8080/health` | `docker compose run --rm kilocode-terminal` | `docker compose run --rm kilocode-terminal ask "..."` |
+| C7a | `curl -s http://localhost:18789/` | `docker compose exec openclaw-gateway sh` | — |
+| C7b | `docker compose exec openclaw-cli curl -sf http://localhost:8080/health` | `docker compose run --rm openclaw-cli` | `docker compose run --rm openclaw-cli ask "..."` |
+| C8 | `docker compose exec hermes-agent curl -sf http://localhost:8080/health` | `docker compose run --rm hermes-agent` | `docker compose run --rm hermes-agent ask "..."` |
+
+---
+
+## 10. Multi-Agent Debate Framework
+
+`tests/agent_debate.py` orchestrates a structured, timed intellectual debate across all six agent containers simultaneously. No topic or role is hardcoded — the moderator LLM picks the topic and assigns a unique stance to each agent dynamically.
+
+### How it works
+
+```
+Host (agent_debate.py)
+      │
+      ├── Phase 0: Moderator LLM (X-Agent-ID: debate-moderator)
+      │     Picks a topic from a random seed domain.
+      │     Assigns a unique intellectual stance to each of the 6 agents via JSON.
+      │
+      ├── Phase 1: Opening Statements
+      │     Each agent receives: topic + their stance.
+      │     Responds with a 4–6 sentence position statement.
+      │
+      ├── Phase 2: Rebuttal Rounds  (loops until time budget exhausted)
+      │     Each agent receives: topic + stance + FULL transcript of all prior statements.
+      │     Must name and rebut a specific opponent, then advance a new argument.
+      │
+      ├── Phase 3: Closing Statements
+      │     Each agent summarises their position and responds to the strongest counterargument.
+      │
+      └── Phase 4: Judge LLM (X-Agent-ID: debate-judge)
+            Scores all 6 agents on accuracy, depth, engagement, and persuasiveness (1–10 each).
+            Declares a winner with a one-sentence reason.
+            Prints a ranked leaderboard with per-agent comments.
+```
+
+All 6 agents call C1's `/v1/chat/completions` endpoint with unique `X-Agent-ID` headers, giving each its own isolated Copilot session. Agents "hear" each other because the orchestrator embeds the full transcript in every prompt. A 3-second inter-agent delay and automatic 35-second circuit-breaker recovery prevent rate-limiting.
+
+### Usage
+
+```bash
+# 10-minute debate with a random topic (default)
+python3 tests/agent_debate.py
+
+# 5-minute debate
+python3 tests/agent_debate.py --duration 300
+
+# Quick 2-minute validation test
+python3 tests/agent_debate.py --duration 120
+
+# Force a specific topic (LLM still assigns all stances — nothing else is hardcoded)
+python3 tests/agent_debate.py --topic "Is P equal to NP?"
+python3 tests/agent_debate.py --topic "Does consciousness require embodiment?"
+python3 tests/agent_debate.py --topic "Is mathematics discovered or invented?"
+
+# Run with only a subset of agents
+python3 tests/agent_debate.py --agents C2a C5 C8
+
+# Point at a non-default C1 endpoint
+python3 tests/agent_debate.py --api http://localhost:8000
+
+# Save transcripts to a custom directory
+python3 tests/agent_debate.py --output /tmp/debates
+```
+
+### Agent keys
+
+| Key | Agent name | Container |
+|-----|-----------|-----------|
+| `C2a` | C2-Aider | `agent-terminal` |
+| `C2b` | C2-OpenCode | `agent-terminal` |
+| `C5` | C5-Claude | `claude-code-terminal` |
+| `C6` | C6-KiloCode | `kilocode-terminal` |
+| `C7b` | C7b-OpenClaw | `openclaw-cli` |
+| `C8` | C8-Hermes | `hermes-agent` |
+
+### Scoring criteria
+
+| Criterion | Description |
+|-----------|-------------|
+| **accuracy** | Factual correctness and precision; avoidance of errors |
+| **depth** | Intellectual nuance, sophistication, and layered reasoning |
+| **engagement** | How specifically each agent engaged with opponents' arguments |
+| **persuasiveness** | Overall persuasive force of the cumulative case |
+
+Each criterion is scored 1–10. Total maximum: 40.
+
+### Sample output
+
+```
+TOPIC   : Does true artificial general intelligence require embodiment?
+WINNER  : C5-Claude
+REASON  : Claude offered the most balanced and nuanced position, effectively
+          synthesising opposing arguments into a coherent middle ground.
+
+  Rank  Agent               Acc  Dep  Eng  Per  Total
+  ──────────────────────────────────────────────────────
+  1     C5-Claude             9    9    9    9     36
+  2     C2-OpenCode           8    8    8    8     32
+  3     C8-Hermes             8    8    8    8     32
+  4     C6-KiloCode           8    8    7    8     31
+  5     C2-Aider              8    7    7    7     29
+  6     C7b-OpenClaw          8    7    7    7     29
+```
+
+### Transcripts
+
+Every debate is saved to `tests/debate-transcripts/debate_<YYYYMMDD_HHMMSS>.json` containing the full setup (topic, stances), every agent statement (with phase, round, and timestamp), and the complete judge scores.
+
+---
+
+## 11. Testing
 
 ### Pair Integration Tests (`tests/run_pair_tests.sh`)
 
@@ -803,7 +1111,7 @@ curl -X POST http://localhost:8000/v1/chat/completions \
 
 ---
 
-## 10. Configuration Reference
+## 12. Configuration Reference
 
 All settings are read from `.env` (copy from `.env.example`):
 
@@ -839,7 +1147,7 @@ All settings are read from `.env` (copy from `.env.example`):
 
 ---
 
-## 11. Troubleshooting
+## 13. Troubleshooting
 
 ### C1 returns `"Failed to create conversation, status: 404"`
 Cookies are missing or expired.
@@ -968,12 +1276,14 @@ copilot-openai-wrapper/
 │   └── professor_prompt.txt System prompt for all agent sessions
 │
 └── tests/
-    ├── run_pair_tests.sh    7-pair integration test runner (sequential + parallel)
-    ├── test_playwright.py   45 Playwright tests
-    ├── test_unit_*.py       Unit tests for all core modules
-    ├── conftest.py          pytest fixtures
-    ├── validators.py        Response schema validators
-    └── reports/             Generated HTML reports + screenshots
+    ├── run_pair_tests.sh      7-pair integration test runner (sequential + parallel)
+    ├── agent_debate.py        Multi-agent debate framework (10-min, all 6 agents)
+    ├── debate-transcripts/    Saved debate JSON transcripts (debate_<ts>.json)
+    ├── test_playwright.py     45 Playwright tests
+    ├── test_unit_*.py         Unit tests for all core modules
+    ├── conftest.py            pytest fixtures
+    ├── validators.py          Response schema validators
+    └── reports/               Generated HTML reports + screenshots
 ```
 
 ---
