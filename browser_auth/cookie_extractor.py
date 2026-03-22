@@ -79,12 +79,14 @@ async def _get_context() -> BrowserContext:
         headless=False,               # headed so VNC/noVNC shows the browser
         args=[
             "--no-sandbox",
-            "--disable-setuid-sandbox",
             "--disable-dev-shm-usage",
             "--disable-blink-features=AutomationControlled",
-            "--window-size=1280,800",
+            "--window-size=1280,900",
+            "--hide-crash-restore-bubble",
+            "--test-type",
         ],
-        viewport={"width": 1280, "height": 800},
+        ignore_default_args=["--enable-automation", "--disable-infobars"],
+        viewport={"width": 1280, "height": 900},
         ignore_https_errors=False,
         accept_downloads=False,
     )

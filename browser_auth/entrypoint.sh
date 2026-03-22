@@ -6,7 +6,7 @@
 set -e
 
 DISPLAY_NUM=99
-SCREEN_RES="${VNC_RESOLUTION:-1280x800x24}"
+SCREEN_RES="${VNC_RESOLUTION:-1280x900x24}"
 VNC_PORT=5900
 NOVNC_PORT=6080
 API_PORT=8001
@@ -62,6 +62,11 @@ if [ -z "$NOVNC_WEB" ]; then
 fi
 
 if [ -n "$NOVNC_WEB" ]; then
+    # Enable auto-scaling so the full VNC canvas fits the user's browser window.
+    # Without this, the bottom of the canvas (where Copilot's input box lives) is clipped.
+    if [ -f "$NOVNC_WEB/vnc_auto.html" ]; then
+        sed -i "s/getConfigVar('scale', false)/getConfigVar('scale', true)/" "$NOVNC_WEB/vnc_auto.html"
+    fi
     websockify --web "$NOVNC_WEB" ${NOVNC_PORT} localhost:${VNC_PORT} &
     echo "[browser-auth] noVNC web UI at http://localhost:${NOVNC_PORT}/vnc.html"
 else
