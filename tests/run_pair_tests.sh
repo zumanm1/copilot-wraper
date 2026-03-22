@@ -177,25 +177,57 @@ test6_c7b_cli() {
     echo "$REPLY" | grep -q "C7B_TEST_OK" || { echo "ERROR: expected marker not found"; return 1; }
 }
 
+test7_hermes() {
+    cd "$COMPOSE_DIR"
+    echo "[verify] hermes version in C8"
+    docker compose exec -T hermes-agent bash -c 'hermes version 2>&1 | head -1'
+
+    echo "[verify] C1 reachable from C8"
+    C1_STATUS=$(docker compose exec -T hermes-agent bash -c \
+        'curl -sf --max-time 5 http://app:8000/health | python3 -c "import json,sys;print(json.load(sys.stdin)[\"status\"])" 2>/dev/null || echo "offline"')
+    echo "  C1 status → $C1_STATUS"
+    [[ "$C1_STATUS" == "ok" ]] || { echo "ERROR: C1 not reachable from C8"; return 1; }
+
+    echo "[verify] C3 reachable from C8"
+    C3_STATUS=$(docker compose exec -T hermes-agent bash -c \
+        'curl -sf --max-time 5 http://browser-auth:8001/health 2>/dev/null | python3 -c "import json,sys;d=json.load(sys.stdin);print(d.get(\"status\",\"?\"))" 2>/dev/null || echo "offline"')
+    echo "  C3 status → $C3_STATUS"
+
+    echo "[verify] Hermes inference provider config"
+    docker compose exec -T hermes-agent bash -c \
+        'echo "  HERMES_INFERENCE_PROVIDER=${HERMES_INFERENCE_PROVIDER}" && echo "  OPENAI_BASE_URL=${OPENAI_BASE_URL}" && echo "  LLM_MODEL=${LLM_MODEL}"'
+
+    echo "[ask]  C1+C3 ← C8 Hermes (ask_helper via /v1/chat/completions)"
+    REPLY=$(docker compose exec -T hermes-agent bash -c \
+        'python3 /workspace/ask_helper.py "Reply with exactly: HERMES_TEST_OK" \
+            --api-url http://app:8000/v1/chat/completions \
+            --agent-id test-c8-hermes --format openai 2>/dev/null')
+    echo "  reply → $(echo "$REPLY" | head -3)"
+    echo "$REPLY" | grep -q "HERMES_TEST_OK" || { echo "ERROR: expected marker not found"; return 1; }
+    echo "[info] C8 Hermes standby healthy — run 'docker compose exec C8_hermes-agent hermes' for interactive CLI"
+}
+
 # ── sequential execution ───────────────────────────────────────────────────────
 run_sequential() {
     header "Sequential Pair Validation"
-    run_test 1 "C2 OpenCode → C1+C3"   test1_opencode
-    run_test 2 "C2 Aider → C1+C3"      test2_aider
+    run_test 1 "C2 OpenCode → C1+C3"    test1_opencode
+    run_test 2 "C2 Aider → C1+C3"       test2_aider
     run_test 3 "C5 Claude Code → C1+C3" test3_claude_code
     run_test 4 "C6 KiloCode → C1+C3"   test4_kilocode
     run_test 5 "C7a Gateway → C1+C3"   test5_c7a_gateway
     run_test 6 "C7b CLI → C1+C3"       test6_c7b_cli
+    run_test 7 "C8 Hermes → C1+C3"     test7_hermes
 }
 
 # ── parallel execution ─────────────────────────────────────────────────────────
 run_parallel() {
-    header "Parallel Pair Validation (all 6 in parallel)"
+    header "Parallel Pair Validation (all 7 in parallel)"
 
     declare -A PIDS LOGS
     LOGS[1]="$LOG_DIR/test1.log"; LOGS[2]="$LOG_DIR/test2.log"
     LOGS[3]="$LOG_DIR/test3.log"; LOGS[4]="$LOG_DIR/test4.log"
     LOGS[5]="$LOG_DIR/test5.log"; LOGS[6]="$LOG_DIR/test6.log"
+    LOGS[7]="$LOG_DIR/test7.log"
 
     NAMES[1]="C2 OpenCode → C1+C3"
     NAMES[2]="C2 Aider → C1+C3"
@@ -203,19 +235,21 @@ run_parallel() {
     NAMES[4]="C6 KiloCode → C1+C3"
     NAMES[5]="C7a Gateway → C1+C3"
     NAMES[6]="C7b CLI → C1+C3"
+    NAMES[7]="C8 Hermes → C1+C3"
 
-    echo "  Launching 6 tests simultaneously..."
-    test1_opencode   >"${LOGS[1]}" 2>&1 & PIDS[1]=$!
-    test2_aider      >"${LOGS[2]}" 2>&1 & PIDS[2]=$!
-    test3_claude_code>"${LOGS[3]}" 2>&1 & PIDS[3]=$!
-    test4_kilocode   >"${LOGS[4]}" 2>&1 & PIDS[4]=$!
-    test5_c7a_gateway>"${LOGS[5]}" 2>&1 & PIDS[5]=$!
-    test6_c7b_cli    >"${LOGS[6]}" 2>&1 & PIDS[6]=$!
+    echo "  Launching 7 tests simultaneously..."
+    test1_opencode    >"${LOGS[1]}" 2>&1 & PIDS[1]=$!
+    test2_aider       >"${LOGS[2]}" 2>&1 & PIDS[2]=$!
+    test3_claude_code >"${LOGS[3]}" 2>&1 & PIDS[3]=$!
+    test4_kilocode    >"${LOGS[4]}" 2>&1 & PIDS[4]=$!
+    test5_c7a_gateway >"${LOGS[5]}" 2>&1 & PIDS[5]=$!
+    test6_c7b_cli     >"${LOGS[6]}" 2>&1 & PIDS[6]=$!
+    test7_hermes      >"${LOGS[7]}" 2>&1 & PIDS[7]=$!
 
-    echo "  PIDs: ${PIDS[1]} ${PIDS[2]} ${PIDS[3]} ${PIDS[4]} ${PIDS[5]} ${PIDS[6]}"
+    echo "  PIDs: ${PIDS[1]} ${PIDS[2]} ${PIDS[3]} ${PIDS[4]} ${PIDS[5]} ${PIDS[6]} ${PIDS[7]}"
     echo "  Waiting for all to complete..."
 
-    for id in 1 2 3 4 5 6; do
+    for id in 1 2 3 4 5 6 7; do
         if wait "${PIDS[$id]}"; then
             ok "Test $id: ${NAMES[$id]}"
             cat "${LOGS[$id]}" | sed 's/^/    /'
