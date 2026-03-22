@@ -1,5 +1,5 @@
 # ============================================================
-# Container 3: Headless Chrome Cookie Extractor
+# Container 3 (C3): Headless Chrome Cookie Extractor
 #
 # Uses Playwright + Chromium to:
 #   1. Launch a headed browser (via noVNC/VNC for visibility)

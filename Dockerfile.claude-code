@@ -1,5 +1,5 @@
 # ============================================================
-# Container 5 — Claude Code CLI Terminal
+# Container 5 (C5) — Claude Code CLI Terminal
 #
 # Official source: https://www.npmjs.com/package/@anthropic-ai/claude-code
 # Anthropic's official Claude Code CLI, routed through Container 1

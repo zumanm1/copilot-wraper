@@ -187,7 +187,7 @@ docker compose up app
 
 # Option B: plain docker run
 docker run -d \
-  --name copilot-api \
+  --name C1_copilot-api \
   -p 8000:8000 \
   --env-file .env \
   --restart unless-stopped \
@@ -216,7 +216,7 @@ open http://localhost:8000/docs
 docker compose down
 
 # plain docker
-docker stop copilot-api && docker rm copilot-api
+docker stop C1_copilot-api && docker rm C1_copilot-api
 ```
 
 ---
@@ -667,12 +667,16 @@ FROM python:3.11-slim AS runtime
 
 ### docker-compose.yml Services
 
-| Service | Purpose | Port |
-|---|---|---|
-| `app` | FastAPI server | `8000:8000` |
-| `test` | Playwright test runner | (no port, internal only) |
-
-The `test` service uses `depends_on: app: condition: service_healthy` — it **waits for the health check to pass** before running tests.
+| Service | Container Name | Purpose | Port |
+|---|---|---|---|
+| `app` | `C1_copilot-api` | FastAPI server | `8000:8000` |
+| `agent-terminal` | `C2_agent-terminal` | AI agent terminal | (interactive) |
+| `browser-auth` | `C3_browser-auth` | Cookie extractor | `6080, 8001` |
+| `claude-code-terminal` | `C5_claude-code` | Claude Code CLI | (interactive) |
+| `kilocode-terminal` | `C6_kilocode` | KiloCode CLI | (interactive) |
+| `openclaw-gateway` | `C7a_openclaw-gateway` | OpenClaw Gateway | `18789` |
+| `openclaw-cli` | `C7b_openclaw-cli` | OpenClaw CLI/TUI | (interactive) |
+| `test` | `CT_tests` | Playwright tests | (no port) |
 
 ```bash
 # Start only the API server
@@ -740,7 +744,7 @@ open -a Docker   # macOS
 
 ### Container exits immediately
 ```bash
-docker logs copilot-api
+docker logs C1_copilot-api
 # Check for missing BING_COOKIES or import errors
 ```
 

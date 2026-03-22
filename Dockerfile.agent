@@ -1,5 +1,5 @@
 # ============================================================
-# Container 2: AI Agent Terminal
+# Container 2 (C2): AI Agent Terminal
 #
 # Interactive terminal AI agents pre-configured to use the
 # copilot-api service (Container 1) as their OpenAI-compatible

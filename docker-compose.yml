@@ -1,15 +1,22 @@
 # ============================================================
 # Copilot OpenAI-Compatible API Wrapper — Docker Compose
 #
-# Two-container architecture:
+# Container naming: Cy_name (C = Container, y = number)
 #
-#   Container 1 (app)            — FastAPI OpenAI-compatible API
-#                                  Wraps Microsoft Copilot via WebSocket
-#                                  Exposes: http://localhost:8000
+#   C1_copilot-api        — FastAPI OpenAI-compatible API
+#                           Wraps Microsoft Copilot via WebSocket
+#                           Exposes: http://localhost:8000
 #
-#   Container 2 (agent-terminal) — Interactive AI Agent Terminal
-#                                  Runs Aider / OpenCode
-#                                  Uses Container 1 for inference
+#   C2_agent-terminal     — Interactive AI Agent Terminal
+#                           Runs Aider / OpenCode
+#                           Uses C1 for inference
+#
+#   C3_browser-auth       — Headless Chrome Cookie Extractor
+#   C5_claude-code        — Claude Code CLI Terminal
+#   C6_kilocode           — KiloCode CLI Terminal
+#   C7a_openclaw-gateway  — OpenClaw Gateway
+#   C7b_openclaw-cli      — OpenClaw CLI / TUI
+#   CT_tests              — Playwright automated test suite
 #
 # ── Quick start ───────────────────────────────────────────────
 #
@@ -29,7 +36,7 @@
 services:
 
   # ──────────────────────────────────────────────────────────
-  # Container 1: FastAPI Copilot API Wrapper
+  # C1: FastAPI Copilot API Wrapper
   #
   # OpenAI-compatible REST API backed by Microsoft Copilot.
   # All other services use this as their inference backend.
@@ -40,7 +47,7 @@ services:
       dockerfile: Dockerfile
       target: runtime
     image: copilot-api:latest
-    container_name: copilot-api
+    container_name: C1_copilot-api
     ports:
       - "8000:8000"
     env_file:
@@ -77,9 +84,9 @@ services:
         max-file: "3"
 
   # ──────────────────────────────────────────────────────────
-  # Container 2: Interactive AI Agent Terminal
+  # C2: Interactive AI Agent Terminal
   #
-  # Terminal AI agents pre-configured to use Container 1
+  # Terminal AI agents pre-configured to use C1
   # (copilot-api) as their OpenAI-compatible inference backend.
   #
   # Included agents:
@@ -87,7 +94,7 @@ services:
   #   - OpenCode (modern terminal AI agent)
   #
   # How to use:
-  #   docker compose up app -d          # start Container 1 first
+  #   docker compose up app -d          # start C1 first
   #   docker compose run --rm agent-terminal   # launch agent
   #
   # The agent will show a menu to choose between Aider / OpenCode / bash.
@@ -98,7 +105,7 @@ services:
       context: .
       dockerfile: Dockerfile.agent
     image: copilot-agent-terminal:latest
-    container_name: copilot-agent-terminal
+    container_name: C2_agent-terminal
     depends_on:
       app:
         condition: service_healthy
@@ -124,35 +131,99 @@ services:
     restart: "no"
 
   # ──────────────────────────────────────────────────────────
-  # Container 4: OpenClaw AI Agent Terminal
+  # C7a: OpenClaw Gateway
   #
-  # Official source: https://openclaw.ai
-  # Install: curl -fsSL https://openclaw.ai/install.sh | bash
-  # Autonomous AI agent routed through Container 1 as backend.
+  # Self-hosted OpenClaw gateway (v2026.3.13) adapted to use
+  # C1 (copilot-api) as the OpenAI-compatible AI provider.
+  # Reference: OpenClaw Docker Setup Guide v2026.3.13
   #
-  # How to use:
-  #   docker compose run --rm openclaw-terminal             # menu
-  #   docker compose run --rm openclaw-terminal bash        # bash
-  #   docker compose run --rm openclaw-terminal openclaw    # direct
-  #   docker compose run --rm openclaw-terminal ask "q"     # one-shot
-  #   docker compose run --rm openclaw-terminal status      # health
+  # Provider chain: C7a → C1 (http://app:8000/v1) → Copilot
+  # Auth: C3 (browser-auth) feeds cookies to C1 transparently.
+  #
+  # Health checks (reference doc §6):
+  #   curl http://localhost:18789/healthz
+  #   curl http://localhost:18789/readyz
+  #   docker compose exec openclaw-gateway \
+  #       node dist/index.js health --token "copilot-local-gateway-token"
+  #
+  # Mode 1 (host CLI, if openclaw installed on host):
+  #   openclaw tui --url ws://127.0.0.1:18789 --token copilot-local-gateway-token
+  #
+  # Mode 3 (exec into gateway, reference doc §9):
+  #   docker compose exec openclaw-gateway sh
   # ──────────────────────────────────────────────────────────
-  openclaw-terminal:
+  openclaw-gateway:
     build:
       context: .
-      dockerfile: Dockerfile.openclaw
-    image: copilot-openclaw-terminal:latest
-    container_name: copilot-openclaw-terminal
+      dockerfile: Dockerfile.openclaw-gw
+    image: copilot-openclaw-gateway:latest
+    container_name: C7a_openclaw-gateway
     depends_on:
       app:
         condition: service_healthy
+    ports:
+      - "18789:18789"
     environment:
-      # Route OpenClaw through Container 1's /v1/messages endpoint
-      - ANTHROPIC_BASE_URL=http://app:8000
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-sk-ant-not-needed-xxxxxxxxxxxxx}
-      - DO_NOT_TRACK=1
+      # Provider → C1 (copilot-api) as OpenAI-compatible backend
+      - OPENCLAW_PROVIDER_BASE_URL=http://app:8000/v1
+      - OPENCLAW_PROVIDER_API_KEY=sk-not-needed
+      # Gateway auth token — shared with C7b (EC2: single source of truth)
+      - OPENCLAW_GATEWAY_TOKEN=copilot-local-gateway-token
+      - OPENCLAW_TZ=Africa/Johannesburg
       # Session identity — routes requests to a dedicated C1 backend
-      - AGENT_ID=c4-openclaw
+      - AGENT_ID=c7-openclaw
+    volumes:
+      # Persist gateway config + token across container restarts
+      - openclaw-config:/root/.openclaw
+      - ./workspace:/workspace
+    networks:
+      - copilot-net
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ──────────────────────────────────────────────────────────
+  # C7b: OpenClaw CLI / TUI
+  #
+  # Companion CLI for the C7a gateway. Supports all 3 access
+  # modes from the OpenClaw Docker Setup Guide v2026.3.13.
+  #
+  # Mode 2 — container CLI → gateway (reference doc §8):
+  #   docker compose run --rm openclaw-cli tui
+  #   docker compose run --rm openclaw-cli gateway status
+  #   docker compose run --rm openclaw-cli devices list
+  #   docker compose run --rm openclaw-cli dashboard --no-open
+  #
+  # Extra — one-shot ask (→ C1 directly, professor/polymath persona):
+  #   docker compose run --rm openclaw-cli ask "question"
+  #
+  # Extra — interactive bash shell with helpers:
+  #   docker compose run --rm openclaw-cli bash
+  #
+  # Extra — pass-through any openclaw subcommand:
+  #   docker compose run --rm openclaw-cli config set gateway.bind lan
+  #   docker compose run --rm openclaw-cli channels add --channel telegram --token TOKEN
+  # ──────────────────────────────────────────────────────────
+  openclaw-cli:
+    build:
+      context: .
+      dockerfile: Dockerfile.openclaw-cli
+    image: copilot-openclaw-cli:latest
+    container_name: C7b_openclaw-cli
+    depends_on:
+      - openclaw-gateway
+    environment:
+      # Gateway WebSocket URL (internal Docker DNS)
+      - OPENCLAW_GATEWAY_URL=ws://openclaw-gateway:18789
+      # EC2: same token as C7a — single source of truth
+      - OPENCLAW_GATEWAY_TOKEN=copilot-local-gateway-token
+      # C1 backend for one-shot ask command
+      - API_URL=http://app:8000
+      # Session identity — routes requests to a dedicated C1 backend
+      - AGENT_ID=c7-openclaw
     volumes:
       - ./workspace:/workspace
     networks:
@@ -162,10 +233,10 @@ services:
     restart: "no"
 
   # ──────────────────────────────────────────────────────────
-  # Container 5: Claude Code CLI Terminal
+  # C5: Claude Code CLI Terminal
   #
   # Official source: https://www.npmjs.com/package/@anthropic-ai/claude-code
-  # Anthropic's Claude Code CLI routed through Container 1 via
+  # Anthropic's Claude Code CLI routed through C1 via
   # ANTHROPIC_BASE_URL → /v1/messages (Anthropic-compat endpoint).
   #
   # How to use:
@@ -178,7 +249,7 @@ services:
       context: .
       dockerfile: Dockerfile.claude-code
     image: copilot-claude-code-terminal:latest
-    container_name: copilot-claude-code-terminal
+    container_name: C5_claude-code
     depends_on:
       app:
         condition: service_healthy
@@ -199,11 +270,11 @@ services:
     restart: "no"
 
   # ──────────────────────────────────────────────────────────
-  # Container 6: KiloCode CLI Terminal
+  # C6: KiloCode CLI Terminal
   #
   # Official source: https://www.npmjs.com/package/@kilocode/cli
   # Install: npm install -g @kilocode/cli
-  # KiloCode terminal TUI configured to use Container 1.
+  # KiloCode terminal TUI configured to use C1.
   #
   # How to use:
   #   docker compose run --rm kilocode-terminal             # menu
@@ -217,7 +288,7 @@ services:
       context: .
       dockerfile: Dockerfile.kilocode
     image: copilot-kilocode-terminal:latest
-    container_name: copilot-kilocode-terminal
+    container_name: C6_kilocode
     depends_on:
       app:
         condition: service_healthy
@@ -237,7 +308,7 @@ services:
     restart: "no"
 
   # ──────────────────────────────────────────────────────────
-  # Test Runner: Playwright automated test suite (45 tests)
+  # CT: Playwright automated test suite (45 tests)
   #
   # How to use:
   #   docker compose run --rm test
@@ -246,7 +317,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.test
-    container_name: copilot-tests
+    container_name: CT_tests
     depends_on:
       app:
         condition: service_healthy
@@ -263,7 +334,7 @@ services:
     restart: "no"
 
   # ──────────────────────────────────────────────────────────
-  # Container 3: Headless Chrome Cookie Extractor
+  # C3: Headless Chrome Cookie Extractor
   #
   # Runs Playwright/Chromium + noVNC so user can authenticate
   # via browser UI, then extracts session cookies automatically.
@@ -279,7 +350,7 @@ services:
       context: .
       dockerfile: Dockerfile.browser
     image: copilot-browser-auth:latest
-    container_name: copilot-browser-auth
+    container_name: C3_browser-auth
     ports:
       - "6080:6080"    # noVNC web UI
       - "8001:8001"    # Cookie extractor API
@@ -299,7 +370,7 @@ services:
 
 # ── Shared network ────────────────────────────────────────────
 # All containers communicate via this bridge network.
-# Container 2 reaches Container 1 at http://app:8000
+# C1_copilot-api:8000 | C7a_openclaw-gateway:18789 | C3_browser-auth:8001
 networks:
   copilot-net:
     driver: bridge
@@ -307,3 +378,5 @@ networks:
 # ── Named volumes ─────────────────────────────────────────────
 volumes:
   copilot-browser-profile:
+  # Persists OpenClaw gateway config + token across container restarts (C7a)
+  openclaw-config:

@@ -1,0 +1,51 @@
+# ============================================================
+# Container 7b (C7b) — OpenClaw CLI / TUI
+#
+# Companion CLI container for the C7a OpenClaw gateway.
+# Base: node:20-slim + npm install -g openclaw (same npm package
+# confirmed working in project).
+#
+# Reference: OpenClaw Docker Setup Guide v2026.3.13
+# Adaptation: TUI connects to C7a gateway (ws://openclaw-gateway:18789)
+#             ask command calls C1 directly via ask_helper.py
+#
+# All 3 reference-doc access modes are supported:
+#   Mode 1 (host CLI): openclaw tui --url ws://127.0.0.1:18789 --token TOKEN
+#   Mode 2 (this):     docker compose run --rm openclaw-cli tui
+#   Mode 3 (debug):    docker compose exec openclaw-gateway sh
+#
+# Usage:
+#   docker compose run --rm openclaw-cli ask "question"
+#   docker compose run --rm openclaw-cli tui
+#   docker compose run --rm openclaw-cli status
+#   docker compose run --rm openclaw-cli bash
+#   docker compose run --rm openclaw-cli devices list
+#   docker compose run --rm openclaw-cli dashboard --no-open
+#   docker compose run --rm openclaw-cli gateway status
+#   docker compose run --rm openclaw-cli config set gateway.bind lan
+# ============================================================
+FROM node:20-slim
+
+# System utilities: curl for health checks, python3 for ask_helper.py, git for agents
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates bash git python3 procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install OpenClaw CLI via npm (confirmed working)
+RUN npm install -g openclaw 2>&1 | tail -5 \
+    && echo "✅ OpenClaw installed: $(openclaw --version 2>/dev/null || openclaw version 2>/dev/null || echo ok)"
+
+# Git identity (required for workspace operations)
+RUN git config --global user.email "agent@copilot-wrapper" && \
+    git config --global user.name "OpenClaw CLI" && \
+    git config --global init.defaultBranch main
+
+# Timezone (reference doc default: Africa/Johannesburg)
+ENV TZ="Africa/Johannesburg"
+
+WORKDIR /workspace
+
+COPY openclaw-cli/start.sh /openclaw-cli/start.sh
+RUN chmod +x /openclaw-cli/start.sh
+
+ENTRYPOINT ["/openclaw-cli/start.sh"]

@@ -1,0 +1,63 @@
+# ============================================================
+# Container 7a (C7a) — OpenClaw Gateway
+#
+# OpenClaw gateway adapted to use C1 (copilot-api) as the
+# OpenAI-compatible AI provider instead of real OpenAI.
+# Reference: OpenClaw Docker Setup Guide v2026.3.13
+#
+# Base: node:20-slim + npm install -g openclaw (same npm package
+# confirmed working in project). The ghcr.io Docker image is
+# not publicly distributed; this npm approach is equivalent.
+#
+# Provider chain: C7a → C1 (http://app:8000/v1) → Copilot
+# Auth: C3 (browser-auth) feeds cookies to C1 transparently.
+#
+# Usage:
+#   docker compose up openclaw-gateway -d
+#
+# Health checks (reference doc §6):
+#   curl http://localhost:18789/healthz
+#   curl http://localhost:18789/readyz
+#
+# Mode 3 (exec into gateway, reference doc §9):
+#   docker compose exec openclaw-gateway sh
+# ============================================================
+FROM node:20-slim
+
+# System utilities: curl for health checks, python3 for ask_helper.py, git for agents
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl ca-certificates bash git python3 procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install OpenClaw CLI + gateway via npm (confirmed working)
+RUN npm install -g openclaw 2>&1 | tail -5 \
+    && echo "✅ OpenClaw installed: $(openclaw --version 2>/dev/null || openclaw version 2>/dev/null || echo ok)"
+
+# Git identity (required for workspace operations)
+RUN git config --global user.email "agent@copilot-wrapper" && \
+    git config --global user.name "OpenClaw Gateway" && \
+    git config --global init.defaultBranch main
+
+# Timezone (reference doc default: Africa/Johannesburg)
+ENV TZ="Africa/Johannesburg"
+ENV OPENCLAW_TZ="Africa/Johannesburg"
+
+# Provider → C1 (copilot-api) as OpenAI-compatible backend
+ENV OPENCLAW_PROVIDER_BASE_URL="http://app:8000/v1"
+ENV OPENCLAW_PROVIDER_API_KEY="sk-not-needed"
+
+# Gateway auth token — shared with C7b (EC2: single source of truth)
+ENV OPENCLAW_GATEWAY_TOKEN="copilot-local-gateway-token"
+
+# Gateway port (reference doc: 18789)
+ENV OPENCLAW_GATEWAY_PORT="18789"
+
+WORKDIR /workspace
+
+COPY openclaw-gateway/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Gateway WebSocket + HTTP port
+EXPOSE 18789
+
+ENTRYPOINT ["/entrypoint.sh"]
