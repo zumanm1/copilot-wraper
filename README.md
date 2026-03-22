@@ -937,9 +937,10 @@ Host (agent_debate.py)
       │     Each agent receives: topic + their stance.
       │     Responds with a 4–6 sentence position statement.
       │
-      ├── Phase 2: Rebuttal Rounds  (loops until time budget exhausted)
+      ├── Phase 2: Rebuttal Rounds
       │     Each agent receives: topic + stance + FULL transcript of all prior statements.
       │     Must name and rebut a specific opponent, then advance a new argument.
+      │     Stops when either `--duration` reserve is hit or `--max-rebuttal-rounds N` is satisfied.
       │
       ├── Phase 3: Closing Statements
       │     Each agent summarises their position and responds to the strongest counterargument.
@@ -961,8 +962,12 @@ python3 tests/agent_debate.py
 # 5-minute debate
 python3 tests/agent_debate.py --duration 300
 
-# Quick 2-minute validation test
+# Quick 2-minute validation test (time-bounded; may skip some rebuttals)
 python3 tests/agent_debate.py --duration 120
+
+# Exactly 2 full rebuttal passes (each agent speaks once per pass), then closings + judge
+# Use a generous --duration so Phase 3–4 always fit (integration default: 900 s)
+python3 tests/agent_debate.py --max-rebuttal-rounds 2 --duration 900
 
 # Force a specific topic (LLM still assigns all stances — nothing else is hardcoded)
 python3 tests/agent_debate.py --topic "Is P equal to NP?"
@@ -1029,7 +1034,7 @@ Every debate is saved to `tests/debate-transcripts/debate_<YYYYMMDD_HHMMSS>.json
 
 ### Pair Integration Tests + Debate (`tests/run_pair_tests.sh`)
 
-Validates all 7 agent-container ↔ C1+C3 pairs and runs a 90-second multi-agent debate smoke test.
+Validates all 7 agent-container ↔ C1+C3 pairs and runs a multi-agent debate with **exactly two rebuttal rounds** (then closings and judging), via `agent_debate.py --max-rebuttal-rounds 2 --duration 900`.
 
 ```bash
 # Sequential — all 7 pairs then debate (default)
@@ -1054,11 +1059,11 @@ bash tests/run_pair_tests.sh --parallel --skip-debate
 | 5 | C7a Gateway → C1+C3 | Health endpoint `:18789` | OpenClaw 2026.3.13 | ✅ PASS |
 | 6 | C7b CLI → C1+C3 | OpenAI `/v1/chat/completions` | OpenClaw 2026.3.13 | ✅ PASS |
 | 7 | C8 Hermes → C1+C3 | OpenAI `/v1/chat/completions` | Hermes v0.3.0 | ✅ PASS |
-| 8 | Multi-Agent Debate (90s) | All 6 agents + judge via C1 | `agent_debate.py` | ✅ PASS |
+| 8 | Multi-Agent Debate (2 rebuttal rounds) | All 6 agents + judge via C1 | `agent_debate.py` | ✅ PASS |
 
 Each pair test validates: tool version inside container → C1 reachability → C3 reachability → round-trip ask with an expected response marker.
 
-The debate smoke test (test 8) validates: C1 health → all 6 agents produce opening statements → judge produces a scored leaderboard → transcript JSON is saved.
+The debate test (test 8) validates: C1 health → opening statements (≥4 agents) → **two** Phase 2 rebuttal section headers → judge `WINNER` line → transcript JSON saved.
 
 > **Note on parallel mode:** Tests 1 and 2 share the `agent-terminal` container. The parallel runner staggers them by 10 seconds to avoid session contention. Tests 3–7 run truly in parallel.
 
@@ -1288,7 +1293,7 @@ copilot-openai-wrapper/
 │
 └── tests/
     ├── run_pair_tests.sh      7-pair integration test runner (sequential + parallel)
-    ├── agent_debate.py        Multi-agent debate framework (10-min, all 6 agents)
+    ├── agent_debate.py        Multi-agent debate; optional --max-rebuttal-rounds N
     ├── debate-transcripts/    Saved debate JSON transcripts (debate_<ts>.json)
     ├── test_playwright.py     45 Playwright tests
     ├── test_unit_*.py         Unit tests for all core modules

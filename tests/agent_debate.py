@@ -16,6 +16,7 @@
 ║    python3 tests/agent_debate.py                                 ║
 ║    python3 tests/agent_debate.py --duration 300    # 5 min       ║
 ║    python3 tests/agent_debate.py --duration 60     # quick test  ║
+║    python3 tests/agent_debate.py --max-rebuttal-rounds 2  # CI   ║
 ║    python3 tests/agent_debate.py --topic "your topic here"       ║
 ║    python3 tests/agent_debate.py --api http://localhost:8000     ║
 ║    python3 tests/agent_debate.py --agents C2a C5 C8  # subset   ║
@@ -475,15 +476,25 @@ def run_debate(
     duration: int,
     forced_topic: str | None,
     agent_keys: list[str] | None,
+    max_rebuttal_rounds: int | None = None,
 ) -> dict:
     """
     Main debate orchestrator. Returns the full debate record as a dict.
+
+    If ``max_rebuttal_rounds`` is set, Phase 2 runs exactly that many full
+    rebuttal passes (each agent speaks once per pass), then closings and
+    judging run regardless of remaining ``duration`` (subject to enough time
+    for closings + judge).
     """
     start_time = time.time()
     transcript: list[dict] = []
 
     banner("Multi-Agent Debate Framework")
     print(f"  Duration     : {duration // 60} min {duration % 60} s")
+    if max_rebuttal_rounds is not None:
+        print(f"  Rebuttals    : fixed — {max_rebuttal_rounds} round(s) (then closings + judge)")
+    else:
+        print(f"  Rebuttals    : time-bounded (until duration − reserve)")
     print(f"  API          : {api_base}")
     print(f"  Start        : {datetime.now().strftime('%H:%M:%S')}")
     print()
@@ -545,6 +556,7 @@ def run_debate(
         "meta": {
             "started_at":    datetime.now(timezone.utc).isoformat(),
             "duration_s":    duration,
+            "max_rebuttal_rounds": max_rebuttal_rounds,
             "api_base":      api_base,
             "domain_seed":   domain,
             "forced_topic":  forced_topic,
@@ -583,11 +595,18 @@ def run_debate(
 
     # ── Phase 2: Rebuttal rounds ───────────────────────────────────────────
     round_num = 1
+    rebuttal_rounds_done = 0
     # Reserve time for closings (agents × 20s each) + judging (60s)
     closing_reserve = len(agents) * 25 + 60
     while True:
         elapsed = time.time() - start_time
         remaining = duration - elapsed
+
+        # Fixed-round mode: completed enough full rebuttal passes
+        if max_rebuttal_rounds is not None and rebuttal_rounds_done >= max_rebuttal_rounds:
+            break
+
+        # Always stop if we cannot finish closings + judge
         if remaining < closing_reserve:
             break
 
@@ -635,6 +654,8 @@ def run_debate(
         round_duration = time.time() - round_start
         if round_duration < MIN_ROUND_SECONDS:
             time.sleep(MIN_ROUND_SECONDS - round_duration)
+
+        rebuttal_rounds_done += 1
 
     # ── Phase 3: Closing statements ────────────────────────────────────────
     section("PHASE 3 — Closing Statements", AGENT_COLOURS["C6-KiloCode"])
@@ -761,6 +782,8 @@ Examples:
   python3 tests/agent_debate.py                         # 10-min debate, random topic
   python3 tests/agent_debate.py --duration 300          # 5-min debate
   python3 tests/agent_debate.py --duration 60           # quick 1-min smoke test
+  python3 tests/agent_debate.py --max-rebuttal-rounds 2 --duration 900
+          # exactly 2 rebuttal rounds + closings + judge (CI / integration)
   python3 tests/agent_debate.py --topic "P vs NP"       # forced topic (LLM assigns stances)
   python3 tests/agent_debate.py --agents C2a C5 C8      # only 3 agents
         """,
@@ -794,6 +817,17 @@ Examples:
         default=None,
         help="Directory to save transcript JSON (default: tests/debate-transcripts/)",
     )
+    parser.add_argument(
+        "--max-rebuttal-rounds",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Run exactly N full rebuttal passes (each agent speaks once per pass), "
+            "then closings and judging. Overrides time-only stopping for Phase 2. "
+            "Use with a generous --duration so closings + judge still fit."
+        ),
+    )
     args = parser.parse_args()
 
     compose_dir = str(Path(__file__).resolve().parent.parent)
@@ -805,6 +839,7 @@ Examples:
         duration=args.duration,
         forced_topic=args.topic,
         agent_keys=args.agents,
+        max_rebuttal_rounds=args.max_rebuttal_rounds,
     )
 
     path = save_transcript(record, out_dir)

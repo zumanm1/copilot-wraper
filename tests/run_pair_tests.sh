@@ -13,7 +13,8 @@
 #   7  C1+C3 ← C8 Hermes      OpenAI  /v1/chat/completions
 #
 # Debate test (8):
-#   8  Multi-Agent Debate (60 s, all 6 agents, moderator + judge)
+#   8  Multi-Agent Debate — exactly 2 rebuttal rounds + closings + judge
+#      (not skipped by default; use --skip-debate to omit)
 #
 # Usage:
 #   ./tests/run_pair_tests.sh                    # sequential (7 pairs + debate)
@@ -237,21 +238,27 @@ test8_debate() {
     echo "[verify] Python3 available on host"
     python3 --version || { echo "ERROR: python3 not found on host"; return 1; }
 
-    echo "[debate] Running 60-second multi-agent debate (all 6 agents)..."
-    echo "         Topic: LLM picks dynamically — stances are non-hardcoded"
+    echo "[debate] Running multi-agent debate: 2 rebuttal rounds + closings + judge"
+    echo "         (all healthy agents; topic + stances from moderator LLM)"
 
-    # Capture the debate transcript file path from output
+    # Fixed 2 rebuttal rounds — not time-truncated at 90s (avoids skipping rebuttals)
     DEBATE_OUT=$(python3 "$COMPOSE_DIR/tests/agent_debate.py" \
-        --duration 90 \
+        --max-rebuttal-rounds 2 \
+        --duration 900 \
         --api http://localhost:8000 \
         --output "$COMPOSE_DIR/tests/debate-transcripts" 2>&1)
 
-    echo "$DEBATE_OUT" | tail -40
+    echo "$DEBATE_OUT" | tail -50
 
     # Validate: all 6 agents produced opening statements
     AGENT_COUNT=$(echo "$DEBATE_OUT" | grep -c "Opening  |  Round 1" || true)
     echo "[verify] Opening statements received: $AGENT_COUNT / 6"
     [[ "$AGENT_COUNT" -ge 4 ]] || { echo "ERROR: fewer than 4 agents produced openings (got $AGENT_COUNT)"; return 1; }
+
+    # Validate: exactly two Phase-2 rebuttal section headers (round_num 2 and 3)
+    REBUT_HEADERS=$(echo "$DEBATE_OUT" | grep -c "PHASE 2 — Rebuttal Round" || true)
+    echo "[verify] Rebuttal phase headers: $REBUT_HEADERS (expect 2)"
+    [[ "$REBUT_HEADERS" -ge 2 ]] || { echo "ERROR: expected 2 rebuttal rounds in output (got $REBUT_HEADERS)"; return 1; }
 
     # Validate: judge produced scores
     echo "$DEBATE_OUT" | grep -q "WINNER" || { echo "ERROR: judge output missing from debate"; return 1; }
@@ -269,10 +276,9 @@ test8_debate() {
         echo "[verify] Latest transcript: $LATEST"
     fi
 
-    echo "[info]  Debate test passed — all agents participated and judge scored"
-    echo "[info]  Full debate: python3 tests/agent_debate.py --duration 600"
-    echo "[info]  Subset:      python3 tests/agent_debate.py --agents C2a C5 C8 --duration 300"
-    echo "[info]  Custom topic: python3 tests/agent_debate.py --topic 'P vs NP'"
+    echo "[info]  Debate test passed — 2 rebuttal rounds, closings, judge scored"
+    echo "[info]  Full time-bounded debate: python3 tests/agent_debate.py --duration 600"
+    echo "[info]  Fixed rounds:            python3 tests/agent_debate.py --max-rebuttal-rounds 2 --duration 900"
 }
 
 # ── sequential execution ───────────────────────────────────────────────────────
@@ -286,7 +292,7 @@ run_sequential() {
     run_test 6 "C7b CLI → C1+C3"       test6_c7b_cli
     run_test 7 "C8 Hermes → C1+C3"     test7_hermes
     if ! $SKIP_DEBATE; then
-        run_test 8 "Multi-Agent Debate (90s smoke)" test8_debate
+        run_test 8 "Multi-Agent Debate (2 rebuttal rounds)" test8_debate
     fi
 }
 
@@ -335,7 +341,7 @@ run_parallel() {
 
     # Debate always runs after parallel pair tests (it coordinates all agents sequentially)
     if ! $SKIP_DEBATE; then
-        run_test 8 "Multi-Agent Debate (90s smoke)" test8_debate
+        run_test 8 "Multi-Agent Debate (2 rebuttal rounds)" test8_debate
     fi
 }
 
@@ -356,7 +362,7 @@ print_summary() {
     PAIR_LABEL[5]="C7a Gateway → C1+C3"
     PAIR_LABEL[6]="C7b CLI → C1+C3"
     PAIR_LABEL[7]="C8 Hermes → C1+C3"
-    PAIR_LABEL[8]="Multi-Agent Debate (90s)"
+    PAIR_LABEL[8]="Multi-Agent Debate (2 rebuttal rounds)"
 
     API_LABEL[1]="OpenAI /v1/chat/completions"
     API_LABEL[2]="OpenAI /v1/chat/completions"
@@ -392,10 +398,11 @@ print_summary() {
     if ! $SKIP_DEBATE; then
         echo ""
         echo -e "  ${MAGENTA}${BOLD}Debate Framework:${RESET}"
-        echo -e "  ${CYAN}  10-min debate:  python3 tests/agent_debate.py${RESET}"
-        echo -e "  ${CYAN}  Custom topic:   python3 tests/agent_debate.py --topic 'P vs NP'${RESET}"
-        echo -e "  ${CYAN}  Agent subset:   python3 tests/agent_debate.py --agents C2a C5 C8${RESET}"
-        echo -e "  ${CYAN}  Transcripts:    tests/debate-transcripts/debate_<ts>.json${RESET}"
+        echo -e "  ${CYAN}  10-min debate:     python3 tests/agent_debate.py --duration 600${RESET}"
+        echo -e "  ${CYAN}  2 rebuttal rounds: python3 tests/agent_debate.py --max-rebuttal-rounds 2 --duration 900${RESET}"
+        echo -e "  ${CYAN}  Custom topic:      python3 tests/agent_debate.py --topic 'P vs NP'${RESET}"
+        echo -e "  ${CYAN}  Agent subset:      python3 tests/agent_debate.py --agents C2a C5 C8${RESET}"
+        echo -e "  ${CYAN}  Transcripts:       tests/debate-transcripts/debate_<ts>.json${RESET}"
     fi
 
     echo ""
