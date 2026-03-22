@@ -26,7 +26,6 @@ async def _get_or_create_agent_session(agent_id: str) -> "CopilotBackend":
     async with lock:
         if agent_id not in _agent_sessions:
             backend = CopilotBackend()       # type: ignore[name-defined]
-            await backend._get_client()
             _agent_sessions[agent_id] = backend
             logger.info("Agent session created: %s (total active: %d)", agent_id, len(_agent_sessions))
         _agent_session_last_used[agent_id] = time.time()
