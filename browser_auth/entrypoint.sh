@@ -24,6 +24,9 @@ done
 
 echo "[browser-auth] Starting display server..."
 
+# Remove stale X11 lock files left by machine restarts or container crashes
+rm -f /tmp/.X${DISPLAY_NUM}-lock /tmp/.X11-unix/X${DISPLAY_NUM} 2>/dev/null || true
+
 # 1. Start virtual display (Xvfb)
 Xvfb :${DISPLAY_NUM} -screen 0 ${SCREEN_RES} -ac +extension GLX +render -noreset &
 XVFB_PID=$!

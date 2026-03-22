@@ -232,6 +232,23 @@ class CopilotBackend:
                             text = data.get("text", "")
                             if text:
                                 yield text
+                        elif ev == "challenge":
+                            # Copilot bot-verification challenge.
+                            # method="copilot": solve cubic formula mod 22 and reply.
+                            method = data.get("method", "")
+                            parameter = data.get("parameter", "")
+                            if method == "copilot" and parameter:
+                                try:
+                                    a = float(parameter)
+                                    token = str(round((a ** 3 / 100 + a * 25) % 22))
+                                except (ValueError, ZeroDivisionError):
+                                    token = "0"
+                                await ws.send_str(json.dumps({
+                                    "event": "challengeResponse",
+                                    "method": "copilot",
+                                    "token": token,
+                                }))
+                            # Other methods (hashcash, cloudflare): skip for now
                         elif ev in _DONE_EVENTS:
                             if ev == "error":
                                 raise RuntimeError(
