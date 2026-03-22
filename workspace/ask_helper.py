@@ -9,7 +9,7 @@ Maintains per-agent conversation history in /tmp/{agent_id}_history.json.
 Prepends the professor/polymath system prompt from /workspace/professor_prompt.txt on every call.
 Sends X-Agent-ID header so C1 routes the request to the agent's dedicated backend session.
 """
-import json, sys, os, subprocess, argparse
+import json, sys, os, subprocess, argparse, socket
 
 parser = argparse.ArgumentParser(description="Query copilot-api with session isolation")
 parser.add_argument("question", help="The question or prompt to send")
@@ -61,6 +61,31 @@ else:
         "-H", f"X-Agent-ID: {args.agent_id}",
     ]
 
+# ── Pre-flight: check C1 reachability before sending the request ─────────────
+def _check_host_port(url: str) -> tuple[bool, str]:
+    """Return (reachable, error_msg) for the given URL's host:port."""
+    try:
+        import urllib.parse
+        p = urllib.parse.urlparse(url)
+        host = p.hostname or "app"
+        port = p.port or (443 if p.scheme == "https" else 8000)
+        s = socket.create_connection((host, port), timeout=3)
+        s.close()
+        return True, ""
+    except Exception as e:
+        return False, str(e)
+
+
+c1_ok, c1_err = _check_host_port(args.api_url)
+if not c1_ok:
+    print(f"", file=sys.stderr)
+    print(f"  ⚠️  C1 (copilot-api) is NOT reachable at {args.api_url}", file=sys.stderr)
+    print(f"     Error: {c1_err}", file=sys.stderr)
+    print(f"     → Start C1:  docker compose up app -d", file=sys.stderr)
+    print(f"     → Start C3:  docker compose up browser-auth -d  (for fresh cookies)", file=sys.stderr)
+    print(f"", file=sys.stderr)
+    sys.exit(1)
+
 # ── Call the API ──────────────────────────────────────────────────────────────
 cmd = [
     "curl", "-sf", "-X", "POST", args.api_url,
@@ -74,9 +99,13 @@ except subprocess.TimeoutExpired:
     sys.exit(1)
 
 if result.returncode != 0 or not result.stdout.strip():
-    print("  Error: API call failed", file=sys.stderr)
+    print(f"", file=sys.stderr)
+    print(f"  ✗ C1 (copilot-api) returned no response (HTTP error or empty body)", file=sys.stderr)
     if result.stderr:
         print(f"  curl: {result.stderr[:300]}", file=sys.stderr)
+    print(f"  → C1 is reachable but Copilot auth may be stale.", file=sys.stderr)
+    print(f"  → Refresh cookies: docker compose up browser-auth -d", file=sys.stderr)
+    print(f"", file=sys.stderr)
     sys.exit(1)
 
 # ── Parse and display response ────────────────────────────────────────────────
@@ -97,6 +126,13 @@ try:
     if args.format == "openai":
         response_text = d["choices"][0]["message"]["content"]
         usage = d.get("usage", {})
+        if not response_text and usage.get("completion_tokens", 1) == 0:
+            print(f"", file=sys.stderr)
+            print(f"  ⚠️  C1 is up but Copilot returned an empty reply (0 completion tokens).", file=sys.stderr)
+            print(f"     Copilot cookies may be expired — refresh with:", file=sys.stderr)
+            print(f"     docker compose up browser-auth -d", file=sys.stderr)
+            print(f"", file=sys.stderr)
+            sys.exit(1)
         print(response_text)
         print()
         print(f"  [tokens: {usage.get('total_tokens', '?')} | model: {d.get('model', '?')} | session: {args.agent_id}]")
@@ -107,6 +143,13 @@ try:
                 response_text = block["text"]
                 break
         usage = d.get("usage", {})
+        if not response_text and usage.get("output_tokens", 1) == 0:
+            print(f"", file=sys.stderr)
+            print(f"  ⚠️  C1 is up but Copilot returned an empty reply (0 output tokens).", file=sys.stderr)
+            print(f"     Copilot cookies may be expired — refresh with:", file=sys.stderr)
+            print(f"     docker compose up browser-auth -d", file=sys.stderr)
+            print(f"", file=sys.stderr)
+            sys.exit(1)
         print(response_text)
         print()
         print(f"  [in: {usage.get('input_tokens', '?')} | out: {usage.get('output_tokens', '?')} | session: {args.agent_id}]")
