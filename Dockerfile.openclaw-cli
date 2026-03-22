@@ -2,8 +2,7 @@
 # Container 7b (C7b) — OpenClaw CLI / TUI
 #
 # Companion CLI container for the C7a OpenClaw gateway.
-# Base: node:20-slim + npm install -g openclaw (same npm package
-# confirmed working in project).
+# Base: node:22-alpine + openclaw@2026.3.13 (requires Node >= 22.16).
 #
 # Reference: OpenClaw Docker Setup Guide v2026.3.13
 # Adaptation: TUI connects to C7a gateway (ws://openclaw-gateway:18789)
@@ -24,11 +23,12 @@
 #   docker compose run --rm openclaw-cli gateway status
 #   docker compose run --rm openclaw-cli config set gateway.bind lan
 # ============================================================
-FROM node:20-alpine
+FROM node:22-alpine
 
-RUN apk add --no-cache curl ca-certificates bash git python3 \
-    && npm install -g openclaw 2>&1 | tail -5 \
+RUN apk add --no-cache curl ca-certificates bash git python3 make g++ linux-headers \
+    && npm install -g openclaw@2026.3.13 \
     && npm cache clean --force \
+    && apk del make g++ linux-headers \
     && git config --global user.email "agent@copilot-wrapper" \
     && git config --global user.name "OpenClaw CLI" \
     && git config --global init.defaultBranch main
