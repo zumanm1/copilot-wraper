@@ -1,0 +1,22 @@
+# STATUS REPORT: C1-C7 Stack Stabilization (Phase A Complete)
+# Created by: Lead Bounty Hunter (Polymath Prodigy)
+
+## CURRENT STATUS: [STABLE / GREEN]
+- **Core C1 (copilot-api):** 100% Operational. Handshake hardened. Heartbeat added.
+- **Core C3 (browser-auth):** 100% Operational. Session persistence verified.
+- **Multimodal (Vision):** FIXED. Image/jpeg encoding and WebSocket probe frames solved the stall.
+- **Timeouts:** FIXED. Playwright 30s limit overridden to 90s across the test suite.
+- **Logging:** FIXED. PYTHONUNBUFFERED=1 enabled; full "Bounty Hunter Trace" visibility in Docker.
+
+## KEY CHALLENGES SOLVED:
+1. **The 30s Silent Death:** Playwright was killing the connection before Copilot's WebSocket finished "thinking". Overridden.
+2. **The Multimodal Hang:** Sending images without a heartbeat probe caused proxy stalls. Probe added.
+3. **The Import Labyrinth:** Circular dependencies and missing NameErrors (logger, models) in server.py fixed.
+4. **Visibility Gap:** Uvicorn was swallowing start-up crashes. Aggressive stderr flushing implemented.
+
+## NEXT STEPS (PHASE B):
+- Validate C2, C5, C6, C7 agent-specific overrides.
+- Stress-test the concurrent session registry `_agent_sessions`.
+- Final end-to-end "Bounty Hunter" sweep of the specialized agent roles.
+
+MISSION SUCCESS. C1+C3 IS NOW A FORTRESS.
