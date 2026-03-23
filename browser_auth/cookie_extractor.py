@@ -43,20 +43,32 @@ _BING_COOKIE_NAMES = [
 
 _VALID_PROFILES = frozenset({"consumer", "m365_hub"})
 
+# M365 chat may load on canonical host or the common *.microsoft.com alias; both
+# can carry distinct cookies. C1 WebSocket/REST still use copilot.microsoft.com
+# (Phase A), so m365_hub extraction must visit that host too and merge cookies.
+_M365_PORTAL_URLS = (
+    "https://m365.cloud.microsoft",
+    "https://m365.cloud.microsoft.com",
+)
 
-def target_cookies_for_profile(profile: str) -> dict[str, list[str]]:
+
+def target_cookies_for_profile(profile: str) -> list[tuple[str, list[str]]]:
     profile = (profile or "consumer").strip().lower()
     if profile not in _VALID_PROFILES:
         profile = "consumer"
-    portal_url = (
-        "https://m365.cloud.microsoft"
-        if profile == "m365_hub"
-        else "https://copilot.microsoft.com"
-    )
-    return {
-        portal_url: _M365_HUB_COOKIE_NAMES if profile == "m365_hub" else _COPILOT_PORTAL_COOKIE_NAMES,
-        "https://www.bing.com": _BING_COOKIE_NAMES,
-    }
+    bing: tuple[str, list[str]] = ("https://www.bing.com", _BING_COOKIE_NAMES)
+    if profile == "m365_hub":
+        out: list[tuple[str, list[str]]] = []
+        for u in _M365_PORTAL_URLS:
+            out.append((u, _M365_HUB_COOKIE_NAMES))
+        out.append(bing)
+        # Last so shared names prefer consumer Copilot jar for WSS on copilot.microsoft.com
+        out.append(("https://copilot.microsoft.com", _COPILOT_PORTAL_COOKIE_NAMES))
+        return out
+    return [
+        ("https://copilot.microsoft.com", _COPILOT_PORTAL_COOKIE_NAMES),
+        bing,
+    ]
 
 
 def _read_env_keys(env_path: str, keys: tuple[str, ...]) -> dict[str, str]:
@@ -205,15 +217,16 @@ async def _is_logged_in(page: Page, portal_host_markers: tuple[str, ...]) -> boo
 async def _collect_cookies(
     context: BrowserContext,
     page: Page,
-    target_cookies: dict[str, list[str]],
+    targets: list[tuple[str, list[str]]],
 ) -> dict[str, str]:
     """
     Navigate to each target domain and collect all target cookies.
     Must visit each domain explicitly — browsers scope cookies by domain.
+    Later URLs overwrite same cookie name so consumer Copilot values win for API/WSS.
     """
     collected: dict[str, str] = {}
 
-    for url, names in target_cookies.items():
+    for url, names in targets:
         try:
             # Navigate to the domain so its cookies are accessible
             current = page.url
@@ -226,7 +239,7 @@ async def _collect_cookies(
             for cookie in domain_cookies:
                 name = cookie["name"]
                 value = cookie.get("value", "")
-                if name in names and value and name not in collected:
+                if name in names and value:
                     collected[name] = value
                     print(f"[cookie_extractor] Got: {name} ({len(value)} chars)")
         except Exception as e:

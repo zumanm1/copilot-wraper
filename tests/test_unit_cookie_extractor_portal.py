@@ -19,13 +19,19 @@ from cookie_extractor import (  # noqa: E402
 
 def test_target_cookies_consumer_uses_copilot_host():
     tc = target_cookies_for_profile("consumer")
-    assert "https://copilot.microsoft.com" in tc
-    assert "https://www.bing.com" in tc
+    urls = [u for u, _ in tc]
+    assert "https://copilot.microsoft.com" in urls
+    assert "https://www.bing.com" in urls
 
 
-def test_target_cookies_m365_uses_hub_host():
+def test_target_cookies_m365_visits_hub_alias_bing_and_copilot():
     tc = target_cookies_for_profile("m365_hub")
-    assert "https://m365.cloud.microsoft" in tc
+    urls = [u for u, _ in tc]
+    assert urls.index("https://m365.cloud.microsoft") < urls.index(
+        "https://m365.cloud.microsoft.com"
+    )
+    assert "https://www.bing.com" in urls
+    assert urls.index("https://www.bing.com") < urls.index("https://copilot.microsoft.com")
 
 
 def test_portal_landing_override_adds_scheme():
