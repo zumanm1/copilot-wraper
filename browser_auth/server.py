@@ -103,6 +103,44 @@ legend{{font-weight:700;padding:0 .35rem;}}
 <input type="text" id="api_base" name="api_base" placeholder="leave empty = consumer Copilot API host" value="{api_base}"/>
 <button type="submit">Save and reload API</button>
 </form>
+<p class="note" id="navMsg" style="display:none;margin-top:.75rem;"></p>
+<button type="button" id="openPortalBtn">Open selected portal in VNC browser</button>
+<script>
+(function(){{
+  function portalUrl() {{
+    var o = (document.getElementById("portal_base").value || "").trim();
+    if (o) {{
+      if (!/^https?:\\/\\//i.test(o)) o = "https://" + o.replace(/^\\/+/,"");
+      return o;
+    }}
+    var p = document.querySelector('input[name="profile"]:checked');
+    var v = p ? p.value : "m365_hub";
+    if (v === "consumer") return "https://copilot.microsoft.com/";
+    return "https://m365.cloud.microsoft/chat/";
+  }}
+  document.getElementById("openPortalBtn").addEventListener("click", async function() {{
+    var msg = document.getElementById("navMsg");
+    msg.style.display = "block";
+    msg.textContent = "Opening…";
+    try {{
+      var url = portalUrl();
+      var r = await fetch("/navigate", {{
+        method: "POST",
+        headers: {{ "Content-Type": "application/x-www-form-urlencoded" }},
+        body: new URLSearchParams({{ url: url }}).toString()
+      }});
+      var j = await r.json();
+      if (j.status === "ok") {{
+        msg.textContent = "Opened in VNC browser: " + (j.url || url);
+      }} else {{
+        msg.textContent = "Error: " + (j.message || JSON.stringify(j));
+      }}
+    }} catch (e) {{
+      msg.textContent = "Error: " + e;
+    }}
+  }});
+}})();
+</script>
 <p><a href="/health">health</a> · <a href="/status">status</a></p>
 </body></html>"""
 
@@ -198,15 +236,17 @@ async def extract():
 
 
 @app.post("/navigate")
-async def navigate(url: str = "https://copilot.microsoft.com"):
-    """Force the browser to navigate to a URL."""
+async def navigate(request: Request, url: str | None = Form(default=None)):
+    """Force the browser to navigate to a URL (form field or query ?url= for curl)."""
+    u = (url or request.query_params.get("url") or "").strip() or "https://copilot.microsoft.com"
+    u = normalize_copilot_portal_url(u)
     try:
         context = await get_context()
         if not context.pages:
             page = await context.new_page()
         else:
             page = context.pages[0]
-        await page.goto(url, wait_until="domcontentloaded")
+        await page.goto(u, wait_until="domcontentloaded")
         return {"status": "ok", "url": page.url}
     except Exception as e:
         return {"status": "error", "message": str(e)}

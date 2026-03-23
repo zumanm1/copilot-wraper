@@ -43,6 +43,8 @@ def test_setup_shows_two_portal_radios_m365_default(c3_client):
     assert not re.search(r'value="consumer"\s+checked', text)
     assert "POST /navigate" in text
     assert "6080" in text
+    assert "Open selected portal in VNC browser" in text
+    assert 'id="openPortalBtn"' in text
 
 
 def test_setup_respects_consumer_in_env(tmp_path, monkeypatch):
