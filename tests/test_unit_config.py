@@ -94,6 +94,7 @@ def test_portal_consumer_explicit_env(monkeypatch):
     importlib.reload(cfg)
     assert cfg.COPILOT_PORTAL_PROFILE == "consumer"
     assert cfg.portal_base_url_resolved() == "https://copilot.microsoft.com/"
+    assert cfg.copilot_api_base_url() == "https://copilot.microsoft.com"
     assert cfg.copilot_browser_origin() == "https://copilot.microsoft.com"
 
 

@@ -207,6 +207,8 @@ C3 (`C3_browser-auth`) runs a **headless Chromium browser inside Docker** with a
 
 **Portal profile (consumer vs M365 web):** open [`http://localhost:8001/setup`](http://localhost:8001/setup) to write `COPILOT_PORTAL_PROFILE` (and optional portal/API URL overrides) into the mounted `.env` and trigger `POST /v1/reload-config` on C1. Then use noVNC to sign in on the matching host (`copilot.microsoft.com` or `m365.cloud.microsoft`) before calling `/extract`. C3 application code lives **in the image** (not bind-mounted): after you change `browser_auth/` or [`portal_urls.py`](portal_urls.py), run `docker compose build browser-auth` and recreate the container.
 
+**M365 web + C1 chat:** With `m365_hub`, C1 still opens the Copilot WebSocket on **`copilot.microsoft.com`** by default (Phase A in [`docs/prd-dual-copilot-portal-m365.md`](docs/prd-dual-copilot-portal-m365.md)); `Origin`/`Referer` follow the M365 portal. If you see **403** on that socket after `/extract`, ensure the C3 session has valid tokens for the consumer API (e.g. open `https://copilot.microsoft.com` once in the same C3 browser, or refresh cookies). Override the API host only with `COPILOT_PORTAL_API_BASE_URL` when you have confirmed the correct origin from network traces.
+
 ### How to use C3
 
 ```bash
