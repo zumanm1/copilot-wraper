@@ -101,7 +101,7 @@ class TestBrowserAuthC3SetupPage:
 
     def test_setup_open_portal_button_navigates_and_shows_success(self, c3_page):
         """
-        Regression: visible "Open selected portal" control; click drives POST /navigate
+        Regression: visible connect control (#openPortalBtn); click drives POST /navigate
         and shows success in #navMsg. Screenshots under tests/reports/.
         """
         if not _c3_setup_ui_ready():
@@ -112,7 +112,7 @@ class TestBrowserAuthC3SetupPage:
         c3_page.goto(f"{C3_URL}/setup", wait_until="domcontentloaded")
         btn = c3_page.locator("#openPortalBtn")
         expect(btn).to_be_visible()
-        expect(btn).to_contain_text("Open selected portal", timeout=5_000)
+        expect(btn).to_contain_text("Connect to selected portal", timeout=5_000)
         before = _reports_dir() / "c3_setup_playwright_before_open_portal.png"
         after = _reports_dir() / "c3_setup_playwright_after_open_portal.png"
         c3_page.screenshot(path=str(before), full_page=True)

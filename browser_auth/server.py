@@ -103,8 +103,12 @@ legend{{font-weight:700;padding:0 .35rem;}}
 <input type="text" id="api_base" name="api_base" placeholder="leave empty = consumer Copilot API host" value="{api_base}"/>
 <button type="submit">Save and reload API</button>
 </form>
+<fieldset style="margin-top:1.25rem;">
+<legend>Open portal in VNC</legend>
+<p class="note" style="margin-top:0">Opens the URL from your selection or override in Chromium inside this container (noVNC).</p>
 <p class="note" id="navMsg" style="display:none;margin-top:.75rem;"></p>
-<button type="button" id="openPortalBtn">Open selected portal in VNC browser</button>
+<button type="button" id="openPortalBtn">Connect to selected portal</button>
+</fieldset>
 <script>
 (function(){{
   function portalUrl() {{
