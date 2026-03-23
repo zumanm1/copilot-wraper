@@ -1105,7 +1105,7 @@ open tests/reports/report.html
 
 ### Manual curl validation
 
-**C3 extract smoke** (after noVNC sign-in — validates `POST /extract` JSON; does not automate Microsoft login):
+**C3 extract smoke** (after noVNC sign-in - validates `POST /extract` JSON; does not automate Microsoft login):
 
 ```bash
 ./scripts/smoke_c3_extract.sh

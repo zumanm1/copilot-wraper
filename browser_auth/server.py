@@ -222,9 +222,9 @@ async def extract():
     """
     Trigger cookie extraction from the headless browser session.
     Visits depend on COPILOT_PORTAL_PROFILE in the mounted .env:
-      consumer → copilot.microsoft.com, then bing.com
-      m365_hub → m365.cloud.microsoft, m365.cloud.microsoft.com, bing.com,
-                 then copilot.microsoft.com (merged cookie string for C1 Phase A WSS)
+      consumer -> copilot.microsoft.com, then bing.com
+      m365_hub -> m365.cloud.microsoft, m365.cloud.microsoft.com, bing.com,
+                  then copilot.microsoft.com (merged cookie string for C1 Phase A WSS)
     If the user is not logged in, authenticate via noVNC at :6080, then call again.
     On success, signals C1 (API1_URL) to POST /v1/reload-config.
     """
