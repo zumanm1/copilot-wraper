@@ -45,3 +45,12 @@ tests/test_unit_portal_urls.py::test_normalize_www_m365 PASSED           [100%]
 
 ---
 Additional: tests/test_playwright_c3_setup.py (2 passed, ~1.4s)
+
+---
+C3 /setup open-portal button (2026-03-23):
+- tests/test_playwright_c3_setup.py::test_setup_open_portal_button_navigates_and_shows_success
+  Screenshots (gitignored): tests/reports/c3_setup_playwright_before_open_portal.png, c3_setup_playwright_after_open_portal.png
+- tests/test_puppeteer_c3_setup.py + tests/puppeteer_novnc/validate_c3_setup_button.mjs
+  Screenshots: c3_setup_puppeteer_before_open_portal.png, c3_setup_puppeteer_after_open_portal.png
+Requires: docker compose up -d browser-auth (same host as prior noVNC E2E).
+Local CI run without C3: 4 skipped (health/setup probe failed).

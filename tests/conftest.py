@@ -20,11 +20,14 @@ def pytest_collection_modifyitems(config, items):
     """Run Playwright/network container tests last; they leave a running asyncio loop that breaks pytest-asyncio."""
     def sort_key(item):
         node = item.nodeid
-        late = node.startswith("tests/test_new_containers") or node.startswith(
-            "tests/test_playwright"
-        ) or node.startswith("tests/test_playwright_c3_setup") or node.startswith(
-            "tests/test_playwright_novnc"
-        ) or node.startswith("tests/test_puppeteer_novnc")
+        late = (
+            node.startswith("tests/test_new_containers")
+            or node.startswith("tests/test_playwright")
+            or node.startswith("tests/test_playwright_c3_setup")
+            or node.startswith("tests/test_playwright_novnc")
+            or node.startswith("tests/test_puppeteer_novnc")
+            or node.startswith("tests/test_puppeteer_c3_setup")
+        )
         return (1 if late else 0, node)
 
     items.sort(key=sort_key)

@@ -16,11 +16,18 @@ import os
 import re
 import urllib.error
 import urllib.request
+from pathlib import Path
 
 import pytest
 from playwright.sync_api import expect, sync_playwright
 
 C3_URL = os.getenv("BROWSER_AUTH_URL", "http://localhost:8001").rstrip("/")
+
+
+def _reports_dir() -> Path:
+    d = Path(__file__).resolve().parent / "reports"
+    d.mkdir(parents=True, exist_ok=True)
+    return d
 
 
 def _c3_setup_ui_ready() -> bool:
@@ -36,6 +43,7 @@ def _c3_setup_ui_ready() -> bool:
             "Choose Copilot portal" in html
             and 'value="m365_hub"' in html
             and 'value="consumer"' in html
+            and 'id="openPortalBtn"' in html
         )
     except (urllib.error.URLError, OSError, TimeoutError, ValueError):
         return False
@@ -90,3 +98,29 @@ class TestBrowserAuthC3SetupPage:
         c3_page.locator('input[type="radio"][value="consumer"]').click()
         expect(c3_page.locator('input[type="radio"][value="consumer"]')).to_be_checked()
         expect(c3_page.locator('input[type="radio"][value="m365_hub"]')).not_to_be_checked()
+
+    def test_setup_open_portal_button_navigates_and_shows_success(self, c3_page):
+        """
+        Regression: visible "Open selected portal" control; click drives POST /navigate
+        and shows success in #navMsg. Screenshots under tests/reports/.
+        """
+        if not _c3_setup_ui_ready():
+            pytest.skip(
+                f"C3 setup UI not ready at {C3_URL} — "
+                "docker compose up -d --force-recreate browser-auth"
+            )
+        c3_page.goto(f"{C3_URL}/setup", wait_until="domcontentloaded")
+        btn = c3_page.locator("#openPortalBtn")
+        expect(btn).to_be_visible()
+        expect(btn).to_contain_text("Open selected portal", timeout=5_000)
+        before = _reports_dir() / "c3_setup_playwright_before_open_portal.png"
+        after = _reports_dir() / "c3_setup_playwright_after_open_portal.png"
+        c3_page.screenshot(path=str(before), full_page=True)
+        btn.click()
+        msg = c3_page.locator("#navMsg")
+        expect(msg).to_be_visible(timeout=5_000)
+        expect(msg).to_contain_text(
+            re.compile(r"Opened in VNC browser", re.I),
+            timeout=90_000,
+        )
+        c3_page.screenshot(path=str(after), full_page=True)
