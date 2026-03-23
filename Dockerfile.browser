@@ -20,18 +20,25 @@ ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 WORKDIR /browser-auth
 
-# Single layer: Python, VNC stack, and Chromium system deps via Playwright.
-# Combining apt + pip + playwright install avoids duplicate apt-get update layers.
+# Shared URL helpers (copied with browser_auth; not in browser_auth/ folder)
+COPY portal_urls.py /browser-auth/portal_urls.py
+
+# Layer 1: apt + Python deps + pip websockify (newer than distro 0.10.x; fewer RFB drops).
 COPY browser_auth/requirements.txt .
 RUN apt-get update && apt-get install -y --no-install-recommends \
         python3 python3-pip \
         x11vnc xvfb novnc net-tools python3-websockify \
         curl ca-certificates \
     && pip install --no-cache-dir -r requirements.txt \
-    && playwright install chromium --with-deps \
+    && pip install --no-cache-dir 'websockify>=0.11,<0.14' \
+    && apt-get clean && rm -rf /var/lib/apt/lists/* /tmp/* /root/.cache
+
+# Layer 2: Playwright Chromium (cached independently of websockify bumps).
+# Do not remove numpy: pip websockify needs it; stripping it causes RFB failures (noVNC "connection closed").
+RUN playwright install chromium --with-deps \
     && rm -rf /ms-playwright/ffmpeg-* \
     && pip uninstall -y pip setuptools 2>/dev/null; \
-       rm -rf /usr/lib/python3/dist-packages/numpy* \
+       rm -rf \
               /usr/lib/python3/dist-packages/docutils* \
               /usr/lib/python3/dist-packages/PIL* \
               /usr/lib/python3/dist-packages/Pillow* \
@@ -44,7 +51,7 @@ RUN chmod +x /browser-auth/entrypoint.sh && mkdir -p /browser-profile
 
 EXPOSE 6080 8001
 
-HEALTHCHECK --interval=15s --timeout=5s --start-period=20s --retries=3 \
-    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')" || exit 1
+HEALTHCHECK --interval=15s --timeout=5s --start-period=25s --retries=3 \
+    CMD python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8001/health'); urllib.request.urlopen('http://127.0.0.1:6080/')" || exit 1
 
 CMD ["/browser-auth/entrypoint.sh"]

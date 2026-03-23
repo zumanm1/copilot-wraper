@@ -1,0 +1,47 @@
+# Focused suite: noVNC (Playwright + Puppeteer), C3 setup HTML, browser entrypoint, portal URLs.
+# Requires: docker compose up -d browser-auth for Playwright/Puppeteer rows.
+# PNG artifacts (gitignored): tests/reports/novnc_playwright_after_warm.png, novnc_puppeteer_after_warm.png
+# Generated: 2026-03-23
+
+============================= test session starts ==============================
+platform darwin -- Python 3.11.13, pytest-7.4.3, pluggy-1.6.0 -- /opt/homebrew/opt/python@3.11/bin/python3.11
+cachedir: .pytest_cache
+metadata: {'Python': '3.11.13', 'Platform': 'macOS-14.5-arm64-arm-64bit', 'Packages': {'pytest': '7.4.3', 'pluggy': '1.6.0'}, 'Plugins': {'anyio': '4.12.1', 'flask': '1.3.0', 'html': '4.1.1', 'timeout': '2.4.0', 'metadata': '3.1.1', 'cov': '4.1.0', 'asyncio': '0.21.1', 'playwright': '0.7.0', 'mock': '3.14.1', 'langsmith': '0.3.45', 'base-url': '2.1.0'}, 'CI': '1', 'Base URL': ''}
+rootdir: /Users/macbook
+configfile: pytest.ini
+plugins: anyio-4.12.1, flask-1.3.0, html-4.1.1, timeout-2.4.0, metadata-3.1.1, cov-4.1.0, asyncio-0.21.1, playwright-0.7.0, mock-3.14.1, langsmith-0.3.45, base-url-2.1.0
+asyncio: mode=Mode.STRICT
+collecting ... collected 27 items
+
+tests/test_playwright_novnc.py::TestBrowserAuthNoVNC::test_novnc_framebuffer_not_black_after_warm_screenshot PASSED [  3%]
+tests/test_playwright_novnc.py::TestBrowserAuthNoVNC::test_novnc_root_serves_client_html PASSED [  7%]
+tests/test_playwright_novnc.py::TestBrowserAuthNoVNC::test_root_url_reaches_connected PASSED [ 11%]
+tests/test_playwright_novnc.py::TestBrowserAuthNoVNC::test_vnc_auto_reaches_connected PASSED [ 14%]
+tests/test_puppeteer_novnc.py::test_puppeteer_novnc_validate_script PASSED [ 18%]
+tests/test_unit_browser_config.py::test_compose_vnc_resolution PASSED    [ 22%]
+tests/test_unit_browser_config.py::test_cookie_extractor_viewport_and_args PASSED [ 25%]
+tests/test_unit_browser_config.py::test_cross_source_consistency PASSED  [ 29%]
+tests/test_unit_browser_config.py::test_entrypoint_novnc_scaling PASSED  [ 33%]
+tests/test_unit_browser_config.py::test_entrypoint_resolution PASSED     [ 37%]
+tests/test_unit_browser_config.py::test_entrypoint_root_index_is_vnc_auto_with_query_redirect PASSED [ 40%]
+tests/test_unit_browser_config.py::test_entrypoint_waits_for_websockify PASSED [ 44%]
+tests/test_unit_c3_setup_html.py::test_setup_respects_consumer_in_env PASSED [ 48%]
+tests/test_unit_c3_setup_html.py::test_setup_shows_two_portal_radios_m365_default PASSED [ 51%]
+tests/test_unit_cookie_extractor_portal.py::test_portal_landing_m365_default_uses_chat_path PASSED [ 55%]
+tests/test_unit_cookie_extractor_portal.py::test_portal_landing_normalizes_m365_com_typo PASSED [ 59%]
+tests/test_unit_cookie_extractor_portal.py::test_portal_landing_override_adds_scheme PASSED [ 62%]
+tests/test_unit_cookie_extractor_portal.py::test_portal_settings_empty_file_defaults_m365 PASSED [ 66%]
+tests/test_unit_cookie_extractor_portal.py::test_portal_settings_from_env_file PASSED [ 70%]
+tests/test_unit_cookie_extractor_portal.py::test_portal_settings_invalid_profile_defaults_consumer PASSED [ 74%]
+tests/test_unit_cookie_extractor_portal.py::test_target_cookies_consumer_uses_copilot_host PASSED [ 77%]
+tests/test_unit_cookie_extractor_portal.py::test_target_cookies_m365_uses_hub_host PASSED [ 81%]
+tests/test_unit_portal_urls.py::test_empty_unchanged PASSED              [ 85%]
+tests/test_unit_portal_urls.py::test_m365_default_landing_is_chat_path PASSED [ 88%]
+tests/test_unit_portal_urls.py::test_normalize_copilot_www PASSED        [ 92%]
+tests/test_unit_portal_urls.py::test_normalize_m365_cloud_microsoft_com_to_canonical PASSED [ 96%]
+tests/test_unit_portal_urls.py::test_normalize_www_m365 PASSED           [100%]
+
+============================= 27 passed in 26.72s ==============================
+
+---
+Additional: tests/test_playwright_c3_setup.py (2 passed, ~1.4s)

@@ -120,6 +120,25 @@ def test_entrypoint_novnc_scaling():
     )
 
 
+def test_entrypoint_waits_for_websockify():
+    """Avoid marking C3 healthy before :6080 serves noVNC (RFB handshake would fail in browser)."""
+    text = ENTRYPOINT_SH.read_text()
+    assert "wait_novnc" in text and "curl -sf" in text and "127.0.0.1:${NOVNC_PORT}" in text, (
+        "entrypoint.sh must wait until websockify HTTP is reachable before exec uvicorn"
+    )
+
+
+def test_entrypoint_root_index_is_vnc_auto_with_query_redirect():
+    """Root index.html must be vnc_auto + one-shot ?resize=…&autoconnect=… when query empty."""
+    text = ENTRYPOINT_SH.read_text()
+    assert "cp -a" in text and "$NOVNC_SERVE/vnc_auto.html" in text and "$NOVNC_SERVE/index.html" in text, (
+        "entrypoint.sh must copy vnc_auto.html to index.html for /"
+    )
+    assert "window.location.replace" in text and "resize=scale" in text and "autoconnect=true" in text, (
+        "entrypoint.sh must inject client redirect to /?resize=scale&autoconnect=true when query empty"
+    )
+
+
 def test_compose_vnc_resolution():
     """VNC_RESOLUTION in docker-compose.yml has height >= MIN_HEIGHT."""
     res = _parse_compose_vnc_resolution()

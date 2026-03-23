@@ -35,8 +35,6 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s:%(name)s:%(message)s")
 
 # ── Streaming event protocol ──────────────────────────────────────────────────
-_WS_BASE = "wss://copilot.microsoft.com/c/api/chat"
-_CONV_URL = "https://copilot.microsoft.com/c/api/conversations"
 _DONE_EVENTS = {"done", "error", "throttled", "badMessage"}
 
 # ── Response cache ────────────────────────────────────────────────────────────
@@ -99,9 +97,10 @@ def reload_cookies() -> None:
 
 
 def _make_headers() -> dict:
+    """Browser-like headers; Origin/Referer follow portal profile (see config)."""
     return {
-        "Origin": "https://copilot.microsoft.com",
-        "Referer": "https://copilot.microsoft.com/",
+        "Origin": config.copilot_browser_origin(),
+        "Referer": config.copilot_browser_referer(),
         "User-Agent": (
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -128,7 +127,7 @@ class CopilotBackend:
         async with self._lock:
             if self._conversation_id:
                 return self._conversation_id
-            async with session.post(_CONV_URL, json={}) as resp:
+            async with session.post(config.copilot_conversations_url(), json={}) as resp:
                 if resp.status != 200:
                     raise RuntimeError(
                         f"Failed to create Copilot conversation: HTTP {resp.status}"
@@ -139,7 +138,8 @@ class CopilotBackend:
 
     def _ws_url(self) -> str:
         sid = str(uuid.uuid4())
-        return f"{_WS_BASE}?api-version=2&clientSessionId={sid}"
+        base = config.copilot_ws_chat_url()
+        return f"{base}?api-version=2&clientSessionId={sid}"
 
     async def chat_completion(self, prompt: str, attachment_path=None, context=None, search=True) -> str:
         global _cache_hits, _cache_misses

@@ -205,6 +205,8 @@ docker compose down
 
 C3 (`C3_browser-auth`) runs a **headless Chromium browser inside Docker** with a noVNC remote display, so you can log into Microsoft Copilot interactively and have your session cookies extracted automatically. This avoids the need to manually copy cookies from your host browser.
 
+**Portal profile (consumer vs M365 web):** open [`http://localhost:8001/setup`](http://localhost:8001/setup) to write `COPILOT_PORTAL_PROFILE` (and optional portal/API URL overrides) into the mounted `.env` and trigger `POST /v1/reload-config` on C1. Then use noVNC to sign in on the matching host (`copilot.microsoft.com` or `m365.cloud.microsoft`) before calling `/extract`. C3 application code lives **in the image** (not bind-mounted): after you change `browser_auth/` or [`portal_urls.py`](portal_urls.py), run `docker compose build browser-auth` and recreate the container.
+
 ### How to use C3
 
 ```bash
@@ -235,8 +237,9 @@ curl http://localhost:8000/v1/debug/cookie
 |---|---|---|
 | `/health` | GET | C3 health check |
 | `/status` | GET | Browser status (open pages, cookies present) |
+| `/setup` | GET, POST | HTML form: portal profile + optional URLs → `.env` + C1 reload |
 | `/extract` | POST | Extract cookies from active Chromium session |
-| `/cookies` | GET | View currently extracted cookies |
+| `/navigate` | POST | Open a URL in the C3 browser (optional manual flows) |
 
 ### Manual cookie fallback
 

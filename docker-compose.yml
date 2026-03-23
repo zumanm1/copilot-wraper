@@ -454,6 +454,11 @@ services:
   # ──────────────────────────────────────────────────────────
   # C3: Headless Chrome Cookie Extractor
   #
+  # If C3 fails with read-only overlayfs: Docker Desktop VM disk — see scripts/recover-c3-docker.sh
+  #
+  # C3 code ships inside the image only (same pattern as pre–dual-portal compose): no bind-mount
+  # of ./browser_auth. After editing browser_auth/ or portal_urls.py: docker compose build browser-auth
+  #
   # Runs Playwright/Chromium + noVNC so user can authenticate
   # via browser UI, then extracts session cookies automatically.
   #
@@ -486,10 +491,11 @@ services:
     shm_size: '2gb'    # Chrome needs shared memory
     restart: "no"
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      # API alone is insufficient: noVNC must be up on :6080 or the UI shows "connection closed".
+      test: ["CMD-SHELL", "curl -sf http://localhost:8001/health >/dev/null && curl -sf http://127.0.0.1:6080/ >/dev/null"]
       interval: 10s
       timeout: 5s
-      start_period: 15s
+      start_period: 25s
       retries: 3
 
 # ── Shared network ────────────────────────────────────────────

@@ -19,11 +19,12 @@ Run in Docker: docker compose run --rm test
 """
 from __future__ import annotations
 
+import base64
 import json
 import os
-import time
-import base64
 import pathlib
+import time
+
 import pytest
 from playwright.sync_api import sync_playwright, APIRequestContext, Page, expect
 

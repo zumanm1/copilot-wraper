@@ -1,11 +1,11 @@
 """
 browser_auth/cookie_extractor.py
 =================================
-Headless Chromium cookie extractor for copilot.microsoft.com + bing.com.
+Headless Chromium cookie extractor for Copilot / M365 hub + bing.com.
 
 Strategy:
   1. Launch Chromium (headed, visible via noVNC on :6080)
-  2. Navigate to copilot.microsoft.com — waits for login if needed
+  2. Navigate to portal (consumer or m365.cloud.microsoft per .env) — waits for login if needed
   3. Navigate to bing.com — captures _U and other bing cookies
   4. Extract all session cookies from both domains via Playwright
   5. Write combined cookie string to /app/.env
@@ -23,20 +23,95 @@ import os
 import re
 import time
 from pathlib import Path
+from urllib.parse import urlparse
 from playwright.async_api import async_playwright, BrowserContext, Page, Browser
 
+from portal_urls import m365_hub_default_landing, normalize_copilot_portal_url
+
 # ── Cookie targets ─────────────────────────────────────────────────────────────
-# domain → list of cookie names to collect
-TARGET_COOKIES = {
-    "https://copilot.microsoft.com": [
-        "__cf_bm", "_C_ETH", "_EDGE_S", "MUID", "MUIDB", "_EDGE_V",
-        "__Host-copilot-anon", "MSFPC",
-    ],
-    "https://www.bing.com": [
-        "_U", "MUID", "MUIDB", "SRCHHPGUSR", "SRCHD", "SRCHUID",
-        "_EDGE_S", "_EDGE_V", "_RwBf",
-    ],
-}
+# domain → list of cookie names to collect (must visit each URL before context.cookies)
+_COPILOT_PORTAL_COOKIE_NAMES = [
+    "__cf_bm", "_C_ETH", "_EDGE_S", "MUID", "MUIDB", "_EDGE_V",
+    "__Host-copilot-anon", "MSFPC",
+]
+_M365_HUB_COOKIE_NAMES = list(_COPILOT_PORTAL_COOKIE_NAMES)  # same MS ecosystem set; refine after traces
+
+_BING_COOKIE_NAMES = [
+    "_U", "MUID", "MUIDB", "SRCHHPGUSR", "SRCHD", "SRCHUID",
+    "_EDGE_S", "_EDGE_V", "_RwBf",
+]
+
+_VALID_PROFILES = frozenset({"consumer", "m365_hub"})
+
+
+def target_cookies_for_profile(profile: str) -> dict[str, list[str]]:
+    profile = (profile or "consumer").strip().lower()
+    if profile not in _VALID_PROFILES:
+        profile = "consumer"
+    portal_url = (
+        "https://m365.cloud.microsoft"
+        if profile == "m365_hub"
+        else "https://copilot.microsoft.com"
+    )
+    return {
+        portal_url: _M365_HUB_COOKIE_NAMES if profile == "m365_hub" else _COPILOT_PORTAL_COOKIE_NAMES,
+        "https://www.bing.com": _BING_COOKIE_NAMES,
+    }
+
+
+def _read_env_keys(env_path: str, keys: tuple[str, ...]) -> dict[str, str]:
+    """Parse KEY=value from a mounted .env (no python-dotenv)."""
+    out: dict[str, str] = {}
+    try:
+        text = Path(env_path).read_text()
+    except OSError:
+        return out
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" not in line:
+            continue
+        k, _, v = line.partition("=")
+        k = k.strip()
+        if k in keys:
+            out[k] = v.strip().strip('"').strip("'")
+    return out
+
+
+def portal_settings_from_env_file(env_path: str) -> tuple[str, str, str]:
+    """
+    Returns (profile, portal_base_url, api_base_url) from disk so C3 picks up
+    /setup changes without container restart. Empty strings mean use config defaults.
+    """
+    data = _read_env_keys(
+        env_path,
+        (
+            "COPILOT_PORTAL_PROFILE",
+            "COPILOT_PORTAL_BASE_URL",
+            "COPILOT_PORTAL_API_BASE_URL",
+        ),
+    )
+    profile = (data.get("COPILOT_PORTAL_PROFILE") or "m365_hub").strip().lower()
+    if profile not in _VALID_PROFILES:
+        profile = "consumer"
+    return (
+        profile,
+        (data.get("COPILOT_PORTAL_BASE_URL") or "").strip(),
+        (data.get("COPILOT_PORTAL_API_BASE_URL") or "").strip(),
+    )
+
+
+def portal_landing_url(profile: str, portal_base_override: str) -> str:
+    """First navigation URL for login + cookie scope (no trailing slash)."""
+    if portal_base_override:
+        u = portal_base_override.strip().rstrip("/")
+        if not u.startswith("http://") and not u.startswith("https://"):
+            u = "https://" + u.lstrip("/")
+        return normalize_copilot_portal_url(u).rstrip("/")
+    if (profile or "m365_hub").strip().lower() == "m365_hub":
+        return normalize_copilot_portal_url(m365_hub_default_landing()).rstrip("/")
+    return "https://copilot.microsoft.com"
 # Cookies present in both anonymous and authenticated sessions
 ANON_COOKIES = ["MUID", "MUIDB", "_EDGE_S", "_EDGE_V", "MSFPC"]
 # Additional cookies only present when signed in to a Microsoft account
@@ -102,10 +177,10 @@ async def _get_or_create_page(context: BrowserContext) -> Page:
     return await context.new_page()
 
 
-async def _is_logged_in(page: Page) -> bool:
+async def _is_logged_in(page: Page, portal_host_markers: tuple[str, ...]) -> bool:
     """
     Detect login state. Primary check is URL-based (fast, reliable).
-    If we're on copilot.microsoft.com and NOT on a Microsoft login page,
+    If we're on the expected Copilot/M365 hub host and NOT on a Microsoft login page,
     we consider the session valid enough to extract cookies.
     """
     try:
@@ -114,9 +189,9 @@ async def _is_logged_in(page: Page) -> bool:
         if any(h in url for h in ("login.microsoft.com", "login.live.com",
                                    "login.microsoftonline.com", "account.live.com")):
             return False
-        # On copilot.microsoft.com (or a subpath) — session is active
-        if "copilot.microsoft.com" in url:
-            return True
+        for marker in portal_host_markers:
+            if marker in url:
+                return True
         # On bing.com or another Microsoft domain — check for auth cookie
         cookies = await page.context.cookies(["https://www.bing.com"])
         if any(c["name"] == "_U" for c in cookies):
@@ -127,14 +202,18 @@ async def _is_logged_in(page: Page) -> bool:
         return False
 
 
-async def _collect_cookies(context: BrowserContext, page: Page) -> dict[str, str]:
+async def _collect_cookies(
+    context: BrowserContext,
+    page: Page,
+    target_cookies: dict[str, list[str]],
+) -> dict[str, str]:
     """
     Navigate to each target domain and collect all target cookies.
     Must visit each domain explicitly — browsers scope cookies by domain.
     """
     collected: dict[str, str] = {}
 
-    for url, names in TARGET_COOKIES.items():
+    for url, names in target_cookies.items():
         try:
             # Navigate to the domain so its cookies are accessible
             current = page.url
@@ -184,57 +263,71 @@ def _patch_env(env_path: str, key: str, value: str) -> None:
     Path(env_path).write_text("".join(lines))
 
 
+def patch_env_variable(env_path: str, key: str, value: str) -> None:
+    """Public wrapper for server /setup and tests."""
+    _patch_env(env_path, key, value)
+
+
 async def extract_and_save(env_path: str = "/app/.env") -> dict:
     """
     Main extraction flow.
     1. Launch browser (or reuse existing).
-    2. Navigate to copilot.microsoft.com.
-    3. If not logged in, wait up to 5 min for user to authenticate via noVNC.
-    4. Collect cookies from copilot + bing.
+    2. Navigate to portal (consumer Copilot or M365 hub per .env).
+    3. If not logged in, wait up to 60s for user to authenticate via noVNC.
+    4. Collect cookies from portal + bing.
     5. Write to .env.
     Returns a result dict with status and cookie info.
     """
+    profile, portal_base_override, _api_override = portal_settings_from_env_file(env_path)
+    landing = portal_landing_url(profile, portal_base_override)
+    netloc = (urlparse(landing).netloc or "").lower()
+    if netloc:
+        host_markers = (netloc,)
+    else:
+        host_markers = ("copilot.microsoft.com", "m365.cloud.microsoft")
+    target_cookies = target_cookies_for_profile(profile)
+
     async with _lock:
         context = await _get_context()
         page = await _get_or_create_page(context)
 
-        # Step 1: Navigate to Copilot (skip if already there)
+        # Step 1: Navigate to portal (skip if already there)
         current_url = page.url
-        if "copilot.microsoft.com" not in current_url:
-            print("[cookie_extractor] Navigating to copilot.microsoft.com...")
+        landing_norm = landing.rstrip("/")
+        if not current_url.startswith(landing_norm):
+            print(f"[cookie_extractor] Navigating to {landing} (profile={profile})...")
             try:
-                await page.goto("https://copilot.microsoft.com",
-                                wait_until="domcontentloaded", timeout=20_000)
+                await page.goto(landing, wait_until="domcontentloaded", timeout=20_000)
                 await asyncio.sleep(2)
             except Exception as e:
-                return {"status": "error", "message": f"Failed to navigate to Copilot: {e}"}
+                return {"status": "error", "message": f"Failed to navigate to portal: {e}"}
         else:
             print(f"[cookie_extractor] Already on {current_url} — skipping navigation")
 
         # Step 2: Check login (up to 60 seconds for user to log in via noVNC)
-        logged_in = await _is_logged_in(page)
+        logged_in = await _is_logged_in(page, host_markers)
         if not logged_in:
             print("[cookie_extractor] Not logged in. Waiting up to 60s for authentication via noVNC...")
-            print("[cookie_extractor] Open http://localhost:6080 and log in to copilot.microsoft.com")
+            print(f"[cookie_extractor] Open http://localhost:6080 and complete sign-in for {landing}")
             deadline = time.time() + 60
             while time.time() < deadline:
                 await asyncio.sleep(3)
-                if await _is_logged_in(page):
+                if await _is_logged_in(page, host_markers):
                     print("[cookie_extractor] Login detected!")
                     logged_in = True
                     break
             if not logged_in:
-                print("[cookie_extractor] WARNING: Not on copilot.microsoft.com. Extracting available cookies anyway.")
+                print("[cookie_extractor] WARNING: Portal session not confirmed. Extracting available cookies anyway.")
 
         # Wait for cookies to stabilize after login
         await asyncio.sleep(2)
 
         # Step 3: Collect cookies from all domains
-        cookies = await _collect_cookies(context, page)
+        cookies = await _collect_cookies(context, page, target_cookies)
 
-        # Step 4: Navigate back to Copilot for a clean state
+        # Step 4: Navigate back to portal for a clean state
         try:
-            await page.goto("https://copilot.microsoft.com", wait_until="domcontentloaded", timeout=10_000)
+            await page.goto(landing, wait_until="domcontentloaded", timeout=10_000)
         except Exception:
             pass
 
@@ -271,6 +364,19 @@ async def extract_and_save(env_path: str = "/app/.env") -> dict:
             "cookie_names": list(cookies.keys()),
             "message": msg,
         }
+
+
+async def warm_browser_for_novnc() -> None:
+    """
+    Launch Chromium and open the local /setup page so noVNC shows a framebuffer
+    instead of a black Xvfb before the first /extract or /navigate.
+    """
+    setup_url = os.getenv("BROWSER_AUTH_SETUP_URL", "http://127.0.0.1:8001/setup")
+    async with _lock:
+        context = await _get_context()
+        page = await _get_or_create_page(context)
+        await page.goto(setup_url, wait_until="domcontentloaded", timeout=60_000)
+    print(f"[cookie_extractor] noVNC warm: opened {setup_url}")
 
 
 async def get_context() -> BrowserContext:

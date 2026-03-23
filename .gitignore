@@ -19,6 +19,7 @@ build/
 *.egg
 
 # Testing
+tests/puppeteer_novnc/node_modules/
 .pytest_cache/
 .coverage
 htmlcov/
