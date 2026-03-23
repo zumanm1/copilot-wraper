@@ -1105,6 +1105,14 @@ open tests/reports/report.html
 
 ### Manual curl validation
 
+**C3 extract smoke** (after noVNC sign-in — validates `POST /extract` JSON; does not automate Microsoft login):
+
+```bash
+./scripts/smoke_c3_extract.sh
+# Optional: also POST a tiny chat to C1 (often fails until cookies are good):
+# WITH_CHAT=1 ./scripts/smoke_c3_extract.sh
+```
+
 ```bash
 # Health
 curl http://localhost:8000/health
