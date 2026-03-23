@@ -42,8 +42,8 @@ Your App / OpenAI SDK / Claude Code / Hermes / ...
 │  /v1/agent/*           (stateful sessions)    │
 └──────────────────────┬────────────────────────┘
                        │  WebSocket (WSS)
-                       ▼
-            copilot.microsoft.com
+               ▼
+    copilot.microsoft.com
                        ▲
          C3 browser-auth feeds session cookies
 ```
