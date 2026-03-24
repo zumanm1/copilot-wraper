@@ -1,22 +1,34 @@
-"""Unit tests for browser_auth cookie_extractor portal helpers (no Playwright)."""
+"""Unit tests for browser_auth cookie_extractor portal helpers (no Playwright).
+
+IMPORTANT: browser_auth/ must NOT be added to sys.path at module level.
+Doing so causes ``import server`` in later test files to resolve to
+``browser_auth/server.py`` instead of the root ``server.py`` (C1).
+"""
 from __future__ import annotations
 
+import importlib.util
 import sys
 from pathlib import Path
 import pytest
 
 _ROOT = Path(__file__).resolve().parents[1]
-_BROWSER_AUTH = _ROOT / "browser_auth"
-for _p in (_ROOT, _BROWSER_AUTH):
-    if str(_p) not in sys.path:
-        sys.path.insert(0, str(_p))
+# Only add project root (for portal_urls etc.) — NOT browser_auth/
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
-from cookie_extractor import (  # noqa: E402
-    _is_logged_in,
-    portal_landing_url,
-    portal_settings_from_env_file,
-    target_cookies_for_profile,
+# Load cookie_extractor by file path to avoid adding browser_auth/ to sys.path
+_spec = importlib.util.spec_from_file_location(
+    "browser_auth_cookie_extractor",
+    str(_ROOT / "browser_auth" / "cookie_extractor.py"),
 )
+_ce = importlib.util.module_from_spec(_spec)
+sys.modules["browser_auth_cookie_extractor"] = _ce
+_spec.loader.exec_module(_ce)
+
+_is_logged_in = _ce._is_logged_in
+portal_landing_url = _ce.portal_landing_url
+portal_settings_from_env_file = _ce.portal_settings_from_env_file
+target_cookies_for_profile = _ce.target_cookies_for_profile
 
 
 def test_target_cookies_consumer_uses_copilot_host():
