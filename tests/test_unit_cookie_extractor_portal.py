@@ -118,15 +118,16 @@ async def test_is_logged_in_false_when_m365_auth_modal_present():
         "https://m365.cloud.microsoft/chat?auth=1",
         "<div>Authentication required</div><button>Continue</button>",
     )
-    ok = await _is_logged_in(p, ("m365.cloud.microsoft",))
+    ok = await _is_logged_in(p, ("m365.cloud.microsoft",), "m365_hub")
     assert ok is False
 
 
 @pytest.mark.asyncio
-async def test_is_logged_in_true_on_portal_host_without_auth_gate():
+async def test_is_logged_in_true_on_portal_host_with_m365_auth_cookie():
     p = _DummyPage(
         "https://m365.cloud.microsoft/chat",
         "<main>Welcome to Copilot</main>",
+        cookies=[{"name": "OH.SID", "value": "abc"}],
     )
-    ok = await _is_logged_in(p, ("m365.cloud.microsoft",))
+    ok = await _is_logged_in(p, ("m365.cloud.microsoft",), "m365_hub")
     assert ok is True

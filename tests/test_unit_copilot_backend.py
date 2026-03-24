@@ -74,6 +74,55 @@ async def test_close_clears_conversation_id(backend):
     assert backend._conversation_id is None
 
 
+def test_provider_auto_m365(monkeypatch):
+    monkeypatch.setenv("COPILOT_PROVIDER", "auto")
+    monkeypatch.setenv("COPILOT_PORTAL_PROFILE", "m365_hub")
+    import config as cfg
+    import copilot_backend as cb
+    import importlib
+    importlib.reload(cfg)
+    importlib.reload(cb)
+    b = cb.CopilotBackend()
+    assert b.provider.name == "m365"
+
+
+def test_provider_auto_consumer(monkeypatch):
+    monkeypatch.setenv("COPILOT_PROVIDER", "auto")
+    monkeypatch.setenv("COPILOT_PORTAL_PROFILE", "consumer")
+    import config as cfg
+    import copilot_backend as cb
+    import importlib
+    importlib.reload(cfg)
+    importlib.reload(cb)
+    b = cb.CopilotBackend()
+    assert b.provider.name == "copilot"
+
+
+def test_m365_provider_missing_session_cookie_error(monkeypatch):
+    monkeypatch.setenv("COPILOT_PROVIDER", "m365")
+    monkeypatch.setenv("M365_PROVIDER_FALLBACK_TO_COPILOT", "false")
+    import config as cfg
+    import copilot_backend as cb
+    import importlib
+    importlib.reload(cfg)
+    importlib.reload(cb)
+    p = cb.M365Provider()
+    with pytest.raises(RuntimeError, match="M365 provider requires an active M365 web session cookie"):
+        p.validate_session("MUID=abc;_U=xyz")
+
+
+def test_no_cross_provider_auto_fallback(monkeypatch):
+    monkeypatch.setenv("COPILOT_PROVIDER", "m365")
+    import config as cfg
+    import copilot_backend as cb
+    import importlib
+    importlib.reload(cfg)
+    importlib.reload(cb)
+    b = cb.CopilotBackend()
+    assert b.provider.name == "m365"
+    assert cb._should_fallback_to_copilot(b.provider, "MUID=abc;_U=xyz") is False
+
+
 # ── CopilotConnectionPool ────────────────────────────────────────────
 
 async def test_pool_acquire_creates_backend():
@@ -103,136 +152,3 @@ async def test_pool_close_all_empties_pool():
         pool._connections.append(b)
         await pool.close_all()
         assert len(pool._connections) == 0
-
-
-def test_extract_conversation_id_shapes():
-    from copilot_backend import _extract_conversation_id
-    assert _extract_conversation_id({"id": "abc"}) == "abc"
-    assert _extract_conversation_id({"conversations": [{"id": "c1"}]}) == "c1"
-    assert _extract_conversation_id({"items": [{"conversationId": "c2"}]}) == "c2"
-    assert _extract_conversation_id([{"conversationId": "c3"}]) == "c3"
-    assert _extract_conversation_id({"items": []}) is None
-
-
-def test_validate_provider_cookie_compatibility_m365_ok(monkeypatch):
-    import config
-    from copilot_backend import _validate_provider_cookie_compatibility
-
-    monkeypatch.setattr(config, "copilot_provider", lambda: "m365")
-    _validate_provider_cookie_compatibility("MSFPC=abc; foo=bar")
-
-
-def test_validate_provider_cookie_compatibility_m365_missing_required(monkeypatch):
-    import config
-    from copilot_backend import _validate_provider_cookie_compatibility
-
-    monkeypatch.setattr(config, "copilot_provider", lambda: "m365")
-    with pytest.raises(RuntimeError, match="M365 provider selected"):
-        _validate_provider_cookie_compatibility("MUID=abc; foo=bar")
-
-
-def test_validate_provider_cookie_compatibility_copilot_ok(monkeypatch):
-    import config
-    from copilot_backend import _validate_provider_cookie_compatibility
-
-    monkeypatch.setattr(config, "copilot_provider", lambda: "copilot")
-    _validate_provider_cookie_compatibility("MUID=abc; foo=bar")
-
-
-def test_validate_provider_cookie_compatibility_copilot_missing_required(monkeypatch):
-    import config
-    from copilot_backend import _validate_provider_cookie_compatibility
-
-    monkeypatch.setattr(config, "copilot_provider", lambda: "copilot")
-    with pytest.raises(RuntimeError, match="Copilot provider selected"):
-        _validate_provider_cookie_compatibility("OH.SID=abc; foo=bar")
-
-
-def test_validate_provider_cookie_compatibility_empty_cookie_header(monkeypatch):
-    import config
-    from copilot_backend import _validate_provider_cookie_compatibility
-
-    monkeypatch.setattr(config, "copilot_provider", lambda: "m365")
-    with pytest.raises(RuntimeError, match="No Copilot cookies loaded"):
-        _validate_provider_cookie_compatibility("")
-
-
-class _FakeResp:
-    def __init__(self, status, payload):
-        self.status = status
-        self._payload = payload
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, exc_type, exc, tb):
-        return False
-
-    async def json(self, content_type=None):
-        return self._payload
-
-
-class _FakeSession:
-    def __init__(self, get_resp=None, post_resp=None):
-        self._get_resp = get_resp
-        self._post_resp = post_resp
-
-    def get(self, *_args, **_kwargs):
-        return self._get_resp
-
-    def post(self, *_args, **_kwargs):
-        return self._post_resp
-
-
-async def test_create_conversation_m365_get_success(monkeypatch):
-    from copilot_backend import CopilotBackend
-    import config
-    monkeypatch.setattr(config, "copilot_provider", lambda: "m365")
-    b = CopilotBackend()
-    s = _FakeSession(
-        get_resp=_FakeResp(200, {"conversations": [{"id": "m365-1"}]}),
-        post_resp=_FakeResp(200, {"id": "post-fallback"}),
-    )
-    cid = await b._create_conversation(s)
-    assert cid == "m365-1"
-
-
-async def test_create_conversation_m365_post_fallback(monkeypatch):
-    from copilot_backend import CopilotBackend
-    import config
-    monkeypatch.setattr(config, "copilot_provider", lambda: "m365")
-    b = CopilotBackend()
-    s = _FakeSession(
-        get_resp=_FakeResp(405, {}),
-        post_resp=_FakeResp(200, {"id": "post-id"}),
-    )
-    cid = await b._create_conversation(s)
-    assert cid == "post-id"
-
-
-async def test_create_conversation_m365_unauthorized(monkeypatch):
-    from copilot_backend import CopilotBackend
-    import config
-    monkeypatch.setattr(config, "copilot_provider", lambda: "m365")
-    b = CopilotBackend()
-    s = _FakeSession(
-        get_resp=_FakeResp(405, {}),
-        post_resp=_FakeResp(403, {}),
-    )
-    with pytest.raises(RuntimeError, match="unauthorized"):
-        await b._create_conversation(s)
-
-
-async def test_create_conversation_copilot_m365_base_mismatch(monkeypatch):
-    from copilot_backend import CopilotBackend
-    import config
-
-    monkeypatch.setattr(config, "copilot_provider", lambda: "copilot")
-    monkeypatch.setattr(config, "copilot_conversations_url", lambda: "https://m365.cloud.microsoft/c/api/conversations")
-    b = CopilotBackend()
-    s = _FakeSession(
-        get_resp=_FakeResp(200, {}),
-        post_resp=_FakeResp(200, {"id": "should-not-be-used"}),
-    )
-    with pytest.raises(RuntimeError, match="Config mismatch"):
-        await b._create_conversation(s)

@@ -14,6 +14,7 @@ Endpoints:
 from __future__ import annotations
 import asyncio
 import html
+import json
 import httpx
 import os
 from contextlib import asynccontextmanager
@@ -275,3 +276,236 @@ async def navigate(request: Request):
         return {"status": "ok", "url": page.url}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+@app.post("/trace/m365-bootstrap")
+async def trace_m365_bootstrap():
+    """
+    Capture real in-browser request/response metadata for M365 conversations bootstrap.
+    This is a diagnostic endpoint for Phase B (no secrets returned).
+    """
+    target = "https://m365.cloud.microsoft/c/api/conversations"
+    context = await get_context()
+    page = await context.new_page()
+
+    captured: dict = {
+        "request": None,
+        "response": None,
+        "fetch_result": None,
+    }
+
+    def _on_request(req):
+        if "/c/api/conversations" not in req.url:
+            return
+        headers = req.headers or {}
+        captured["request"] = {
+            "url": req.url,
+            "method": req.method,
+            "headers_subset": {
+                "origin": headers.get("origin"),
+                "referer": headers.get("referer"),
+                "authorization_present": bool(headers.get("authorization")),
+                "cookie_present": bool(headers.get("cookie")),
+                "x_ms_client_request_id": headers.get("x-ms-client-request-id"),
+            },
+        }
+
+    async def _on_response(resp):
+        if "/c/api/conversations" not in resp.url:
+            return
+        headers = await resp.all_headers()
+        captured["response"] = {
+            "url": resp.url,
+            "status": resp.status,
+            "headers_subset": {
+                "location": headers.get("location"),
+                "www-authenticate": headers.get("www-authenticate"),
+                "access-control-allow-origin": headers.get("access-control-allow-origin"),
+            },
+        }
+
+    page.on("request", _on_request)
+    page.on("response", lambda r: asyncio.create_task(_on_response(r)))
+    try:
+        await page.goto("https://m365.cloud.microsoft/chat/", wait_until="domcontentloaded", timeout=30_000)
+        await asyncio.sleep(2)
+        if "m365.cloud.microsoft" not in (page.url or ""):
+            return JSONResponse(
+                content={
+                    "status": "error",
+                    "message": "Trace page is not on m365.cloud.microsoft; complete interactive sign-in in noVNC first.",
+                    "current_url": page.url,
+                }
+            )
+
+        # Execute same-origin fetch in the authenticated browser context.
+        res = await page.evaluate(
+            """async (url) => {
+                try {
+                    const r = await fetch(url, {
+                        method: "GET",
+                        credentials: "include",
+                        redirect: "manual",
+                    });
+                    const hdr = {};
+                    for (const [k, v] of r.headers.entries()) {
+                        if (["location", "www-authenticate", "access-control-allow-origin"].includes(k.toLowerCase())) {
+                            hdr[k.toLowerCase()] = v;
+                        }
+                    }
+                    return {
+                        ok: r.ok,
+                        status: r.status,
+                        type: r.type,
+                        redirected: r.redirected,
+                        url: r.url,
+                        headers_subset: hdr,
+                        body_preview: (await r.text()).slice(0, 300),
+                    };
+                } catch (e) {
+                    return { error: String(e) };
+                }
+            }""",
+            target,
+        )
+        captured["fetch_result"] = res
+        return JSONResponse(
+            content={
+                "status": "ok",
+                "target": target,
+                "trace": captured,
+            }
+        )
+    finally:
+        try:
+            page.remove_listener("request", _on_request)
+        except Exception:
+            pass
+        try:
+            await page.close()
+        except Exception:
+            pass
+
+
+@app.post("/trace/m365-traffic")
+async def trace_m365_traffic(request: Request):
+    """
+    Capture live M365 XHR/fetch/websocket request metadata for a short window.
+    Use while interacting in noVNC to discover the real chat bootstrap path.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    duration = int(body.get("duration_seconds", 15))
+    duration = max(5, min(duration, 60))
+
+    context = await get_context()
+    page = await context.new_page()
+    events: list[dict] = []
+
+    def _capture(req):
+        rtype = req.resource_type or ""
+        if rtype not in ("xhr", "fetch", "websocket"):
+            return
+        h = req.headers or {}
+        events.append(
+            {
+                "type": rtype,
+                "method": req.method,
+                "url": req.url,
+                "authorization_present": bool(h.get("authorization")),
+                "x_ms_client_request_id": h.get("x-ms-client-request-id"),
+                "content_type": h.get("content-type"),
+                "referer": h.get("referer"),
+            }
+        )
+
+    page.on("request", _capture)
+    try:
+        await page.goto("https://m365.cloud.microsoft/chat/", wait_until="domcontentloaded", timeout=30_000)
+        await asyncio.sleep(duration)
+        # De-duplicate by method+url+type
+        uniq = {}
+        for e in events:
+            key = (e["type"], e["method"], e["url"])
+            uniq[key] = e
+        interesting = list(uniq.values())
+        interesting.sort(key=lambda x: x["url"])
+        return JSONResponse(
+            content={
+                "status": "ok",
+                "duration_seconds": duration,
+                "current_url": page.url,
+                "captured_count": len(events),
+                "unique_count": len(interesting),
+                "traffic": interesting[:200],
+            }
+        )
+    finally:
+        try:
+            page.remove_listener("request", _capture)
+        except Exception:
+            pass
+        try:
+            await page.close()
+        except Exception:
+            pass
+
+
+@app.post("/trace/m365-traffic-live")
+async def trace_m365_traffic_live(request: Request):
+    """
+    Capture traffic across ALL existing browser pages for a short window.
+    Use this while interacting manually in noVNC to capture actual send-message calls.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    duration = int(body.get("duration_seconds", 20))
+    duration = max(5, min(duration, 90))
+
+    context = await get_context()
+    events: list[dict] = []
+
+    def _capture(req):
+        rtype = req.resource_type or ""
+        if rtype not in ("xhr", "fetch", "websocket"):
+            return
+        h = req.headers or {}
+        events.append(
+            {
+                "type": rtype,
+                "method": req.method,
+                "url": req.url,
+                "authorization_present": bool(h.get("authorization")),
+                "x_ms_client_request_id": h.get("x-ms-client-request-id"),
+                "content_type": h.get("content-type"),
+                "referer": h.get("referer"),
+            }
+        )
+
+    context.on("request", _capture)
+    try:
+        await asyncio.sleep(duration)
+        uniq = {}
+        for e in events:
+            key = (e["type"], e["method"], e["url"])
+            uniq[key] = e
+        interesting = list(uniq.values())
+        interesting.sort(key=lambda x: x["url"])
+        return JSONResponse(
+            content={
+                "status": "ok",
+                "duration_seconds": duration,
+                "captured_count": len(events),
+                "unique_count": len(interesting),
+                "traffic": interesting[:300],
+            }
+        )
+    finally:
+        try:
+            context.remove_listener("request", _capture)
+        except Exception:
+            pass

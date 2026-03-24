@@ -137,9 +137,9 @@ def portal_landing_url(profile: str, portal_base_override: str) -> str:
 ANON_COOKIES = ["MUID", "MUIDB", "_EDGE_S", "_EDGE_V", "MSFPC", "__Host-copilot-anon", "_C_ETH", "SRCHHPGUSR"]
 # Additional cookies only present when signed in to a Microsoft account
 AUTH_COOKIES = ["_U"]
-# Extraction succeeds if at least one required cookie is present (profile-dependent)
+# Extraction succeeds if required auth/session cookies are present (profile-dependent)
 REQUIRED_COOKIES_CONSUMER = ["MUID"]          # bing/copilot domain cookie
-REQUIRED_COOKIES_M365 = ["MSFPC", "OH.SID"]  # m365 domain cookies (any one)
+REQUIRED_COOKIES_M365 = ["OH.SID"]            # signed-in M365 session cookie
 # Legacy alias for tests that import REQUIRED_COOKIES
 REQUIRED_COOKIES = REQUIRED_COOKIES_CONSUMER
 
@@ -155,6 +155,7 @@ _playwright = None
 _browser: Browser | None = None
 _context: BrowserContext | None = None
 _lock = asyncio.Lock()
+_DISMISS_AUTH_DIALOG = os.getenv("BROWSER_AUTH_AUTO_DISMISS_AUTH_DIALOG", "false").strip().lower() == "true"
 
 
 async def _get_context() -> BrowserContext:
@@ -187,6 +188,7 @@ async def _get_context() -> BrowserContext:
             "--no-sandbox",
             "--disable-dev-shm-usage",
             "--disable-blink-features=AutomationControlled",
+            "--disable-quic",
             "--window-size=1280,1024",
             "--window-position=0,0",
             "--start-maximized",
@@ -212,8 +214,10 @@ async def _get_context() -> BrowserContext:
 
     _context.on("page", _on_new_page)
 
-    # Start background monitor that auto-dismisses 'Authentication required' dialogs.
-    asyncio.ensure_future(_auth_dialog_monitor())
+    # Keep manual mouse/keyboard control by default.
+    # Opt-in only when explicit auto-dismiss is desired.
+    if _DISMISS_AUTH_DIALOG:
+        asyncio.ensure_future(_auth_dialog_monitor())
 
     return _context
 
@@ -227,6 +231,12 @@ async def _handle_auth_popup(popup: Page) -> None:
     """
     try:
         url = popup.url
+        # Ignore regular/new tabs (start as about:blank); only handle auth popups.
+        if url in ("", "about:blank"):
+            return
+        auth_hosts = ("login.microsoftonline.com", "login.live.com", "account.live.com")
+        if not any(h in url for h in auth_hosts):
+            return
         print(f"[cookie_extractor] Auth popup opened: {url[:80]}")
         # Wait for the popup to finish its auth redirect (up to 10s)
         await popup.wait_for_load_state("domcontentloaded", timeout=10_000)
@@ -280,7 +290,9 @@ async def _get_or_create_page(context: BrowserContext) -> Page:
     return await context.new_page()
 
 
-async def _is_logged_in(page: Page, portal_host_markers: tuple[str, ...]) -> bool:
+async def _is_logged_in(
+    page: Page, portal_host_markers: tuple[str, ...], profile: str = "consumer"
+) -> bool:
     """
     Detect login state from the current page WITHOUT navigating away.
 
@@ -292,8 +304,8 @@ async def _is_logged_in(page: Page, portal_host_markers: tuple[str, ...]) -> boo
     Checks (fast, no navigation):
       1. If URL is on a Microsoft auth page → not logged in.
       2. If page shows 'Authentication required' dialog → not logged in.
-      3. If URL is on a known portal host → logged in (session may be anon or
-         authenticated; _collect_cookies will determine which).
+      3. If URL is on a known portal host and profile-auth signal exists
+         (cookie or signed-in UI markers) → logged in.
       4. If on about:blank / setup page → not logged in.
     """
     try:
@@ -311,11 +323,37 @@ async def _is_logged_in(page: Page, portal_host_markers: tuple[str, ...]) -> boo
         except Exception:
             pass
 
-        # URL-based check: user is on a portal page without auth gates
-        for marker in portal_host_markers:
-            if marker in url:
+        # Must be on one of the expected portal hosts.
+        on_portal = any(marker in url for marker in portal_host_markers)
+        if not on_portal:
+            return False
+
+        # Profile-aware auth detection: avoid "URL only" false positives.
+        cookie_names: set[str] = set()
+        try:
+            jar = await page.context.cookies([url])
+            cookie_names = {
+                c.get("name", "")
+                for c in jar
+                if isinstance(c, dict) and c.get("name")
+            }
+        except Exception:
+            pass
+
+        if (profile or "").strip().lower() == "m365_hub":
+            # Strong signed-in signal on m365.
+            if "OH.SID" in cookie_names:
                 return True
-        return False
+            # Fallback UI heuristics when cookie inspection lags.
+            signed_in_ui_markers = ("my account", "sign out", "logout")
+            if any(tok in html for tok in signed_in_ui_markers):
+                return True
+            if any(tok in html for tok in ("sign in", "log in")):
+                return False
+            return False
+
+        # Consumer flow keeps previous behavior (portal host is enough).
+        return True
     except Exception:
         return False
 
@@ -354,8 +392,72 @@ async def _collect_cookies(
     return collected
 
 
+async def _collect_shadow_cookies(
+    context: BrowserContext,
+    targets: list[tuple[str, list[str]]],
+) -> dict[str, str]:
+    """
+    Collect cookies from additional domains using a temporary hidden page so
+    the user's visible portal tab is not displaced.
+    """
+    collected: dict[str, str] = {}
+    shadow = await context.new_page()
+    try:
+        for url, names in targets:
+            nav_ok = False
+            try:
+                for attempt in range(2):
+                    try:
+                        await shadow.goto(url, wait_until="domcontentloaded", timeout=15_000)
+                        nav_ok = True
+                        break
+                    except Exception:
+                        if attempt == 0:
+                            await asyncio.sleep(1)
+                if nav_ok:
+                    await asyncio.sleep(1)
+            except Exception as e:
+                print(f"[cookie_extractor] Shadow warning for {url}: {e}")
+            try:
+                # Even when navigation is flaky, context may already have valid cookies.
+                domain_cookies = await context.cookies([url])
+                found = 0
+                for cookie in domain_cookies:
+                    name = cookie["name"]
+                    value = cookie.get("value", "")
+                    if name in names and value:
+                        collected[name] = value
+                        found += 1
+                if found:
+                    print(f"[cookie_extractor] Shadow collected {found} cookies from {url}")
+                elif not nav_ok:
+                    print(f"[cookie_extractor] Shadow skipped noisy failure for {url} (no cookies available)")
+            except Exception as e:
+                print(f"[cookie_extractor] Shadow warning for {url}: {e}")
+    finally:
+        try:
+            await shadow.close()
+        except Exception:
+            pass
+    return collected
+
+
 def _build_cookie_string(cookies: dict[str, str]) -> str:
     return ";".join(f"{k}={v}" for k, v in cookies.items())
+
+
+def _parse_cookie_string(cookie_str: str) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for part in (cookie_str or "").split(";"):
+        part = part.strip()
+        if "=" not in part:
+            continue
+        k, _, v = part.partition("=")
+        k = k.strip()
+        v = v.strip()
+        if k and v:
+            out[k] = v
+    return out
 
 
 def _patch_env(env_path: str, key: str, value: str) -> None:
@@ -424,14 +526,14 @@ async def extract_and_save(env_path: str = "/app/.env") -> dict:
             print(f"[cookie_extractor] Already on {current_url} — skipping navigation")
 
         # Step 2: Check login (up to 60 seconds for user to log in via noVNC)
-        logged_in = await _is_logged_in(page, host_markers)
+        logged_in = await _is_logged_in(page, host_markers, profile)
         if not logged_in:
             print("[cookie_extractor] Not logged in. Waiting up to 60s for authentication via noVNC...")
             print(f"[cookie_extractor] Open http://localhost:6080 and complete sign-in for {landing}")
             deadline = time.time() + 60
             while time.time() < deadline:
                 await asyncio.sleep(3)
-                if await _is_logged_in(page, host_markers):
+                if await _is_logged_in(page, host_markers, profile):
                     print("[cookie_extractor] Login detected!")
                     logged_in = True
                     break
@@ -443,6 +545,15 @@ async def extract_and_save(env_path: str = "/app/.env") -> dict:
 
         # Step 3: Collect cookies from all domains
         cookies = await _collect_cookies(context, page, target_cookies)
+        # Phase B bridge: for m365_hub, also fetch copilot/bing cookies in a shadow tab
+        # so C1 can fallback to copilot provider without disrupting the user's visible page.
+        if profile == "m365_hub":
+            shadow_targets = [
+                ("https://copilot.microsoft.com", _COPILOT_PORTAL_COOKIE_NAMES),
+                ("https://www.bing.com", _BING_COOKIE_NAMES),
+            ]
+            shadow_cookies = await _collect_shadow_cookies(context, shadow_targets)
+            cookies.update(shadow_cookies)
 
         # Step 4: Navigate back to portal for a clean state
         try:
@@ -464,24 +575,44 @@ async def extract_and_save(env_path: str = "/app/.env") -> dict:
                 "cookies_found": list(cookies.keys()),
             }
 
-        cookie_str = _build_cookie_string(cookies)
-        has_auth = any(c in cookies for c in AUTH_COOKIES)
+        # Preserve previously extracted cross-domain cookies if a shadow fetch
+        # transiently fails (timeouts/QUIC errors).
+        prev_env = _read_env_keys(env_path, ("COPILOT_COOKIES", "BING_COOKIES"))
+        prev = _parse_cookie_string(prev_env.get("COPILOT_COOKIES", "") or prev_env.get("BING_COOKIES", ""))
+        merged = dict(prev)
+        merged.update(cookies)
+        cookie_str = _build_cookie_string(merged)
+        if profile == "m365_hub":
+            has_auth = "OH.SID" in cookies
+        else:
+            has_auth = any(c in cookies for c in AUTH_COOKIES)
         mode = "authenticated" if has_auth else "anonymous"
 
         # Step 6: Write to .env (works for both authenticated and anonymous sessions)
         _patch_env(env_path, "COPILOT_COOKIES", cookie_str)
         _patch_env(env_path, "BING_COOKIES", cookie_str)
 
-        # Honest messaging: warn if _U is missing
+        # Profile-aware status message
         if has_auth:
-            msg = f"Extracted {len(cookies)} cookies in authenticated mode (_U cookie present)."
+            if profile == "m365_hub":
+                msg = f"Extracted {len(cookies)} cookies in authenticated mode (OH.SID present)."
+            else:
+                msg = f"Extracted {len(cookies)} cookies in authenticated mode (_U cookie present)."
         else:
-            msg = (
-                f"Extracted {len(cookies)} cookies but NO _U COOKIE (Microsoft account auth). "
-                f"Copilot API calls will fail with 403. "
-                f"To fix: (1) Open http://localhost:6080, (2) Sign in with your Microsoft account, "
-                f"(3) Re-run: curl -X POST http://localhost:8001/extract"
-            )
+            if profile == "m365_hub":
+                msg = (
+                    f"Extracted {len(cookies)} cookies but no OH.SID cookie. "
+                    f"M365 session is not authenticated yet. "
+                    f"To fix: (1) Open http://localhost:6080, (2) Complete M365 sign-in, "
+                    f"(3) Re-run: curl -X POST http://localhost:8001/extract"
+                )
+            else:
+                msg = (
+                    f"Extracted {len(cookies)} cookies but NO _U COOKIE (Microsoft account auth). "
+                    f"Copilot API calls will fail with 403. "
+                    f"To fix: (1) Open http://localhost:6080, (2) Sign in with your Microsoft account, "
+                    f"(3) Re-run: curl -X POST http://localhost:8001/extract"
+                )
         print(f"[cookie_extractor] {msg}")
         return {
             "status": "ok",

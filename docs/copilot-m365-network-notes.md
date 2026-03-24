@@ -35,3 +35,15 @@ _Recorded by:_
 ### Headers
 
 ### Sample JSON
+
+## Open issue (documented, not solved yet)
+
+- **Challenge-state interaction remains unresolved** for some Copilot sessions:
+  - C1 can receive a WebSocket `challenge` event with null method/parameter.
+  - Depending on how it is acknowledged, upstream may return empty output or `invalid-event`.
+- **Do not force users to change primary sign-in flow**:
+  - Primary authentication remains `https://m365.cloud.microsoft.com` (normalized internally).
+  - `https://copilot.microsoft.com/` remains available as a secondary/manual path and is not removed.
+- **Operational note**:
+  - Keep manual mouse/keyboard control in noVNC unblocked by default.
+  - Auto-dismiss of auth dialogs is now opt-in via `BROWSER_AUTH_AUTO_DISMISS_AUTH_DIALOG=true`.

@@ -15,13 +15,12 @@ load_dotenv()
 # ── Copilot portal profile (consumer vs M365 web hub) ─────────────────────────
 # Phase A: both profiles default to consumer API host; Origin/Referer follow portal.
 _VALID_PORTAL_PROFILES = frozenset({"consumer", "m365_hub"})
-_VALID_PROVIDERS = frozenset({"auto", "copilot", "m365"})
 _DEFAULT_PORTAL_BASES = {
     "consumer": "https://copilot.microsoft.com/",
     "m365_hub": m365_hub_default_landing(),
 }
 _DEFAULT_API_BASE = "https://copilot.microsoft.com"
-_DEFAULT_API_BASE_M365 = "https://m365.cloud.microsoft"
+_DEFAULT_M365_API_BASE = "https://m365.cloud.microsoft"
 
 # Server configuration
 HOST = os.getenv("HOST", "0.0.0.0")
@@ -37,11 +36,23 @@ COPILOT_COOKIES = os.getenv("COPILOT_COOKIES", "") or os.getenv("BING_COOKIES", 
 COPILOT_PORTAL_PROFILE = os.getenv("COPILOT_PORTAL_PROFILE", "m365_hub").strip().lower()
 if COPILOT_PORTAL_PROFILE not in _VALID_PORTAL_PROFILES:
     COPILOT_PORTAL_PROFILE = "consumer"
-COPILOT_PROVIDER = os.getenv("COPILOT_PROVIDER", "auto").strip().lower()
-if COPILOT_PROVIDER not in _VALID_PROVIDERS:
-    COPILOT_PROVIDER = "auto"
 COPILOT_PORTAL_BASE_URL = os.getenv("COPILOT_PORTAL_BASE_URL", "").strip()
 COPILOT_PORTAL_API_BASE_URL = os.getenv("COPILOT_PORTAL_API_BASE_URL", "").strip()
+# Provider routing:
+# - auto    : infer from portal profile (m365_hub -> m365, consumer -> copilot)
+# - copilot : force copilot.microsoft.com provider path
+# - m365    : force M365-compatible provider path
+COPILOT_PROVIDER = os.getenv("COPILOT_PROVIDER", "auto").strip().lower()
+if COPILOT_PROVIDER not in {"auto", "copilot", "m365"}:
+    COPILOT_PROVIDER = "auto"
+M365_API_BASE_URL = os.getenv("M365_API_BASE_URL", "").strip()
+M365_PROVIDER_FALLBACK_TO_COPILOT = os.getenv(
+    "M365_PROVIDER_FALLBACK_TO_COPILOT", "false"
+).strip().lower() == "true"
+# Auto cookie-refresh from C1 can destabilize a good M365 cookie set during
+# challenge windows; keep it disabled for m365_hub unless explicitly enabled.
+AUTO_COOKIE_REFRESH = os.getenv("AUTO_COOKIE_REFRESH", "true").strip().lower() == "true"
+AUTO_COOKIE_REFRESH_M365 = os.getenv("AUTO_COOKIE_REFRESH_M365", "false").strip().lower() == "true"
 
 # Copilot settings
 COPILOT_STYLE = os.getenv("COPILOT_STYLE", "smart")
@@ -104,7 +115,7 @@ def portal_base_url_resolved() -> str:
 
 
 def copilot_api_base_url() -> str:
-    """HTTPS origin for REST + WSS (no path)."""
+    """HTTPS origin for REST + WSS (no path), profile/provider aware."""
     if COPILOT_PORTAL_API_BASE_URL:
         u = normalize_copilot_portal_url(COPILOT_PORTAL_API_BASE_URL.strip())
         if not u.startswith("http://") and not u.startswith("https://"):
@@ -113,23 +124,29 @@ def copilot_api_base_url() -> str:
         if parsed.scheme and parsed.netloc:
             return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
         return u.rstrip("/")
-    provider = copilot_provider()
-    if provider == "m365":
-        return _DEFAULT_API_BASE_M365
+    if resolved_provider() == "m365":
+        return m365_api_base_url()
     return _DEFAULT_API_BASE
 
 
-def copilot_provider() -> str:
-    """
-    Provider selector:
-    - explicit COPILOT_PROVIDER wins.
-    - auto mode follows portal profile (m365_hub -> m365, consumer -> copilot).
-    """
-    if COPILOT_PROVIDER != "auto":
+def m365_api_base_url() -> str:
+    """HTTPS origin for M365 provider REST + WSS (no path)."""
+    if M365_API_BASE_URL:
+        u = normalize_copilot_portal_url(M365_API_BASE_URL.strip())
+        if not u.startswith("http://") and not u.startswith("https://"):
+            u = "https://" + u.lstrip("/")
+        parsed = urlparse(u)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+        return u.rstrip("/")
+    return _DEFAULT_M365_API_BASE
+
+
+def resolved_provider() -> str:
+    """Resolve active provider after applying auto/profile rules."""
+    if COPILOT_PROVIDER in {"copilot", "m365"}:
         return COPILOT_PROVIDER
-    if COPILOT_PORTAL_PROFILE == "m365_hub":
-        return "m365"
-    return "copilot"
+    return "m365" if COPILOT_PORTAL_PROFILE == "m365_hub" else "copilot"
 
 
 def copilot_browser_origin() -> str:
@@ -151,6 +168,23 @@ def copilot_conversations_url() -> str:
 def copilot_ws_chat_url() -> str:
     """Base wss URL without query string."""
     api = copilot_api_base_url()
+    if api.startswith("https://"):
+        host = api[len("https://") :]
+    elif api.startswith("http://"):
+        host = api[len("http://") :]
+    else:
+        host = api
+    host = host.rstrip("/")
+    return f"wss://{host}/c/api/chat"
+
+
+def m365_conversations_url() -> str:
+    return f"{m365_api_base_url()}/c/api/conversations"
+
+
+def m365_ws_chat_url() -> str:
+    """Base M365 wss URL without query string."""
+    api = m365_api_base_url()
     if api.startswith("https://"):
         host = api[len("https://") :]
     elif api.startswith("http://"):

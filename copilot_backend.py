@@ -82,33 +82,6 @@ def _cache_key(style: str, prompt: str) -> str:
 
 
 _cached_cookie: str | None = None
-_M365_REQUIRED_COOKIE_HINTS = ("MSFPC", "OH.SID", "OH.FLID", "OH.DCAffinity")
-_COPILOT_REQUIRED_COOKIE_HINTS = ("MUID", "__Host-copilot-anon", "_C_ETH")
-
-
-def _extract_conversation_id(data: object) -> str | None:
-    """
-    Extract conversation ID from both consumer and M365-shaped payloads.
-    """
-    if isinstance(data, dict):
-        direct = data.get("id")
-        if isinstance(direct, str) and direct:
-            return direct
-        for key in ("conversations", "items", "value"):
-            items = data.get(key)
-            if isinstance(items, list):
-                for item in items:
-                    if isinstance(item, dict):
-                        cid = item.get("id") or item.get("conversationId")
-                        if isinstance(cid, str) and cid:
-                            return cid
-    elif isinstance(data, list):
-        for item in data:
-            if isinstance(item, dict):
-                cid = item.get("id") or item.get("conversationId")
-                if isinstance(cid, str) and cid:
-                    return cid
-    return None
 
 def _make_cookie_header() -> str:
     """Return cached Cookie header; refreshed on reload_cookies()."""
@@ -117,67 +90,23 @@ def _make_cookie_header() -> str:
         _cached_cookie = os.getenv("COPILOT_COOKIES") or os.getenv("BING_COOKIES") or ""
     return _cached_cookie
 
-
-def _cookie_names_from_header(cookie_header: str) -> set[str]:
-    names: set[str] = set()
-    for pair in (cookie_header or "").split(";"):
-        pair = pair.strip()
-        if not pair or "=" not in pair:
-            continue
-        name, _, _val = pair.partition("=")
-        name = name.strip()
-        if name:
-            names.add(name)
-    return names
-
-
-def _validate_provider_cookie_compatibility(cookie_header: str) -> None:
-    """
-    Fail fast with actionable guidance when cookie set does not match provider.
-    """
-    provider = config.copilot_provider()
-    profile = getattr(config, "COPILOT_PORTAL_PROFILE", "consumer")
-    cookie_names = _cookie_names_from_header(cookie_header)
-
-    if not cookie_names:
-        raise RuntimeError(
-            "No Copilot cookies loaded. Run C3 extract and reload C1 cookies."
-        )
-
-    if provider == "m365":
-        if not any(name in cookie_names for name in _M365_REQUIRED_COOKIE_HINTS):
-            raise RuntimeError(
-                "M365 provider selected but M365 session cookies not found "
-                f"(expected one of: {', '.join(_M365_REQUIRED_COOKIE_HINTS)}). "
-                "Sign in on m365.cloud.microsoft in noVNC, extract cookies, then retry."
-            )
-        return
-
-    if provider == "copilot":
-        if not any(name in cookie_names for name in _COPILOT_REQUIRED_COOKIE_HINTS):
-            raise RuntimeError(
-                "Copilot provider selected but Copilot/Bing cookies not found "
-                f"(expected one of: {', '.join(_COPILOT_REQUIRED_COOKIE_HINTS)}). "
-                "Sign in on copilot.microsoft.com, extract cookies, then retry."
-            )
-        if profile == "m365_hub":
-            logger.warning(
-                "Provider/profile mismatch: COPILOT_PROVIDER=copilot with "
-                "COPILOT_PORTAL_PROFILE=m365_hub. Using explicit provider override."
-            )
-
 def reload_cookies() -> None:
     """Invalidate the cached cookie so the next call re-reads the env."""
     global _cached_cookie
     _cached_cookie = None
 
 
-def _make_headers() -> dict:
-    """Browser-like headers; Origin/Referer follow portal profile (see config)."""
+def _make_headers(provider_name: str = "copilot") -> dict:
+    """Browser-like headers; Origin/Referer follow selected provider host."""
+    if provider_name == "m365":
+        origin = config.copilot_browser_origin()
+        referer = config.copilot_browser_referer()
+    else:
+        origin = "https://copilot.microsoft.com"
+        referer = "https://copilot.microsoft.com/"
     return {
-        "Origin": config.copilot_browser_origin(),
-        "Referer": config.copilot_browser_referer(),
-        "Accept": "application/json, text/plain, */*",
+        "Origin": origin,
+        "Referer": referer,
         "User-Agent": (
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -187,12 +116,86 @@ def _make_headers() -> dict:
     }
 
 
+# ── Provider strategy ──────────────────────────────────────────────────────────
+class _ProviderBase:
+    name = "base"
+
+    def conversations_url(self) -> str:
+        raise NotImplementedError
+
+    def ws_chat_url(self) -> str:
+        raise NotImplementedError
+
+    def validate_session(self, cookie_header: str) -> None:
+        # Base provider: no-op.
+        return
+
+
+class CopilotPublicProvider(_ProviderBase):
+    name = "copilot"
+
+    def conversations_url(self) -> str:
+        return config.copilot_conversations_url()
+
+    def ws_chat_url(self) -> str:
+        return config.copilot_ws_chat_url()
+
+
+class M365Provider(_ProviderBase):
+    name = "m365"
+
+    def conversations_url(self) -> str:
+        return config.m365_conversations_url()
+
+    def ws_chat_url(self) -> str:
+        return config.m365_ws_chat_url()
+
+    def validate_session(self, cookie_header: str) -> None:
+        """
+        m365_hub cookies differ from consumer Copilot cookies.
+        Fail fast with a clear operator error if M365 session material is absent.
+        """
+        cookie_header = cookie_header or ""
+        has_m365_cookie = ("OH.SID=" in cookie_header) or ("MSFPC=" in cookie_header)
+        if has_m365_cookie:
+            return
+        raise RuntimeError(
+            "M365 provider requires an active M365 web session cookie "
+            "(expected one of: OH.SID, MSFPC). "
+            "Refresh cookies in C3 with COPILOT_PORTAL_PROFILE=m365_hub, then retry."
+        )
+
+
+def _should_fallback_to_copilot(provider: _ProviderBase, cookie_header: str) -> bool:
+    # Strict provider isolation mode:
+    # - m365 provider must remain m365
+    # - copilot provider must remain copilot
+    # Cross-provider automatic fallback is intentionally disabled.
+    return False
+
+
+def _build_provider() -> _ProviderBase:
+    provider_name = config.resolved_provider()
+    if provider_name == "m365":
+        return M365Provider()
+    return CopilotPublicProvider()
+
+
+def _auto_refresh_allowed() -> bool:
+    if not config.AUTO_COOKIE_REFRESH:
+        return False
+    if config.COPILOT_PORTAL_PROFILE == "m365_hub" and not config.AUTO_COOKIE_REFRESH_M365:
+        return False
+    return True
+
+
 # ── Backend ───────────────────────────────────────────────────────────────────
 
 class CopilotBackend:
     def __init__(self, style=None, persona=None):
         self.style = style or config.COPILOT_STYLE
         self.persona = persona or config.COPILOT_PERSONA
+        self.provider = _build_provider()
         self._conversation_id: str | None = None
         self._lock = asyncio.Lock()
         self._last_suggestions: list[str] = []
@@ -204,83 +207,86 @@ class CopilotBackend:
         async with self._lock:
             if self._conversation_id:
                 return self._conversation_id
-            self._conversation_id = await self._create_conversation(session)
+            # M365 may expose a different bootstrap contract (GET list, or non-JSON redirect),
+            # so use provider-aware probing before committing to a conversation id.
+            if self.provider.name == "m365":
+                self._conversation_id = await self._create_conversation_m365(session)
+            else:
+                self._conversation_id = await self._create_conversation_copilot(session)
         return self._conversation_id
 
-    async def _create_conversation(self, session: aiohttp.ClientSession) -> str:
-        """
-        Provider-aware conversation bootstrap.
-        - copilot: POST /c/api/conversations with empty JSON body.
-        - m365:    try GET /c/api/conversations first, then fallback to POST for compatibility.
-        """
-        provider = config.copilot_provider()
-        url = config.copilot_conversations_url()
-        if provider == "copilot" and "m365.cloud.microsoft" in url:
-            raise RuntimeError(
-                "Config mismatch: copilot provider is targeting an M365 API base URL. "
-                "Set COPILOT_PROVIDER=auto or m365 for m365_hub profile, "
-                "or clear COPILOT_PORTAL_API_BASE_URL override."
-            )
-        if provider == "m365":
-            conv_id = await self._create_conversation_m365(session, url)
-            if conv_id:
-                return conv_id
-            raise RuntimeError(
-                "Failed to create M365 conversation session. "
-                "Ensure M365 web session is valid and cookies are reloaded."
-            )
+    async def _create_conversation_copilot(self, session: aiohttp.ClientSession) -> str:
+        url = self.provider.conversations_url()
         async with session.post(url, json={}) as resp:
             if resp.status != 200:
                 raise RuntimeError(
-                    f"Failed to create Copilot conversation: HTTP {resp.status}"
+                    f"Failed to create {self.provider.name} conversation: HTTP {resp.status}"
                 )
             data = await resp.json()
             return data["id"]
 
-    async def _create_conversation_m365(
-        self, session: aiohttp.ClientSession, url: str
-    ) -> str | None:
-        # M365 hub may require GET for listing/bootstrapping conversations.
-        async with session.get(url) as get_resp:
+    async def _create_conversation_m365(self, session: aiohttp.ClientSession) -> str:
+        url = self.provider.conversations_url()
+        # Probe GET first for M365 hubs that list conversations.
+        # Keep redirects disabled so we can detect auth redirects explicitly.
+        async with session.get(url, allow_redirects=False) as get_resp:
+            if get_resp.status in (301, 302, 303, 307, 308):
+                location = (get_resp.headers.get("Location") or "").lower()
+                if "login.microsoftonline.com" in location or "oauth2" in location:
+                    raise RuntimeError(
+                        "M365 conversation bootstrap redirected to Microsoft login/OAuth. "
+                        "Current session is missing required M365 auth context/token for API bootstrap."
+                    )
+                raise RuntimeError(
+                    f"M365 conversation bootstrap redirected (HTTP {get_resp.status}) "
+                    "to a non-chat endpoint."
+                )
             if get_resp.status == 200:
                 try:
                     data = await get_resp.json(content_type=None)
+                    if isinstance(data, dict):
+                        convs = data.get("conversations") or data.get("items") or data.get("value")
+                        if isinstance(convs, list):
+                            for item in convs:
+                                if isinstance(item, dict):
+                                    cid = item.get("id") or item.get("conversationId")
+                                    if isinstance(cid, str) and cid:
+                                        return cid
+                        if isinstance(data.get("id"), str) and data.get("id"):
+                            return data["id"]
                 except Exception as exc:
-                    raise RuntimeError(
-                        "M365 conversation bootstrap response-envelope mismatch "
-                        "(GET /c/api/conversations returned non-JSON)."
-                    ) from exc
-                cid = _extract_conversation_id(data)
-                if cid:
-                    return cid
+                    # Some M365 sessions return HTML/redirect content for GET bootstrap.
+                    # Do not fail fast here; attempt POST fallback before returning error.
+                    logger.warning(
+                        "M365 GET bootstrap returned non-JSON; trying POST fallback: %s",
+                        exc,
+                    )
             elif get_resp.status not in (404, 405):
                 raise RuntimeError(
-                    f"Failed to bootstrap M365 conversation via GET: HTTP {get_resp.status}"
+                    f"Failed to create m365 conversation via GET: HTTP {get_resp.status}"
                 )
 
-        # Fallback for environments where POST still works.
+        # Fallback POST path for environments where m365 supports the consumer shape.
         async with session.post(url, json={}) as post_resp:
-            if post_resp.status == 200:
-                try:
-                    data = await post_resp.json(content_type=None)
-                except Exception as exc:
-                    raise RuntimeError(
-                        "M365 conversation bootstrap response-envelope mismatch "
-                        "(POST /c/api/conversations returned non-JSON)."
-                    ) from exc
-                cid = _extract_conversation_id(data)
-                if cid:
-                    return cid
-            elif post_resp.status in (401, 403):
+            if post_resp.status != 200:
                 raise RuntimeError(
-                    "M365 conversation bootstrap unauthorized (401/403). "
-                    "Complete sign-in in noVNC and refresh cookies."
+                    f"Failed to create {self.provider.name} conversation: HTTP {post_resp.status}"
                 )
-        return None
+            try:
+                data = await post_resp.json(content_type=None)
+            except Exception as exc:
+                raise RuntimeError(
+                    "M365 conversation bootstrap response-envelope mismatch "
+                    "(POST /c/api/conversations returned non-JSON)."
+                ) from exc
+            cid = data.get("id") if isinstance(data, dict) else None
+            if isinstance(cid, str) and cid:
+                return cid
+            raise RuntimeError("M365 conversation bootstrap returned no conversation id.")
 
     def _ws_url(self) -> str:
         sid = str(uuid.uuid4())
-        base = config.copilot_ws_chat_url()
+        base = self.provider.ws_chat_url()
         return f"{base}?api-version=2&clientSessionId={sid}"
 
     async def chat_completion(self, prompt: str, attachment_path=None, context=None, search=True) -> str:
@@ -332,7 +338,10 @@ class CopilotBackend:
         except RuntimeError as exc:
             msg = str(exc).lower()
             # If we hit a challenge or auth failure, try to trigger a refresh
-            if "verification required" in msg or "unauthorized" in msg or "handshake" in msg:
+            if (
+                _auto_refresh_allowed()
+                and ("verification required" in msg or "unauthorized" in msg or "handshake" in msg)
+            ):
                 logger.info("Auth failure/Challenge detected. Triggering automated cookie refresh...")
                 try:
                     async with aiohttp.ClientSession() as session:
@@ -351,6 +360,12 @@ class CopilotBackend:
                                 logger.error("Cookie refresh failed: HTTP %s", resp.status)
                 except Exception as refresh_exc:
                     logger.error("Automated cookie refresh failed: %s", refresh_exc)
+            elif "verification required" in msg or "unauthorized" in msg or "handshake" in msg:
+                logger.info(
+                    "Auth failure detected, but auto cookie refresh is disabled "
+                    "(profile=%s).",
+                    config.COPILOT_PORTAL_PROFILE,
+                )
             
             # If not a challenge or refresh failed, re-raise
             raise
@@ -367,8 +382,9 @@ class CopilotBackend:
         logger.info("WS_STREAM: prompt='%s', attachment=%s", prompt[:50], attachment_path)
         
         # Always re-read cookies from environment to ensure latest C3 sync
-        headers = _make_headers()
-        _validate_provider_cookie_compatibility(headers.get("Cookie", ""))
+        headers = _make_headers(self.provider.name)
+        cookie_header = headers.get("Cookie", "")
+        self.provider.validate_session(cookie_header)
 
         connector = await _get_shared_connector()
         timeout = aiohttp.ClientTimeout(
@@ -394,11 +410,17 @@ class CopilotBackend:
                             {name.strip(): val.strip()},
                         )
 
-            conv_id = await self._ensure_conversation(session)
+            try:
+                conv_id = await self._ensure_conversation(session)
+            except RuntimeError as exc:
+                msg = str(exc).lower()
+                raise
 
             ws_headers = {
                 "Origin": headers["Origin"],
+                "Referer": headers.get("Referer", ""),
                 "User-Agent": headers["User-Agent"],
+                "Accept-Language": "en-US,en;q=0.9",
                 "Cookie": cookie_str,
             }
 
@@ -410,14 +432,7 @@ class CopilotBackend:
                 )
                 async with ws_ctx as ws:
                 # Wait for connected event
-                    hello_raw = await asyncio.wait_for(ws.receive_str(), timeout=15)
-                    try:
-                        hello = json.loads(hello_raw)
-                    except json.JSONDecodeError as exc:
-                        raise RuntimeError(
-                            "WebSocket response-envelope mismatch: expected JSON 'connected' "
-                            "event from provider endpoint. Check provider/API base alignment."
-                        ) from exc
+                    hello = json.loads(await asyncio.wait_for(ws.receive_str(), timeout=15))
                     if hello.get("event") != "connected":
                         raise RuntimeError(f"Unexpected hello: {hello}")
                 
@@ -475,13 +490,7 @@ class CopilotBackend:
                     # Stream response
                     async for msg in ws:
                         if msg.type == aiohttp.WSMsgType.TEXT:
-                            try:
-                                data = json.loads(msg.data)
-                            except json.JSONDecodeError as exc:
-                                raise RuntimeError(
-                                    "WebSocket response-envelope mismatch while streaming. "
-                                    "Provider endpoint returned non-JSON frame."
-                                ) from exc
+                            data = json.loads(msg.data)
                             ev = data.get("event", "")
                             sys.stderr.write(f"WS_RECV_EVENT: {ev}\n")
                             sys.stderr.flush()
@@ -492,7 +501,9 @@ class CopilotBackend:
                                 # method="copilot": solve cubic formula mod 22 and reply.
                                 method = data.get("method", "")
                                 parameter = data.get("parameter", "")
-                                if method == "copilot" and parameter:
+                                sys.stderr.write(f"WS_CHALLENGE_DATA: {json.dumps(data)[:300]}\n")
+                                sys.stderr.flush()
+                                if (method == "copilot" and parameter) or (not method and parameter):
                                     try:
                                         a = float(parameter)
                                         token = str(round((a ** 3 / 100 + a * 25) % 22))
@@ -503,17 +514,26 @@ class CopilotBackend:
                                         "method": "copilot",
                                         "token": token,
                                     }))
+                                elif not method:
+                                    # Some sessions emit a challenge marker with null fields but a
+                                    # challenge id. Echo an acknowledgement to unblock generation.
+                                    challenge_id = data.get("id")
+                                    payload = {"event": "challengeResponse"}
+                                    if challenge_id is not None:
+                                        payload["id"] = challenge_id
+                                    await ws.send_str(json.dumps(payload))
+                                    continue
                                 else:
                                     # Other methods (hashcash, cloudflare) or failed copilot challenge
                                     raise RuntimeError(
-                                        f"Copilot verification required (method: {method or ev}). "
+                                        f"Copilot verification required (method: {method or ev}, data={data}). "
                                         "Please refresh cookies via Container 3 (browser-auth) "
                                         "or solve the challenge in the noVNC browser."
                                     )
                             elif ev in _DONE_EVENTS:
                                 if ev == "error":
                                     raise RuntimeError(
-                                        f"Copilot error: {data.get('message', ev)}"
+                                        f"Copilot error: {data.get('message', ev)} (payload={data})"
                                     )
                                 if ev == "throttled":
                                     raise RuntimeError("Copilot rate limited (throttled)")
@@ -527,14 +547,12 @@ class CopilotBackend:
                         elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                             break
             except aiohttp.WSServerHandshakeError as exc:
-                provider = config.copilot_provider()
-                profile = getattr(config, "COPILOT_PORTAL_PROFILE", "consumer")
-                if exc.status in (401, 403):
-                    raise RuntimeError(
-                        "WebSocket handshake unauthorized "
-                        f"(HTTP {exc.status}, provider={provider}, profile={profile}). "
-                        "Refresh cookies via C3 and ensure sign-in for the selected provider."
-                    ) from exc
+                raise RuntimeError(
+                    f"WebSocket handshake unauthorized (HTTP {exc.status}, "
+                    f"provider={self.provider.name}, profile={config.COPILOT_PORTAL_PROFILE}). "
+                    "Refresh cookies via C3 and ensure sign-in for the selected provider."
+                ) from exc
+            except RuntimeError as exc:
                 raise
 
     async def chat_completion_stream(self, prompt: str, attachment_path=None, context=None) -> AsyncGenerator[str, None]:
@@ -544,7 +562,10 @@ class CopilotBackend:
                 yield token
         except RuntimeError as exc:
             msg = str(exc).lower()
-            if "verification required" in msg or "unauthorized" in msg or "handshake" in msg:
+            if (
+                _auto_refresh_allowed()
+                and ("verification required" in msg or "unauthorized" in msg or "handshake" in msg)
+            ):
                 logger.info("Auth failure/Challenge detected in stream. Triggering automated cookie refresh...")
                 try:
                     async with aiohttp.ClientSession() as session:
@@ -557,6 +578,12 @@ class CopilotBackend:
                                 return
                 except Exception as refresh_exc:
                     logger.error("Automated cookie refresh failed in stream: %s", refresh_exc)
+            elif "verification required" in msg or "unauthorized" in msg or "handshake" in msg:
+                logger.info(
+                    "Auth failure detected in stream, but auto cookie refresh is disabled "
+                    "(profile=%s).",
+                    config.COPILOT_PORTAL_PROFILE,
+                )
             raise
 
     async def reset_conversation(self):

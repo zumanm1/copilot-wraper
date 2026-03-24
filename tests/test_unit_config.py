@@ -74,7 +74,6 @@ def test_custom_timeout_from_env(monkeypatch):
 
 def test_portal_defaults_m365_when_unset(monkeypatch):
     monkeypatch.delenv("COPILOT_PORTAL_PROFILE", raising=False)
-    monkeypatch.delenv("COPILOT_PROVIDER", raising=False)
     monkeypatch.delenv("COPILOT_PORTAL_BASE_URL", raising=False)
     monkeypatch.delenv("COPILOT_PORTAL_API_BASE_URL", raising=False)
     import config as cfg
@@ -82,7 +81,6 @@ def test_portal_defaults_m365_when_unset(monkeypatch):
     importlib.reload(cfg)
     assert cfg.COPILOT_PORTAL_PROFILE == "m365_hub"
     assert cfg.portal_base_url_resolved() == "https://m365.cloud.microsoft/chat/"
-    assert cfg.copilot_provider() == "m365"
     assert cfg.copilot_api_base_url() == "https://m365.cloud.microsoft"
     assert cfg.copilot_browser_origin() == "https://m365.cloud.microsoft"
     assert "m365.cloud.microsoft" in cfg.copilot_browser_referer()
@@ -90,13 +88,11 @@ def test_portal_defaults_m365_when_unset(monkeypatch):
 
 def test_portal_consumer_explicit_env(monkeypatch):
     monkeypatch.setenv("COPILOT_PORTAL_PROFILE", "consumer")
-    monkeypatch.delenv("COPILOT_PROVIDER", raising=False)
     monkeypatch.delenv("COPILOT_PORTAL_BASE_URL", raising=False)
     monkeypatch.delenv("COPILOT_PORTAL_API_BASE_URL", raising=False)
     import config as cfg
     importlib.reload(cfg)
     assert cfg.COPILOT_PORTAL_PROFILE == "consumer"
-    assert cfg.copilot_provider() == "copilot"
     assert cfg.portal_base_url_resolved() == "https://copilot.microsoft.com/"
     assert cfg.copilot_api_base_url() == "https://copilot.microsoft.com"
     assert cfg.copilot_browser_origin() == "https://copilot.microsoft.com"
@@ -104,18 +100,52 @@ def test_portal_consumer_explicit_env(monkeypatch):
 
 def test_portal_m365_hub_referer_and_default_api(monkeypatch):
     monkeypatch.setenv("COPILOT_PORTAL_PROFILE", "m365_hub")
-    monkeypatch.delenv("COPILOT_PROVIDER", raising=False)
     monkeypatch.delenv("COPILOT_PORTAL_BASE_URL", raising=False)
     monkeypatch.delenv("COPILOT_PORTAL_API_BASE_URL", raising=False)
     import config as cfg
     import importlib
     importlib.reload(cfg)
     assert cfg.COPILOT_PORTAL_PROFILE == "m365_hub"
-    assert cfg.copilot_provider() == "m365"
     assert cfg.portal_base_url_resolved() == "https://m365.cloud.microsoft/chat/"
     assert cfg.copilot_api_base_url() == "https://m365.cloud.microsoft"
     assert cfg.copilot_browser_origin() == "https://m365.cloud.microsoft"
     assert cfg.copilot_browser_referer() == "https://m365.cloud.microsoft/chat/"
+
+
+def test_provider_auto_resolves_m365_for_m365_profile(monkeypatch):
+    monkeypatch.setenv("COPILOT_PORTAL_PROFILE", "m365_hub")
+    monkeypatch.setenv("COPILOT_PROVIDER", "auto")
+    import config as cfg
+    import importlib
+    importlib.reload(cfg)
+    assert cfg.resolved_provider() == "m365"
+
+
+def test_provider_auto_resolves_copilot_for_consumer_profile(monkeypatch):
+    monkeypatch.setenv("COPILOT_PORTAL_PROFILE", "consumer")
+    monkeypatch.setenv("COPILOT_PROVIDER", "auto")
+    import config as cfg
+    import importlib
+    importlib.reload(cfg)
+    assert cfg.resolved_provider() == "copilot"
+
+
+def test_provider_explicit_override(monkeypatch):
+    monkeypatch.setenv("COPILOT_PORTAL_PROFILE", "m365_hub")
+    monkeypatch.setenv("COPILOT_PROVIDER", "copilot")
+    import config as cfg
+    import importlib
+    importlib.reload(cfg)
+    assert cfg.resolved_provider() == "copilot"
+
+
+def test_m365_api_base_override(monkeypatch):
+    monkeypatch.setenv("M365_API_BASE_URL", "https://m365.cloud.microsoft.com")
+    import config as cfg
+    import importlib
+    importlib.reload(cfg)
+    assert cfg.m365_api_base_url() == "https://m365.cloud.microsoft"
+    assert cfg.m365_ws_chat_url() == "wss://m365.cloud.microsoft/c/api/chat"
 
 
 def test_portal_invalid_profile_falls_back_consumer(monkeypatch):
@@ -145,21 +175,12 @@ def test_portal_api_override(monkeypatch):
     assert cfg.copilot_ws_chat_url() == "wss://example.test/c/api/chat"
 
 
-def test_provider_override_copilot_for_m365_profile(monkeypatch):
+def test_provider_explicit_copilot_keeps_consumer_api_base(monkeypatch):
     monkeypatch.setenv("COPILOT_PORTAL_PROFILE", "m365_hub")
     monkeypatch.setenv("COPILOT_PROVIDER", "copilot")
     monkeypatch.delenv("COPILOT_PORTAL_API_BASE_URL", raising=False)
     import config as cfg
+    import importlib
     importlib.reload(cfg)
-    assert cfg.copilot_provider() == "copilot"
+    assert cfg.resolved_provider() == "copilot"
     assert cfg.copilot_api_base_url() == "https://copilot.microsoft.com"
-
-
-def test_provider_invalid_falls_back_auto(monkeypatch):
-    monkeypatch.setenv("COPILOT_PORTAL_PROFILE", "consumer")
-    monkeypatch.setenv("COPILOT_PROVIDER", "invalid")
-    monkeypatch.delenv("COPILOT_PORTAL_API_BASE_URL", raising=False)
-    import config as cfg
-    importlib.reload(cfg)
-    assert cfg.COPILOT_PROVIDER == "auto"
-    assert cfg.copilot_provider() == "copilot"
