@@ -263,10 +263,19 @@ async def _get_or_create_page(context: BrowserContext) -> Page:
 
 async def _is_logged_in(page: Page, portal_host_markers: tuple[str, ...]) -> bool:
     """
-    Detect login state by checking for _U cookie on bing.com.
-    The _U cookie is the definitive indicator of Microsoft account authentication.
-    Being on the M365 portal URL alone is not sufficient — anonymous sessions can
-    reach the portal with an anonymous JWT (__Host-copilot-anon).
+    Detect login state from the current page WITHOUT navigating away.
+
+    Previous implementation navigated to bing.com on every poll to check for
+    the _U cookie, causing a visible bounce loop (bing → portal → bing …).
+    The _U cookie is collected later by _collect_cookies() which visits bing
+    exactly once after login is confirmed.
+
+    Checks (fast, no navigation):
+      1. If URL is on a Microsoft auth page → not logged in.
+      2. If page shows 'Authentication required' dialog → not logged in.
+      3. If URL is on a known portal host → logged in (session may be anon or
+         authenticated; _collect_cookies will determine which).
+      4. If on about:blank / setup page → not logged in.
     """
     try:
         url = page.url
@@ -282,30 +291,12 @@ async def _is_logged_in(page: Page, portal_host_markers: tuple[str, ...]) -> boo
                 return False
         except Exception:
             pass
-        
-        # Strong check: verify _U cookie on bing.com (requires a quick navigation)
-        # The _U cookie is set by Microsoft account login and lives on .bing.com domain.
-        # We must visit bing.com to check if it's present in this browser context.
-        current_url = page.url
-        try:
-            # Navigate to bing.com to establish the _U cookie if the user is logged in
-            await page.goto("https://www.bing.com", wait_until="domcontentloaded", timeout=10_000)
-            await asyncio.sleep(1)  # allow cookies to settle
-            cookies = await page.context.cookies(["https://www.bing.com"])
-            has_u = any(c["name"] == "_U" for c in cookies)
-            # Navigate back to original page
-            if current_url and not current_url.startswith("about:"):
-                try:
-                    await page.goto(current_url, wait_until="domcontentloaded", timeout=10_000)
-                except Exception:
-                    pass
-            return has_u
-        except Exception:
-            # If bing.com navigation fails, fall back to URL-based check
-            for marker in portal_host_markers:
-                if marker in url:
-                    return True
-            return False
+
+        # URL-based check: user is on a portal page without auth gates
+        for marker in portal_host_markers:
+            if marker in url:
+                return True
+        return False
     except Exception:
         return False
 
