@@ -125,9 +125,9 @@ def portal_landing_url(profile: str, portal_base_override: str) -> str:
         return normalize_copilot_portal_url(m365_hub_default_landing()).rstrip("/")
     return "https://copilot.microsoft.com"
 # Cookies present in both anonymous and authenticated sessions
-ANON_COOKIES = ["MUID", "MUIDB", "_EDGE_S", "_EDGE_V", "MSFPC"]
+ANON_COOKIES = ["MUID", "MUIDB", "_EDGE_S", "_EDGE_V", "MSFPC", "__Host-copilot-anon", "_C_ETH", "SRCHHPGUSR"]
 # Additional cookies only present when signed in to a Microsoft account
-AUTH_COOKIES = ["_U", "_C_ETH", "SRCHHPGUSR", "__Host-copilot-anon"]
+AUTH_COOKIES = ["_U"]
 # Extraction succeeds if at least one anon cookie is present
 REQUIRED_COOKIES = ["MUID"]
 
@@ -173,13 +173,83 @@ async def _get_context() -> BrowserContext:
             "--start-maximized",
             "--hide-crash-restore-bubble",
             "--test-type",
+            # Allow M365 silent-auth popup windows (token refresh flow).
+            # Without this, Chromium blocks the hidden login.microsoftonline.com
+            # popup that M365 uses for silent token renewal, causing the
+            # 'Authentication required' dialog and ?from=PopupFailed redirects.
+            "--disable-popup-blocking",
         ],
         ignore_default_args=["--enable-automation", "--disable-infobars"],
         viewport=None,    # let --start-maximized + --window-size fill the Xvfb display
         ignore_https_errors=False,
         accept_downloads=False,
     )
+
+    # Handle M365 silent-auth popup windows.
+    # M365 opens a hidden popup to login.microsoftonline.com to silently refresh
+    # its session token. We must let it complete and then close it.
+    def _on_new_page(popup: Page) -> None:
+        asyncio.ensure_future(_handle_auth_popup(popup))
+
+    _context.on("page", _on_new_page)
+
+    # Start background monitor that auto-dismisses 'Authentication required' dialogs.
+    asyncio.ensure_future(_auth_dialog_monitor())
+
     return _context
+
+
+async def _handle_auth_popup(popup: Page) -> None:
+    """
+    Allow M365 silent-auth popup windows to complete their OAuth flow then close.
+    These are the hidden login.microsoftonline.com popups that refresh session tokens.
+    Closing them after load mimics normal browser behaviour and prevents the
+    'Authentication required' dialog from appearing.
+    """
+    try:
+        url = popup.url
+        print(f"[cookie_extractor] Auth popup opened: {url[:80]}")
+        # Wait for the popup to finish its auth redirect (up to 10s)
+        await popup.wait_for_load_state("domcontentloaded", timeout=10_000)
+        final_url = popup.url
+        print(f"[cookie_extractor] Auth popup final URL: {final_url[:80]} — closing")
+        await popup.close()
+    except Exception as e:
+        print(f"[cookie_extractor] Auth popup handler error (non-fatal): {e}")
+        try:
+            await popup.close()
+        except Exception:
+            pass
+
+
+async def _auth_dialog_monitor() -> None:
+    """
+    Background task: every 15 seconds, check all open pages for the M365
+    'Authentication required' dialog and dismiss it by clicking 'Continue'.
+    This is the fallback for when the popup handler alone is insufficient.
+    """
+    await asyncio.sleep(15)  # initial delay — let browser settle
+    while True:
+        try:
+            if _context is not None:
+                for page in list(_context.pages):
+                    try:
+                        if page.is_closed():
+                            continue
+                        content = (await page.content()).lower()
+                        if "authentication required" in content and "continue" in content:
+                            print("[cookie_extractor] Auth dialog detected — auto-clicking Continue")
+                            # Find and click the Continue button
+                            btn = page.locator("button", has_text="Continue")
+                            if await btn.count() > 0:
+                                await btn.first.click(timeout=5_000)
+                                print("[cookie_extractor] Auth dialog dismissed")
+                                await asyncio.sleep(3)  # let re-auth complete
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        await asyncio.sleep(15)
 
 
 async def _get_or_create_page(context: BrowserContext) -> Page:
@@ -193,9 +263,10 @@ async def _get_or_create_page(context: BrowserContext) -> Page:
 
 async def _is_logged_in(page: Page, portal_host_markers: tuple[str, ...]) -> bool:
     """
-    Detect login state. Primary check is URL-based (fast, reliable).
-    If we're on the expected Copilot/M365 hub host and NOT on a Microsoft login page,
-    we consider the session valid enough to extract cookies.
+    Detect login state by checking for _U cookie on bing.com.
+    The _U cookie is the definitive indicator of Microsoft account authentication.
+    Being on the M365 portal URL alone is not sufficient — anonymous sessions can
+    reach the portal with an anonymous JWT (__Host-copilot-anon).
     """
     try:
         url = page.url
@@ -211,15 +282,30 @@ async def _is_logged_in(page: Page, portal_host_markers: tuple[str, ...]) -> boo
                 return False
         except Exception:
             pass
-        for marker in portal_host_markers:
-            if marker in url:
-                return True
-        # On bing.com or another Microsoft domain — check for auth cookie
-        cookies = await page.context.cookies(["https://www.bing.com"])
-        if any(c["name"] == "_U" for c in cookies):
-            return True
-        # Unknown page — treat as not confirmed
-        return False
+        
+        # Strong check: verify _U cookie on bing.com (requires a quick navigation)
+        # The _U cookie is set by Microsoft account login and lives on .bing.com domain.
+        # We must visit bing.com to check if it's present in this browser context.
+        current_url = page.url
+        try:
+            # Navigate to bing.com to establish the _U cookie if the user is logged in
+            await page.goto("https://www.bing.com", wait_until="domcontentloaded", timeout=10_000)
+            await asyncio.sleep(1)  # allow cookies to settle
+            cookies = await page.context.cookies(["https://www.bing.com"])
+            has_u = any(c["name"] == "_U" for c in cookies)
+            # Navigate back to original page
+            if current_url and not current_url.startswith("about:"):
+                try:
+                    await page.goto(current_url, wait_until="domcontentloaded", timeout=10_000)
+                except Exception:
+                    pass
+            return has_u
+        except Exception:
+            # If bing.com navigation fails, fall back to URL-based check
+            for marker in portal_host_markers:
+                if marker in url:
+                    return True
+            return False
     except Exception:
         return False
 
@@ -371,13 +457,16 @@ async def extract_and_save(env_path: str = "/app/.env") -> dict:
         _patch_env(env_path, "COPILOT_COOKIES", cookie_str)
         _patch_env(env_path, "BING_COOKIES", cookie_str)
 
-        msg = (
-            f"Extracted {len(cookies)} cookies in {mode} mode."
-            if has_auth else
-            f"Extracted {len(cookies)} anonymous cookies (no Microsoft account sign-in detected). "
-            "Copilot will work in anonymous mode with lower rate limits. "
-            "Log in via the noVNC browser at http://localhost:6080 and re-run /extract for authenticated access."
-        )
+        # Honest messaging: warn if _U is missing
+        if has_auth:
+            msg = f"Extracted {len(cookies)} cookies in authenticated mode (_U cookie present)."
+        else:
+            msg = (
+                f"Extracted {len(cookies)} cookies but NO _U COOKIE (Microsoft account auth). "
+                f"Copilot API calls will fail with 403. "
+                f"To fix: (1) Open http://localhost:6080, (2) Sign in with your Microsoft account, "
+                f"(3) Re-run: curl -X POST http://localhost:8001/extract"
+            )
         print(f"[cookie_extractor] {msg}")
         return {
             "status": "ok",
