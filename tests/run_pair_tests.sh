@@ -46,6 +46,61 @@ fail()   { echo -e "  ${RED}❌ FAIL${RESET}  $*"; }
 warn()   { echo -e "  ${YELLOW}⚠️  WARN${RESET}  $*"; }
 info()   { echo -e "  ${CYAN}ℹ  INFO${RESET}  $*"; }
 
+# ── pre-flight: C1 health + roundtrip ─────────────────────────────────────────
+preflight() {
+    echo -e "\n${BOLD}── Pre-flight checks ──${RESET}"
+
+    # 1. C1 health
+    echo -n "  C1 health (/health) ... "
+    C1_H=$(curl -sf --max-time 5 http://localhost:8000/health 2>/dev/null || echo '{}')
+    C1_STATUS=$(echo "$C1_H" | python3 -c "import json,sys;print(json.load(sys.stdin).get('status','?'))" 2>/dev/null || echo "offline")
+    if [[ "$C1_STATUS" != "ok" ]]; then
+        echo -e "${RED}OFFLINE${RESET}"
+        echo -e "  ${RED}ERROR: C1 (copilot-api) is not healthy. Start it with: docker compose up app -d${RESET}"
+        exit 1
+    fi
+    echo -e "${GREEN}ok${RESET}"
+
+    # 2. C3 health
+    echo -n "  C3 health (/health) ... "
+    C3_H=$(curl -sf --max-time 5 http://localhost:8001/health 2>/dev/null || echo '{}')
+    C3_STATUS=$(echo "$C3_H" | python3 -c "import json,sys;print(json.load(sys.stdin).get('status','?'))" 2>/dev/null || echo "offline")
+    if [[ "$C3_STATUS" != "ok" ]]; then
+        echo -e "${RED}OFFLINE${RESET}"
+        echo -e "  ${RED}ERROR: C3 (browser-auth) is not healthy. Start it with: docker compose up browser-auth -d${RESET}"
+        exit 1
+    fi
+    echo -e "${GREEN}ok${RESET}"
+
+    # 3. C1 roundtrip — verify Copilot cookies are valid
+    echo -n "  C1 roundtrip (Copilot cookies) ... "
+    ROUNDTRIP=$(curl -sf --max-time 30 -X POST http://localhost:8000/v1/chat/completions \
+        -H "Content-Type: application/json" \
+        -H "X-Agent-ID: preflight-test" \
+        -d '{"model":"copilot","messages":[{"role":"user","content":"Reply with exactly one word: PREFLIGHT_OK"}],"stream":false}' 2>/dev/null || echo "")
+    if [[ -z "$ROUNDTRIP" ]]; then
+        echo -e "${RED}FAILED (empty response)${RESET}"
+        echo -e "  ${YELLOW}⚠️  C1 is healthy but Copilot returned no data — cookies are likely expired.${RESET}"
+        echo -e "  ${YELLOW}   → Log in via noVNC: http://localhost:6080${RESET}"
+        echo -e "  ${YELLOW}   → Then extract:     curl -X POST http://localhost:8001/extract${RESET}"
+        echo -e "  ${YELLOW}   → Then re-run:      bash tests/run_pair_tests.sh${RESET}"
+        exit 1
+    fi
+    # Check for API error in response
+    HAS_ERROR=$(echo "$ROUNDTRIP" | python3 -c "import json,sys;d=json.load(sys.stdin);print('yes' if 'error' in d else 'no')" 2>/dev/null || echo "unknown")
+    if [[ "$HAS_ERROR" == "yes" ]]; then
+        ERR_MSG=$(echo "$ROUNDTRIP" | python3 -c "import json,sys;d=json.load(sys.stdin);print(d['error'].get('message',str(d['error']))[:200])" 2>/dev/null || echo "unknown error")
+        echo -e "${RED}FAILED${RESET}"
+        echo -e "  ${YELLOW}⚠️  C1 API error: ${ERR_MSG}${RESET}"
+        echo -e "  ${YELLOW}   → Cookies may be expired. Refresh via noVNC and POST /extract.${RESET}"
+        exit 1
+    fi
+    echo -e "${GREEN}ok${RESET} — Copilot cookies valid"
+    echo ""
+}
+
+preflight
+
 # ── run_test <id> <name> <script_fn> ─────────────────────────────────────────
 run_test() {
     local id="$1" name="$2" fn="$3"
@@ -84,7 +139,7 @@ test1_opencode() {
     REPLY=$(docker compose exec -T agent-terminal bash -c \
         'python3 /workspace/ask_helper.py "Reply with exactly: OPENCODE_TEST_OK" \
             --api-url http://app:8000/v1/chat/completions \
-            --agent-id test-opencode --format openai 2>/dev/null')
+            --agent-id test-opencode --format openai')
     echo "  reply → $(echo "$REPLY" | head -3)"
     echo "$REPLY" | grep -q "OPENCODE_TEST_OK" || { echo "ERROR: expected marker not found"; return 1; }
 }
@@ -104,7 +159,7 @@ test2_aider() {
     REPLY=$(docker compose exec -T agent-terminal bash -c \
         'python3 /workspace/ask_helper.py "Reply with exactly: AIDER_TEST_OK" \
             --api-url http://app:8000/v1/chat/completions \
-            --agent-id test-aider --format openai 2>/dev/null')
+            --agent-id test-aider --format openai')
     echo "  reply → $(echo "$REPLY" | head -3)"
     echo "$REPLY" | grep -q "AIDER_TEST_OK" || { echo "ERROR: expected marker not found"; return 1; }
 }
@@ -125,7 +180,7 @@ test3_claude_code() {
         'python3 /workspace/ask_helper.py "Reply with exactly: CLAUDE_CODE_TEST_OK" \
             --api-url http://app:8000/v1/messages \
             --agent-id test-c5-claude --format anthropic \
-            --api-key sk-ant-not-needed 2>/dev/null')
+            --api-key sk-ant-not-needed')
     echo "  reply → $(echo "$REPLY" | head -3)"
     echo "$REPLY" | grep -q "CLAUDE_CODE_TEST_OK" || { echo "ERROR: expected marker not found"; return 1; }
 }
@@ -145,7 +200,7 @@ test4_kilocode() {
     REPLY=$(docker compose exec -T kilocode-terminal bash -c \
         'python3 /workspace/ask_helper.py "Reply with exactly: KILOCODE_TEST_OK" \
             --api-url http://app:8000/v1/chat/completions \
-            --agent-id test-c6-kilo --format openai 2>/dev/null')
+            --agent-id test-c6-kilo --format openai')
     echo "  reply → $(echo "$REPLY" | head -3)"
     echo "$REPLY" | grep -q "KILOCODE_TEST_OK" || { echo "ERROR: expected marker not found"; return 1; }
 }
@@ -190,7 +245,7 @@ test6_c7b_cli() {
     REPLY=$(docker compose exec -T openclaw-cli sh -c \
         'python3 /workspace/ask_helper.py "Reply with exactly: C7B_TEST_OK" \
             --api-url http://app:8000/v1/chat/completions \
-            --agent-id test-c7b --format openai 2>/dev/null')
+            --agent-id test-c7b --format openai')
     echo "  reply → $(echo "$REPLY" | head -3)"
     echo "$REPLY" | grep -q "C7B_TEST_OK" || { echo "ERROR: expected marker not found"; return 1; }
 }
@@ -219,7 +274,7 @@ test7_hermes() {
     REPLY=$(docker compose exec -T hermes-agent bash -c \
         'python3 /workspace/ask_helper.py "Reply with exactly: HERMES_TEST_OK" \
             --api-url http://app:8000/v1/chat/completions \
-            --agent-id test-c8-hermes --format openai 2>/dev/null')
+            --agent-id test-c8-hermes --format openai')
     echo "  reply → $(echo "$REPLY" | head -3)"
     echo "$REPLY" | grep -q "HERMES_TEST_OK" || { echo "ERROR: expected marker not found"; return 1; }
     echo "[info] C8 Hermes standby healthy — run 'docker compose exec C8_hermes-agent hermes' for interactive CLI"
