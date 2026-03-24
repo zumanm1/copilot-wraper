@@ -168,12 +168,14 @@ async def _get_context() -> BrowserContext:
             "--no-sandbox",
             "--disable-dev-shm-usage",
             "--disable-blink-features=AutomationControlled",
-            "--window-size=1280,900",
+            "--window-size=1280,1024",
+            "--window-position=0,0",
+            "--start-maximized",
             "--hide-crash-restore-bubble",
             "--test-type",
         ],
         ignore_default_args=["--enable-automation", "--disable-infobars"],
-        viewport={"width": 1280, "height": 900},
+        viewport=None,    # let --start-maximized + --window-size fill the Xvfb display
         ignore_https_errors=False,
         accept_downloads=False,
     )
@@ -201,6 +203,14 @@ async def _is_logged_in(page: Page, portal_host_markers: tuple[str, ...]) -> boo
         if any(h in url for h in ("login.microsoft.com", "login.live.com",
                                    "login.microsoftonline.com", "account.live.com")):
             return False
+        # M365 shell can show an in-app auth gate ("Authentication required" + Continue)
+        # even while URL remains on the portal host; treat this as not logged in.
+        try:
+            html = (await page.content()).lower()
+            if "authentication required" in html and "continue" in html:
+                return False
+        except Exception:
+            pass
         for marker in portal_host_markers:
             if marker in url:
                 return True

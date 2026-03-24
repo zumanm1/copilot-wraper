@@ -26,7 +26,7 @@ def _parse_cookie_extractor():
     source = COOKIE_EXTRACTOR.read_text()
     tree = ast.parse(source)
 
-    viewport = None
+    viewport = "__NOT_FOUND__"
     args_list = None
     ignore_default_args = None
 
@@ -37,14 +37,18 @@ def _parse_cookie_extractor():
         if isinstance(func, ast.Attribute) and func.attr == "launch_persistent_context":
             for kw in node.keywords:
                 if kw.arg == "viewport":
-                    viewport = ast.literal_eval(kw.value)
+                    # viewport can be None (openbox auto-maximize) or a dict
+                    if isinstance(kw.value, ast.Constant) and kw.value.value is None:
+                        viewport = None
+                    else:
+                        viewport = ast.literal_eval(kw.value)
                 elif kw.arg == "args":
                     args_list = ast.literal_eval(kw.value)
                 elif kw.arg == "ignore_default_args":
                     ignore_default_args = ast.literal_eval(kw.value)
             break
 
-    assert viewport is not None, "Could not find viewport= in launch_persistent_context"
+    assert viewport != "__NOT_FOUND__", "Could not find viewport= in launch_persistent_context"
     assert args_list is not None, "Could not find args= in launch_persistent_context"
     return viewport, args_list, ignore_default_args
 
@@ -76,12 +80,12 @@ def _split_resolution(res: str):
 # ── tests ─────────────────────────────────────────────────────────────────────
 
 def test_cookie_extractor_viewport_and_args():
-    """Playwright viewport height >= MIN_HEIGHT, automation banner suppressed, --window-size matches."""
-    viewport, args, ignore_defaults = _parse_cookie_extractor()
+    """--window-size height >= MIN_HEIGHT, automation banner suppressed.
 
-    assert viewport["height"] >= MIN_HEIGHT, (
-        f"viewport height {viewport['height']} is below minimum {MIN_HEIGHT}"
-    )
+    viewport may be None (openbox auto-maximize) or a dict; when None the
+    --window-size Chrome arg controls the effective viewport.
+    """
+    viewport, args, ignore_defaults = _parse_cookie_extractor()
 
     assert ignore_defaults is not None, "ignore_default_args must be set on launch_persistent_context"
     assert "--enable-automation" in ignore_defaults, (
@@ -99,8 +103,10 @@ def test_cookie_extractor_viewport_and_args():
     assert window_size_args, "--window-size not found in Chrome args"
     w, h = window_size_args[0].split("=")[1].split(",")
     assert int(h) >= MIN_HEIGHT, f"--window-size height {h} is below minimum {MIN_HEIGHT}"
-    assert int(w) == viewport["width"], "window-size width != viewport width"
-    assert int(h) == viewport["height"], "window-size height != viewport height"
+
+    if viewport is not None:
+        assert int(w) == viewport["width"], "window-size width != viewport width"
+        assert int(h) == viewport["height"], "window-size height != viewport height"
 
 
 def test_entrypoint_resolution():
@@ -149,9 +155,18 @@ def test_compose_vnc_resolution():
 
 
 def test_cross_source_consistency():
-    """All three configuration sources must agree on width and height."""
+    """All three configuration sources must agree on width and height.
+
+    When viewport=None (openbox auto-maximize), --window-size is the
+    authoritative source for the expected resolution.
+    """
     viewport, args, _ = _parse_cookie_extractor()
-    py_w, py_h = viewport["width"], viewport["height"]
+
+    # Derive effective dimensions from --window-size arg
+    window_size_args = [a for a in args if a.startswith("--window-size=")]
+    assert window_size_args, "--window-size not found in Chrome args"
+    ws_w, ws_h = window_size_args[0].split("=")[1].split(",")
+    py_w, py_h = int(ws_w), int(ws_h)
 
     sh_res = _parse_entrypoint_resolution()
     sh_w, sh_h = _split_resolution(sh_res)

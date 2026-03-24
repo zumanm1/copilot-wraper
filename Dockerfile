@@ -26,7 +26,7 @@ WORKDIR /app
 COPY --from=builder /install /usr/local
 
 # Copy application source code
-COPY config.py models.py copilot_backend.py server.py agent_manager.py circuit_breaker.py cookie_extractor_linux.py token_counting.py ./
+COPY config.py models.py copilot_backend.py server.py agent_manager.py circuit_breaker.py cookie_extractor_linux.py token_counting.py portal_urls.py ./
 COPY test_client/ ./test_client/
 
 # Create non-root user for security

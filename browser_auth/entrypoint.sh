@@ -6,7 +6,7 @@
 set -e
 
 DISPLAY_NUM=99
-SCREEN_RES="${VNC_RESOLUTION:-1280x900x24}"
+SCREEN_RES="${VNC_RESOLUTION:-1280x1024x24}"
 VNC_PORT=5900
 NOVNC_PORT=6080
 API_PORT=8001
@@ -42,6 +42,18 @@ if ! kill -0 $XVFB_PID 2>/dev/null; then
     exit 1
 fi
 echo "[browser-auth] Xvfb running on :${DISPLAY_NUM}"
+
+# 1b. Start lightweight window manager (openbox) so Chrome can maximize properly.
+# Without a WM, --start-maximized has no effect and Chrome leaves a black strip.
+# The openbox-rc.xml config auto-maximizes all windows with no decorations.
+OPENBOX_RC="/browser-auth/openbox-rc.xml"
+if [ -f "$OPENBOX_RC" ]; then
+    openbox --config-file "$OPENBOX_RC" &
+else
+    openbox --config-file /dev/null &
+fi
+sleep 0.5
+echo "[browser-auth] openbox window manager started"
 
 # 2. Start VNC server (x11vnc, no password for local-only use)
 # Note: x11vnc uses -rfbport (not -port) to set the listening port.

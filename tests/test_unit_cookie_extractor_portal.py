@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+import pytest
 
 _ROOT = Path(__file__).resolve().parents[1]
 _BROWSER_AUTH = _ROOT / "browser_auth"
@@ -11,6 +12,7 @@ for _p in (_ROOT, _BROWSER_AUTH):
         sys.path.insert(0, str(_p))
 
 from cookie_extractor import (  # noqa: E402
+    _is_logged_in,
     portal_landing_url,
     portal_settings_from_env_file,
     target_cookies_for_profile,
@@ -77,3 +79,41 @@ def test_portal_settings_empty_file_defaults_m365(tmp_path):
     assert prof == "m365_hub"
     assert base == ""
     assert api == ""
+
+
+class _DummyContext:
+    def __init__(self, cookies):
+        self._cookies = cookies
+
+    async def cookies(self, _urls):
+        return self._cookies
+
+
+class _DummyPage:
+    def __init__(self, url: str, html: str, cookies=None):
+        self.url = url
+        self._html = html
+        self.context = _DummyContext(cookies or [])
+
+    async def content(self):
+        return self._html
+
+
+@pytest.mark.asyncio
+async def test_is_logged_in_false_when_m365_auth_modal_present():
+    p = _DummyPage(
+        "https://m365.cloud.microsoft/chat?auth=1",
+        "<div>Authentication required</div><button>Continue</button>",
+    )
+    ok = await _is_logged_in(p, ("m365.cloud.microsoft",))
+    assert ok is False
+
+
+@pytest.mark.asyncio
+async def test_is_logged_in_true_on_portal_host_without_auth_gate():
+    p = _DummyPage(
+        "https://m365.cloud.microsoft/chat",
+        "<main>Welcome to Copilot</main>",
+    )
+    ok = await _is_logged_in(p, ("m365.cloud.microsoft",))
+    assert ok is True

@@ -242,9 +242,28 @@ async def extract():
 
 
 @app.post("/navigate")
-async def navigate(request: Request, url: str | None = Form(default=None)):
-    """Force the browser to navigate to a URL (form field or query ?url= for curl)."""
-    u = (url or request.query_params.get("url") or "").strip() or "https://copilot.microsoft.com"
+async def navigate(request: Request):
+    """Force the browser to navigate to a URL (form field, query ?url=, or JSON body).
+
+    Accepts:
+      - Form: url=...
+      - Query: /navigate?url=...
+      - JSON:  {"url": "..."}
+    Supports both copilot.microsoft.com and m365.cloud.microsoft portals.
+    """
+    u = request.query_params.get("url")
+    if not u:
+        content_type = (request.headers.get("content-type") or "").lower()
+        try:
+            if "json" in content_type:
+                body = await request.json()
+                u = body.get("url", "")
+            else:
+                form = await request.form()
+                u = form.get("url", "")
+        except Exception:
+            pass
+    u = (u or "").strip() or "https://copilot.microsoft.com"
     u = normalize_copilot_portal_url(u)
     try:
         context = await get_context()
@@ -252,7 +271,7 @@ async def navigate(request: Request, url: str | None = Form(default=None)):
             page = await context.new_page()
         else:
             page = context.pages[0]
-        await page.goto(u, wait_until="domcontentloaded")
+        await page.goto(u, wait_until="domcontentloaded", timeout=30000)
         return {"status": "ok", "url": page.url}
     except Exception as e:
         return {"status": "error", "message": str(e)}

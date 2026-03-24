@@ -480,7 +480,7 @@ services:
     environment:
       - ENV_PATH=/app/.env
       - API1_URL=http://app:8000
-      - VNC_RESOLUTION=1280x900x24
+      - VNC_RESOLUTION=1280x1024x24
     volumes:
       # Share .env with Container 1 so extracted cookies persist
       - ./.env:/app/.env
