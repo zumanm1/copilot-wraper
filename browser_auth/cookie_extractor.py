@@ -34,7 +34,15 @@ _COPILOT_PORTAL_COOKIE_NAMES = [
     "__cf_bm", "_C_ETH", "_EDGE_S", "MUID", "MUIDB", "_EDGE_V",
     "__Host-copilot-anon", "MSFPC",
 ]
-_M365_HUB_COOKIE_NAMES = list(_COPILOT_PORTAL_COOKIE_NAMES)  # same MS ecosystem set; refine after traces
+_M365_HUB_COOKIE_NAMES = [
+    # MS ecosystem cookies shared across portals
+    "__cf_bm", "_C_ETH", "_EDGE_S", "MUID", "MUIDB", "_EDGE_V",
+    "__Host-copilot-anon", "MSFPC",
+    # M365-specific session cookies (set by m365.cloud.microsoft)
+    "OH.SID", "OH.FLID", "OH.DCAffinity",
+    # Auth cookies that may appear after M365 login
+    "_U", "SRCHHPGUSR", "SRCHD", "SRCHUID",
+]
 
 _BING_COOKIE_NAMES = [
     "_U", "MUID", "MUIDB", "SRCHHPGUSR", "SRCHD", "SRCHUID",
@@ -44,8 +52,9 @@ _BING_COOKIE_NAMES = [
 _VALID_PROFILES = frozenset({"consumer", "m365_hub"})
 
 # M365 chat may load on canonical host or the common *.microsoft.com alias; both
-# can carry distinct cookies. C1 WebSocket/REST still use copilot.microsoft.com
-# (Phase A), so m365_hub extraction must visit that host too and merge cookies.
+# can carry distinct cookies.  Extraction stays on these hosts only — no
+# navigation to bing.com or copilot.microsoft.com to avoid disrupting the
+# user's M365 session.  (Phase B will route C1 WSS through m365 APIs.)
 _M365_PORTAL_URLS = (
     "https://m365.cloud.microsoft",
     "https://m365.cloud.microsoft.com",
@@ -58,13 +67,13 @@ def target_cookies_for_profile(profile: str) -> list[tuple[str, list[str]]]:
         profile = "consumer"
     bing: tuple[str, list[str]] = ("https://www.bing.com", _BING_COOKIE_NAMES)
     if profile == "m365_hub":
+        # M365 hub: only visit m365 portal URLs — do NOT navigate to bing.com
+        # or copilot.microsoft.com to avoid disrupting the user's M365 session.
         out: list[tuple[str, list[str]]] = []
         for u in _M365_PORTAL_URLS:
             out.append((u, _M365_HUB_COOKIE_NAMES))
-        out.append(bing)
-        # Last so shared names prefer consumer Copilot jar for WSS on copilot.microsoft.com
-        out.append(("https://copilot.microsoft.com", _COPILOT_PORTAL_COOKIE_NAMES))
         return out
+    # Consumer profile: copilot.microsoft.com + bing.com
     return [
         ("https://copilot.microsoft.com", _COPILOT_PORTAL_COOKIE_NAMES),
         bing,
@@ -128,8 +137,18 @@ def portal_landing_url(profile: str, portal_base_override: str) -> str:
 ANON_COOKIES = ["MUID", "MUIDB", "_EDGE_S", "_EDGE_V", "MSFPC", "__Host-copilot-anon", "_C_ETH", "SRCHHPGUSR"]
 # Additional cookies only present when signed in to a Microsoft account
 AUTH_COOKIES = ["_U"]
-# Extraction succeeds if at least one anon cookie is present
-REQUIRED_COOKIES = ["MUID"]
+# Extraction succeeds if at least one required cookie is present (profile-dependent)
+REQUIRED_COOKIES_CONSUMER = ["MUID"]          # bing/copilot domain cookie
+REQUIRED_COOKIES_M365 = ["MSFPC", "OH.SID"]  # m365 domain cookies (any one)
+# Legacy alias for tests that import REQUIRED_COOKIES
+REQUIRED_COOKIES = REQUIRED_COOKIES_CONSUMER
+
+
+def required_cookies_for_profile(profile: str) -> list[str]:
+    """Return the list of cookies that must be present for extraction to succeed."""
+    if (profile or "consumer").strip().lower() == "m365_hub":
+        return REQUIRED_COOKIES_M365
+    return REQUIRED_COOKIES_CONSUMER
 
 # ── Singleton state ────────────────────────────────────────────────────────────
 _playwright = None
@@ -431,8 +450,13 @@ async def extract_and_save(env_path: str = "/app/.env") -> dict:
         except Exception:
             pass
 
-        # Step 5: Validate
-        missing = [r for r in REQUIRED_COOKIES if r not in cookies]
+        # Step 5: Validate (profile-aware: m365 uses different required cookies)
+        req = required_cookies_for_profile(profile)
+        # For m365_hub, pass if ANY required cookie is present (OR logic)
+        if profile == "m365_hub":
+            missing = req if not any(r in cookies for r in req) else []
+        else:
+            missing = [r for r in req if r not in cookies]
         if missing:
             return {
                 "status": "error",

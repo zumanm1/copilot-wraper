@@ -38,14 +38,15 @@ def test_target_cookies_consumer_uses_copilot_host():
     assert "https://www.bing.com" in urls
 
 
-def test_target_cookies_m365_visits_hub_alias_bing_and_copilot():
+def test_target_cookies_m365_stays_on_m365_only():
     tc = target_cookies_for_profile("m365_hub")
     urls = [u for u, _ in tc]
     assert urls.index("https://m365.cloud.microsoft") < urls.index(
         "https://m365.cloud.microsoft.com"
     )
-    assert "https://www.bing.com" in urls
-    assert urls.index("https://www.bing.com") < urls.index("https://copilot.microsoft.com")
+    # m365_hub must NOT navigate to bing or copilot (disrupts user session)
+    assert "https://www.bing.com" not in urls
+    assert "https://copilot.microsoft.com" not in urls
 
 
 def test_portal_landing_override_adds_scheme():
