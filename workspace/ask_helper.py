@@ -19,6 +19,15 @@ parser.add_argument("--format", choices=["openai", "anthropic"], default="openai
 parser.add_argument("--api-key", default="sk-ant-not-needed-xxxxxxxxxxxxx", help="API key (Anthropic format only)")
 args = parser.parse_args()
 
+
+def _classify_upstream_error(message: str) -> str:
+    msg = (message or "").lower()
+    if any(x in msg for x in ("unauthorized", "401", "403", "handshake", "verification required", "challenge", "cookie")):
+        return "auth"
+    if any(x in msg for x in ("json", "choices", "content", "extracting response", "invalid")):
+        return "parse"
+    return "unknown"
+
 history_dir = "/workspace/.history"
 history_file = f"{history_dir}/{args.agent_id}_history.json"
 prompt_file = "/workspace/professor_prompt.txt"
@@ -91,9 +100,9 @@ if not c1_ok:
 
 # ── Call the API ──────────────────────────────────────────────────────────────
 cmd = [
-    "curl", "-sf", "-X", "POST", args.api_url,
+    "curl", "-sS", "-X", "POST", args.api_url,
     "-H", "Content-Type: application/json",
-] + extra_headers + ["-d", payload]
+] + extra_headers + ["-d", payload, "-w", "\n__ASK_HELPER_HTTP_STATUS__:%{http_code}\n"]
 
 try:
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
@@ -101,28 +110,59 @@ except subprocess.TimeoutExpired:
     print("  Error: API call timed out after 120s", file=sys.stderr)
     sys.exit(1)
 
-if result.returncode != 0 or not result.stdout.strip():
+raw_stdout = result.stdout or ""
+status_code = None
+if "__ASK_HELPER_HTTP_STATUS__:" in raw_stdout:
+    body, _, tail = raw_stdout.rpartition("__ASK_HELPER_HTTP_STATUS__:")
+    raw_stdout = body.rstrip("\n")
+    try:
+        status_code = int(tail.strip().splitlines()[0].strip())
+    except Exception:
+        status_code = None
+
+if result.returncode != 0 or (status_code is not None and status_code >= 400) or not raw_stdout.strip():
     print(f"", file=sys.stderr)
     print(f"  ✗ C1 (copilot-api) returned no response (HTTP error or empty body)", file=sys.stderr)
+    if status_code is not None:
+        print(f"  HTTP status: {status_code}", file=sys.stderr)
     if result.stderr:
         print(f"  curl: {result.stderr[:300]}", file=sys.stderr)
-    print(f"  → C1 is reachable but Copilot auth may be stale.", file=sys.stderr)
-    print(f"  → Refresh cookies: docker compose up browser-auth -d", file=sys.stderr)
+    kind = _classify_upstream_error(result.stderr)
+    if raw_stdout.strip():
+        kind = _classify_upstream_error(raw_stdout)
+        print(f"  body: {raw_stdout[:300]}", file=sys.stderr)
+    if kind == "auth":
+        print(f"  → C1 is reachable, but upstream auth/session is invalid.", file=sys.stderr)
+        print(f"  → Refresh cookies: docker compose up browser-auth -d", file=sys.stderr)
+    elif kind == "parse":
+        print(f"  → C1 is reachable, but response envelope/parsing is mismatched.", file=sys.stderr)
+    else:
+        print(f"  → C1 is reachable, but upstream returned an error/empty response.", file=sys.stderr)
     print(f"", file=sys.stderr)
     sys.exit(1)
 
 # ── Parse and display response ────────────────────────────────────────────────
 try:
-    d = json.loads(result.stdout)
+    d = json.loads(raw_stdout)
 except json.JSONDecodeError as e:
     print(f"  Error: invalid JSON from API — {e}", file=sys.stderr)
-    print(f"  Raw: {result.stdout[:300]}", file=sys.stderr)
+    print(f"  Raw: {raw_stdout[:300]}", file=sys.stderr)
     sys.exit(1)
 
 # EC4: handle error responses from API
 if "error" in d:
     err = d["error"]
-    print(f"  API Error: {err.get('message', err)}", file=sys.stderr)
+    err_msg = err.get("message", err) if isinstance(err, dict) else str(err)
+    print(f"  API Error: {err_msg}", file=sys.stderr)
+    kind = _classify_upstream_error(str(err_msg))
+    if kind == "auth":
+        print("  Error class: upstream-auth-invalid", file=sys.stderr)
+        print("  Action: sign in (provider-matching portal), extract cookies, reload C1.", file=sys.stderr)
+    elif kind == "parse":
+        print("  Error class: response-envelope-mismatch", file=sys.stderr)
+        print("  Action: inspect C1 response schema and ask_helper parser assumptions.", file=sys.stderr)
+    else:
+        print("  Error class: upstream-unknown", file=sys.stderr)
     sys.exit(1)
 
 try:
@@ -209,7 +249,9 @@ try:
 
 except (KeyError, IndexError) as e:
     print(f"  Error extracting response: {e}", file=sys.stderr)
-    print(f"  Raw: {result.stdout[:400]}", file=sys.stderr)
+    print("  Error class: response-envelope-mismatch", file=sys.stderr)
+    print("  Action: verify C1 response schema for this provider.", file=sys.stderr)
+    print(f"  Raw: {raw_stdout[:400]}", file=sys.stderr)
     sys.exit(1)
 
 # ── Persist history ───────────────────────────────────────────────────────────

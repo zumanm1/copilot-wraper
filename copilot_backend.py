@@ -82,6 +82,33 @@ def _cache_key(style: str, prompt: str) -> str:
 
 
 _cached_cookie: str | None = None
+_M365_REQUIRED_COOKIE_HINTS = ("MSFPC", "OH.SID", "OH.FLID", "OH.DCAffinity")
+_COPILOT_REQUIRED_COOKIE_HINTS = ("MUID", "__Host-copilot-anon", "_C_ETH")
+
+
+def _extract_conversation_id(data: object) -> str | None:
+    """
+    Extract conversation ID from both consumer and M365-shaped payloads.
+    """
+    if isinstance(data, dict):
+        direct = data.get("id")
+        if isinstance(direct, str) and direct:
+            return direct
+        for key in ("conversations", "items", "value"):
+            items = data.get(key)
+            if isinstance(items, list):
+                for item in items:
+                    if isinstance(item, dict):
+                        cid = item.get("id") or item.get("conversationId")
+                        if isinstance(cid, str) and cid:
+                            return cid
+    elif isinstance(data, list):
+        for item in data:
+            if isinstance(item, dict):
+                cid = item.get("id") or item.get("conversationId")
+                if isinstance(cid, str) and cid:
+                    return cid
+    return None
 
 def _make_cookie_header() -> str:
     """Return cached Cookie header; refreshed on reload_cookies()."""
@@ -89,6 +116,55 @@ def _make_cookie_header() -> str:
     if _cached_cookie is None:
         _cached_cookie = os.getenv("COPILOT_COOKIES") or os.getenv("BING_COOKIES") or ""
     return _cached_cookie
+
+
+def _cookie_names_from_header(cookie_header: str) -> set[str]:
+    names: set[str] = set()
+    for pair in (cookie_header or "").split(";"):
+        pair = pair.strip()
+        if not pair or "=" not in pair:
+            continue
+        name, _, _val = pair.partition("=")
+        name = name.strip()
+        if name:
+            names.add(name)
+    return names
+
+
+def _validate_provider_cookie_compatibility(cookie_header: str) -> None:
+    """
+    Fail fast with actionable guidance when cookie set does not match provider.
+    """
+    provider = config.copilot_provider()
+    profile = getattr(config, "COPILOT_PORTAL_PROFILE", "consumer")
+    cookie_names = _cookie_names_from_header(cookie_header)
+
+    if not cookie_names:
+        raise RuntimeError(
+            "No Copilot cookies loaded. Run C3 extract and reload C1 cookies."
+        )
+
+    if provider == "m365":
+        if not any(name in cookie_names for name in _M365_REQUIRED_COOKIE_HINTS):
+            raise RuntimeError(
+                "M365 provider selected but M365 session cookies not found "
+                f"(expected one of: {', '.join(_M365_REQUIRED_COOKIE_HINTS)}). "
+                "Sign in on m365.cloud.microsoft in noVNC, extract cookies, then retry."
+            )
+        return
+
+    if provider == "copilot":
+        if not any(name in cookie_names for name in _COPILOT_REQUIRED_COOKIE_HINTS):
+            raise RuntimeError(
+                "Copilot provider selected but Copilot/Bing cookies not found "
+                f"(expected one of: {', '.join(_COPILOT_REQUIRED_COOKIE_HINTS)}). "
+                "Sign in on copilot.microsoft.com, extract cookies, then retry."
+            )
+        if profile == "m365_hub":
+            logger.warning(
+                "Provider/profile mismatch: COPILOT_PROVIDER=copilot with "
+                "COPILOT_PORTAL_PROFILE=m365_hub. Using explicit provider override."
+            )
 
 def reload_cookies() -> None:
     """Invalidate the cached cookie so the next call re-reads the env."""
@@ -101,6 +177,7 @@ def _make_headers() -> dict:
     return {
         "Origin": config.copilot_browser_origin(),
         "Referer": config.copilot_browser_referer(),
+        "Accept": "application/json, text/plain, */*",
         "User-Agent": (
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -127,14 +204,79 @@ class CopilotBackend:
         async with self._lock:
             if self._conversation_id:
                 return self._conversation_id
-            async with session.post(config.copilot_conversations_url(), json={}) as resp:
-                if resp.status != 200:
-                    raise RuntimeError(
-                        f"Failed to create Copilot conversation: HTTP {resp.status}"
-                    )
-                data = await resp.json()
-                self._conversation_id = data["id"]
+            self._conversation_id = await self._create_conversation(session)
         return self._conversation_id
+
+    async def _create_conversation(self, session: aiohttp.ClientSession) -> str:
+        """
+        Provider-aware conversation bootstrap.
+        - copilot: POST /c/api/conversations with empty JSON body.
+        - m365:    try GET /c/api/conversations first, then fallback to POST for compatibility.
+        """
+        provider = config.copilot_provider()
+        url = config.copilot_conversations_url()
+        if provider == "copilot" and "m365.cloud.microsoft" in url:
+            raise RuntimeError(
+                "Config mismatch: copilot provider is targeting an M365 API base URL. "
+                "Set COPILOT_PROVIDER=auto or m365 for m365_hub profile, "
+                "or clear COPILOT_PORTAL_API_BASE_URL override."
+            )
+        if provider == "m365":
+            conv_id = await self._create_conversation_m365(session, url)
+            if conv_id:
+                return conv_id
+            raise RuntimeError(
+                "Failed to create M365 conversation session. "
+                "Ensure M365 web session is valid and cookies are reloaded."
+            )
+        async with session.post(url, json={}) as resp:
+            if resp.status != 200:
+                raise RuntimeError(
+                    f"Failed to create Copilot conversation: HTTP {resp.status}"
+                )
+            data = await resp.json()
+            return data["id"]
+
+    async def _create_conversation_m365(
+        self, session: aiohttp.ClientSession, url: str
+    ) -> str | None:
+        # M365 hub may require GET for listing/bootstrapping conversations.
+        async with session.get(url) as get_resp:
+            if get_resp.status == 200:
+                try:
+                    data = await get_resp.json(content_type=None)
+                except Exception as exc:
+                    raise RuntimeError(
+                        "M365 conversation bootstrap response-envelope mismatch "
+                        "(GET /c/api/conversations returned non-JSON)."
+                    ) from exc
+                cid = _extract_conversation_id(data)
+                if cid:
+                    return cid
+            elif get_resp.status not in (404, 405):
+                raise RuntimeError(
+                    f"Failed to bootstrap M365 conversation via GET: HTTP {get_resp.status}"
+                )
+
+        # Fallback for environments where POST still works.
+        async with session.post(url, json={}) as post_resp:
+            if post_resp.status == 200:
+                try:
+                    data = await post_resp.json(content_type=None)
+                except Exception as exc:
+                    raise RuntimeError(
+                        "M365 conversation bootstrap response-envelope mismatch "
+                        "(POST /c/api/conversations returned non-JSON)."
+                    ) from exc
+                cid = _extract_conversation_id(data)
+                if cid:
+                    return cid
+            elif post_resp.status in (401, 403):
+                raise RuntimeError(
+                    "M365 conversation bootstrap unauthorized (401/403). "
+                    "Complete sign-in in noVNC and refresh cookies."
+                )
+        return None
 
     def _ws_url(self) -> str:
         sid = str(uuid.uuid4())
@@ -226,6 +368,7 @@ class CopilotBackend:
         
         # Always re-read cookies from environment to ensure latest C3 sync
         headers = _make_headers()
+        _validate_provider_cookie_compatibility(headers.get("Cookie", ""))
 
         connector = await _get_shared_connector()
         timeout = aiohttp.ClientTimeout(
@@ -259,115 +402,140 @@ class CopilotBackend:
                 "Cookie": cookie_str,
             }
 
-            async with session.ws_connect(
-                self._ws_url(),
-                headers=ws_headers,
-                timeout=aiohttp.ClientWSTimeout(ws_receive=config.REQUEST_TIMEOUT),
-            ) as ws:
+            try:
+                ws_ctx = session.ws_connect(
+                    self._ws_url(),
+                    headers=ws_headers,
+                    timeout=aiohttp.ClientWSTimeout(ws_receive=config.REQUEST_TIMEOUT),
+                )
+                async with ws_ctx as ws:
                 # Wait for connected event
-                hello = json.loads(await asyncio.wait_for(ws.receive_str(), timeout=15))
-                if hello.get("event") != "connected":
-                    raise RuntimeError(f"Unexpected hello: {hello}")
+                    hello_raw = await asyncio.wait_for(ws.receive_str(), timeout=15)
+                    try:
+                        hello = json.loads(hello_raw)
+                    except json.JSONDecodeError as exc:
+                        raise RuntimeError(
+                            "WebSocket response-envelope mismatch: expected JSON 'connected' "
+                            "event from provider endpoint. Check provider/API base alignment."
+                        ) from exc
+                    if hello.get("event") != "connected":
+                        raise RuntimeError(f"Unexpected hello: {hello}")
                 
-                # BOUNTY HUNTER HEARTBEAT
-                sys.stderr.write(f"Bounty Hunter: WS_LINK_ESTABLISHED conv={conv_id}\n")
-                sys.stderr.flush()
+                    # BOUNTY HUNTER HEARTBEAT
+                    sys.stderr.write(f"Bounty Hunter: WS_LINK_ESTABLISHED conv={conv_id}\n")
+                    sys.stderr.flush()
 
-                # Map legacy style names to new copilot.microsoft.com API modes
-                # Valid modes: smart, chat, research, reasoning, study, smart-latest
-                _MODE_MAP = {
-                    "balanced": "smart",
-                    "creative": "smart",
-                    "precise": "chat",
-                    "smart": "smart",
-                    "chat": "chat",
-                    "research": "research",
-                    "reasoning": "reasoning",
-                    "study": "study",
-                }
-                mode = _MODE_MAP.get(self.style, "smart")
+                    # Map legacy style names to new copilot.microsoft.com API modes
+                    # Valid modes: smart, chat, research, reasoning, study, smart-latest
+                    _MODE_MAP = {
+                        "balanced": "smart",
+                        "creative": "smart",
+                        "precise": "chat",
+                        "smart": "smart",
+                        "chat": "chat",
+                        "research": "research",
+                        "reasoning": "reasoning",
+                        "study": "study",
+                    }
+                    mode = _MODE_MAP.get(self.style, "smart")
 
-                content_payload = [{"type": "text", "text": prompt}]
-                if attachment_path:
-                    abs_path = os.path.abspath(attachment_path)
-                    if os.path.exists(abs_path):
-                        import base64
-                        sz = os.path.getsize(abs_path)
-                        if sz > config.MAX_IMAGE_BYTES:
-                            raise ValueError(
-                                f"Image file exceeds MAX_IMAGE_BYTES ({config.MAX_IMAGE_BYTES})"
-                            )
-                        with open(abs_path, "rb") as f:
-                            b64 = base64.b64encode(f.read()).decode("utf-8")
-                        content_payload.append({
-                            "type": "image",
-                            "imageUrl": f"data:image/jpeg;base64,{b64}"
-                        })
-                        sys.stderr.write(f"Encoding image as JPEG (Base64 length: {len(b64)}) from: {abs_path}\n")
-                        sys.stderr.flush()
-                    else:
-                        logger.warning("Attachment path not found: %s", abs_path)
-
-                # Send message
-                payload = {
-                    "event": "send",
-                    "conversationId": conv_id,
-                    "content": content_payload,
-                    "mode": mode,
-                    "context": context or {},
-                }
-                sys.stderr.write(f"WS_SEND: {json.dumps(payload)[:200]}\n")
-                sys.stderr.flush()
-                await ws.send_str(json.dumps(payload))
-
-                # Stream response
-                async for msg in ws:
-                    if msg.type == aiohttp.WSMsgType.TEXT:
-                        data = json.loads(msg.data)
-                        ev = data.get("event", "")
-                        sys.stderr.write(f"WS_RECV_EVENT: {ev}\n")
-                        sys.stderr.flush()
-                        if ev == "appendText":
-                            yield data.get("text", "")
-                        elif ev == "challenge":
-                            # Copilot bot-verification challenge.
-                            # method="copilot": solve cubic formula mod 22 and reply.
-                            method = data.get("method", "")
-                            parameter = data.get("parameter", "")
-                            if method == "copilot" and parameter:
-                                try:
-                                    a = float(parameter)
-                                    token = str(round((a ** 3 / 100 + a * 25) % 22))
-                                except (ValueError, ZeroDivisionError):
-                                    token = "0"
-                                await ws.send_str(json.dumps({
-                                    "event": "challengeResponse",
-                                    "method": "copilot",
-                                    "token": token,
-                                }))
-                            else:
-                                # Other methods (hashcash, cloudflare) or failed copilot challenge
-                                raise RuntimeError(
-                                    f"Copilot verification required (method: {method or ev}). "
-                                    "Please refresh cookies via Container 3 (browser-auth) "
-                                    "or solve the challenge in the noVNC browser."
+                    content_payload = [{"type": "text", "text": prompt}]
+                    if attachment_path:
+                        abs_path = os.path.abspath(attachment_path)
+                        if os.path.exists(abs_path):
+                            import base64
+                            sz = os.path.getsize(abs_path)
+                            if sz > config.MAX_IMAGE_BYTES:
+                                raise ValueError(
+                                    f"Image file exceeds MAX_IMAGE_BYTES ({config.MAX_IMAGE_BYTES})"
                                 )
-                        elif ev in _DONE_EVENTS:
-                            if ev == "error":
+                            with open(abs_path, "rb") as f:
+                                b64 = base64.b64encode(f.read()).decode("utf-8")
+                            content_payload.append({
+                                "type": "image",
+                                "imageUrl": f"data:image/jpeg;base64,{b64}"
+                            })
+                            sys.stderr.write(f"Encoding image as JPEG (Base64 length: {len(b64)}) from: {abs_path}\n")
+                            sys.stderr.flush()
+                        else:
+                            logger.warning("Attachment path not found: %s", abs_path)
+
+                    # Send message
+                    payload = {
+                        "event": "send",
+                        "conversationId": conv_id,
+                        "content": content_payload,
+                        "mode": mode,
+                        "context": context or {},
+                    }
+                    sys.stderr.write(f"WS_SEND: {json.dumps(payload)[:200]}\n")
+                    sys.stderr.flush()
+                    await ws.send_str(json.dumps(payload))
+
+                    # Stream response
+                    async for msg in ws:
+                        if msg.type == aiohttp.WSMsgType.TEXT:
+                            try:
+                                data = json.loads(msg.data)
+                            except json.JSONDecodeError as exc:
                                 raise RuntimeError(
-                                    f"Copilot error: {data.get('message', ev)}"
-                                )
-                            if ev == "throttled":
-                                raise RuntimeError("Copilot rate limited (throttled)")
-                            
-                            # Capture suggested follow-up prompts
-                            self._last_suggestions = data.get("suggestedResponses", [])
-                            if self._last_suggestions:
-                                sys.stderr.write(f"Bounty Hunter Trace: SUGGESTIONS_CAPTURED count={len(self._last_suggestions)}\n")
-                                sys.stderr.flush()
+                                    "WebSocket response-envelope mismatch while streaming. "
+                                    "Provider endpoint returned non-JSON frame."
+                                ) from exc
+                            ev = data.get("event", "")
+                            sys.stderr.write(f"WS_RECV_EVENT: {ev}\n")
+                            sys.stderr.flush()
+                            if ev == "appendText":
+                                yield data.get("text", "")
+                            elif ev == "challenge":
+                                # Copilot bot-verification challenge.
+                                # method="copilot": solve cubic formula mod 22 and reply.
+                                method = data.get("method", "")
+                                parameter = data.get("parameter", "")
+                                if method == "copilot" and parameter:
+                                    try:
+                                        a = float(parameter)
+                                        token = str(round((a ** 3 / 100 + a * 25) % 22))
+                                    except (ValueError, ZeroDivisionError):
+                                        token = "0"
+                                    await ws.send_str(json.dumps({
+                                        "event": "challengeResponse",
+                                        "method": "copilot",
+                                        "token": token,
+                                    }))
+                                else:
+                                    # Other methods (hashcash, cloudflare) or failed copilot challenge
+                                    raise RuntimeError(
+                                        f"Copilot verification required (method: {method or ev}). "
+                                        "Please refresh cookies via Container 3 (browser-auth) "
+                                        "or solve the challenge in the noVNC browser."
+                                    )
+                            elif ev in _DONE_EVENTS:
+                                if ev == "error":
+                                    raise RuntimeError(
+                                        f"Copilot error: {data.get('message', ev)}"
+                                    )
+                                if ev == "throttled":
+                                    raise RuntimeError("Copilot rate limited (throttled)")
+
+                                # Capture suggested follow-up prompts
+                                self._last_suggestions = data.get("suggestedResponses", [])
+                                if self._last_suggestions:
+                                    sys.stderr.write(f"Bounty Hunter Trace: SUGGESTIONS_CAPTURED count={len(self._last_suggestions)}\n")
+                                    sys.stderr.flush()
+                                break
+                        elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                             break
-                    elif msg.type in (aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
-                        break
+            except aiohttp.WSServerHandshakeError as exc:
+                provider = config.copilot_provider()
+                profile = getattr(config, "COPILOT_PORTAL_PROFILE", "consumer")
+                if exc.status in (401, 403):
+                    raise RuntimeError(
+                        "WebSocket handshake unauthorized "
+                        f"(HTTP {exc.status}, provider={provider}, profile={profile}). "
+                        "Refresh cookies via C3 and ensure sign-in for the selected provider."
+                    ) from exc
+                raise
 
     async def chat_completion_stream(self, prompt: str, attachment_path=None, context=None) -> AsyncGenerator[str, None]:
         """Streaming interface — yields text tokens as they arrive."""
