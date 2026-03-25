@@ -313,7 +313,7 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
 
     # ── Non-streaming path ────────────────────────────────────────────
     try:
-        response = await backend.chat_completion(prompt=prompt, attachment_path=attachment)
+        response = await backend.chat_completion(prompt=prompt, attachment_path=attachment, agent_id=agent_id or "")
         sys.stderr.write(f"Bounty Hunter Trace: RESPONSE_CONTENT='{response[:100]}...'\n")
         sys.stderr.flush()
         response, truncated = truncate_by_approx_tokens(response, request.max_tokens)
@@ -536,7 +536,7 @@ async def anthropic_messages(request: AnthropicRequest, raw_request: Request):
 
     # ── Non-streaming path ──────────────────────────────────────────────
     try:
-        response_text = await backend.chat_completion(prompt=prompt)
+        response_text = await backend.chat_completion(prompt=prompt, agent_id=agent_id or "")
         token_in = count_tokens(prompt)
         token_out = count_tokens(response_text)
         sys.stderr.write(f"Bounty Hunter Trace: ANTHROPIC_RESPONSE_CONTENT='{response_text[:100]}...'\n")

@@ -155,7 +155,9 @@ _playwright = None
 _browser: Browser | None = None
 _context: BrowserContext | None = None
 _lock = asyncio.Lock()
-_chat_lock = asyncio.Lock()
+_chat_lock = asyncio.Lock()  # kept as fallback; pool mode bypasses this
+_pool_pages: set = set()      # pages owned by PagePool; skipped by _get_or_create_page
+_page_pool: "PagePool | None" = None  # initialized lazily on first browser_chat call
 _DISMISS_AUTH_DIALOG = os.getenv("BROWSER_AUTH_AUTO_DISMISS_AUTH_DIALOG", "false").strip().lower() == "true"
 
 
@@ -283,12 +285,98 @@ async def _auth_dialog_monitor() -> None:
 
 
 async def _get_or_create_page(context: BrowserContext) -> Page:
-    """Reuse an existing page or open a new one."""
+    """Reuse an existing non-pool page or open a new one."""
     pages = context.pages
     for p in pages:
-        if not p.is_closed():
+        if not p.is_closed() and p not in _pool_pages:
             return p
     return await context.new_page()
+
+
+class PagePool:
+    """
+    Pool of N browser tabs, each pre-navigated to M365 Chat.
+
+    Tabs are acquired from an asyncio.Queue (fair FIFO) and returned after use.
+    Concurrent requests share the pool rather than all serialising on one
+    global _chat_lock.  Pool size is set via C3_CHAT_TAB_POOL_SIZE (default 3).
+    """
+
+    _M365_CHAT_URL = "https://m365.cloud.microsoft/chat"
+
+    def __init__(self, size: int) -> None:
+        self._size = size
+        self._queue: asyncio.Queue = asyncio.Queue()
+        self._pages: list[Page] = []
+        self._init_lock = asyncio.Lock()
+        self._initialized = False
+
+    async def initialize(self, context: BrowserContext) -> None:
+        """Create pool tabs and navigate each to M365 Chat (runs once)."""
+        async with self._init_lock:
+            if self._initialized:
+                return
+            print(f"[PagePool] Initializing {self._size} chat tabs...")
+            for i in range(self._size):
+                try:
+                    page = await context.new_page()
+                    _pool_pages.add(page)
+                    await page.goto(
+                        self._M365_CHAT_URL,
+                        wait_until="domcontentloaded",
+                        timeout=30_000,
+                    )
+                    await asyncio.sleep(1)
+                    print(f"[PagePool] Tab {i + 1}/{self._size} ready: {page.url[:60]}")
+                    self._pages.append(page)
+                    await self._queue.put(page)
+                except Exception as exc:
+                    print(f"[PagePool] Tab {i + 1} init error (skipped): {exc}")
+            print(f"[PagePool] {self._queue.qsize()}/{self._size} tabs in pool")
+            self._initialized = True
+
+    async def acquire(self, timeout: float = 120.0) -> Page:
+        """Block until a tab is available, then remove it from the pool."""
+        try:
+            return await asyncio.wait_for(self._queue.get(), timeout=timeout)
+        except asyncio.TimeoutError:
+            raise TimeoutError(
+                f"PagePool: no tab available after {timeout:.0f}s "
+                f"(pool_size={self._size})"
+            )
+
+    def release(self, page: Page) -> None:
+        """Return a tab to the pool."""
+        self._queue.put_nowait(page)
+
+    async def replace(self, bad_page: Page, context: BrowserContext) -> Page:
+        """Close a failed tab, create a healthy replacement, and register it."""
+        _pool_pages.discard(bad_page)
+        try:
+            await bad_page.close()
+        except Exception:
+            pass
+        new_page = await context.new_page()
+        _pool_pages.add(new_page)
+        try:
+            await new_page.goto(
+                self._M365_CHAT_URL,
+                wait_until="domcontentloaded",
+                timeout=30_000,
+            )
+            await asyncio.sleep(1)
+            print(f"[PagePool] Replacement tab ready: {new_page.url[:60]}")
+        except Exception as exc:
+            print(f"[PagePool] Replacement tab nav failed: {exc}")
+        return new_page
+
+    @property
+    def available(self) -> int:
+        return self._queue.qsize()
+
+    @property
+    def size(self) -> int:
+        return self._size
 
 
 async def _is_logged_in(
@@ -705,51 +793,76 @@ async def extract_access_token() -> dict:
 async def browser_chat(prompt: str, mode: str = "chat", timeout_ms: int = 60000) -> dict:
     """Execute a Copilot chat via the M365 browser UI + WebSocket frame interception.
 
-    Strategy:
-      1. Navigate to m365.cloud.microsoft/chat (if not already there).
-      2. Attach a WebSocket frame listener to capture appendText events.
-      3. Type the prompt into the composer textarea and submit.
-      4. The web app's own JavaScript handles the challenge natively.
-      5. Collect appendText frames until done/partCompleted.
-
-    Serialized by _chat_lock — only one chat request uses the browser at a time.
-    Concurrent callers queue and wait (up to timeout_ms + 30s for the lock).
+    Uses a PagePool of N pre-navigated browser tabs for concurrency.
+    Each tab is acquired from the pool (FIFO queue), used for one request,
+    then returned.  Within each tab, Phase 3 'New chat' fast-reset avoids
+    the costly about:blank → m365 full-page teardown between requests.
 
     Returns dict with 'text', 'events', 'success', and optionally 'error'.
     """
-    lock_timeout = (timeout_ms / 1000.0) + 30
-    try:
-        await asyncio.wait_for(_chat_lock.acquire(), timeout=lock_timeout)
-    except asyncio.TimeoutError:
-        return {
-            "success": False,
-            "error": f"Browser busy — another chat request is in progress (waited {lock_timeout:.0f}s)",
-            "events": [], "text": "",
-        }
-    try:
-        return await _browser_chat_locked(prompt, mode=mode, timeout_ms=timeout_ms)
-    finally:
-        _chat_lock.release()
-
-
-async def _browser_chat_locked(prompt: str, mode: str = "chat", timeout_ms: int = 60000) -> dict:
-    """Inner implementation of browser_chat(), called with _chat_lock held."""
-    import json as _json
+    global _page_pool
 
     context = await _get_context()
-    page = await _get_or_create_page(context)
 
-    # Health check: verify the page is responsive before navigating.
-    # A stale/crashed page will hang on goto; detect and replace it.
+    pool_size = max(1, int(os.getenv("C3_CHAT_TAB_POOL_SIZE", "3")))
+    if _page_pool is None:
+        _page_pool = PagePool(pool_size)
+    await _page_pool.initialize(context)
+
+    lock_timeout = (timeout_ms / 1000.0) + 30
+    try:
+        page = await _page_pool.acquire(timeout=lock_timeout)
+    except TimeoutError as exc:
+        return {"success": False, "error": str(exc), "events": [], "text": ""}
+
+    final_page = page
+    try:
+        result, final_page = await _browser_chat_on_page(
+            page, context, prompt, mode=mode, timeout_ms=timeout_ms
+        )
+    except Exception as exc:
+        print(f"[browser_chat] Unexpected error: {exc}")
+        result = {"success": False, "error": str(exc), "events": [], "text": ""}
+        try:
+            final_page = await _page_pool.replace(page, context)
+        except Exception:
+            final_page = page
+    finally:
+        _page_pool.release(final_page)
+
+    return result
+
+
+async def _browser_chat_on_page(
+    page: Page,
+    context: BrowserContext,
+    prompt: str,
+    mode: str = "chat",
+    timeout_ms: int = 60000,
+) -> "tuple[dict, Page]":
+    """
+    Execute one chat request on a given browser page.
+
+    Returns (result_dict, final_page).  final_page may differ from `page`
+    when the original page was unresponsive and replaced with a fresh one.
+
+    Phase 3: tries 'New chat' button click first (no navigation overhead);
+    falls back to full about:blank → m365 teardown only when needed.
+    """
+    import json as _json
+
+    # Health check: verify the page is responsive before doing anything.
+    # A stale/crashed page will hang on goto; detect and replace it early.
     try:
         await asyncio.wait_for(page.evaluate("1+1"), timeout=5)
     except Exception:
-        print("[browser_chat] Page unresponsive — creating fresh page")
+        print("[browser_chat] Page unresponsive — replacing with fresh page")
         try:
             await page.close()
         except Exception:
             pass
         page = await context.new_page()
+        _pool_pages.add(page)
 
     # State for WebSocket frame interception
     collected_text = []
@@ -870,28 +983,69 @@ async def _browser_chat_locked(prompt: str, mode: str = "chat", timeout_ms: int 
     # ── Attach WS listener — M365 opens a NEW WS per chat message ──
     page.on("websocket", _on_websocket)
 
-    # Force full page teardown then navigate to fresh M365 chat URL.
-    # SPA caches state when navigating to the same URL, causing Enter key
-    # to not submit on consecutive requests. about:blank forces full teardown.
+    # ── Phase 3: fast reset via 'New chat' button ──────────────────────────────
+    # If the page is already on m365, click 'New chat' and wait for the
+    # composer — skips the costly about:blank → m365 navigation (5-10s).
+    # Falls back to full teardown if the page is on a different URL or the
+    # 'New chat' click does not produce a ready composer within 5 s.
     _M365_CHAT_URL = "https://m365.cloud.microsoft/chat"
-    try:
-        await page.goto("about:blank", wait_until="domcontentloaded", timeout=15_000)
-        await page.goto(_M365_CHAT_URL, wait_until="domcontentloaded", timeout=30_000)
-        # Wait for composer element to appear (reliable page-ready signal)
-        for _sel in [
-            '[role="textbox"][contenteditable="true"]',
-            '[contenteditable="true"]',
-            'textarea',
-        ]:
+    _fast_reset_ok = False
+    if "m365.cloud.microsoft" in (page.url or ""):
+        try:
+            _clicked = await page.evaluate("""() => {
+                const nc = document.querySelector(
+                    '[data-testid="sidebar-new-conversation-nav-item"]'
+                );
+                if (nc) { nc.click(); return true; }
+                for (const b of document.querySelectorAll('button,[role="button"]')) {
+                    const t = ((b.textContent || '') +
+                               (b.getAttribute('aria-label') || '')).toLowerCase();
+                    if (t.includes('new chat') || t.includes('new conversation')) {
+                        b.click();
+                        return true;
+                    }
+                }
+                return false;
+            }""")
+            if _clicked:
+                for _sel in [
+                    '[data-testid="composer-input"]',
+                    '[role="textbox"][contenteditable="true"]',
+                    'textarea',
+                ]:
+                    try:
+                        await page.wait_for_selector(_sel, state="visible", timeout=5_000)
+                        _fast_reset_ok = True
+                        print(f"[browser_chat] Fast reset via 'New chat' — {page.url[:60]}")
+                        break
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+
+    if not _fast_reset_ok:
+        print("[browser_chat] Fast reset unavailable — full page teardown")
+        try:
+            await page.goto("about:blank", wait_until="domcontentloaded", timeout=15_000)
+            await page.goto(_M365_CHAT_URL, wait_until="domcontentloaded", timeout=30_000)
+            for _sel in [
+                '[role="textbox"][contenteditable="true"]',
+                '[contenteditable="true"]',
+                'textarea',
+            ]:
+                try:
+                    await page.wait_for_selector(_sel, state="visible", timeout=15_000)
+                    break
+                except Exception:
+                    continue
+            print(f"[browser_chat] Full teardown complete: {page.url}")
+        except Exception as e:
+            print(f"[browser_chat] navigate failed: {e}")
             try:
-                await page.wait_for_selector(_sel, state="visible", timeout=15_000)
-                break
+                page.remove_listener("websocket", _on_websocket)
             except Exception:
-                continue
-        print(f"[browser_chat] Navigated to fresh chat: {page.url}")
-    except Exception as e:
-        print(f"[browser_chat] navigate failed: {e}")
-        return {"success": False, "error": f"Navigate failed: {e}", "events": [], "text": ""}
+                pass
+            return {"success": False, "error": f"Navigate failed: {e}", "events": [], "text": ""}, page
 
     try:
         # Use page.evaluate() for auth dialog check — immune to overlay dialogs
@@ -921,7 +1075,7 @@ async def _browser_chat_locked(prompt: str, mode: str = "chat", timeout_ms: int 
                     "success": False,
                     "error": "Authentication required on m365.cloud.microsoft — sign in via noVNC at http://localhost:6080 then retry",
                     "events": [], "text": "",
-                }
+                }, page
             # Clicked a button — wait for re-auth
             await asyncio.sleep(8)
             # Re-check
@@ -934,16 +1088,12 @@ async def _browser_chat_locked(prompt: str, mode: str = "chat", timeout_ms: int 
                     "success": False,
                     "error": "Authentication required on m365.cloud.microsoft — sign in via noVNC at http://localhost:6080 then retry",
                     "events": [], "text": "",
-                }
+                }, page
             print("[browser_chat] Auth dialog dismissed after button click")
 
         # ── Discover DOM elements via page.evaluate (fast, overlay-immune) ──
         dom_info = await page.evaluate("""() => {
             const info = {url: location.href, title: document.title, composer: null, sendBtn: null};
-
-            // Try "New chat" button (click via JS — doesn't need real events)
-            const nc = document.querySelector('[data-testid="sidebar-new-conversation-nav-item"]');
-            if (nc) nc.click();
 
             // Find composer
             const sels = [
@@ -983,7 +1133,7 @@ async def _browser_chat_locked(prompt: str, mode: str = "chat", timeout_ms: int 
         if not composer_sel:
             err = f"No composer found (page: {dom_info.get('url')}, title: {dom_info.get('title')})"
             print(f"[browser_chat] {err}")
-            return {"success": False, "error": err, "events": [], "text": ""}
+            return {"success": False, "error": err, "events": [], "text": ""}, page
 
         # ── Use Playwright native methods for text input (triggers real events for React) ──
         composer = page.locator(composer_sel).first
@@ -1055,11 +1205,11 @@ async def _browser_chat_locked(prompt: str, mode: str = "chat", timeout_ms: int 
 
         success = len(text) > 0
         print(f"[browser_chat] success={success}, recv={events_recv[:10]}, sent={events_sent[:10]}, ws_urls={[u[:60] for u in ws_urls]}, text_len={len(text)}")
-        return {"success": success, "events": events_recv, "events_sent": events_sent, "ws_urls": ws_urls, "text": text}
+        return {"success": success, "events": events_recv, "events_sent": events_sent, "ws_urls": ws_urls, "text": text}, page
 
     except Exception as e:
         print(f"[browser_chat] error: {e}")
-        return {"success": False, "error": str(e), "events": events_recv, "text": "".join(collected_text)}
+        return {"success": False, "error": str(e), "events": events_recv, "text": "".join(collected_text)}, page
     finally:
         try:
             page.remove_listener("websocket", _on_websocket)

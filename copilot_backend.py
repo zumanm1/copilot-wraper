@@ -77,8 +77,8 @@ def get_cache_stats() -> dict:
     }
 
 
-def _cache_key(style: str, prompt: str) -> str:
-    return hashlib.sha256(f"{style}:{prompt}".encode()).hexdigest()
+def _cache_key(style: str, prompt: str, agent_id: str = "") -> str:
+    return hashlib.sha256(f"{style}:{agent_id}:{prompt}".encode()).hexdigest()
 
 
 _cached_cookie: str | None = None
@@ -285,13 +285,13 @@ class CopilotBackend:
         base = self.provider.ws_chat_url()
         return f"{base}?api-version=2&clientSessionId={sid}"
 
-    async def chat_completion(self, prompt: str, attachment_path=None, context=None, search=True) -> str:
+    async def chat_completion(self, prompt: str, attachment_path=None, context=None, search=True, agent_id: str = "") -> str:
         global _cache_hits, _cache_misses
 
         if attachment_path:
             return await self._do_chat_completion(prompt, attachment_path, context)
 
-        key = _cache_key(self.style, prompt)
+        key = _cache_key(self.style, prompt, agent_id)
         if key in _response_cache:
             _cache_hits += 1
             return _response_cache[key]

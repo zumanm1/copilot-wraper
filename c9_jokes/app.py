@@ -115,19 +115,15 @@ def create_app() -> Flask:
 
     # ── Chat proxy helper (shared by /api/chat and /api/validate) ─────────────
 
-    def _chat_one(agent_id: str, prompt: str, c1_url: str, bust_cache: bool = False) -> dict:
+    def _chat_one(agent_id: str, prompt: str, c1_url: str) -> dict:
         """Call C1 for a single agent. Returns {ok, http_status, text, elapsed_ms}.
 
-        bust_cache=True appends a per-agent suffix so C1's (style, prompt) dedup
-        cache treats each agent's request as distinct, ensuring unique real responses.
+        C1 now keys its response cache on (style, agent_id, prompt), so each
+        agent receives a unique response even when the prompt is identical.
         """
-        # Add an invisible per-agent tag that makes the cache key unique per agent.
-        # C1's _in_flight dedup is keyed on (style, prompt) with no agent_id, so
-        # without this all agents with the same prompt share one Copilot call.
-        actual_prompt = f"{prompt}\n\n[agent:{agent_id}]" if bust_cache else prompt
         body = {
             "model": "copilot",
-            "messages": [{"role": "user", "content": actual_prompt}],
+            "messages": [{"role": "user", "content": prompt}],
             "stream": False,
         }
         t0 = time.monotonic()
@@ -340,8 +336,8 @@ def create_app() -> Flask:
           prompt:     str  (default "Tell me a joke")
           agent_ids:  list (optional, default all)
           parallel:   bool (default false) — fire all agents concurrently via
-                      ThreadPoolExecutor; each agent gets a cache-busting suffix
-                      so C1's (style, prompt) dedup never merges their calls.
+                      ThreadPoolExecutor; C1 keys its cache on (style, agent_id,
+                      prompt) so each agent receives a distinct response.
 
         Returns: {run_id, mode, passed, failed, total, wall_ms, results: [...]}
         """
@@ -353,11 +349,6 @@ def create_app() -> Flask:
         agents_to_run = [a for a in AGENTS if a["id"] in requested_ids]
         if not agents_to_run:
             return jsonify({"ok": False, "error": "no matching agents"}), 400
-
-        # Parallel always busts the dedup cache so every agent gets a real
-        # independent Copilot call.  Sequential also busts when >1 agent so
-        # responses differ even in serial mode.
-        bust = len(agents_to_run) > 1
 
         mode = "web-parallel" if parallel else "web-sequential"
         started_at = datetime.now(timezone.utc).isoformat()
@@ -374,7 +365,7 @@ def create_app() -> Flask:
             pass
 
         def _run_one(agent: dict) -> dict:
-            r = _chat_one(agent["id"], prompt, c1, bust_cache=bust)
+            r = _chat_one(agent["id"], prompt, c1)
             ok = r["ok"] and bool((r.get("text") or "").strip())
             detail = r.get("text") or r.get("error") or r.get("raw") or ""
             # Each thread writes its own pair_result immediately

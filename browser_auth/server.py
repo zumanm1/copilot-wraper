@@ -33,6 +33,7 @@ from cookie_extractor import (
     portal_settings_from_env_file,
     warm_browser_for_novnc,
 )
+import cookie_extractor as _ce
 
 
 @asynccontextmanager
@@ -255,7 +256,17 @@ async def status():
     try:
         context = await get_context()
         pages = len(context.pages)
-        return {"status": "ok", "browser": "running", "open_pages": pages}
+        pool = _ce._page_pool
+        pool_info = (
+            {
+                "pool_size": pool.size,
+                "pool_available": pool.available,
+                "pool_initialized": pool._initialized,
+            }
+            if pool is not None
+            else {"pool_size": 0, "pool_available": 0, "pool_initialized": False}
+        )
+        return {"status": "ok", "browser": "running", "open_pages": pages, **pool_info}
     except Exception as e:
         return {"status": "error", "browser": str(e)}
 
