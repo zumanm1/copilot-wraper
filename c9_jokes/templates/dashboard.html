@@ -2,7 +2,8 @@
 {% block title %}Dashboard{% endblock %}
 {% block content %}
 <h2>Overview</h2>
-<p class="muted">Probe targets: C1 <code>{{ urls.c1 }}</code>, C3 <code>{{ urls.c3 }}</code>, C7a <code>{{ urls.c7a }}</code></p>
+<p class="muted">Monitoring {{ targets | length }} containers:
+{% for key, t in targets.items() %}<code>{{ t.label }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</p>
 <div class="card-grid">
 {% for p in probes %}
   <div class="card">

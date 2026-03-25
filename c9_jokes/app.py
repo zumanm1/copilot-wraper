@@ -7,7 +7,6 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -26,11 +25,21 @@ def create_app() -> Flask:
         static_url_path="/static",
     )
 
+    TARGETS = {
+        "c1":  {"env": "C1_URL",  "default": "http://localhost:8000",  "label": "C1 copilot-api",         "health": "/health"},
+        "c2":  {"env": "C2_URL",  "default": "http://localhost:8080",  "label": "C2 agent-terminal",      "health": "/health"},
+        "c3":  {"env": "C3_URL",  "default": "http://localhost:8001",  "label": "C3 browser-auth",        "health": "/health"},
+        "c5":  {"env": "C5_URL",  "default": "http://localhost:8080",  "label": "C5 claude-code",         "health": "/health"},
+        "c6":  {"env": "C6_URL",  "default": "http://localhost:8080",  "label": "C6 kilocode",            "health": "/health"},
+        "c7a": {"env": "C7A_URL", "default": "http://localhost:18789", "label": "C7a openclaw-gateway",   "health": "/healthz"},
+        "c7b": {"env": "C7B_URL", "default": "http://localhost:8080",  "label": "C7b openclaw-cli",       "health": "/health"},
+        "c8":  {"env": "C8_URL",  "default": "http://localhost:8080",  "label": "C8 hermes-agent",        "health": "/health"},
+    }
+
     def _urls() -> dict[str, str]:
         return {
-            "c1": os.environ.get("C1_URL", "http://localhost:8000").rstrip("/"),
-            "c3": os.environ.get("C3_URL", "http://localhost:8001").rstrip("/"),
-            "c7a": os.environ.get("C7A_URL", "http://localhost:18789").rstrip("/"),
+            key: os.environ.get(t["env"], t["default"]).rstrip("/")
+            for key, t in TARGETS.items()
         }
 
     def init_db() -> None:
@@ -71,25 +80,23 @@ def create_app() -> Flask:
                 "error": str(e),
             }
 
+    def _probe_all() -> list[dict]:
+        urls = _urls()
+        return [
+            probe_health(TARGETS[key]["label"], urls[key], TARGETS[key]["health"])
+            for key in TARGETS
+        ]
+
     @app.get("/")
     def dashboard():
-        urls = _urls()
-        probes = [
-            probe_health("C1", urls["c1"], "/health"),
-            probe_health("C3", urls["c3"], "/health"),
-            probe_health("C7a", urls["c7a"], "/healthz"),
-        ]
-        return render_template("dashboard.html", probes=probes, urls=urls)
+        probes = _probe_all()
+        return render_template("dashboard.html", probes=probes, targets=TARGETS)
 
     @app.get("/health")
     def page_health():
+        probes = _probe_all()
         urls = _urls()
-        probes = [
-            probe_health("C1", urls["c1"], "/health"),
-            probe_health("C3", urls["c3"], "/health"),
-            probe_health("C3 status", urls["c3"], "/status"),
-            probe_health("C7a", urls["c7a"], "/healthz"),
-        ]
+        probes.append(probe_health("C3 /status", urls["c3"], "/status"))
         return render_template("health.html", probes=probes)
 
     @app.get("/pairs")
@@ -101,7 +108,8 @@ def create_app() -> Flask:
 
     @app.get("/chat")
     def page_chat():
-        return render_template("chat.html", c1_url=_urls()["c1"])
+        urls = _urls()
+        return render_template("chat.html", c1_url=urls["c1"])
 
     @app.get("/logs")
     def page_logs():
@@ -119,15 +127,16 @@ def create_app() -> Flask:
 
     @app.get("/sessions")
     def page_sessions():
-        urls = _urls()["c1"]
+        urls = _urls()
+        c1 = urls["c1"]
         data = None
         err = None
         try:
-            r = requests.get(f"{urls}/v1/sessions", timeout=5)
+            r = requests.get(f"{c1}/v1/sessions", timeout=5)
             data = r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text
         except requests.RequestException as e:
             err = str(e)
-        return render_template("sessions.html", data=data, error=err, c1_url=urls)
+        return render_template("sessions.html", data=data, error=err, c1_url=c1)
 
     @app.get("/api")
     def page_api_reference():
@@ -136,19 +145,17 @@ def create_app() -> Flask:
     @app.get("/api/status")
     def api_status():
         urls = _urls()
-        return jsonify(
-            {
-                "c1": probe_health("c1", urls["c1"], "/health"),
-                "c3": probe_health("c3", urls["c3"], "/health"),
-                "c7a": probe_health("c7a", urls["c7a"], "/healthz"),
-                "ts": datetime.now(timezone.utc).isoformat(),
-            }
-        )
+        result = {
+            key: probe_health(key, urls[key], TARGETS[key]["health"])
+            for key in TARGETS
+        }
+        result["ts"] = datetime.now(timezone.utc).isoformat()
+        return jsonify(result)
 
     @app.post("/api/chat")
     def api_chat():
         """Proxy chat to C1 (OpenAI format). Body: {agent_id, prompt}."""
-        urls = _urls()["c1"]
+        c1 = _urls()["c1"]
         payload_in = request.get_json(silent=True) or {}
         agent_id = (payload_in.get("agent_id") or "c9-jokes").strip()
         prompt = (payload_in.get("prompt") or "").strip()
@@ -161,7 +168,7 @@ def create_app() -> Flask:
         }
         try:
             r = requests.post(
-                f"{urls}/v1/chat/completions",
+                f"{c1}/v1/chat/completions",
                 headers={
                     "Content-Type": "application/json",
                     "X-Agent-ID": agent_id,
