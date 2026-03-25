@@ -4,7 +4,6 @@ Does not modify C1–C8; only HTTP GET/POST to peer URLs you configure.
 """
 from __future__ import annotations
 
-import json
 import os
 import sqlite3
 from datetime import datetime, timezone
@@ -99,17 +98,23 @@ def create_app() -> Flask:
         probes.append(probe_health("C3 /status", urls["c3"], "/status"))
         return render_template("health.html", probes=probes)
 
+    AGENTS = [
+        {"id": "c2-aider",       "label": "C2 Aider (OpenAI)"},
+        {"id": "c5-claude-code", "label": "C5 Claude Code (Anthropic)"},
+        {"id": "c6-kilocode",    "label": "C6 KiloCode (OpenAI)"},
+        {"id": "c7-openclaw",    "label": "C7b OpenClaw"},
+        {"id": "c8-hermes",      "label": "C8 Hermes Agent"},
+        {"id": "c9-jokes",       "label": "C9 (generic session)"},
+    ]
+
     @app.get("/pairs")
     def page_pairs():
-        return render_template(
-            "pairs.html",
-            hint="Run host script: python3 tests/validate_all_agents.py [--parallel]",
-        )
+        return render_template("pairs.html", agents=AGENTS)
 
     @app.get("/chat")
     def page_chat():
         urls = _urls()
-        return render_template("chat.html", c1_url=urls["c1"])
+        return render_template("chat.html", c1_url=urls["c1"], agents=AGENTS)
 
     @app.get("/logs")
     def page_logs():
@@ -140,7 +145,7 @@ def create_app() -> Flask:
 
     @app.get("/api")
     def page_api_reference():
-        return render_template("api_reference.html", urls=_urls())
+        return render_template("api_reference.html", urls=_urls(), targets=TARGETS)
 
     @app.get("/api/status")
     def api_status():

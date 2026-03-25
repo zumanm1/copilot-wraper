@@ -3,26 +3,56 @@
 {% block content %}
 <h2>API reference</h2>
 
-<h3>C9 (this service)</h3>
-<ul>
-  <li><code>GET /api/status</code> — JSON health probe for C1, C3, C7a</li>
-  <li><code>POST /api/chat</code> — body <code>{"agent_id":"c9-jokes","prompt":"..."}</code></li>
-</ul>
+<h3>C9 endpoints (this service — port 6090)</h3>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td>GET</td><td><code>/api/status</code></td><td>JSON health probe for all 8 containers</td></tr>
+    <tr><td>POST</td><td><code>/api/chat</code></td><td>Proxy chat to C1. Body: <code>{"agent_id":"c2-aider","prompt":"Tell me a joke"}</code></td></tr>
+    <tr><td>GET</td><td><code>/</code></td><td>Dashboard — container status grid</td></tr>
+    <tr><td>GET</td><td><code>/health</code></td><td>Detailed health table with HTTP status</td></tr>
+    <tr><td>GET</td><td><code>/pairs</code></td><td>Run pair validation from UI</td></tr>
+    <tr><td>GET</td><td><code>/chat</code></td><td>Interactive agent chat</td></tr>
+    <tr><td>GET</td><td><code>/logs</code></td><td>Chat log history (SQLite)</td></tr>
+    <tr><td>GET</td><td><code>/sessions</code></td><td>C1 backend session list</td></tr>
+  </tbody>
+</table>
 
-<h3>C1 (copilot-api)</h3>
-<p>Base: <code>{{ urls.c1 }}</code></p>
-<pre>curl -sS {{ urls.c1 }}/health
-curl -sS -X POST {{ urls.c1 }}/v1/chat/completions \
+<h3>Container health endpoints</h3>
+<table>
+  <thead><tr><th>Container</th><th>Internal URL</th><th>Health path</th></tr></thead>
+  <tbody>
+  {% for key, t in targets.items() %}
+    <tr>
+      <td><strong>{{ t.label }}</strong></td>
+      <td><code>{{ urls[key] }}</code></td>
+      <td><code>{{ t.health }}</code></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<h3>Example: Chat via curl</h3>
+<pre>curl -sS -X POST http://localhost:6090/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id":"c2-aider","prompt":"Tell me a joke"}'</pre>
+
+<h3>Example: Direct C1 call</h3>
+<pre>curl -sS -X POST {{ urls.c1 }}/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "X-Agent-ID: c9-smoke" \
   -d '{"model":"copilot","messages":[{"role":"user","content":"Tell me a joke"}],"stream":false}'</pre>
 
-<h3>C3 (browser-auth)</h3>
-<p>Base: <code>{{ urls.c3 }}</code></p>
-<pre>curl -sS {{ urls.c3 }}/health
-curl -sS {{ urls.c3 }}/status</pre>
-
-<h3>C7a (OpenClaw gateway)</h3>
-<p>Base: <code>{{ urls.c7a }}</code></p>
-<pre>curl -sS {{ urls.c7a }}/healthz</pre>
+<h3>Agent IDs</h3>
+<table>
+  <thead><tr><th>Agent</th><th>X-Agent-ID</th><th>Protocol path</th></tr></thead>
+  <tbody>
+    <tr><td>C2 Aider</td><td><code>c2-aider</code></td><td>OpenAI → C1 → Copilot</td></tr>
+    <tr><td>C5 Claude Code</td><td><code>c5-claude-code</code></td><td>Anthropic → C1 → Copilot</td></tr>
+    <tr><td>C6 KiloCode</td><td><code>c6-kilocode</code></td><td>OpenAI → C1 → Copilot</td></tr>
+    <tr><td>C7b OpenClaw</td><td><code>c7-openclaw</code></td><td>OpenClaw → C1 → Copilot</td></tr>
+    <tr><td>C8 Hermes</td><td><code>c8-hermes</code></td><td>OpenAI → C1 → Copilot</td></tr>
+    <tr><td>C9 Generic</td><td><code>c9-jokes</code></td><td>Direct → C1 → Copilot</td></tr>
+  </tbody>
+</table>
 {% endblock %}

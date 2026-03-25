@@ -1,30 +1,148 @@
 {% extends "base.html" %}
 {% block title %}Agent chat{% endblock %}
 {% block content %}
-<h2>Agent chat (via C1)</h2>
-<p>Posts to <code>{{ c1_url }}/v1/chat/completions</code> with <code>X-Agent-ID</code>.</p>
-<div class="card">
-  <label>Agent ID (session)</label>
-  <input id="agent_id" value="c9-jokes" placeholder="c9-jokes"/>
-  <label>Prompt</label>
-  <textarea id="prompt" rows="4" placeholder="Tell me a joke"></textarea>
-  <button type="button" id="send">Send</button>
-  <h3>Response</h3>
-  <pre id="out">(not sent yet)</pre>
+<h2>Agent chat <span class="muted" style="font-size:0.7em;">(via C1 → Copilot)</span></h2>
+
+<div class="chat-controls">
+  <div class="control-row">
+    <label for="agent_id">Agent</label>
+    <select id="agent_id">
+      {% for agent in agents %}
+      <option value="{{ agent.id }}"{% if agent.id == 'c2-aider' %} selected{% endif %}>
+        {{ agent.label }}
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="control-row">
+    <label>Quick prompts</label>
+    <div class="quick-btns">
+      <button type="button" class="quick" data-prompt="Tell me a joke">Tell me a joke</button>
+      <button type="button" class="quick" data-prompt="Tell me a programming joke">Programming joke</button>
+      <button type="button" class="quick" data-prompt="Tell me a dad joke">Dad joke</button>
+      <button type="button" class="quick" data-prompt="What can you do?">Capabilities</button>
+    </div>
+  </div>
 </div>
+
+<div class="chat-window" id="chat-window">
+  <div class="chat-empty" id="chat-empty">Select an agent and send a prompt to begin.</div>
+</div>
+
+<form id="chat-form" autocomplete="off">
+  <div class="chat-input-row">
+    <textarea id="prompt" rows="2" placeholder="Type a message…" required></textarea>
+    <button type="submit" id="send">Send</button>
+  </div>
+</form>
+
+<details class="muted" style="margin-top:0.75rem;">
+  <summary>How it works</summary>
+  <p>
+    Your prompt is sent to <code>POST /api/chat</code> on this C9 service,
+    which proxies it to <strong>C1</strong> (<code>{{ c1_url }}/v1/chat/completions</code>)
+    with the selected agent's <code>X-Agent-ID</code> header.
+    C1 routes the request through <strong>C3</strong> (browser-auth cookies) to Microsoft Copilot.
+    Each agent ID maintains a separate backend session.
+    All exchanges are logged in the C9 SQLite DB (see <a href="{{ url_for('page_logs') }}">Logs</a>).
+  </p>
+</details>
+
 <script>
-document.getElementById('send').onclick = async () => {
-  const agent_id = document.getElementById('agent_id').value.trim() || 'c9-jokes';
-  const prompt = document.getElementById('prompt').value.trim();
-  const out = document.getElementById('out');
-  out.textContent = 'Loading…';
-  const r = await fetch('/api/chat', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({ agent_id, prompt })
+(function() {
+  const chatWindow = document.getElementById('chat-window');
+  const chatEmpty = document.getElementById('chat-empty');
+  const form = document.getElementById('chat-form');
+  const promptEl = document.getElementById('prompt');
+  const agentEl = document.getElementById('agent_id');
+  const sendBtn = document.getElementById('send');
+  let busy = false;
+
+  function agentLabel() {
+    return agentEl.options[agentEl.selectedIndex].text;
+  }
+
+  function appendBubble(role, text, meta) {
+    chatEmpty.style.display = 'none';
+    const bubble = document.createElement('div');
+    bubble.className = 'bubble ' + role;
+    const header = document.createElement('div');
+    header.className = 'bubble-header';
+    header.textContent = role === 'user' ? 'You' : agentLabel();
+    bubble.appendChild(header);
+    const body = document.createElement('div');
+    body.className = 'bubble-body';
+    body.textContent = text;
+    bubble.appendChild(body);
+    if (meta) {
+      const foot = document.createElement('div');
+      foot.className = 'bubble-meta';
+      foot.textContent = meta;
+      bubble.appendChild(foot);
+    }
+    chatWindow.appendChild(bubble);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+  }
+
+  async function send(prompt) {
+    if (busy || !prompt) return;
+    busy = true;
+    sendBtn.disabled = true;
+    sendBtn.textContent = 'Sending…';
+    const agent_id = agentEl.value;
+    appendBubble('user', prompt);
+
+    const loader = document.createElement('div');
+    loader.className = 'bubble assistant loading';
+    loader.innerHTML = '<div class="bubble-header">' + agentLabel() + '</div><div class="bubble-body">Thinking…</div>';
+    chatEmpty.style.display = 'none';
+    chatWindow.appendChild(loader);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+
+    const t0 = performance.now();
+    try {
+      const r = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ agent_id, prompt })
+      });
+      const j = await r.json();
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+      loader.remove();
+      if (j.ok && j.text) {
+        appendBubble('assistant', j.text, `HTTP ${j.http_status} · ${elapsed}s · ${agent_id}`);
+      } else {
+        const errMsg = j.error || j.raw || JSON.stringify(j);
+        appendBubble('error', 'Error: ' + errMsg, `HTTP ${j.http_status || '?'} · ${elapsed}s`);
+      }
+    } catch (e) {
+      loader.remove();
+      appendBubble('error', 'Network error: ' + e.message);
+    }
+    busy = false;
+    sendBtn.disabled = false;
+    sendBtn.textContent = 'Send';
+    promptEl.focus();
+  }
+
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    const p = promptEl.value.trim();
+    if (p) { promptEl.value = ''; send(p); }
   });
-  const j = await r.json();
-  out.textContent = JSON.stringify(j, null, 2);
-};
+
+  document.querySelectorAll('.quick').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      send(btn.dataset.prompt);
+    });
+  });
+
+  promptEl.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      form.dispatchEvent(new Event('submit'));
+    }
+  });
+})();
 </script>
 {% endblock %}

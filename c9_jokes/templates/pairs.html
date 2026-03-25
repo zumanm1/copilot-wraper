@@ -2,15 +2,101 @@
 {% block title %}Pair validation{% endblock %}
 {% block content %}
 <h2>Pair validation</h2>
-<p>{{ hint }}</p>
-<div class="card">
-  <p>Validates end-to-end:</p>
-  <ul>
-    <li>C1 + C3 — <code>POST /v1/chat/completions</code></li>
-    <li>C2, C5, C6, C7b, C8 — each via <code>docker compose run … ask</code></li>
-  </ul>
+<p class="muted">Tests each AI agent via C1 → Copilot roundtrip. Each agent uses its own <code>X-Agent-ID</code> session.</p>
+
+<div class="chat-controls">
+  <div class="control-row">
+    <label>Prompt sent to every agent</label>
+    <input id="val-prompt" value="Tell me a joke" />
+  </div>
+  <button type="button" id="run-all" style="margin-top:0.5rem">Run all agents</button>
+</div>
+
+<table id="results-table">
+  <thead><tr><th>Agent</th><th>Status</th><th>Time</th><th>Response</th></tr></thead>
+  <tbody id="results-body">
+  {% for agent in agents %}
+    <tr id="row-{{ agent.id }}">
+      <td><strong>{{ agent.label }}</strong><br><code style="font-size:0.72rem">{{ agent.id }}</code></td>
+      <td id="status-{{ agent.id }}"><span class="badge" style="opacity:0.4">PENDING</span></td>
+      <td id="time-{{ agent.id }}">—</td>
+      <td id="resp-{{ agent.id }}" style="max-width:400px;overflow:hidden;text-overflow:ellipsis"><small class="muted">Not tested yet</small></td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<div id="summary" style="margin-top:1rem"></div>
+
+<details class="muted" style="margin-top:1rem;">
+  <summary>CLI alternative</summary>
   <pre>cd /path/to/copilot-openai-wrapper
 python3 tests/validate_all_agents.py
 python3 tests/validate_all_agents.py --parallel</pre>
-</div>
+</details>
+
+<script>
+(function() {
+  const agents = {{ agents | tojson }};
+  const runBtn = document.getElementById('run-all');
+  const summaryEl = document.getElementById('summary');
+
+  async function testAgent(agent, prompt) {
+    const statusEl = document.getElementById('status-' + agent.id);
+    const timeEl = document.getElementById('time-' + agent.id);
+    const respEl = document.getElementById('resp-' + agent.id);
+    statusEl.innerHTML = '<span class="badge" style="background:rgba(88,166,255,0.15);color:var(--accent)">RUNNING</span>';
+    respEl.innerHTML = '<small class="muted">Waiting for response…</small>';
+    const t0 = performance.now();
+    try {
+      const r = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ agent_id: agent.id, prompt })
+      });
+      const j = await r.json();
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+      timeEl.textContent = elapsed + 's';
+      if (j.ok && j.text) {
+        statusEl.innerHTML = '<span class="badge ok">PASS</span>';
+        respEl.innerHTML = '<small>' + escapeHtml(j.text.substring(0, 300)) + '</small>';
+        return true;
+      } else {
+        statusEl.innerHTML = '<span class="badge fail">FAIL</span>';
+        respEl.innerHTML = '<small style="color:var(--fail)">' + escapeHtml(j.error || j.raw || JSON.stringify(j)).substring(0, 200) + '</small>';
+        return false;
+      }
+    } catch(e) {
+      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+      timeEl.textContent = elapsed + 's';
+      statusEl.innerHTML = '<span class="badge fail">FAIL</span>';
+      respEl.innerHTML = '<small style="color:var(--fail)">Network: ' + escapeHtml(e.message) + '</small>';
+      return false;
+    }
+  }
+
+  function escapeHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  runBtn.addEventListener('click', async function() {
+    runBtn.disabled = true;
+    runBtn.textContent = 'Running…';
+    summaryEl.innerHTML = '';
+    const prompt = document.getElementById('val-prompt').value.trim() || 'Tell me a joke';
+    let passed = 0;
+    for (const agent of agents) {
+      const ok = await testAgent(agent, prompt);
+      if (ok) passed++;
+    }
+    const total = agents.length;
+    const color = passed === total ? 'var(--ok)' : 'var(--fail)';
+    summaryEl.innerHTML = '<strong style="color:' + color + '">Result: ' + passed + '/' + total + ' agents passed</strong>';
+    runBtn.disabled = false;
+    runBtn.textContent = 'Run all agents';
+  });
+})();
+</script>
 {% endblock %}
