@@ -40,20 +40,27 @@ async def _fake_ws_stream(self, prompt, context, attachment_path=None):
     yield " response"
 
 
+async def _fake_c3_proxy(self, prompt):
+    """Avoid real C3 browser-auth call; returns canned text (M365 path)."""
+    return "Mocked Copilot response"
+
+
 # ── FastAPI TestClient ────────────────────────────────────────────────────────
 
 @pytest.fixture
 def test_app():
-    """FastAPI app with Copilot WebSocket I/O stubbed via _ws_stream."""
+    """FastAPI app with Copilot WebSocket I/O stubbed via _ws_stream
+    and M365 C3 proxy stubbed via _c3_proxy_call."""
     import os
     os.environ.setdefault("BING_COOKIES", "test-cookie")
 
     with patch("copilot_backend.CopilotBackend._ws_stream", _fake_ws_stream):
-        with patch("server.config.POOL_WARM_COUNT", 0):
-            from fastapi.testclient import TestClient
-            import server as srv
-            import copilot_backend as cb
-            cb._connection_pool = None
-            client = TestClient(srv.app, raise_server_exceptions=False)
-            yield client
-            cb._connection_pool = None
+        with patch("copilot_backend.CopilotBackend._c3_proxy_call", _fake_c3_proxy):
+            with patch("server.config.POOL_WARM_COUNT", 0):
+                from fastapi.testclient import TestClient
+                import server as srv
+                import copilot_backend as cb
+                cb._connection_pool = None
+                client = TestClient(srv.app, raise_server_exceptions=False)
+                yield client
+                cb._connection_pool = None

@@ -386,17 +386,27 @@ class CopilotBackend:
         """Proxy chat through C3 browser-auth /chat endpoint (M365 SignalR)."""
         c3_url = os.getenv("C3_URL", "http://browser-auth:8001")
         logger.info("M365 proxy via C3: %s/chat prompt='%s'", c3_url, prompt[:60])
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                f"{c3_url}/chat",
-                json={"prompt": prompt, "timeout": int(config.REQUEST_TIMEOUT * 1000)},
-                timeout=aiohttp.ClientTimeout(total=config.REQUEST_TIMEOUT + 10),
-            ) as resp:
-                data = await resp.json()
-                if data.get("success") and data.get("text"):
-                    return data["text"]
-                error = data.get("error", "No response from M365 Copilot")
-                raise RuntimeError(f"C3 /chat failed: {error}")
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{c3_url}/chat",
+                    json={"prompt": prompt, "timeout": int(config.REQUEST_TIMEOUT * 1000)},
+                    timeout=aiohttp.ClientTimeout(total=config.REQUEST_TIMEOUT + 10),
+                ) as resp:
+                    data = await resp.json()
+                    if data.get("success") and data.get("text"):
+                        return data["text"]
+                    error = (
+                        data.get("error")
+                        or data.get("message")
+                        or data.get("detail")
+                        or "No response from M365 Copilot (empty reply)"
+                    )
+                    raise RuntimeError(f"C3 /chat failed: {error}")
+        except aiohttp.ClientError as exc:
+            raise RuntimeError(
+                f"C3 browser-auth unreachable at {c3_url}/chat: {exc}"
+            ) from exc
 
     async def _ws_stream(self, prompt: str, context, attachment_path=None) -> AsyncGenerator[str, None]:
         """Low-level WebSocket streaming generator."""

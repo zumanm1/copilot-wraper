@@ -101,13 +101,14 @@ class TestStreamingChatCompletion:
         data_lines = [l for l in r.text.splitlines()
                       if l.startswith("data: ") and l != "data: [DONE]"
                       and not l.startswith("data: {\"error\"")]
-        # init + heartbeat + one chunk per stub token (Mocked,  Copilot,  response)
+        # Consumer mode: init + heartbeat + one chunk per stub token (3 tokens)
+        # M365 mode: init + heartbeat + 1 chunk (full response from C3 proxy)
         content_deltas = [
             json.loads(l[len("data: "):])["choices"][0]["delta"].get("content")
             for l in data_lines
         ]
         non_empty = [c for c in content_deltas if c]
-        assert len(non_empty) >= 3
+        assert len(non_empty) >= 1
 
     def test_streaming_max_tokens_sets_finish_reason_length(self, test_app):
         r = test_app.post("/v1/chat/completions", json={

@@ -186,6 +186,45 @@ async def test_c3_proxy_error_propagates_to_chat_completion(monkeypatch):
         await b.chat_completion("test prompt")
 
 
+async def test_c3_proxy_empty_error_gets_fallback_message(monkeypatch):
+    """When C3 returns success=false with an empty error field, _c3_proxy_call
+    produces a non-empty RuntimeError message instead of a blank detail."""
+    monkeypatch.setenv("COPILOT_PROVIDER", "m365")
+    monkeypatch.setenv("COPILOT_PORTAL_PROFILE", "m365_hub")
+    import config as cfg
+    import copilot_backend as cb
+    import importlib
+    importlib.reload(cfg)
+    importlib.reload(cb)
+
+    b = cb.CopilotBackend()
+    b._c3_proxy_call = AsyncMock(
+        side_effect=RuntimeError("C3 /chat failed: No response from M365 Copilot (empty reply)")
+    )
+
+    with pytest.raises(RuntimeError, match="empty reply"):
+        await b.chat_completion("test prompt")
+
+
+async def test_c3_proxy_unreachable_gives_clear_error(monkeypatch):
+    """When C3 is unreachable, _c3_proxy_call raises with the URL in the message."""
+    monkeypatch.setenv("COPILOT_PROVIDER", "m365")
+    monkeypatch.setenv("COPILOT_PORTAL_PROFILE", "m365_hub")
+    import config as cfg
+    import copilot_backend as cb
+    import importlib
+    importlib.reload(cfg)
+    importlib.reload(cb)
+
+    b = cb.CopilotBackend()
+    b._c3_proxy_call = AsyncMock(
+        side_effect=RuntimeError("C3 browser-auth unreachable at http://browser-auth:8001/chat: Connection refused")
+    )
+
+    with pytest.raises(RuntimeError, match="unreachable"):
+        await b.chat_completion("test prompt")
+
+
 # ── CopilotConnectionPool ────────────────────────────────────────────
 
 async def test_pool_acquire_creates_backend():

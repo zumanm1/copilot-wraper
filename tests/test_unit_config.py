@@ -88,6 +88,7 @@ def test_portal_defaults_m365_when_unset(monkeypatch):
 
 def test_portal_consumer_explicit_env(monkeypatch):
     monkeypatch.setenv("COPILOT_PORTAL_PROFILE", "consumer")
+    monkeypatch.setenv("COPILOT_PROVIDER", "auto")
     monkeypatch.delenv("COPILOT_PORTAL_BASE_URL", raising=False)
     monkeypatch.delenv("COPILOT_PORTAL_API_BASE_URL", raising=False)
     import config as cfg

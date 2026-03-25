@@ -155,6 +155,7 @@ _playwright = None
 _browser: Browser | None = None
 _context: BrowserContext | None = None
 _lock = asyncio.Lock()
+_chat_lock = asyncio.Lock()
 _DISMISS_AUTH_DIALOG = os.getenv("BROWSER_AUTH_AUTO_DISMISS_AUTH_DIALOG", "false").strip().lower() == "true"
 
 
@@ -711,12 +712,44 @@ async def browser_chat(prompt: str, mode: str = "chat", timeout_ms: int = 60000)
       4. The web app's own JavaScript handles the challenge natively.
       5. Collect appendText frames until done/partCompleted.
 
+    Serialized by _chat_lock — only one chat request uses the browser at a time.
+    Concurrent callers queue and wait (up to timeout_ms + 30s for the lock).
+
     Returns dict with 'text', 'events', 'success', and optionally 'error'.
     """
+    lock_timeout = (timeout_ms / 1000.0) + 30
+    try:
+        await asyncio.wait_for(_chat_lock.acquire(), timeout=lock_timeout)
+    except asyncio.TimeoutError:
+        return {
+            "success": False,
+            "error": f"Browser busy — another chat request is in progress (waited {lock_timeout:.0f}s)",
+            "events": [], "text": "",
+        }
+    try:
+        return await _browser_chat_locked(prompt, mode=mode, timeout_ms=timeout_ms)
+    finally:
+        _chat_lock.release()
+
+
+async def _browser_chat_locked(prompt: str, mode: str = "chat", timeout_ms: int = 60000) -> dict:
+    """Inner implementation of browser_chat(), called with _chat_lock held."""
     import json as _json
 
     context = await _get_context()
     page = await _get_or_create_page(context)
+
+    # Health check: verify the page is responsive before navigating.
+    # A stale/crashed page will hang on goto; detect and replace it.
+    try:
+        await asyncio.wait_for(page.evaluate("1+1"), timeout=5)
+    except Exception:
+        print("[browser_chat] Page unresponsive — creating fresh page")
+        try:
+            await page.close()
+        except Exception:
+            pass
+        page = await context.new_page()
 
     # State for WebSocket frame interception
     collected_text = []
@@ -842,7 +875,7 @@ async def browser_chat(prompt: str, mode: str = "chat", timeout_ms: int = 60000)
     # to not submit on consecutive requests. about:blank forces full teardown.
     _M365_CHAT_URL = "https://m365.cloud.microsoft/chat"
     try:
-        await page.goto("about:blank", wait_until="domcontentloaded", timeout=5_000)
+        await page.goto("about:blank", wait_until="domcontentloaded", timeout=15_000)
         await page.goto(_M365_CHAT_URL, wait_until="domcontentloaded", timeout=30_000)
         # Wait for composer element to appear (reliable page-ready signal)
         for _sel in [
@@ -954,7 +987,7 @@ async def browser_chat(prompt: str, mode: str = "chat", timeout_ms: int = 60000)
 
         # ── Use Playwright native methods for text input (triggers real events for React) ──
         composer = page.locator(composer_sel).first
-        await composer.click(force=True, timeout=5000)
+        await composer.click(force=True, timeout=10_000)
         await asyncio.sleep(0.3)
 
         # Clear existing content
