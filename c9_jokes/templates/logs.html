@@ -1,22 +1,111 @@
 {% extends "base.html" %}
 {% block title %}Logs{% endblock %}
 {% block content %}
-<h2>Chat logs (C9 local DB)</h2>
-<table>
-  <thead><tr><th>id</th><th>time</th><th>agent</th><th>prompt</th><th>HTTP</th></tr></thead>
+<div class="toolbar">
+  <h2 style="margin:0">Chat logs <span class="muted" style="font-size:0.7em;">({{ total }} total)</span></h2>
+</div>
+
+<div class="filter-bar">
+  <form method="GET" action="{{ url_for('page_logs') }}" style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+    <label for="agent-filter" style="font-size:0.85rem;color:var(--muted);">Filter by agent:</label>
+    <select id="agent-filter" name="agent" onchange="this.form.submit()">
+      <option value="">All agents</option>
+      {% for agent in agents %}
+      <option value="{{ agent.id }}" {% if agent.id == agent_filter %}selected{% endif %}>{{ agent.label }}</option>
+      {% endfor %}
+    </select>
+    {% if agent_filter %}
+    <a href="{{ url_for('page_logs') }}" class="btn-sm">Clear filter</a>
+    {% endif %}
+    <span class="muted" style="font-size:0.82rem;">
+      Showing {{ offset + 1 }}–{{ [offset + limit, total] | min }} of {{ total }}
+    </span>
+  </form>
+</div>
+
+<table class="logs-table">
+  <thead>
+    <tr>
+      <th style="width:2.5rem">#</th>
+      <th style="width:10rem">Time</th>
+      <th style="width:8rem">Agent</th>
+      <th>Prompt</th>
+      <th>Response</th>
+      <th style="width:3.5rem">HTTP</th>
+    </tr>
+  </thead>
   <tbody>
   {% for row in rows %}
-    <tr>
-      <td>{{ row['id'] }}</td>
-      <td><small>{{ row['created_at'] }}</small></td>
-      <td>{{ row['agent_id'] }}</td>
-      <td><small>{{ row['prompt_excerpt'] }}</small></td>
-      <td>{{ row['http_status'] }}</td>
+    <tr class="log-row" id="log-{{ row['id'] }}">
+      <td class="muted">{{ row['id'] }}</td>
+      <td><small>{{ row['created_at'][:19] if row['created_at'] else '—' }}</small></td>
+      <td><code style="font-size:0.78rem">{{ row['agent_id'] }}</code></td>
+      <td>
+        <div class="log-excerpt">{{ row['prompt_excerpt'] or '—' }}</div>
+      </td>
+      <td>
+        {% if row['response_excerpt'] %}
+          <div class="log-excerpt log-resp-preview">{{ row['response_excerpt'][:120] }}{% if (row['response_excerpt'] | length) > 120 %}…{% endif %}</div>
+          {% if (row['response_excerpt'] | length) > 120 %}
+          <button type="button" class="btn-sm expand-btn" data-id="{{ row['id'] }}">Expand</button>
+          <div class="log-resp-full" id="full-{{ row['id'] }}" style="display:none">
+            <pre>{{ row['response_excerpt'] }}</pre>
+          </div>
+          {% endif %}
+        {% else %}
+          <span class="muted">—</span>
+        {% endif %}
+      </td>
+      <td>
+        <span class="badge {{ 'ok' if row['http_status'] == 200 else 'fail' }}">
+          {{ row['http_status'] or '—' }}
+        </span>
+      </td>
     </tr>
   {% endfor %}
   {% if not rows %}
-    <tr><td colspan="5">No rows yet — use Chat page or POST /api/chat.</td></tr>
+    <tr><td colspan="6" style="text-align:center;padding:2rem;" class="muted">
+      No logs yet — use the <a href="{{ url_for('page_chat') }}">Chat page</a> or
+      <a href="{{ url_for('page_pairs') }}">Pairs validation</a>.
+    </td></tr>
   {% endif %}
   </tbody>
 </table>
+
+<div class="pagination">
+  {% if has_prev %}
+  <a href="{{ url_for('page_logs', agent=agent_filter, offset=prev_offset) }}" class="btn-sm">← Previous</a>
+  {% else %}
+  <span class="btn-sm disabled">← Previous</span>
+  {% endif %}
+
+  <span class="muted" style="font-size:0.85rem;">
+    Page {{ (offset // limit) + 1 }} of {{ ((total - 1) // limit + 1) if total else 1 }}
+  </span>
+
+  {% if has_next %}
+  <a href="{{ url_for('page_logs', agent=agent_filter, offset=next_offset) }}" class="btn-sm">Next →</a>
+  {% else %}
+  <span class="btn-sm disabled">Next →</span>
+  {% endif %}
+</div>
+
+<script>
+document.querySelectorAll('.expand-btn').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    const id = btn.dataset.id;
+    const full = document.getElementById('full-' + id);
+    const preview = btn.previousElementSibling;
+    if (full.style.display === 'none') {
+      full.style.display = '';
+      preview.style.display = 'none';
+      btn.textContent = 'Collapse';
+    } else {
+      full.style.display = 'none';
+      preview.style.display = '';
+      btn.textContent = 'Expand';
+    }
+  });
+});
+</script>
 {% endblock %}

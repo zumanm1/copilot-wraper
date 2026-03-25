@@ -5,6 +5,7 @@
   --accent: #58a6ff;
   --ok: #3fb950;
   --fail: #f85149;
+  --warn: #d29922;
   --card: #161b22;
   --border: #30363d;
 }
@@ -29,7 +30,10 @@ header {
 header h1 { font-size: 1.1rem; margin: 0; }
 nav a { margin-right: 1rem; text-decoration: none; }
 nav a:hover { text-decoration: underline; }
-main { padding: 1.25rem; max-width: 960px; margin: 0 auto; }
+main { padding: 1.25rem; max-width: 980px; margin: 0 auto; }
+h2 { margin-top: 0; }
+
+/* ── Cards ───────────────────────────────────────────────────────────────── */
 .card {
   background: var(--card);
   border: 1px solid var(--border);
@@ -37,9 +41,52 @@ main { padding: 1.25rem; max-width: 960px; margin: 0 auto; }
   padding: 1rem;
   margin-bottom: 1rem;
 }
-.badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.8rem; }
-.badge.ok { background: rgba(63, 185, 80, 0.2); color: var(--ok); }
-.badge.fail { background: rgba(248, 81, 73, 0.2); color: var(--fail); }
+.card.card-down { border-color: rgba(248, 81, 73, 0.35); }
+.card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; }
+.card-url { margin: 0.15rem 0 0.25rem; }
+.card-meta { font-size: 0.75rem; margin-bottom: 0.35rem; }
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+/* ── Badges ──────────────────────────────────────────────────────────────── */
+.badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.8rem; font-weight: 600; }
+.badge.ok   { background: rgba(63, 185, 80, 0.2);  color: var(--ok); }
+.badge.fail { background: rgba(248, 81, 73, 0.2);  color: var(--fail); }
+.badge.warn { background: rgba(210, 153, 34, 0.2); color: var(--warn); }
+
+/* ── Status bar (dashboard) ──────────────────────────────────────────────── */
+.status-bar {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.65rem 1rem;
+  margin-bottom: 1.1rem;
+  font-size: 0.9rem;
+}
+.status-bar.bar-ok   { border-color: rgba(63, 185, 80, 0.4); }
+.status-bar.bar-warn { border-color: rgba(210, 153, 34, 0.4); }
+.status-bar.bar-fail { border-color: rgba(248, 81, 73, 0.4); }
+.status-ts { color: var(--muted); font-size: 0.82rem; }
+
+/* ── Toolbar ─────────────────────────────────────────────────────────────── */
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+
+/* ── Pre / code ──────────────────────────────────────────────────────────── */
 pre, code {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 0.85rem;
@@ -48,7 +95,16 @@ pre, code {
   border-radius: 6px;
   padding: 0.75rem;
   overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
+
+/* ── Tables ──────────────────────────────────────────────────────────────── */
+table { width: 100%; border-collapse: collapse; margin-bottom: 1rem; }
+th, td { border-bottom: 1px solid var(--border); padding: 0.5rem 0.4rem; text-align: left; vertical-align: top; }
+th { font-size: 0.82rem; color: var(--muted); }
+
+/* ── Footer ──────────────────────────────────────────────────────────────── */
 footer {
   margin-top: 2rem;
   padding: 1rem;
@@ -57,9 +113,9 @@ footer {
   text-align: center;
   border-top: 1px solid var(--border);
 }
-table { width: 100%; border-collapse: collapse; }
-th, td { border-bottom: 1px solid var(--border); padding: 0.5rem 0.35rem; text-align: left; }
-input, textarea, button {
+
+/* ── Form elements ───────────────────────────────────────────────────────── */
+input, textarea, button, select {
   background: var(--card);
   color: var(--fg);
   border: 1px solid var(--border);
@@ -67,26 +123,39 @@ input, textarea, button {
   padding: 0.5rem;
   width: 100%;
   max-width: 100%;
+  font-size: 0.9rem;
 }
+select { appearance: auto; }
 button { width: auto; cursor: pointer; margin-top: 0.5rem; }
 button:hover { border-color: var(--accent); }
-.card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 1rem;
-}
-.muted { color: var(--muted); }
+button:disabled { opacity: 0.45; cursor: not-allowed; }
 
-/* Agent selector + controls */
-select {
-  background: var(--card);
-  color: var(--fg);
+/* ── Small / secondary buttons ───────────────────────────────────────────── */
+.btn-sm {
+  display: inline-block;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.8rem;
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0.5rem;
-  width: 100%;
-  appearance: auto;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--fg);
+  cursor: pointer;
+  text-decoration: none;
+  white-space: nowrap;
+  width: auto;
+  margin-top: 0;
 }
+.btn-sm:hover:not(.disabled) { border-color: var(--accent); color: var(--accent); }
+.btn-sm.disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
+.btn-secondary {
+  background: transparent;
+  color: var(--muted);
+  border-color: var(--border);
+  margin-top: 0;
+}
+.btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── Agent selector + chat controls ──────────────────────────────────────── */
 .chat-controls {
   background: var(--card);
   border: 1px solid var(--border);
@@ -100,7 +169,7 @@ select {
 .quick-btns { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 .quick-btns button {
   width: auto;
-  padding: 0.35rem 0.75rem;
+  padding: 0.3rem 0.7rem;
   font-size: 0.82rem;
   border-radius: 20px;
   background: transparent;
@@ -111,32 +180,32 @@ select {
 }
 .quick-btns button:hover { background: rgba(88, 166, 255, 0.12); }
 
-/* Chat window */
+/* ── Chat window ─────────────────────────────────────────────────────────── */
 .chat-window {
   background: #010409;
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 1rem;
-  min-height: 320px;
-  max-height: 520px;
+  min-height: 340px;
+  max-height: 560px;
   overflow-y: auto;
   margin-bottom: 0.75rem;
 }
 .chat-empty { color: var(--muted); text-align: center; padding: 3rem 0; }
 
-/* Chat bubbles */
+/* ── Chat bubbles ────────────────────────────────────────────────────────── */
 .bubble {
   border-radius: 10px;
-  padding: 0.6rem 0.85rem;
-  margin-bottom: 0.65rem;
-  max-width: 85%;
+  padding: 0.65rem 0.9rem;
+  margin-bottom: 0.7rem;
+  max-width: 88%;
   word-wrap: break-word;
-  white-space: pre-wrap;
 }
 .bubble.user {
   background: rgba(88, 166, 255, 0.12);
   border: 1px solid rgba(88, 166, 255, 0.25);
   margin-left: auto;
+  white-space: pre-wrap;
 }
 .bubble.assistant {
   background: var(--card);
@@ -146,31 +215,27 @@ select {
   background: rgba(248, 81, 73, 0.08);
   border: 1px solid rgba(248, 81, 73, 0.3);
   color: var(--fail);
+  white-space: pre-wrap;
 }
-.bubble.loading .bubble-body {
-  color: var(--muted);
-  font-style: italic;
-}
-.bubble-header {
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: var(--muted);
-  margin-bottom: 0.2rem;
-}
-.bubble-body { font-size: 0.92rem; line-height: 1.55; }
+.bubble.loading .bubble-body { color: var(--muted); font-style: italic; }
+.bubble-header { font-size: 0.72rem; font-weight: 600; color: var(--muted); margin-bottom: 0.2rem; }
+.bubble-body { font-size: 0.92rem; line-height: 1.6; }
 .bubble-meta { font-size: 0.7rem; color: var(--muted); margin-top: 0.3rem; }
 
-/* Chat input bar */
-.chat-input-row {
-  display: flex;
-  gap: 0.5rem;
-  align-items: flex-end;
-}
-.chat-input-row textarea {
-  flex: 1;
-  resize: vertical;
-  min-height: 2.5rem;
-}
+/* Markdown rendered inside bubbles */
+.md-body p { margin: 0 0 0.5rem; }
+.md-body p:last-child { margin: 0; }
+.md-body ul { margin: 0.3rem 0; padding-left: 1.4rem; }
+.md-body li { margin-bottom: 0.2rem; }
+.md-body h3, .md-body h4 { margin: 0.5rem 0 0.2rem; font-size: 0.95rem; }
+.md-body pre { margin: 0.4rem 0; }
+.md-body code { padding: 0.1rem 0.35rem; font-size: 0.82rem; }
+.md-body strong { color: var(--fg); }
+.md-body em { color: var(--muted); }
+
+/* ── Chat input bar ──────────────────────────────────────────────────────── */
+.chat-input-row { display: flex; gap: 0.5rem; align-items: flex-end; }
+.chat-input-row textarea { flex: 1; resize: vertical; min-height: 2.5rem; }
 .chat-input-row button {
   width: auto;
   padding: 0.5rem 1.25rem;
@@ -181,6 +246,60 @@ select {
   font-weight: 600;
   cursor: pointer;
   white-space: nowrap;
+  margin-top: 0;
 }
 .chat-input-row button:disabled { opacity: 0.5; cursor: not-allowed; }
 .chat-input-row button:hover:not(:disabled) { filter: brightness(1.15); }
+
+/* ── Filter bar (logs) ───────────────────────────────────────────────────── */
+.filter-bar {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.65rem 1rem;
+  margin-bottom: 0.85rem;
+}
+.filter-bar select { width: auto; min-width: 180px; margin: 0; }
+
+/* ── Logs table ──────────────────────────────────────────────────────────── */
+.logs-table .log-excerpt {
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.85rem;
+}
+.logs-table .log-resp-preview { color: var(--muted); }
+.logs-table .log-resp-full pre { margin-top: 0.4rem; max-height: 200px; overflow-y: auto; }
+.logs-table .expand-btn { margin-top: 0.3rem; }
+
+/* ── Pagination ──────────────────────────────────────────────────────────── */
+.pagination {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: center;
+  padding: 0.75rem 0;
+}
+
+/* ── History dots (health page) ──────────────────────────────────────────── */
+.history-cell { min-width: 80px; }
+.hist-dot { font-size: 0.85rem; margin-right: 0.15rem; }
+.hist-dot.ok   { color: var(--ok); }
+.hist-dot.fail { color: var(--fail); }
+
+/* ── History runs (pairs page) ───────────────────────────────────────────── */
+.history-run {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  padding: 0.6rem 1rem;
+  margin-bottom: 0.5rem;
+}
+.history-run summary { cursor: pointer; list-style: none; padding: 0.15rem 0; }
+.history-run summary::-webkit-details-marker { display: none; }
+.history-run table { margin-top: 0.6rem; }
+
+/* ── Helpers ─────────────────────────────────────────────────────────────── */
+.muted { color: var(--muted); }
+.resp-cell { max-width: 380px; }

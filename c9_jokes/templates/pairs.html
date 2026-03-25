@@ -2,25 +2,44 @@
 {% block title %}Pair validation{% endblock %}
 {% block content %}
 <h2>Pair validation</h2>
-<p class="muted">Tests each AI agent via C1 → Copilot roundtrip. Each agent uses its own <code>X-Agent-ID</code> session.</p>
+<p class="muted">Tests each AI agent via C1 → Copilot roundtrip. Results are persisted to DB.</p>
 
 <div class="chat-controls">
   <div class="control-row">
     <label>Prompt sent to every agent</label>
     <input id="val-prompt" value="Tell me a joke" />
   </div>
-  <button type="button" id="run-all" style="margin-top:0.5rem">Run all agents</button>
+  <div style="display:flex;gap:0.5rem;margin-top:0.5rem;flex-wrap:wrap;">
+    <button type="button" id="run-all">Run all agents</button>
+    <button type="button" id="load-history" class="btn-secondary">Load history</button>
+  </div>
 </div>
 
 <table id="results-table">
-  <thead><tr><th>Agent</th><th>Status</th><th>Time</th><th>Response</th></tr></thead>
+  <thead>
+    <tr>
+      <th>Agent</th>
+      <th>Status</th>
+      <th>Time</th>
+      <th>Response</th>
+      <th>Action</th>
+    </tr>
+  </thead>
   <tbody id="results-body">
   {% for agent in agents %}
     <tr id="row-{{ agent.id }}">
-      <td><strong>{{ agent.label }}</strong><br><code style="font-size:0.72rem">{{ agent.id }}</code></td>
+      <td>
+        <strong>{{ agent.label }}</strong><br>
+        <code style="font-size:0.72rem">{{ agent.id }}</code>
+      </td>
       <td id="status-{{ agent.id }}"><span class="badge" style="opacity:0.4">PENDING</span></td>
       <td id="time-{{ agent.id }}">—</td>
-      <td id="resp-{{ agent.id }}" style="max-width:400px;overflow:hidden;text-overflow:ellipsis"><small class="muted">Not tested yet</small></td>
+      <td id="resp-{{ agent.id }}" class="resp-cell"><small class="muted">Not tested yet</small></td>
+      <td>
+        <button type="button" class="btn-sm run-one" data-agent-id="{{ agent.id }}" data-agent-label="{{ agent.label }}">
+          Run
+        </button>
+      </td>
     </tr>
   {% endfor %}
   </tbody>
@@ -28,7 +47,12 @@
 
 <div id="summary" style="margin-top:1rem"></div>
 
-<details class="muted" style="margin-top:1rem;">
+<section id="history-section" style="display:none;margin-top:2rem;">
+  <h3>Past validation runs</h3>
+  <div id="history-list"></div>
+</section>
+
+<details class="muted" style="margin-top:1.5rem;">
   <summary>CLI alternative</summary>
   <pre>cd /path/to/copilot-openai-wrapper
 python3 tests/validate_all_agents.py
@@ -39,63 +63,138 @@ python3 tests/validate_all_agents.py --parallel</pre>
 (function() {
   const agents = {{ agents | tojson }};
   const runBtn = document.getElementById('run-all');
+  const histBtn = document.getElementById('load-history');
   const summaryEl = document.getElementById('summary');
+  let busy = false;
 
-  async function testAgent(agent, prompt) {
-    const statusEl = document.getElementById('status-' + agent.id);
-    const timeEl = document.getElementById('time-' + agent.id);
-    const respEl = document.getElementById('resp-' + agent.id);
-    statusEl.innerHTML = '<span class="badge" style="background:rgba(88,166,255,0.15);color:var(--accent)">RUNNING</span>';
-    respEl.innerHTML = '<small class="muted">Waiting for response…</small>';
-    const t0 = performance.now();
+  function escapeHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = String(s);
+    return d.innerHTML;
+  }
+
+  function setRowRunning(agentId) {
+    document.getElementById('status-' + agentId).innerHTML =
+      '<span class="badge" style="background:rgba(88,166,255,0.15);color:var(--accent)">RUNNING</span>';
+    document.getElementById('resp-' + agentId).innerHTML =
+      '<small class="muted">Waiting…</small>';
+    document.getElementById('time-' + agentId).textContent = '—';
+  }
+
+  function setRowResult(agentId, ok, elapsed_ms, text, error) {
+    document.getElementById('status-' + agentId).innerHTML =
+      '<span class="badge ' + (ok ? 'ok' : 'fail') + '">' + (ok ? 'PASS' : 'FAIL') + '</span>';
+    document.getElementById('time-' + agentId).textContent =
+      elapsed_ms !== null ? (elapsed_ms / 1000).toFixed(1) + 's' : '—';
+    if (ok) {
+      document.getElementById('resp-' + agentId).innerHTML =
+        '<small>' + escapeHtml((text || '').substring(0, 300)) + '</small>';
+    } else {
+      document.getElementById('resp-' + agentId).innerHTML =
+        '<small style="color:var(--fail)">' + escapeHtml((error || text || 'failed').substring(0, 200)) + '</small>';
+    }
+  }
+
+  async function runAgent(agentId, prompt) {
+    setRowRunning(agentId);
     try {
-      const r = await fetch('/api/chat', {
+      const r = await fetch('/api/validate', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ agent_id: agent.id, prompt })
+        body: JSON.stringify({ prompt, agent_ids: [agentId] })
       });
       const j = await r.json();
-      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
-      timeEl.textContent = elapsed + 's';
-      if (j.ok && j.text) {
-        statusEl.innerHTML = '<span class="badge ok">PASS</span>';
-        respEl.innerHTML = '<small>' + escapeHtml(j.text.substring(0, 300)) + '</small>';
-        return true;
-      } else {
-        statusEl.innerHTML = '<span class="badge fail">FAIL</span>';
-        respEl.innerHTML = '<small style="color:var(--fail)">' + escapeHtml(j.error || j.raw || JSON.stringify(j)).substring(0, 200) + '</small>';
-        return false;
-      }
+      const res = (j.results || [])[0] || {};
+      setRowResult(agentId, res.ok, res.elapsed_ms, res.text, res.error);
+      return res.ok;
     } catch(e) {
-      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
-      timeEl.textContent = elapsed + 's';
-      statusEl.innerHTML = '<span class="badge fail">FAIL</span>';
-      respEl.innerHTML = '<small style="color:var(--fail)">Network: ' + escapeHtml(e.message) + '</small>';
+      setRowResult(agentId, false, null, '', e.message);
       return false;
     }
   }
 
-  function escapeHtml(s) {
-    const d = document.createElement('div');
-    d.textContent = s;
-    return d.innerHTML;
-  }
-
+  // Run all button → POST /api/validate with all agent IDs
   runBtn.addEventListener('click', async function() {
+    if (busy) return;
+    busy = true;
     runBtn.disabled = true;
     runBtn.textContent = 'Running…';
     summaryEl.innerHTML = '';
     const prompt = document.getElementById('val-prompt').value.trim() || 'Tell me a joke';
-    let passed = 0;
-    for (const agent of agents) {
-      const ok = await testAgent(agent, prompt);
-      if (ok) passed++;
+
+    // Mark all as running immediately
+    agents.forEach(a => setRowRunning(a.id));
+
+    try {
+      const r = await fetch('/api/validate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ prompt })
+      });
+      const j = await r.json();
+      (j.results || []).forEach(function(res) {
+        setRowResult(res.agent_id, res.ok, res.elapsed_ms, res.text, res.error);
+      });
+      const color = j.passed === j.total ? 'var(--ok)' : 'var(--fail)';
+      summaryEl.innerHTML = '<strong style="color:' + color + '">Run #' + (j.run_id || '?') +
+        ': ' + j.passed + '/' + j.total + ' agents passed</strong>' +
+        ' <span class="muted" style="font-size:0.8rem">(persisted to DB)</span>';
+    } catch(e) {
+      summaryEl.innerHTML = '<span style="color:var(--fail)">Error: ' + escapeHtml(e.message) + '</span>';
     }
-    const total = agents.length;
-    const color = passed === total ? 'var(--ok)' : 'var(--fail)';
-    summaryEl.innerHTML = '<strong style="color:' + color + '">Result: ' + passed + '/' + total + ' agents passed</strong>';
+    busy = false;
     runBtn.disabled = false;
     runBtn.textContent = 'Run all agents';
+  });
+
+  // Individual run buttons
+  document.querySelectorAll('.run-one').forEach(function(btn) {
+    btn.addEventListener('click', async function() {
+      if (busy) return;
+      const agentId = btn.dataset.agentId;
+      const prompt = document.getElementById('val-prompt').value.trim() || 'Tell me a joke';
+      btn.disabled = true;
+      await runAgent(agentId, prompt);
+      btn.disabled = false;
+    });
+  });
+
+  // Load history
+  histBtn.addEventListener('click', async function() {
+    histBtn.textContent = 'Loading…';
+    const section = document.getElementById('history-section');
+    const list = document.getElementById('history-list');
+    try {
+      const r = await fetch('/api/validation-runs?limit=10');
+      const runs = await r.json();
+      section.style.display = '';
+      if (!runs.length) {
+        list.innerHTML = '<p class="muted">No runs yet.</p>';
+      } else {
+        list.innerHTML = runs.map(function(run) {
+          const allPass = run.passed === (run.passed + run.failed);
+          const color = allPass ? 'var(--ok)' : 'var(--fail)';
+          const pairsHtml = (run.pairs || []).map(function(p) {
+            return '<tr>' +
+              '<td>' + escapeHtml(p.pair_name) + '</td>' +
+              '<td><span class="badge ' + (p.ok ? 'ok' : 'fail') + '">' + (p.ok ? 'PASS' : 'FAIL') + '</span></td>' +
+              '<td class="muted">' + (p.duration_ms ? (p.duration_ms/1000).toFixed(1)+'s' : '—') + '</td>' +
+              '<td><small>' + escapeHtml((p.detail || '').substring(0, 200)) + '</small></td>' +
+              '</tr>';
+          }).join('');
+          return '<details class="history-run">' +
+            '<summary><strong style="color:' + color + '">Run #' + run.id + '</strong>' +
+            ' — ' + escapeHtml(run.started_at || '') +
+            ' — <span style="color:' + color + '">' + run.passed + '/' + (run.passed + run.failed) + ' passed</span>' +
+            '</summary>' +
+            (pairsHtml ? '<table><thead><tr><th>Agent</th><th>Result</th><th>Time</th><th>Response</th></tr></thead><tbody>' + pairsHtml + '</tbody></table>' : '<p class="muted">No pair data.</p>') +
+            '</details>';
+        }).join('');
+      }
+    } catch(e) {
+      list.innerHTML = '<p style="color:var(--fail)">Failed to load: ' + escapeHtml(e.message) + '</p>';
+    }
+    histBtn.textContent = 'Load history';
   });
 })();
 </script>

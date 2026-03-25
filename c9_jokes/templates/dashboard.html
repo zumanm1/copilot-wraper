@@ -1,18 +1,98 @@
 {% extends "base.html" %}
 {% block title %}Dashboard{% endblock %}
 {% block content %}
-<h2>Overview</h2>
-<p class="muted">Monitoring {{ targets | length }} containers:
-{% for key, t in targets.items() %}<code>{{ t.label }}</code>{% if not loop.last %}, {% endif %}{% endfor %}</p>
-<div class="card-grid">
+<div class="status-bar" id="status-bar">
+  <span id="summary-text">
+    <strong id="up-count">{{ up }}</strong> / <strong>{{ total }}</strong> containers UP
+  </span>
+  <span class="status-ts" id="status-ts">Last checked: —</span>
+  <button type="button" id="refresh-btn" class="btn-sm">Refresh now</button>
+</div>
+
+<div class="card-grid" id="card-grid">
 {% for p in probes %}
-  <div class="card">
-    <strong>{{ p.name }}</strong>
-    <span class="badge {{ 'ok' if p.ok else 'fail' }}">{{ 'UP' if p.ok else 'DOWN' }}</span>
-    <p><small>{{ p.url }}</small></p>
-    {% if p.error %}<pre>{{ p.error }}</pre>{% else %}<pre>{{ p.body | tojson(indent=2) if p.body is mapping else p.body }}</pre>{% endif %}
+  <div class="card probe-card" id="card-{{ loop.index0 }}" data-key="{{ loop.index0 }}">
+    <div class="card-header">
+      <strong>{{ p.name }}</strong>
+      <span class="badge {{ 'ok' if p.ok else 'fail' }}" id="badge-{{ loop.index0 }}">{{ 'UP' if p.ok else 'DOWN' }}</span>
+    </div>
+    <p class="card-url"><small id="url-{{ loop.index0 }}">{{ p.url }}</small></p>
+    <div class="card-meta muted" id="meta-{{ loop.index0 }}">
+      {% if p.elapsed_ms is defined %}{{ p.elapsed_ms }}ms{% endif %}
+    </div>
+    {% if p.error %}
+      <pre id="body-{{ loop.index0 }}">{{ p.error }}</pre>
+    {% else %}
+      <pre id="body-{{ loop.index0 }}">{{ p.body | tojson(indent=2) if p.body is mapping else p.body }}</pre>
+    {% endif %}
   </div>
 {% endfor %}
 </div>
+
 <p><a href="{{ url_for('api_status') }}">JSON: /api/status</a></p>
+
+<script>
+(function() {
+  const INTERVAL = 15000;
+  const keys = {{ probes | map(attribute='name') | list | tojson }};
+  let timer = null;
+
+  function fmtTime(d) {
+    return d.toLocaleTimeString();
+  }
+
+  function updateCard(idx, p) {
+    const badge = document.getElementById('badge-' + idx);
+    const meta  = document.getElementById('meta-'  + idx);
+    const body  = document.getElementById('body-'  + idx);
+    const card  = document.getElementById('card-'  + idx);
+    if (!badge) return;
+    const up = p.ok === true;
+    badge.textContent = up ? 'UP' : 'DOWN';
+    badge.className = 'badge ' + (up ? 'ok' : 'fail');
+    if (p.elapsed_ms !== undefined) meta.textContent = p.elapsed_ms + 'ms';
+    if (p.error) {
+      body.textContent = p.error;
+    } else if (p.body) {
+      body.textContent = JSON.stringify(p.body, null, 2);
+    }
+    card.classList.toggle('card-down', !up);
+  }
+
+  async function refresh() {
+    document.getElementById('refresh-btn').textContent = '…';
+    try {
+      const resp = await fetch('/api/status');
+      const data = await resp.json();
+      const containers = Object.keys(data).filter(k => k !== 'ts');
+      let up = 0;
+      containers.forEach((key, idx) => {
+        const p = data[key];
+        if (p && p.ok) up++;
+        updateCard(idx, p || {});
+      });
+      const total = containers.length;
+      document.getElementById('up-count').textContent = up;
+      const bar = document.getElementById('status-bar');
+      bar.classList.toggle('bar-ok', up === total);
+      bar.classList.toggle('bar-warn', up > 0 && up < total);
+      bar.classList.toggle('bar-fail', up === 0);
+      document.getElementById('status-ts').textContent = 'Last checked: ' + fmtTime(new Date());
+    } catch(e) {
+      document.getElementById('status-ts').textContent = 'Refresh failed: ' + e.message;
+    }
+    document.getElementById('refresh-btn').textContent = 'Refresh now';
+  }
+
+  document.getElementById('refresh-btn').addEventListener('click', function() {
+    clearInterval(timer);
+    refresh();
+    timer = setInterval(refresh, INTERVAL);
+  });
+
+  // Set initial timestamp and start polling
+  document.getElementById('status-ts').textContent = 'Last checked: ' + fmtTime(new Date());
+  timer = setInterval(refresh, INTERVAL);
+})();
+</script>
 {% endblock %}

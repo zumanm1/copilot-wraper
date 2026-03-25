@@ -1,16 +1,17 @@
 {% extends "base.html" %}
 {% block title %}Agent chat{% endblock %}
 {% block content %}
-<h2>Agent chat <span class="muted" style="font-size:0.7em;">(via C1 → Copilot)</span></h2>
+<div class="toolbar">
+  <h2 style="margin:0">Agent chat <span class="muted" style="font-size:0.7em;">(via C1 → Copilot)</span></h2>
+  <button type="button" id="clear-chat" class="btn-sm">Clear chat</button>
+</div>
 
 <div class="chat-controls">
   <div class="control-row">
     <label for="agent_id">Agent</label>
     <select id="agent_id">
       {% for agent in agents %}
-      <option value="{{ agent.id }}"{% if agent.id == 'c2-aider' %} selected{% endif %}>
-        {{ agent.label }}
-      </option>
+      <option value="{{ agent.id }}"{% if agent.id == 'c2-aider' %} selected{% endif %}>{{ agent.label }}</option>
       {% endfor %}
     </select>
   </div>
@@ -31,7 +32,7 @@
 
 <form id="chat-form" autocomplete="off">
   <div class="chat-input-row">
-    <textarea id="prompt" rows="2" placeholder="Type a message…" required></textarea>
+    <textarea id="prompt" rows="2" placeholder="Type a message… (Enter to send, Shift+Enter for newline)" required></textarea>
     <button type="submit" id="send">Send</button>
   </div>
 </form>
@@ -50,19 +51,59 @@
 
 <script>
 (function() {
+  /* ── Minimal markdown renderer ───────────────────────────────────────────
+     Handles: **bold**, *italic*, `code`, ```blocks```, # headers,
+     - bullet lists, numbered lists, and line breaks.
+     No external dependency — safe for dark-mode pre blocks.                */
+  function renderMarkdown(text) {
+    if (!text) return '';
+    let html = text
+      // Escape raw HTML first
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      // Fenced code blocks
+      .replace(/```[\w]*\n([\s\S]*?)```/g, function(_, code) {
+        return '<pre><code>' + code.trimEnd() + '</code></pre>';
+      })
+      // Inline code
+      .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+      // Bold
+      .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+      // Italic
+      .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>')
+      // H3 / H2 / H1
+      .replace(/^### (.+)$/gm, '<h4>$1</h4>')
+      .replace(/^## (.+)$/gm, '<h3>$1</h3>')
+      .replace(/^# (.+)$/gm, '<h3>$1</h3>')
+      // Unordered list items
+      .replace(/^[\-\*] (.+)$/gm, '<li>$1</li>')
+      // Numbered list items
+      .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
+      // Wrap consecutive <li> in <ul>
+      .replace(/(<li>[\s\S]+?<\/li>)(?![\s\S]*?<\/ul>)/g, function(m) {
+        return '<ul>' + m + '</ul>';
+      })
+      // Double newline → paragraph break
+      .replace(/\n\n+/g, '</p><p>')
+      // Single newline → <br>
+      .replace(/\n/g, '<br>');
+
+    return '<p>' + html + '</p>';
+  }
+
   const chatWindow = document.getElementById('chat-window');
-  const chatEmpty = document.getElementById('chat-empty');
-  const form = document.getElementById('chat-form');
-  const promptEl = document.getElementById('prompt');
-  const agentEl = document.getElementById('agent_id');
-  const sendBtn = document.getElementById('send');
+  const chatEmpty  = document.getElementById('chat-empty');
+  const form       = document.getElementById('chat-form');
+  const promptEl   = document.getElementById('prompt');
+  const agentEl    = document.getElementById('agent_id');
+  const sendBtn    = document.getElementById('send');
+  const clearBtn   = document.getElementById('clear-chat');
   let busy = false;
 
   function agentLabel() {
-    return agentEl.options[agentEl.selectedIndex].text;
+    return agentEl.options[agentEl.selectedIndex].text.trim();
   }
 
-  function appendBubble(role, text, meta) {
+  function appendBubble(role, htmlContent, meta, isHtml) {
     chatEmpty.style.display = 'none';
     const bubble = document.createElement('div');
     bubble.className = 'bubble ' + role;
@@ -71,8 +112,9 @@
     header.textContent = role === 'user' ? 'You' : agentLabel();
     bubble.appendChild(header);
     const body = document.createElement('div');
-    body.className = 'bubble-body';
-    body.textContent = text;
+    body.className = 'bubble-body' + (isHtml ? ' md-body' : '');
+    if (isHtml) body.innerHTML = htmlContent;
+    else body.textContent = htmlContent;
     bubble.appendChild(body);
     if (meta) {
       const foot = document.createElement('div');
@@ -82,19 +124,21 @@
     }
     chatWindow.appendChild(bubble);
     chatWindow.scrollTop = chatWindow.scrollHeight;
+    return bubble;
   }
 
-  async function send(prompt) {
-    if (busy || !prompt) return;
+  async function send(promptText) {
+    if (busy || !promptText) return;
     busy = true;
     sendBtn.disabled = true;
     sendBtn.textContent = 'Sending…';
     const agent_id = agentEl.value;
-    appendBubble('user', prompt);
+    appendBubble('user', promptText, null, false);
 
     const loader = document.createElement('div');
     loader.className = 'bubble assistant loading';
-    loader.innerHTML = '<div class="bubble-header">' + agentLabel() + '</div><div class="bubble-body">Thinking…</div>';
+    loader.innerHTML = '<div class="bubble-header">' + agentLabel() + '</div>' +
+                       '<div class="bubble-body">Thinking…</div>';
     chatEmpty.style.display = 'none';
     chatWindow.appendChild(loader);
     chatWindow.scrollTop = chatWindow.scrollHeight;
@@ -104,26 +148,37 @@
       const r = await fetch('/api/chat', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ agent_id, prompt })
+        body: JSON.stringify({ agent_id, prompt: promptText })
       });
       const j = await r.json();
       const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
       loader.remove();
       if (j.ok && j.text) {
-        appendBubble('assistant', j.text, `HTTP ${j.http_status} · ${elapsed}s · ${agent_id}`);
+        appendBubble('assistant', renderMarkdown(j.text),
+          'HTTP ' + j.http_status + ' · ' + elapsed + 's · ' + agent_id, true);
       } else {
         const errMsg = j.error || j.raw || JSON.stringify(j);
-        appendBubble('error', 'Error: ' + errMsg, `HTTP ${j.http_status || '?'} · ${elapsed}s`);
+        appendBubble('error', errMsg,
+          'HTTP ' + (j.http_status || '?') + ' · ' + elapsed + 's', false);
       }
-    } catch (e) {
+    } catch(e) {
       loader.remove();
-      appendBubble('error', 'Network error: ' + e.message);
+      appendBubble('error', 'Network error: ' + e.message, null, false);
     }
     busy = false;
     sendBtn.disabled = false;
     sendBtn.textContent = 'Send';
     promptEl.focus();
   }
+
+  clearBtn.addEventListener('click', function() {
+    chatWindow.innerHTML = '';
+    const empty = document.createElement('div');
+    empty.id = 'chat-empty';
+    empty.className = 'chat-empty';
+    empty.textContent = 'Select an agent and send a prompt to begin.';
+    chatWindow.appendChild(empty);
+  });
 
   form.addEventListener('submit', function(e) {
     e.preventDefault();
@@ -132,9 +187,7 @@
   });
 
   document.querySelectorAll('.quick').forEach(function(btn) {
-    btn.addEventListener('click', function() {
-      send(btn.dataset.prompt);
-    });
+    btn.addEventListener('click', function() { send(btn.dataset.prompt); });
   });
 
   promptEl.addEventListener('keydown', function(e) {
