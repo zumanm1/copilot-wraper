@@ -97,13 +97,9 @@ def reload_cookies() -> None:
 
 
 def _make_headers(provider_name: str = "copilot") -> dict:
-    """Browser-like headers; Origin/Referer follow selected provider host."""
-    if provider_name == "m365":
-        origin = config.copilot_browser_origin()
-        referer = config.copilot_browser_referer()
-    else:
-        origin = "https://copilot.microsoft.com"
-        referer = "https://copilot.microsoft.com/"
+    """Browser-like headers; Origin/Referer always follow config (profile-aware)."""
+    origin = config.copilot_browser_origin()
+    referer = config.copilot_browser_referer()
     return {
         "Origin": origin,
         "Referer": referer,
@@ -371,11 +367,36 @@ class CopilotBackend:
             raise
 
     async def _raw_copilot_call(self, prompt: str, context, attachment_path=None) -> str:
-        """Accumulates all appendText events into a single string."""
+        """Accumulates all appendText events into a single string.
+        M365 provider proxies through C3 browser-auth /chat endpoint.
+        Consumer Copilot uses direct WebSocket."""
+        if self.provider.name == "m365":
+            return await self._c3_proxy_call(prompt)
+
         chunks = []
         async for chunk in self._ws_stream(prompt, context, attachment_path):
             chunks.append(chunk)
+        # Reset conversation so next request gets a fresh server-side context.
+        # Reusing a conversation_id across separate WebSocket connections causes
+        # Copilot to reject the 'send' event with errorCode: 'invalid-event'.
+        self._conversation_id = None
         return "".join(chunks)
+
+    async def _c3_proxy_call(self, prompt: str) -> str:
+        """Proxy chat through C3 browser-auth /chat endpoint (M365 SignalR)."""
+        c3_url = os.getenv("C3_URL", "http://browser-auth:8001")
+        logger.info("M365 proxy via C3: %s/chat prompt='%s'", c3_url, prompt[:60])
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                f"{c3_url}/chat",
+                json={"prompt": prompt, "timeout": int(config.REQUEST_TIMEOUT * 1000)},
+                timeout=aiohttp.ClientTimeout(total=config.REQUEST_TIMEOUT + 10),
+            ) as resp:
+                data = await resp.json()
+                if data.get("success") and data.get("text"):
+                    return data["text"]
+                error = data.get("error", "No response from M365 Copilot")
+                raise RuntimeError(f"C3 /chat failed: {error}")
 
     async def _ws_stream(self, prompt: str, context, attachment_path=None) -> AsyncGenerator[str, None]:
         """Low-level WebSocket streaming generator."""
@@ -440,6 +461,45 @@ class CopilotBackend:
                     sys.stderr.write(f"Bounty Hunter: WS_LINK_ESTABLISHED conv={conv_id}\n")
                     sys.stderr.flush()
 
+                    # Pre-send challenge probe: Copilot may send a challenge event
+                    # immediately after 'connected' and BEFORE it accepts a 'send'.
+                    # Respond to it here so the 'send' is not rejected as invalid-event.
+                    try:
+                        pre_msg = await asyncio.wait_for(ws.receive_str(), timeout=2.0)
+                        pre_data = json.loads(pre_msg)
+                        pre_ev = pre_data.get("event", "")
+                        sys.stderr.write(f"WS_PRE_SEND_EVENT: {pre_ev}\n")
+                        sys.stderr.flush()
+                        if pre_ev == "challenge":
+                            pre_method = pre_data.get("method") or ""
+                            pre_param = pre_data.get("parameter") or ""
+                            pre_id = pre_data.get("id")
+                            if pre_method == "copilot" and pre_param:
+                                try:
+                                    a = float(pre_param)
+                                    token = str(round((a ** 3 / 100 + a * 25) % 22))
+                                except (ValueError, ZeroDivisionError):
+                                    token = "0"
+                                await ws.send_str(json.dumps({
+                                    "event": "challengeResponse",
+                                    "method": "copilot",
+                                    "token": token,
+                                }))
+                            else:
+                                resp = {"event": "challengeResponse"}
+                                if pre_id is not None:
+                                    resp["id"] = pre_id
+                                await ws.send_str(json.dumps(resp))
+                            sys.stderr.write(f"WS_PRE_SEND_CHALLENGE_HANDLED: method={pre_method!r}\n")
+                            sys.stderr.flush()
+                        elif pre_ev:
+                            # Unexpected non-challenge event before send — log and ignore
+                            sys.stderr.write(f"WS_PRE_SEND_UNEXPECTED: {pre_data}\n")
+                            sys.stderr.flush()
+                    except asyncio.TimeoutError:
+                        # No pre-send challenge — proceed normally
+                        pass
+
                     # Map legacy style names to new copilot.microsoft.com API modes
                     # Valid modes: smart, chat, research, reasoning, study, smart-latest
                     _MODE_MAP = {
@@ -503,7 +563,9 @@ class CopilotBackend:
                                 parameter = data.get("parameter", "")
                                 sys.stderr.write(f"WS_CHALLENGE_DATA: {json.dumps(data)[:300]}\n")
                                 sys.stderr.flush()
-                                if (method == "copilot" and parameter) or (not method and parameter):
+                                if method == "copilot" and parameter:
+                                    sys.stderr.write("WS_CHALLENGE: Handling copilot method with parameter\n")
+                                    sys.stderr.flush()
                                     try:
                                         a = float(parameter)
                                         token = str(round((a ** 3 / 100 + a * 25) % 22))
@@ -515,13 +577,17 @@ class CopilotBackend:
                                         "token": token,
                                     }))
                                 elif not method:
+                                    sys.stderr.write("WS_CHALLENGE: Handling null method challenge\n")
+                                    sys.stderr.flush()
                                     # Some sessions emit a challenge marker with null fields but a
                                     # challenge id. Echo an acknowledgement to unblock generation.
                                     challenge_id = data.get("id")
-                                    payload = {"event": "challengeResponse"}
-                                    if challenge_id is not None:
-                                        payload["id"] = challenge_id
+                                    payload = {"event": "challengeResponse", "id": challenge_id}
                                     await ws.send_str(json.dumps(payload))
+                                    sys.stderr.write(f"WS_CHALLENGE_RESPONSE_SENT: {json.dumps(payload)}\n")
+                                    sys.stderr.flush()
+                                    # Small delay to allow server to process challenge response
+                                    await asyncio.sleep(0.1)
                                     continue
                                 else:
                                     # Other methods (hashcash, cloudflare) or failed copilot challenge
@@ -556,7 +622,12 @@ class CopilotBackend:
                 raise
 
     async def chat_completion_stream(self, prompt: str, attachment_path=None, context=None) -> AsyncGenerator[str, None]:
-        """Streaming interface — yields text tokens as they arrive."""
+        """Streaming interface — yields text tokens as they arrive.
+        M365 provider returns full text in one chunk (C3 proxy is non-streaming)."""
+        if self.provider.name == "m365":
+            text = await self._c3_proxy_call(prompt)
+            yield text
+            return
         try:
             async for token in self._ws_stream(prompt, context, attachment_path):
                 yield token

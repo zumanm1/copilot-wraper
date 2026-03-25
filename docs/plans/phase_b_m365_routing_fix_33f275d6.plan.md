@@ -1,11 +1,13 @@
 ---
 name: Phase B M365 Routing Fix
+status: ✅ COMPLETE (2026-03-25)
 overview: Implement Phase B so C1/C2 can authenticate and send requests through an M365-compatible path for `m365_hub`, while preserving the existing Copilot path for non-M365 profiles. Validate with automated tests and an optional live signed-in round-trip.
 source: /Users/macbook/UNINSTALL00/.cursor/plans/phase_b_m365_routing_fix_33f275d6.plan.md
 continuation_notes:
   - Continued under "phase-b-m365-complete" with locked target behavior: dual-mode routing (`m365_hub` => M365, others => Copilot).
   - End-to-end validation target is a real signed-in M365 browser session with C2 `ask_helper.py` round-trip.
   - Implementation commits and push references are recorded in git history for this repo.
+  - COMPLETED 2026-03-25: C2 Aider → C1 → C3 → M365 validated end-to-end. Aider received response from M365 Copilot.
 ---
 
 # Phase B: Fix C2→C1→C3 M365 Integration

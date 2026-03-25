@@ -167,4 +167,4 @@ echo "[browser-auth] Starting cookie extractor API on port ${API_PORT}..."
 echo "[browser-auth] Portal setup: http://localhost:${API_PORT}/setup"
 echo "[browser-auth] Open http://localhost:${NOVNC_PORT}/ (or vnc_auto.html) to see the browser"
 echo "[browser-auth] Trigger: curl -X POST http://localhost:${API_PORT}/extract"
-exec uvicorn server:app --host 0.0.0.0 --port ${API_PORT} --log-level info
+exec uvicorn server:app --host 0.0.0.0 --port ${API_PORT} --log-level info --reload --reload-dir /browser-auth

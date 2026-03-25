@@ -25,7 +25,9 @@ from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from portal_urls import normalize_copilot_portal_url
 
 from cookie_extractor import (
+    browser_chat,
     extract_and_save,
+    extract_access_token,
     get_context,
     patch_env_variable,
     portal_settings_from_env_file,
@@ -66,6 +68,46 @@ API1_URL = os.getenv("API1_URL", "http://app:8000")
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "browser-auth"}
+
+
+@app.post("/token")
+async def token():
+    """Extract access_token from the browser's localStorage for Copilot WS auth."""
+    try:
+        result = await extract_access_token()
+        return JSONResponse(result)
+    except Exception as e:
+        return JSONResponse({"error": str(e), "access_token": None}, status_code=500)
+
+
+@app.post("/chat")
+async def chat(request: Request):
+    """Proxy a chat request through the real browser WebSocket.
+
+    The browser's native TLS fingerprint bypasses the null-method challenge
+    that blocks programmatic WebSocket connections from aiohttp/httpx.
+
+    Body: {"prompt": "...", "mode": "chat|smart|reasoning", "timeout": 30000}
+    Returns: {"success": bool, "text": "...", "events": [...]}
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON body"}, status_code=400)
+
+    prompt = body.get("prompt", "").strip()
+    if not prompt:
+        return JSONResponse({"error": "prompt is required"}, status_code=400)
+
+    mode = body.get("mode", "chat")
+    timeout_ms = int(body.get("timeout", 30000))
+
+    try:
+        result = await browser_chat(prompt, mode=mode, timeout_ms=timeout_ms)
+        status = 200 if result.get("success") else 502
+        return JSONResponse(result, status_code=status)
+    except Exception as e:
+        return JSONResponse({"error": str(e), "success": False}, status_code=500)
 
 
 _SETUP_HTML = """<!DOCTYPE html>

@@ -1,3 +1,21 @@
+# === Phase B M365 validation (2026-03-25) ===
+# M365 C3 proxy unit tests added to test_unit_copilot_backend.py
+# 3 new tests: M365 routing, streaming single chunk, error propagation
+# Full unit suite: 125 passed, 1 pre-existing failure (test_portal_consumer_explicit_env)
+#
+# Live E2E validation (M365 mode):
+#   C2 Aider → C1 → C3 → M365 Copilot: PASS (Aider received "My name is M365 Copilot")
+#   Consecutive requests: 3/3 PASS
+#   Large prompt (>200 chars, execCommand path): PASS
+#   SignalR type=2 parser: clean text, no DOM artifacts
+#
+# Bugs fixed:
+#   - Locator.type timeout on large prompts → execCommand('insertText')
+#   - Consecutive request failure → about:blank teardown
+#   - DOM artifacts in response → SignalR type=2 parser
+#   - backend fixture pollution → explicit consumer env reload
+
+# === Previous run (2026-03-23) ===
 # Focused suite: noVNC (Playwright + Puppeteer), C3 setup HTML, browser entrypoint, portal URLs.
 # Requires: docker compose up -d browser-auth for Playwright/Puppeteer rows.
 # PNG artifacts (gitignored): tests/reports/novnc_playwright_after_warm.png, novnc_puppeteer_after_warm.png

@@ -19,10 +19,16 @@ async def _fake_ws_tokens(self, prompt, context, attachment_path=None):
 
 
 @pytest.fixture
-def backend():
+def backend(monkeypatch):
+    monkeypatch.setenv("COPILOT_PROVIDER", "auto")
+    monkeypatch.setenv("COPILOT_PORTAL_PROFILE", "consumer")
+    import config as cfg
+    import copilot_backend as cb
+    import importlib
+    importlib.reload(cfg)
+    importlib.reload(cb)
     with patch("copilot_backend.CopilotBackend._ws_stream", _fake_ws_tokens):
-        from copilot_backend import CopilotBackend
-        b = CopilotBackend()
+        b = cb.CopilotBackend()
         yield b
 
 
@@ -121,6 +127,63 @@ def test_no_cross_provider_auto_fallback(monkeypatch):
     b = cb.CopilotBackend()
     assert b.provider.name == "m365"
     assert cb._should_fallback_to_copilot(b.provider, "MUID=abc;_U=xyz") is False
+
+
+# ── M365 C3 Proxy ────────────────────────────────────────────────────
+
+async def test_m365_provider_routes_through_c3_proxy(monkeypatch):
+    """M365 provider calls _c3_proxy_call instead of _ws_stream."""
+    monkeypatch.setenv("COPILOT_PROVIDER", "m365")
+    monkeypatch.setenv("COPILOT_PORTAL_PROFILE", "m365_hub")
+    import config as cfg
+    import copilot_backend as cb
+    import importlib
+    importlib.reload(cfg)
+    importlib.reload(cb)
+
+    b = cb.CopilotBackend()
+    assert b.provider.name == "m365"
+
+    # Mock _c3_proxy_call to return test text
+    b._c3_proxy_call = AsyncMock(return_value="M365 says hello")
+    result = await b.chat_completion("test prompt")
+    b._c3_proxy_call.assert_awaited_once()
+    assert result == "M365 says hello"
+
+
+async def test_m365_stream_yields_single_chunk(monkeypatch):
+    """M365 streaming yields full text in one chunk (non-streaming proxy)."""
+    monkeypatch.setenv("COPILOT_PROVIDER", "m365")
+    monkeypatch.setenv("COPILOT_PORTAL_PROFILE", "m365_hub")
+    import config as cfg
+    import copilot_backend as cb
+    import importlib
+    importlib.reload(cfg)
+    importlib.reload(cb)
+
+    b = cb.CopilotBackend()
+    b._c3_proxy_call = AsyncMock(return_value="Full response text")
+    chunks = []
+    async for chunk in b.chat_completion_stream("test"):
+        chunks.append(chunk)
+    assert chunks == ["Full response text"]
+
+
+async def test_c3_proxy_error_propagates_to_chat_completion(monkeypatch):
+    """M365 chat_completion raises RuntimeError when C3 proxy fails."""
+    monkeypatch.setenv("COPILOT_PROVIDER", "m365")
+    monkeypatch.setenv("COPILOT_PORTAL_PROFILE", "m365_hub")
+    import config as cfg
+    import copilot_backend as cb
+    import importlib
+    importlib.reload(cfg)
+    importlib.reload(cb)
+
+    b = cb.CopilotBackend()
+    b._c3_proxy_call = AsyncMock(side_effect=RuntimeError("C3 /chat failed: No composer found"))
+
+    with pytest.raises(RuntimeError, match="C3 /chat failed"):
+        await b.chat_completion("test prompt")
 
 
 # ── CopilotConnectionPool ────────────────────────────────────────────

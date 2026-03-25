@@ -41,11 +41,15 @@ Your App / OpenAI SDK / Claude Code / Hermes / ...
 │  /v1/messages          (Anthropic format)     │
 │  /v1/agent/*           (stateful sessions)    │
 └──────────────────────┬────────────────────────┘
-                       │  WebSocket (WSS)
-               ▼
-    copilot.microsoft.com
-                       ▲
-         C3 browser-auth feeds session cookies
+                       │
+          ┌────────────┴────────────┐
+          │ consumer profile        │ m365_hub profile
+          │ (direct WebSocket)      │ (C3 browser proxy)
+          ▼                         ▼
+  copilot.microsoft.com    C3 browser-auth
+                           POST /chat → Playwright
+                           → m365.cloud.microsoft
+                           → SignalR WS (substrate.office.com)
 ```
 
 ---
@@ -54,11 +58,26 @@ Your App / OpenAI SDK / Claude Code / Hermes / ...
 
 ### Request Flow
 
-1. A client sends a request to C1 (`POST /v1/chat/completions` or `POST /v1/messages`)
-2. C1 (`server.py`) validates the request using Pydantic models and extracts cookies from the environment (originally obtained by C3)
-3. `CopilotBackend` (`copilot_backend.py`) opens a **WebSocket connection** to `copilot.microsoft.com`, authenticates with the session cookie, and sends the prompt
-4. The response streams back token-by-token
-5. C1 re-formats it into the requested API schema (OpenAI SSE or Anthropic chunks) and returns it to the caller
+C1 supports **two routing modes** selected by `COPILOT_PROVIDER` (or auto-detected from `COPILOT_PORTAL_PROFILE`):
+
+#### Consumer Copilot (default, `consumer` profile)
+
+1. Client → `POST /v1/chat/completions` on C1
+2. C1 opens a **direct WebSocket** to `copilot.microsoft.com` using session cookies extracted by C3
+3. Response streams back token-by-token
+4. C1 re-formats into OpenAI SSE or Anthropic chunks
+
+#### M365 Copilot (`m365_hub` profile) — Phase B
+
+1. Client → `POST /v1/chat/completions` on C1
+2. C1 calls `_c3_proxy_call()` → **HTTP POST** to C3's `/chat` endpoint
+3. C3 uses **Playwright** to type the prompt into the real M365 Copilot web UI at `m365.cloud.microsoft/chat`
+4. C3 intercepts the **SignalR WebSocket** response from `substrate.office.com/m365Copilot/Chathub/`
+5. C3 parses SignalR frames (delimited by `\x1e`), extracts bot text from `type=2` completion frames
+6. C3 returns the response text to C1 via JSON
+7. C1 re-formats into the OpenAI/Anthropic response schema and returns it to the caller
+
+> **Why the browser proxy?** M365 Copilot uses a SignalR-based protocol on `substrate.office.com` that requires an active browser session with OAuth tokens. Direct WebSocket connections (like the consumer path) don't work because M365's auth model binds to the browser session, not standalone cookies.
 
 ### Per-Agent Session Routing
 
@@ -70,13 +89,22 @@ X-Agent-ID: c5-claude-code → session pool slot B
 X-Agent-ID: c8-hermes      → session pool slot C
 ```
 
-### Cookie Flow (C3 → C1)
+### Cookie & Session Flow (C3 → C1)
 
-C3 runs a headless Chromium browser with a noVNC remote display. You log into `copilot.microsoft.com` inside that browser, then trigger cookie extraction via the C3 API. The extracted cookies are written to the shared `.env` file which C1 reads.
+C3 runs a headless Chromium browser with a noVNC remote display. Authentication depends on the profile:
 
+#### Consumer profile
 ```
-Browser (noVNC :6080) → login → C3 extracts cookies → .env → C1 reloads
+noVNC :6080 → login to copilot.microsoft.com → C3 /extract → cookies → .env → C1 reloads
 ```
+
+#### M365 profile
+```
+noVNC :6080 → login to m365.cloud.microsoft → session persists in browser
+C1 receives prompt → POST C3 /chat → Playwright types in M365 UI → SignalR WS response → C1
+```
+
+> **Key difference:** In M365 mode, C3 doesn't just extract cookies — it acts as a **live browser proxy**. The authenticated browser session inside C3 is used for every chat request. C1 calls `POST /chat` on C3 for each prompt, and C3 submits it through the real M365 Copilot web UI.
 
 ---
 
@@ -104,18 +132,23 @@ Host Machine
 ┌────────────────────────────────────────────────────────────────────┐
 │  Docker Network: copilot-net                                       │
 │                                                                    │
-│  C3 browser-auth ──cookies──► C1 copilot-api ──WSS──► Copilot    │
-│  :6080 (noVNC)               :8000                                 │
-│  :8001 (Cookie API)          /v1/chat/completions                  │
-│                              /v1/messages                          │
-│                              /v1/agent/*                           │
-│                                    ▲                               │
-│  C2 agent-terminal ────OpenAI /v1──┤                               │
-│  C5 claude-code ───Anthropic /v1───┤                               │
-│  C6 kilocode ──────OpenAI /v1──────┤                               │
-│  C7a openclaw-gateway ─OpenAI /v1──┤  :18789                      │
-│  C7b openclaw-cli ────OpenAI /v1───┤                               │
-│  C8 hermes-agent ─────OpenAI /v1───┘                               │
+│  ┌─────── Consumer mode ───────┐  ┌──── M365 mode ──────────────┐ │
+│  │ C1 ──WSS──► copilot.ms.com  │  │ C1 ──POST /chat──► C3       │ │
+│  │ (direct WebSocket + cookies)│  │ C3 ──Playwright──► M365 UI  │ │
+│  └─────────────────────────────┘  │ C3 ──SignalR WS──►          │ │
+│                                   │   substrate.office.com       │ │
+│  C3 browser-auth                  └─────────────────────────────┘ │
+│  :6080 (noVNC)   :8001 (API)                                      │
+│                                                                    │
+│  C1 copilot-api :8000                                              │
+│  /v1/chat/completions  /v1/messages  /v1/agent/*                   │
+│                      ▲                                             │
+│  C2 agent-terminal ──┤  (Aider, OpenCode)                          │
+│  C5 claude-code ─────┤  (Claude Code — Anthropic /v1)              │
+│  C6 kilocode ────────┤  (KiloCode)                                 │
+│  C7a openclaw-gw ────┤  :18789 (OpenClaw Gateway)                  │
+│  C7b openclaw-cli ───┤  (OpenClaw CLI)                             │
+│  C8 hermes-agent ────┘  (Hermes — memory, skills, cron)            │
 │                                                                    │
 │  CT tests ─────────HTTP tests──────► C1                            │
 └────────────────────────────────────────────────────────────────────┘
@@ -241,6 +274,7 @@ curl http://localhost:8000/v1/debug/cookie
 | `/status` | GET | Browser status (open pages, cookies present) |
 | `/setup` | GET, POST | HTML form: portal profile + optional URLs → `.env` + C1 reload |
 | `/extract` | POST | Extract cookies from active Chromium session |
+| `/chat` | POST | **M365 mode:** Submit a prompt via Playwright, return SignalR response (`{"prompt":"...","timeout":90000}`) |
 | `/navigate` | POST | Open a URL in the C3 browser (optional manual flows) |
 
 ### Manual cookie fallback
@@ -1158,6 +1192,9 @@ All settings are read from `.env` (copy from `.env.example`):
 | `CONNECT_TIMEOUT` | No | `15` | WebSocket connect timeout (seconds) |
 | `RATE_LIMIT` | No | `100/minute` | Per-IP rate limit |
 | `CIRCUIT_BREAKER_THRESHOLD` | No | `50` | Failure % before circuit opens |
+| `COPILOT_PORTAL_PROFILE` | No | `consumer` | Portal profile: `consumer` or `m365_hub` |
+| `COPILOT_PROVIDER` | No | `auto` | Provider: `auto`, `copilot`, or `m365`. Auto selects based on profile |
+| `C3_URL` | No | `http://browser-auth:8001` | C3 endpoint for M365 browser proxy (used by C1 in M365 mode) |
 
 ### Agent container environment variables
 
@@ -1244,7 +1281,8 @@ copilot-openai-wrapper/
 │                            /v1/cookies/extract, /v1/reload-config
 │
 ├── copilot_backend.py       WebSocket client + connection pool for Copilot
-│                            CopilotConnectionPool, cookie caching, reload
+│                            CopilotConnectionPool, _c3_proxy_call (M365),
+│                            dual-mode routing (consumer WS / M365 C3 proxy)
 │
 ├── agent_manager.py         Stateful agent lifecycle (STOPPED/RUNNING/PAUSED/BUSY)
 │
@@ -1276,10 +1314,11 @@ copilot-openai-wrapper/
 │   ├── opencode.json
 │   └── .aider.conf.yml
 │
-├── browser_auth/            C3 cookie extraction service
-│   ├── server.py            Flask API (/extract, /status, /health)
-│   ├── cookie_extractor.py  Playwright Chromium automation
-│   ├── entrypoint.sh        Xvfb + x11vnc + noVNC + Flask startup
+├── browser_auth/            C3 cookie extraction + M365 browser proxy
+│   ├── server.py            FastAPI (/extract, /status, /health, /chat)
+│   ├── cookie_extractor.py  Playwright: cookie extraction + browser_chat()
+│   │                        SignalR WS interception, execCommand text input
+│   ├── entrypoint.sh        Xvfb + x11vnc + noVNC + uvicorn (--reload)
 │   └── requirements.txt
 │
 ├── claude-code-terminal/    C5 launcher scripts

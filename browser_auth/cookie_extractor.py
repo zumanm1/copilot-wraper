@@ -642,6 +642,398 @@ async def get_context() -> BrowserContext:
     return await _get_context()
 
 
+async def extract_access_token() -> dict:
+    """Extract access_token from the browser's localStorage on M365 Copilot.
+
+    Checks m365.cloud.microsoft localStorage first, then falls back to
+    copilot.microsoft.com cookies (__Host-copilot-anon).
+
+    Returns dict with 'access_token' and optionally 'useridentitytype'.
+    """
+    context = await _get_context()
+    page = await _get_or_create_page(context)
+
+    # Navigate to M365 chat if not already there
+    current = page.url or ""
+    if "m365.cloud.microsoft" not in current:
+        try:
+            await page.goto("https://m365.cloud.microsoft/chat", wait_until="domcontentloaded", timeout=20_000)
+            await asyncio.sleep(2)
+        except Exception as e:
+            print(f"[cookie_extractor] navigate for token extraction failed: {e}")
+
+    result = await page.evaluate("""
+        (() => {
+            for (var i = 0; i < localStorage.length; i++) {
+                try {
+                    const key = localStorage.key(i);
+                    const item = JSON.parse(localStorage.getItem(key));
+                    if (item?.body?.access_token) {
+                        return {
+                            access_token: "" + item.body.access_token,
+                            useridentitytype: "m365"
+                        };
+                    } else if (key.includes("chatai")) {
+                        return {
+                            access_token: "" + item.secret,
+                            useridentitytype: null
+                        };
+                    }
+                } catch(e) {}
+            }
+            return null;
+        })()
+    """)
+
+    if result and result.get("access_token"):
+        print(f"[cookie_extractor] access_token extracted (length={len(result['access_token'])})")
+        return result
+
+    # Fallback: try copilot.microsoft.com anon cookie from browser context
+    for domain_url in ["https://m365.cloud.microsoft", "https://copilot.microsoft.com"]:
+        cookies = await context.cookies(domain_url)
+        for c in cookies:
+            if c["name"] == "__Host-copilot-anon":
+                print(f"[cookie_extractor] Using __Host-copilot-anon from {domain_url}")
+                return {"access_token": c["value"], "useridentitytype": None}
+
+    print("[cookie_extractor] No access_token found in localStorage or cookies")
+    return {"access_token": None, "useridentitytype": None}
+
+
+async def browser_chat(prompt: str, mode: str = "chat", timeout_ms: int = 60000) -> dict:
+    """Execute a Copilot chat via the M365 browser UI + WebSocket frame interception.
+
+    Strategy:
+      1. Navigate to m365.cloud.microsoft/chat (if not already there).
+      2. Attach a WebSocket frame listener to capture appendText events.
+      3. Type the prompt into the composer textarea and submit.
+      4. The web app's own JavaScript handles the challenge natively.
+      5. Collect appendText frames until done/partCompleted.
+
+    Returns dict with 'text', 'events', 'success', and optionally 'error'.
+    """
+    import json as _json
+
+    context = await _get_context()
+    page = await _get_or_create_page(context)
+
+    # State for WebSocket frame interception
+    collected_text = []
+    events_recv = []
+    events_sent = []
+    ws_urls = []
+    done_event = asyncio.Event()
+
+    def _parse_frame(payload: str) -> list[dict]:
+        """Parse one or more JSON messages from a WebSocket frame.
+        SignalR frames are delimited by \\x1e (record separator)."""
+        results = []
+        for part in payload.split("\x1e"):
+            part = part.strip()
+            if not part:
+                continue
+            try:
+                results.append(_json.loads(part))
+            except Exception:
+                pass
+        return results
+
+    def _on_ws_recv(payload: str) -> None:
+        """Handle received WebSocket text frames (SignalR or Copilot protocol)."""
+        for msg in _parse_frame(payload):
+            # SignalR protocol (M365 Copilot via substrate.office.com)
+            sr_type = msg.get("type")
+            if sr_type is not None:
+                if sr_type == 1:  # Invocation
+                    target = msg.get("target", "")
+                    events_recv.append(f"sr:{target}")
+                    args = msg.get("arguments", [])
+                    # Extract text from M365 Copilot response
+                    for arg in args:
+                        if isinstance(arg, dict):
+                            # Check for streaming text in various M365 response shapes
+                            text = arg.get("text") or arg.get("messageText") or ""
+                            if text:
+                                collected_text.append(text)
+                            # Check messages array
+                            for m in arg.get("messages", []):
+                                if isinstance(m, dict):
+                                    t = m.get("text") or m.get("content") or ""
+                                    if t:
+                                        collected_text.append(t)
+                    print(f"[browser_chat] WS_RECV SR_INV: target={target} args_keys={[list(a.keys()) if isinstance(a, dict) else type(a).__name__ for a in args][:3]} text_so_far={len(''.join(collected_text))}")
+                elif sr_type == 2:  # Completion with full response
+                    events_recv.append("sr:completion")
+                    # Extract bot response text from type=2 item.messages
+                    item = msg.get("item", {})
+                    for m in item.get("messages", []):
+                        if not isinstance(m, dict):
+                            continue
+                        author = m.get("author", "")
+                        if author == "user":
+                            continue  # Skip user's own message echo
+                        # Bot response text — try multiple field locations
+                        t = m.get("text") or m.get("messageText") or ""
+                        # Also check adaptiveCards body
+                        if not t:
+                            for card in m.get("adaptiveCards", []):
+                                for body in card.get("body", []):
+                                    t = body.get("text", "")
+                                    if t:
+                                        break
+                                if t:
+                                    break
+                        if t and t not in "".join(collected_text):
+                            collected_text.clear()  # type=2 has final text — replace partials
+                            collected_text.append(t)
+                    print(f"[browser_chat] WS_RECV SR_DONE: {str(payload)[:200]}")
+                    done_event.set()
+                elif sr_type == 3:  # Close/completion signal
+                    events_recv.append("sr:close3")
+                    print(f"[browser_chat] WS_RECV SR_TYPE3: {str(payload)[:200]}")
+                    done_event.set()
+                elif sr_type == 7:  # Close
+                    events_recv.append("sr:close")
+                    done_event.set()
+                elif sr_type == 6:  # Ping
+                    pass  # ignore pings
+                else:
+                    events_recv.append(f"sr:type{sr_type}")
+                    print(f"[browser_chat] WS_RECV SR_OTHER: type={sr_type} {str(payload)[:150]}")
+                continue
+
+            # Copilot.microsoft.com protocol (legacy/consumer)
+            ev = msg.get("event", "")
+            if ev:
+                events_recv.append(ev)
+                print(f"[browser_chat] WS_RECV: {ev} {str(payload)[:150]}")
+                if ev == "appendText":
+                    collected_text.append(msg.get("text", ""))
+                elif ev in ("done", "partCompleted"):
+                    done_event.set()
+                elif ev == "error":
+                    events_recv.append(f"error:{msg.get('errorCode', 'unknown')}")
+                    done_event.set()
+
+    def _on_ws_sent(payload: str) -> None:
+        """Log sent WebSocket frames."""
+        for msg in _parse_frame(payload):
+            sr_type = msg.get("type")
+            ev = msg.get("event", "")
+            label = f"sr:type{sr_type}" if sr_type is not None else (ev or "raw")
+            events_sent.append(label)
+            print(f"[browser_chat] WS_SENT: {label} {str(payload)[:200]}")
+
+    def _on_websocket(ws) -> None:
+        """Attach frame listeners to any new WebSocket on the page."""
+        url = ws.url or ""
+        ws_urls.append(url)
+        print(f"[browser_chat] WS_OPEN: {url[:120]}")
+        ws.on("framereceived", _on_ws_recv)
+        ws.on("framesent", _on_ws_sent)
+        ws.on("close", lambda: print("[browser_chat] WS_CLOSED"))
+
+    # ── Attach WS listener — M365 opens a NEW WS per chat message ──
+    page.on("websocket", _on_websocket)
+
+    # Force full page teardown then navigate to fresh M365 chat URL.
+    # SPA caches state when navigating to the same URL, causing Enter key
+    # to not submit on consecutive requests. about:blank forces full teardown.
+    _M365_CHAT_URL = "https://m365.cloud.microsoft/chat"
+    try:
+        await page.goto("about:blank", wait_until="domcontentloaded", timeout=5_000)
+        await page.goto(_M365_CHAT_URL, wait_until="domcontentloaded", timeout=30_000)
+        # Wait for composer element to appear (reliable page-ready signal)
+        for _sel in [
+            '[role="textbox"][contenteditable="true"]',
+            '[contenteditable="true"]',
+            'textarea',
+        ]:
+            try:
+                await page.wait_for_selector(_sel, state="visible", timeout=15_000)
+                break
+            except Exception:
+                continue
+        print(f"[browser_chat] Navigated to fresh chat: {page.url}")
+    except Exception as e:
+        print(f"[browser_chat] navigate failed: {e}")
+        return {"success": False, "error": f"Navigate failed: {e}", "events": [], "text": ""}
+
+    try:
+        # Use page.evaluate() for auth dialog check — immune to overlay dialogs
+        await asyncio.sleep(1)  # Let page settle
+
+        # Check for "Authentication required" dialog (M365 session expired)
+        auth_blocked = await page.evaluate("""() => {
+            const h = document.querySelector('h2');
+            if (h && h.textContent.includes('Authentication required')) {
+                // Try to click Sign in / Refresh button
+                const btns = document.querySelectorAll('button');
+                for (const b of btns) {
+                    const t = b.textContent.trim().toLowerCase();
+                    if (t === 'sign in' || t === 'refresh' || t === 'ok') {
+                        b.click();
+                        return 'clicked:' + t;
+                    }
+                }
+                return 'auth_dialog_present';
+            }
+            return null;
+        }""")
+        if auth_blocked:
+            print(f"[browser_chat] Auth check: {auth_blocked}")
+            if auth_blocked == "auth_dialog_present":
+                return {
+                    "success": False,
+                    "error": "Authentication required on m365.cloud.microsoft — sign in via noVNC at http://localhost:6080 then retry",
+                    "events": [], "text": "",
+                }
+            # Clicked a button — wait for re-auth
+            await asyncio.sleep(8)
+            # Re-check
+            still_blocked = await page.evaluate("""() => {
+                const h = document.querySelector('h2');
+                return h && h.textContent.includes('Authentication required');
+            }""")
+            if still_blocked:
+                return {
+                    "success": False,
+                    "error": "Authentication required on m365.cloud.microsoft — sign in via noVNC at http://localhost:6080 then retry",
+                    "events": [], "text": "",
+                }
+            print("[browser_chat] Auth dialog dismissed after button click")
+
+        # ── Discover DOM elements via page.evaluate (fast, overlay-immune) ──
+        dom_info = await page.evaluate("""() => {
+            const info = {url: location.href, title: document.title, composer: null, sendBtn: null};
+
+            // Try "New chat" button (click via JS — doesn't need real events)
+            const nc = document.querySelector('[data-testid="sidebar-new-conversation-nav-item"]');
+            if (nc) nc.click();
+
+            // Find composer
+            const sels = [
+                '[data-testid="composer-input"]',
+                'textarea[placeholder*="Message"]',
+                'textarea[placeholder*="Copilot"]',
+                'textarea[placeholder*="Ask"]',
+                'textarea',
+                '[role="textbox"][contenteditable="true"]',
+                '[contenteditable="true"]',
+            ];
+            for (const s of sels) {
+                const el = document.querySelector(s);
+                if (el && el.offsetParent !== null) {
+                    info.composer = s;
+                    break;
+                }
+            }
+
+            // Find send button
+            const btnSels = [
+                'button[data-testid="composer-send-button"]',
+                'button[data-testid="composer-create-button"]',
+                'button[aria-label*="Send"]',
+                'button[aria-label*="Submit"]',
+            ];
+            for (const s of btnSels) {
+                const el = document.querySelector(s);
+                if (el) { info.sendBtn = s; break; }
+            }
+
+            return info;
+        }""")
+        print(f"[browser_chat] DOM probe: url={dom_info.get('url','?')[:60]} composer={dom_info.get('composer')} sendBtn={dom_info.get('sendBtn')}")
+
+        composer_sel = dom_info.get("composer")
+        if not composer_sel:
+            err = f"No composer found (page: {dom_info.get('url')}, title: {dom_info.get('title')})"
+            print(f"[browser_chat] {err}")
+            return {"success": False, "error": err, "events": [], "text": ""}
+
+        # ── Use Playwright native methods for text input (triggers real events for React) ──
+        composer = page.locator(composer_sel).first
+        await composer.click(force=True, timeout=5000)
+        await asyncio.sleep(0.3)
+
+        # Clear existing content
+        await page.keyboard.press("Control+A")
+        await page.keyboard.press("Backspace")
+        await asyncio.sleep(0.1)
+
+        # For large prompts (>200 chars), use execCommand('insertText') — instant
+        # and fires beforeinput/input events that React's synthetic system picks up.
+        # .type() at 20ms/char would timeout on Aider's ~2000+ char system prompts.
+        if len(prompt) > 200:
+            await page.evaluate("(text) => document.execCommand('insertText', false, text)", prompt)
+            await asyncio.sleep(0.5)
+            print(f"[browser_chat] Inserted prompt via execCommand ({len(prompt)} chars)")
+        else:
+            await composer.type(prompt, delay=20)
+            await asyncio.sleep(0.5)
+            print(f"[browser_chat] Typed prompt via Playwright ({len(prompt)} chars)")
+
+        # ── Submit via Enter key (most reliable for React apps) ──
+        # Playwright force-click doesn't trigger React's synthetic event handlers.
+        # Enter key press in the focused composer is the natural submit path.
+        await page.keyboard.press("Enter")
+        print("[browser_chat] Pressed Enter to submit")
+
+        # Wait for the done event or timeout
+        timeout_s = timeout_ms / 1000.0
+        try:
+            await asyncio.wait_for(done_event.wait(), timeout=timeout_s)
+        except asyncio.TimeoutError:
+            print(f"[browser_chat] WS timeout after {timeout_s}s — trying DOM fallback")
+
+        text = "".join(collected_text)
+
+        # ── DOM fallback: extract response text from the page if WS gave nothing ──
+        if not text:
+            await asyncio.sleep(2)  # Give the UI a moment to finish rendering
+            dom_text = await page.evaluate("""() => {
+                // M365 Copilot renders responses in message containers
+                // Look for the LAST assistant/bot message on the page
+                const allMsgs = document.querySelectorAll(
+                    '[data-content="ai-message"], [data-is-bot-message="true"], ' +
+                    '.ac-textBlock, [class*="assistantMessage"], [class*="botMessage"], ' +
+                    '[data-testid*="message"][data-testid*="bot"], ' +
+                    '[role="article"]'
+                );
+                if (allMsgs.length > 0) {
+                    const last = allMsgs[allMsgs.length - 1];
+                    return last.innerText || last.textContent || '';
+                }
+                // Broader fallback: look for the last turn-container with paragraphs
+                const turns = document.querySelectorAll('[class*="turn"]');
+                if (turns.length > 1) {
+                    const last = turns[turns.length - 1];
+                    const ps = last.querySelectorAll('p, span, div');
+                    const parts = [];
+                    ps.forEach(p => { if (p.innerText.trim()) parts.push(p.innerText.trim()); });
+                    return parts.join('\\n');
+                }
+                return '';
+            }""")
+            if dom_text and dom_text.strip():
+                text = dom_text.strip()
+                print(f"[browser_chat] DOM fallback extracted {len(text)} chars")
+
+        success = len(text) > 0
+        print(f"[browser_chat] success={success}, recv={events_recv[:10]}, sent={events_sent[:10]}, ws_urls={[u[:60] for u in ws_urls]}, text_len={len(text)}")
+        return {"success": success, "events": events_recv, "events_sent": events_sent, "ws_urls": ws_urls, "text": text}
+
+    except Exception as e:
+        print(f"[browser_chat] error: {e}")
+        return {"success": False, "error": str(e), "events": events_recv, "text": "".join(collected_text)}
+    finally:
+        try:
+            page.remove_listener("websocket", _on_websocket)
+        except Exception:
+            pass
+
+
 async def close():
     """Gracefully shut down browser."""
     global _context, _browser, _playwright

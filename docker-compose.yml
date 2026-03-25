@@ -486,6 +486,9 @@ services:
       - ./.env:/app/.env
       # Persistent browser profile (survives container restarts)
       - copilot-browser-profile:/browser-profile
+      # Hot-reload source code (edit on host, auto-reloads in container)
+      - ./browser_auth:/browser-auth
+      - ./portal_urls.py:/browser-auth/portal_urls.py
     networks:
       - copilot-net
     shm_size: '2gb'    # Chrome needs shared memory

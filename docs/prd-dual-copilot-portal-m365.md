@@ -1,11 +1,16 @@
 # PRD: Dual Copilot portal profile (consumer vs Microsoft 365 web hub)
 
-**Version:** 1.0  
-**Status:** Phase A implemented (parameterized portal + cookies; API host defaults to consumer Copilot until network discovery proves otherwise)
+**Version:** 2.0  
+**Status:** Phase A + Phase B implemented and validated (2026-03-25)
 
 ## Summary
 
-Operators can choose **Copilot (consumer)** or **Microsoft 365 Copilot (web)** as the browser login surface. C1 uses configurable `Origin`/`Referer` aligned with that portal while **Phase A** keeps the chat API at `copilot.microsoft.com` unless `COPILOT_PORTAL_API_BASE_URL` is set.
+Operators can choose **Copilot (consumer)** or **Microsoft 365 Copilot (web)** as the browser login surface.
+
+- **Phase A (consumer):** C1 connects directly to `copilot.microsoft.com` via WebSocket using session cookies.
+- **Phase B (M365):** C1 proxies chat through C3's browser session. C3 uses Playwright to interact with the M365 Copilot web UI and intercepts SignalR WebSocket responses from `substrate.office.com`.
+
+Phase B was required because M365 Copilot uses a completely different backend (`substrate.office.com`, SignalR protocol) that requires an active browser OAuth session — standalone cookies are insufficient.
 
 ## Configuration
 
@@ -20,9 +25,27 @@ Operators can choose **Copilot (consumer)** or **Microsoft 365 Copilot (web)** a
 - `GET http://localhost:8001/setup` — HTML form (dropdown + save)
 - `POST /setup` — form fields: `profile`, optional `portal_base_url`, optional `api_base_url`
 
-## Phase B gate
+## Phase B — Completed (2026-03-25)
 
-Before changing WebSocket/REST contracts, capture traces from `https://m365.cloud.microsoft/` and document in [copilot-m365-network-notes.md](copilot-m365-network-notes.md).
+Network traces captured and documented in [copilot-m365-network-notes.md](copilot-m365-network-notes.md). M365 uses `substrate.office.com` with SignalR protocol — different from consumer. Phase B implemented as C3 browser proxy (`browser_chat()` in `cookie_extractor.py`, `_c3_proxy_call()` in `copilot_backend.py`).
+
+### Files modified for Phase B
+
+| File | Change |
+|------|--------|
+| `copilot_backend.py` | Added `_c3_proxy_call()`, M365 routing in `_raw_copilot_call()` and `chat_completion_stream()` |
+| `browser_auth/cookie_extractor.py` | Added `browser_chat()` — Playwright M365 interaction, SignalR WS interception, `execCommand` text input |
+| `browser_auth/server.py` | Added `POST /chat` endpoint |
+| `docker-compose.yml` | Added bind mount for hot-reload |
+| `browser_auth/entrypoint.sh` | Added `--reload --reload-dir /browser-auth` |
+
+### Bugs fixed during Phase B
+
+| Bug | Root Cause | Fix |
+|-----|-----------|-----|
+| `Locator.type: Timeout 30000ms` | `.type()` at 20ms/char × 2000+ chars | `execCommand('insertText')` for >200 chars |
+| Consecutive requests fail | SPA caches state on same-URL navigation | `about:blank` teardown before each `/chat` |
+| DOM artifacts in response | SignalR `type=2` frames not parsed | Added `type=2` parser for `item.messages[].text` |
 
 ## Disclaimer
 
