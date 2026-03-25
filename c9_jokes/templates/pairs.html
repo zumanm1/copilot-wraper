@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Pair validation{% endblock %}
+{% block content %}
+<h2>Pair validation</h2>
+<p>{{ hint }}</p>
+<div class="card">
+  <p>Validates end-to-end:</p>
+  <ul>
+    <li>C1 + C3 — <code>POST /v1/chat/completions</code></li>
+    <li>C2, C5, C6, C7b, C8 — each via <code>docker compose run … ask</code></li>
+  </ul>
+  <pre>cd /path/to/copilot-openai-wrapper
+python3 tests/validate_all_agents.py
+python3 tests/validate_all_agents.py --parallel</pre>
+</div>
+{% endblock %}

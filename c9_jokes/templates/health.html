@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Container health{% endblock %}
+{% block content %}
+<h2>Container health</h2>
+<table>
+  <thead><tr><th>Target</th><th>URL</th><th>Status</th><th>Detail</th></tr></thead>
+  <tbody>
+  {% for p in probes %}
+    <tr>
+      <td>{{ p.name }}</td>
+      <td><small>{{ p.url }}</small></td>
+      <td><span class="badge {{ 'ok' if p.ok else 'fail' }}">{{ p.http_status or '—' }}</span></td>
+      <td>{% if p.error %}<pre>{{ p.error }}</pre>{% else %}<pre>{{ p.body | tojson(indent=2) }}</pre>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

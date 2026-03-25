@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}API reference{% endblock %}
+{% block content %}
+<h2>API reference</h2>
+
+<h3>C9 (this service)</h3>
+<ul>
+  <li><code>GET /api/status</code> — JSON health probe for C1, C3, C7a</li>
+  <li><code>POST /api/chat</code> — body <code>{"agent_id":"c9-jokes","prompt":"..."}</code></li>
+</ul>
+
+<h3>C1 (copilot-api)</h3>
+<p>Base: <code>{{ urls.c1 }}</code></p>
+<pre>curl -sS {{ urls.c1 }}/health
+curl -sS -X POST {{ urls.c1 }}/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "X-Agent-ID: c9-smoke" \
+  -d '{"model":"copilot","messages":[{"role":"user","content":"Tell me a joke"}],"stream":false}'</pre>
+
+<h3>C3 (browser-auth)</h3>
+<p>Base: <code>{{ urls.c3 }}</code></p>
+<pre>curl -sS {{ urls.c3 }}/health
+curl -sS {{ urls.c3 }}/status</pre>
+
+<h3>C7a (OpenClaw gateway)</h3>
+<p>Base: <code>{{ urls.c7a }}</code></p>
+<pre>curl -sS {{ urls.c7a }}/healthz</pre>
+{% endblock %}

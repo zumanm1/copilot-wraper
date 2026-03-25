@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Agent chat{% endblock %}
+{% block content %}
+<h2>Agent chat (via C1)</h2>
+<p>Posts to <code>{{ c1_url }}/v1/chat/completions</code> with <code>X-Agent-ID</code>.</p>
+<div class="card">
+  <label>Agent ID (session)</label>
+  <input id="agent_id" value="c9-jokes" placeholder="c9-jokes"/>
+  <label>Prompt</label>
+  <textarea id="prompt" rows="4" placeholder="Tell me a joke"></textarea>
+  <button type="button" id="send">Send</button>
+  <h3>Response</h3>
+  <pre id="out">(not sent yet)</pre>
+</div>
+<script>
+document.getElementById('send').onclick = async () => {
+  const agent_id = document.getElementById('agent_id').value.trim() || 'c9-jokes';
+  const prompt = document.getElementById('prompt').value.trim();
+  const out = document.getElementById('out');
+  out.textContent = 'Loading…';
+  const r = await fetch('/api/chat', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ agent_id, prompt })
+  });
+  const j = await r.json();
+  out.textContent = JSON.stringify(j, null, 2);
+};
+</script>
+{% endblock %}

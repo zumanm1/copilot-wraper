@@ -1,0 +1,78 @@
+:root {
+  --bg: #0f1419;
+  --fg: #e6edf3;
+  --muted: #8b949e;
+  --accent: #58a6ff;
+  --ok: #3fb950;
+  --fail: #f85149;
+  --card: #161b22;
+  --border: #30363d;
+}
+* { box-sizing: border-box; }
+body {
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  margin: 0;
+  line-height: 1.5;
+}
+a { color: var(--accent); }
+header {
+  border-bottom: 1px solid var(--border);
+  padding: 0.75rem 1.25rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+header h1 { font-size: 1.1rem; margin: 0; }
+nav a { margin-right: 1rem; text-decoration: none; }
+nav a:hover { text-decoration: underline; }
+main { padding: 1.25rem; max-width: 960px; margin: 0 auto; }
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+.badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.8rem; }
+.badge.ok { background: rgba(63, 185, 80, 0.2); color: var(--ok); }
+.badge.fail { background: rgba(248, 81, 73, 0.2); color: var(--fail); }
+pre, code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  background: #010409;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.75rem;
+  overflow-x: auto;
+}
+footer {
+  margin-top: 2rem;
+  padding: 1rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  text-align: center;
+  border-top: 1px solid var(--border);
+}
+table { width: 100%; border-collapse: collapse; }
+th, td { border-bottom: 1px solid var(--border); padding: 0.5rem 0.35rem; text-align: left; }
+input, textarea, button {
+  background: var(--card);
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.5rem;
+  width: 100%;
+  max-width: 100%;
+}
+button { width: auto; cursor: pointer; margin-top: 0.5rem; }
+button:hover { border-color: var(--accent); }
+.card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+}
+.muted { color: var(--muted); }

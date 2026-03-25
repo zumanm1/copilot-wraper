@@ -118,6 +118,52 @@ def _is_successful_ask_output(text: str) -> bool:
     return False
 
 
+def run_c2_ask_with_agent_id(agent_id: str, question: str = "Tell me a joke", retries: int = 2) -> CheckResult:
+    """One-shot C2 container with explicit AGENT_ID (isolated C1 backend session)."""
+    cmd = COMPOSE_CMD + [
+        "run",
+        "--rm",
+        "-e",
+        f"AGENT_ID={agent_id}",
+        "agent-terminal",
+        "ask",
+        question,
+    ]
+    attempts: list[str] = []
+    for idx in range(retries + 1):
+        code, out, err = _run_cmd(cmd, timeout=240)
+        merged = f"{out}\n{err}".strip()
+        attempts.append(f"attempt={idx+1} exit={code} :: {merged[-300:]}")
+        if code == 0 and "Asking:" in merged and _is_successful_ask_output(merged):
+            return CheckResult(
+                name=f"C2 ask (AGENT_ID={agent_id})",
+                ok=True,
+                detail=merged[-500:],
+            )
+        if idx < retries:
+            time.sleep(2)
+    return CheckResult(
+        name=f"C2 ask (AGENT_ID={agent_id})",
+        ok=False,
+        detail=" || ".join(attempts),
+    )
+
+
+def check_parallel_c2_distinct_sessions() -> CheckResult:
+    """Two concurrent C2 runs with different AGENT_ID values (separate subjects)."""
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as ex:
+        f1 = ex.submit(run_c2_ask_with_agent_id, "validator-c2-subject-a")
+        f2 = ex.submit(run_c2_ask_with_agent_id, "validator-c2-subject-b")
+        r1 = f1.result()
+        r2 = f2.result()
+    ok = r1.ok and r2.ok
+    return CheckResult(
+        name="C2 parallel distinct AGENT_ID (2 concurrent)",
+        ok=ok,
+        detail=f"a_ok={r1.ok}; b_ok={r2.ok}",
+    )
+
+
 def run_agent_ask(service: str, question: str = "Tell me a joke", retries: int = 2) -> CheckResult:
     cmd = COMPOSE_CMD + ["run", "--rm", service, "ask", question]
     attempts: list[str] = []
@@ -182,6 +228,11 @@ def main() -> int:
         action="store_true",
         help="Also run all 5 agent ask checks in parallel.",
     )
+    parser.add_argument(
+        "--parallel-c2",
+        action="store_true",
+        help="Also run 2 concurrent C2 asks with different AGENT_ID values.",
+    )
     args = parser.parse_args()
 
     results: list[CheckResult] = []
@@ -198,6 +249,8 @@ def main() -> int:
         results.append(run_agent_ask(service))
 
     results.append(check_multi_session_c2())
+    if args.parallel_c2:
+        results.append(check_parallel_c2_distinct_sessions())
     if args.parallel:
         results.extend(check_parallel_agents())
 

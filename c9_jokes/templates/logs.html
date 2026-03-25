@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Logs{% endblock %}
+{% block content %}
+<h2>Chat logs (C9 local DB)</h2>
+<table>
+  <thead><tr><th>id</th><th>time</th><th>agent</th><th>prompt</th><th>HTTP</th></tr></thead>
+  <tbody>
+  {% for row in rows %}
+    <tr>
+      <td>{{ row['id'] }}</td>
+      <td><small>{{ row['created_at'] }}</small></td>
+      <td>{{ row['agent_id'] }}</td>
+      <td><small>{{ row['prompt_excerpt'] }}</small></td>
+      <td>{{ row['http_status'] }}</td>
+    </tr>
+  {% endfor %}
+  {% if not rows %}
+    <tr><td colspan="5">No rows yet — use Chat page or POST /api/chat.</td></tr>
+  {% endif %}
+  </tbody>
+</table>
+{% endblock %}

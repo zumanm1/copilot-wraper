@@ -17,6 +17,7 @@
 #   C7a_openclaw-gateway  — OpenClaw Gateway
 #   C7b_openclaw-cli      — OpenClaw CLI / TUI
 #   C8_hermes-agent       — Hermes Agent (persistent memory, skills, cron)
+#   C9_jokes              — Flask validation UI + API (port 6090)
 #   CT_tests              — Playwright automated test suite
 #
 # ── Quick start ───────────────────────────────────────────────
@@ -501,9 +502,45 @@ services:
       start_period: 25s
       retries: 3
 
+  # ──────────────────────────────────────────────────────────
+  # C9: Jokes / validation console (read-only toward C1–C8)
+  #
+  # Web UI + JSON helpers on http://localhost:6090
+  # Does not mount C1/C3 config; only HTTP probes and optional C1 chat proxy.
+  # ──────────────────────────────────────────────────────────
+  c9-jokes:
+    build:
+      context: .
+      dockerfile: Dockerfile.c9-jokes
+    image: copilot-c9-jokes:latest
+    container_name: C9_jokes
+    ports:
+      - "6090:6090"
+    environment:
+      - C1_URL=http://app:8000
+      - C3_URL=http://browser-auth:8001
+      - C7A_URL=http://openclaw-gateway:18789
+      - DATABASE_PATH=/app/data/c9.db
+    volumes:
+      - ./c9_jokes:/app/c9_jokes
+      - c9-data:/app/data
+    working_dir: /app/c9_jokes
+    networks:
+      - copilot-net
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:6090/api/status >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+
 # ── Shared network ────────────────────────────────────────────
 # All containers communicate via this bridge network.
-# C1_copilot-api:8000 | C7a_openclaw-gateway:18789 | C3_browser-auth:8001
+# C1_copilot-api:8000 | C7a_openclaw-gateway:18789 | C3_browser-auth:8001 | C9_jokes:6090
 networks:
   copilot-net:
     driver: bridge
@@ -515,3 +552,5 @@ volumes:
   openclaw-config:
   # Persists Hermes memories, skills, sessions, cron jobs across restarts (C8)
   hermes-config:
+  # C9 validation SQLite DB
+  c9-data:
