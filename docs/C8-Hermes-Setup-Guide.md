@@ -142,3 +142,9 @@ Once inside the Hermes CLI (`hermes` or `docker compose exec C8_hermes-agent her
 ### Issue: "hermes: command not found"
 **Cause**: Image not built or symlink missing.
 **Fix**: `docker compose build hermes-agent && docker compose up -d hermes-agent`
+
+## Related Guides
+
+- [C2 Aider Setup Guide](C2-Aider-Setup-Guide.md) — OpenAI `/v1/chat/completions` path
+- [C5 Claude Code Setup Guide](C5-Claude-Code-Setup-Guide.md) — Anthropic `/v1/messages` path
+- [M365 Network Notes](copilot-m365-network-notes.md) — SignalR protocol details

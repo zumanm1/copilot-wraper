@@ -581,6 +581,7 @@ All agent containers (C2, C5, C6, C7a, C7b, C8) run in **standby mode** by defau
 | C5 Claude Code | Anthropic `/v1/messages` | `c5-claude-code` | ✅ Validated |
 | C6 KiloCode | OpenAI `/v1/chat/completions` | `c6-kilocode` | ✅ Validated |
 | C7b OpenClaw CLI | OpenAI `/v1/chat/completions` | `c7-openclaw` | ✅ Validated |
+| C7a OpenClaw GW | Gateway standby `:18789/healthz` | `c7-openclaw` | ✅ Validated (standby) |
 | C8 Hermes Agent | OpenAI `/v1/chat/completions` | `c8-hermes` | ✅ Validated |
 
 ### C2 — Agent Terminal (Aider + OpenCode)
@@ -1217,6 +1218,7 @@ All settings are read from `.env` (copy from `.env.example`):
 |---|---|---|
 | `OPENAI_API_BASE` | C2, C6 | Points to `http://app:8000/v1` |
 | `AIDER_MODEL` | C2 | Model name for Aider (`openai/copilot`) |
+| `KILO_MODEL` | C6 | Model name for KiloCode (`copilot`) |
 | `ANTHROPIC_BASE_URL` | C5 | Points to `http://app:8000` |
 | `ANTHROPIC_API_KEY` | C5 | Placeholder key (`sk-ant-not-needed-...`) |
 | `OPENCLAW_PROVIDER_BASE_URL` | C7a | Points to `http://app:8000/v1` |

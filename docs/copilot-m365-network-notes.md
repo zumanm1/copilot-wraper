@@ -91,3 +91,5 @@ Because M365's auth binds to the browser session (not standalone cookies), the s
 - Keep manual mouse/keyboard control in noVNC unblocked by default
 - Auto-dismiss of auth dialogs is opt-in via `BROWSER_AUTH_AUTO_DISMISS_AUTH_DIALOG=true`
 - Hot-reload: `browser_auth/` is bind-mounted into C3; `uvicorn --reload` detects changes without container restart
+- **System prompt truncation:** C1 truncates system prompts to 500 chars in `_anthropic_messages_to_prompt()` (Anthropic `/v1/messages` path). Claude Code sends ~20 KB system prompts that cause C3 browser proxy timeouts. M365 Copilot ignores system prompts, so truncation has no functional impact.
+- **Permissive request parsing:** C1's Anthropic models accept extra fields (`tools`, `metadata`, `tool_use`, `cache_control`) silently via `ConfigDict(extra="allow")`, extracting only text content.

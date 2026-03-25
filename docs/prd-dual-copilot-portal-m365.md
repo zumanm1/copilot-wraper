@@ -1,7 +1,7 @@
 # PRD: Dual Copilot portal profile (consumer vs Microsoft 365 web hub)
 
-**Version:** 2.0  
-**Status:** Phase A + Phase B implemented and validated (2026-03-25)
+**Version:** 3.0  
+**Status:** Phase A + Phase B + Phase C implemented and validated (2026-03-25)
 
 ## Summary
 
@@ -46,6 +46,32 @@ Network traces captured and documented in [copilot-m365-network-notes.md](copilo
 | `Locator.type: Timeout 30000ms` | `.type()` at 20ms/char × 2000+ chars | `execCommand('insertText')` for >200 chars |
 | Consecutive requests fail | SPA caches state on same-URL navigation | `about:blank` teardown before each `/chat` |
 | DOM artifacts in response | SignalR `type=2` frames not parsed | Added `type=2` parser for `item.messages[].text` |
+
+## Phase C — Anthropic Endpoint + Full Agent Validation (2026-03-25)
+
+C1 now exposes an **Anthropic-compatible `/v1/messages` endpoint** alongside the existing OpenAI `/v1/chat/completions`, enabling C5 (Claude Code CLI) to use the M365 Copilot pipeline without any client-side changes.
+
+### Changes for Phase C
+
+| File | Change |
+|------|--------|
+| `server.py` | Added `/v1/messages` endpoint; `_anthropic_messages_to_prompt()` with system prompt truncation (500 char cap) and `system` as `str \| list` handling |
+| `models.py` | Permissive Anthropic Pydantic models (`extra="allow"`, `ConfigDict`) for Claude Code's tools/metadata/tool_use fields |
+| `Dockerfile.claude-code` | Pre-seeded `~/.claude/.credentials.json` and `settings.json` to bypass Claude Code v2.x interactive login |
+| `claude-code-terminal/start.sh` | Fixed `bash -c` argument passthrough |
+
+### Full Agent Ecosystem Validation (2026-03-25)
+
+All agent containers confirmed working with C1+C3 M365 pipeline:
+
+| Container | API Path | Agent ID | Status |
+|-----------|----------|----------|--------|
+| C2 Aider | OpenAI `/v1/chat/completions` | `c2-aider` | ✅ PASS |
+| C5 Claude Code | Anthropic `/v1/messages` | `c5-claude-code` | ✅ PASS |
+| C6 KiloCode | OpenAI `/v1/chat/completions` | `c6-kilocode` | ✅ PASS |
+| C7a OpenClaw GW | Gateway standby `:18789/healthz` | `c7-openclaw` | ✅ Standby OK |
+| C7b OpenClaw CLI | OpenAI `/v1/chat/completions` | `c7-openclaw` | ✅ PASS |
+| C8 Hermes | OpenAI `/v1/chat/completions` | `c8-hermes` | ✅ PASS |
 
 ## Disclaimer
 

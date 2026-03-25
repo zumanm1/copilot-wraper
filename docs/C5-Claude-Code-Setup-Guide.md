@@ -142,3 +142,9 @@ docker compose run --rm claude-code-terminal bash
 ### Issue: 422 Validation Error
 **Cause**: Claude Code sent a request field C1 doesn't expect.
 **Fix**: The permissive Pydantic models (`extra="allow"`) prevent this. If it recurs, check `models.py`.
+
+## Related Guides
+
+- [C2 Aider Setup Guide](C2-Aider-Setup-Guide.md) — OpenAI `/v1/chat/completions` path
+- [C8 Hermes Agent Setup Guide](C8-Hermes-Setup-Guide.md) — persistent memory, skills, cron
+- [M365 Network Notes](copilot-m365-network-notes.md) — SignalR protocol details

@@ -177,6 +177,12 @@ curl http://localhost:8001/status
 docker compose run --rm agent-terminal status
 ```
 
+## Related Guides
+
+- [C5 Claude Code Setup Guide](C5-Claude-Code-Setup-Guide.md) — Anthropic `/v1/messages` path
+- [C8 Hermes Agent Setup Guide](C8-Hermes-Setup-Guide.md) — persistent memory, skills, cron
+- [M365 Network Notes](copilot-m365-network-notes.md) — SignalR protocol details
+
 ## Quick Start Sequence
 
 ```bash
