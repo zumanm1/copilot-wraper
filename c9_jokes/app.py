@@ -12,7 +12,14 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from flask import Flask, jsonify, render_template, request
+
+# Reusable HTTP session with connection pooling for C1 calls
+_http = requests.Session()
+_adapter = HTTPAdapter(pool_connections=6, pool_maxsize=6)
+_http.mount("http://", _adapter)
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DB = Path(os.environ.get("DATABASE_PATH", "/app/data/c9.db"))
@@ -81,7 +88,7 @@ def create_app() -> Flask:
         full = f"{url}{path}"
         t0 = time.monotonic()
         try:
-            r = requests.get(full, timeout=5)
+            r = _http.get(full, timeout=5)
             elapsed_ms = int((time.monotonic() - t0) * 1000)
             try:
                 parsed = r.json()
@@ -128,7 +135,7 @@ def create_app() -> Flask:
         }
         t0 = time.monotonic()
         try:
-            r = requests.post(
+            r = _http.post(
                 f"{c1_url}/v1/chat/completions",
                 headers={"Content-Type": "application/json", "X-Agent-ID": agent_id},
                 json=body,
@@ -230,7 +237,7 @@ def create_app() -> Flask:
         data = None
         err = None
         try:
-            r = requests.get(f"{c1}/v1/sessions", timeout=5)
+            r = _http.get(f"{c1}/v1/sessions", timeout=5)
             data = r.json() if r.headers.get("content-type", "").startswith("application/json") else r.text
         except requests.RequestException as e:
             err = str(e)

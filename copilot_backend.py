@@ -287,6 +287,8 @@ class CopilotBackend:
 
     async def chat_completion(self, prompt: str, attachment_path=None, context=None, search=True, agent_id: str = "") -> str:
         global _cache_hits, _cache_misses
+        import time as _time
+        _t0 = _time.monotonic()
 
         if attachment_path:
             return await self._do_chat_completion(prompt, attachment_path, context)
@@ -294,6 +296,7 @@ class CopilotBackend:
         key = _cache_key(self.style, prompt, agent_id)
         if key in _response_cache:
             _cache_hits += 1
+            logger.info("PERF chat_completion: cache_hit agent=%s elapsed=%dms", agent_id, int((_time.monotonic()-_t0)*1000))
             return _response_cache[key]
 
         _cache_misses += 1
@@ -314,6 +317,7 @@ class CopilotBackend:
             result = await self._do_chat_completion(prompt, None, context)
             _response_cache[key] = result
             result_future.set_result(result)
+            logger.info("PERF chat_completion: cache_miss agent=%s total=%dms", agent_id, int((_time.monotonic()-_t0)*1000))
             return result
         except Exception as exc:
             if not result_future.done():
@@ -382,20 +386,35 @@ class CopilotBackend:
         self._conversation_id = None
         return "".join(chunks)
 
+    _c3_session: aiohttp.ClientSession | None = None
+
+    @classmethod
+    def _get_c3_session(cls) -> aiohttp.ClientSession:
+        if cls._c3_session is None or cls._c3_session.closed:
+            cls._c3_session = aiohttp.ClientSession(
+                connector=aiohttp.TCPConnector(limit=6, keepalive_timeout=120),
+            )
+        return cls._c3_session
+
     async def _c3_proxy_call(self, prompt: str) -> str:
         """Proxy chat through C3 browser-auth /chat endpoint (M365 SignalR)."""
+        import time as _time
+        _t0 = _time.monotonic()
         c3_url = os.getenv("C3_URL", "http://browser-auth:8001")
         logger.info("M365 proxy via C3: %s/chat prompt='%s'", c3_url, prompt[:60])
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(
-                    f"{c3_url}/chat",
-                    json={"prompt": prompt, "timeout": int(config.REQUEST_TIMEOUT * 1000)},
-                    timeout=aiohttp.ClientTimeout(total=config.REQUEST_TIMEOUT + 10),
-                ) as resp:
-                    data = await resp.json()
-                    if data.get("success") and data.get("text"):
-                        return data["text"]
+            session = self._get_c3_session()
+            async with session.post(
+                f"{c3_url}/chat",
+                json={"prompt": prompt, "timeout": int(config.REQUEST_TIMEOUT * 1000)},
+                timeout=aiohttp.ClientTimeout(total=config.REQUEST_TIMEOUT + 10),
+            ) as resp:
+                data = await resp.json()
+                _c3_ms = int((_time.monotonic() - _t0) * 1000)
+                _c3_perf = data.get("perf", {})
+                logger.info("PERF _c3_proxy_call: total=%dms c3_internal=%s", _c3_ms, _c3_perf)
+                if data.get("success") and data.get("text"):
+                    return data["text"]
                     error = (
                         data.get("error")
                         or data.get("message")

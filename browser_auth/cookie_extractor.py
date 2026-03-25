@@ -312,12 +312,14 @@ class PagePool:
         self._initialized = False
 
     async def initialize(self, context: BrowserContext) -> None:
-        """Create pool tabs and navigate each to M365 Chat (runs once)."""
+        """Create pool tabs and navigate each to M365 Chat (parallel)."""
         async with self._init_lock:
             if self._initialized:
                 return
-            print(f"[PagePool] Initializing {self._size} chat tabs...")
-            for i in range(self._size):
+            _t0 = time.monotonic()
+            print(f"[PagePool] Initializing {self._size} chat tabs (parallel)...")
+
+            async def _init_one(idx: int) -> "Page | None":
                 try:
                     page = await context.new_page()
                     _pool_pages.add(page)
@@ -326,13 +328,19 @@ class PagePool:
                         wait_until="domcontentloaded",
                         timeout=30_000,
                     )
-                    await asyncio.sleep(1)
-                    print(f"[PagePool] Tab {i + 1}/{self._size} ready: {page.url[:60]}")
+                    print(f"[PagePool] Tab {idx + 1}/{self._size} ready: {page.url[:60]}")
+                    return page
+                except Exception as exc:
+                    print(f"[PagePool] Tab {idx + 1} init error (skipped): {exc}")
+                    return None
+
+            results = await asyncio.gather(*[_init_one(i) for i in range(self._size)])
+            for page in results:
+                if page is not None:
                     self._pages.append(page)
                     await self._queue.put(page)
-                except Exception as exc:
-                    print(f"[PagePool] Tab {i + 1} init error (skipped): {exc}")
-            print(f"[PagePool] {self._queue.qsize()}/{self._size} tabs in pool")
+            _init_ms = int((time.monotonic() - _t0) * 1000)
+            print(f"[PagePool] {self._queue.qsize()}/{self._size} tabs ready in {_init_ms}ms")
             self._initialized = True
 
     async def acquire(self, timeout: float = 120.0) -> Page:
@@ -851,6 +859,10 @@ async def _browser_chat_on_page(
     """
     import json as _json
 
+    # ── Timing instrumentation ──────────────────────────────────────────
+    _t_start = time.monotonic()
+    _timings: dict = {"prompt_len": len(prompt)}
+
     # Health check: verify the page is responsive before doing anything.
     # A stale/crashed page will hang on goto; detect and replace it early.
     try:
@@ -863,6 +875,7 @@ async def _browser_chat_on_page(
             pass
         page = await context.new_page()
         _pool_pages.add(page)
+    _timings["health_check_ms"] = int((time.monotonic() - _t_start) * 1000)
 
     # State for WebSocket frame interception
     collected_text = []
@@ -984,10 +997,7 @@ async def _browser_chat_on_page(
     page.on("websocket", _on_websocket)
 
     # ── Phase 3: fast reset via 'New chat' button ──────────────────────────────
-    # If the page is already on m365, click 'New chat' and wait for the
-    # composer — skips the costly about:blank → m365 navigation (5-10s).
-    # Falls back to full teardown if the page is on a different URL or the
-    # 'New chat' click does not produce a ready composer within 5 s.
+    _t_nav_start = time.monotonic()
     _M365_CHAT_URL = "https://m365.cloud.microsoft/chat"
     _fast_reset_ok = False
     if "m365.cloud.microsoft" in (page.url or ""):
@@ -1008,18 +1018,17 @@ async def _browser_chat_on_page(
                 return false;
             }""")
             if _clicked:
-                for _sel in [
-                    '[data-testid="composer-input"]',
-                    '[role="textbox"][contenteditable="true"]',
-                    'textarea',
-                ]:
-                    try:
-                        await page.wait_for_selector(_sel, state="visible", timeout=5_000)
-                        _fast_reset_ok = True
-                        print(f"[browser_chat] Fast reset via 'New chat' — {page.url[:60]}")
-                        break
-                    except Exception:
-                        continue
+                _combined = (
+                    '[data-testid="composer-input"], '
+                    '[role="textbox"][contenteditable="true"], '
+                    'textarea'
+                )
+                try:
+                    await page.wait_for_selector(_combined, state="visible", timeout=5_000)
+                    _fast_reset_ok = True
+                    print(f"[browser_chat] Fast reset via 'New chat' — {page.url[:60]}")
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -1028,16 +1037,15 @@ async def _browser_chat_on_page(
         try:
             await page.goto("about:blank", wait_until="domcontentloaded", timeout=15_000)
             await page.goto(_M365_CHAT_URL, wait_until="domcontentloaded", timeout=30_000)
-            for _sel in [
-                '[role="textbox"][contenteditable="true"]',
-                '[contenteditable="true"]',
-                'textarea',
-            ]:
-                try:
-                    await page.wait_for_selector(_sel, state="visible", timeout=15_000)
-                    break
-                except Exception:
-                    continue
+            _combined_teardown = (
+                '[role="textbox"][contenteditable="true"], '
+                '[contenteditable="true"], '
+                'textarea'
+            )
+            try:
+                await page.wait_for_selector(_combined_teardown, state="visible", timeout=15_000)
+            except Exception:
+                pass
             print(f"[browser_chat] Full teardown complete: {page.url}")
         except Exception as e:
             print(f"[browser_chat] navigate failed: {e}")
@@ -1047,9 +1055,12 @@ async def _browser_chat_on_page(
                 pass
             return {"success": False, "error": f"Navigate failed: {e}", "events": [], "text": ""}, page
 
+    _timings["nav_ms"] = int((time.monotonic() - _t_nav_start) * 1000)
+    _timings["nav_method"] = "fast_reset" if _fast_reset_ok else "full_teardown"
+
     try:
         # Use page.evaluate() for auth dialog check — immune to overlay dialogs
-        await asyncio.sleep(1)  # Let page settle
+        await asyncio.sleep(0.3)  # Brief settle after nav
 
         # Check for "Authentication required" dialog (M365 session expired)
         auth_blocked = await page.evaluate("""() => {
@@ -1136,30 +1147,30 @@ async def _browser_chat_on_page(
             return {"success": False, "error": err, "events": [], "text": ""}, page
 
         # ── Use Playwright native methods for text input (triggers real events for React) ──
+        _t_type_start = time.monotonic()
         composer = page.locator(composer_sel).first
         await composer.click(force=True, timeout=10_000)
-        await asyncio.sleep(0.3)
+        await asyncio.sleep(0.15)
 
         # Clear existing content
         await page.keyboard.press("Control+A")
         await page.keyboard.press("Backspace")
-        await asyncio.sleep(0.1)
 
         # For large prompts (>200 chars), use execCommand('insertText') — instant
         # and fires beforeinput/input events that React's synthetic system picks up.
         # .type() at 20ms/char would timeout on Aider's ~2000+ char system prompts.
         if len(prompt) > 200:
             await page.evaluate("(text) => document.execCommand('insertText', false, text)", prompt)
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(0.2)
             print(f"[browser_chat] Inserted prompt via execCommand ({len(prompt)} chars)")
         else:
-            await composer.type(prompt, delay=20)
-            await asyncio.sleep(0.5)
+            await composer.type(prompt, delay=15)
+            await asyncio.sleep(0.2)
             print(f"[browser_chat] Typed prompt via Playwright ({len(prompt)} chars)")
 
         # ── Submit via Enter key (most reliable for React apps) ──
-        # Playwright force-click doesn't trigger React's synthetic event handlers.
-        # Enter key press in the focused composer is the natural submit path.
+        _timings["type_ms"] = int((time.monotonic() - _t_type_start) * 1000)
+        _t_submit = time.monotonic()
         await page.keyboard.press("Enter")
         print("[browser_chat] Pressed Enter to submit")
 
@@ -1204,8 +1215,13 @@ async def _browser_chat_on_page(
                 print(f"[browser_chat] DOM fallback extracted {len(text)} chars")
 
         success = len(text) > 0
+        _timings["ws_wait_ms"] = int((time.monotonic() - _t_submit) * 1000)
+        _timings["total_ms"] = int((time.monotonic() - _t_start) * 1000)
+        _timings["text_len"] = len(text)
+        _timings["success"] = success
+        print(f"[browser_chat] PERF: {_timings}")
         print(f"[browser_chat] success={success}, recv={events_recv[:10]}, sent={events_sent[:10]}, ws_urls={[u[:60] for u in ws_urls]}, text_len={len(text)}")
-        return {"success": success, "events": events_recv, "events_sent": events_sent, "ws_urls": ws_urls, "text": text}, page
+        return {"success": success, "events": events_recv, "events_sent": events_sent, "ws_urls": ws_urls, "text": text, "perf": _timings}, page
 
     except Exception as e:
         print(f"[browser_chat] error: {e}")
