@@ -349,3 +349,48 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 /* ── Helpers ─────────────────────────────────────────────────────────────── */
 .muted { color: var(--muted); }
 .resp-cell { max-width: 380px; }
+
+/* ── M365 Session LED ────────────────────────────────────────────────────── */
+.session-led {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.78rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 20px;
+  border: 1px solid var(--border);
+  background: rgba(22,27,34,0.85);
+  cursor: default;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.session-led-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+/* states */
+.session-led.active   { border-color: var(--ok); }
+.session-led.active   .session-led-dot { background: var(--ok); }
+.session-led.active   .session-led-label { color: var(--ok); }
+
+.session-led.expired  { border-color: var(--fail); }
+.session-led.expired  .session-led-dot {
+  background: var(--fail);
+  animation: led-pulse 1.2s ease-in-out infinite;
+}
+.session-led.expired  .session-led-label { color: var(--fail); }
+
+.session-led.unknown  { border-color: var(--warn); }
+.session-led.unknown  .session-led-dot { background: var(--warn); }
+.session-led.unknown  .session-led-label { color: var(--warn); }
+
+.session-led.checking { border-color: var(--muted); }
+.session-led.checking .session-led-dot { background: var(--muted); }
+.session-led.checking .session-led-label { color: var(--muted); }
+
+@keyframes led-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.35; }
+}

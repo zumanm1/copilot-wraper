@@ -251,6 +251,18 @@ def create_app() -> Flask:
     # JSON API ROUTES
     # ─────────────────────────────────────────────────────────────────────────
 
+    @app.get("/api/session-health")
+    def api_session_health():
+        """Proxy C3's /session-health endpoint; used by the LED indicator on all pages."""
+        c3_url = _urls().get("c3", "http://browser-auth:8001")
+        try:
+            r = _http.get(f"{c3_url}/session-health", timeout=5)
+            return jsonify(r.json()), r.status_code
+        except Exception as exc:
+            import datetime as _dt
+            now = _dt.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+            return jsonify({"session": "unknown", "profile": "unknown", "reason": str(exc), "checked_at": now}), 503
+
     @app.get("/api/status")
     def api_status():
         """Probe all containers and persist each result to health_snapshots."""

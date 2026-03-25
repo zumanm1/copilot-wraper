@@ -26,6 +26,7 @@ from portal_urls import normalize_copilot_portal_url
 
 from cookie_extractor import (
     browser_chat,
+    check_session_health,
     extract_and_save,
     extract_access_token,
     get_context,
@@ -69,6 +70,22 @@ API1_URL = os.getenv("API1_URL", "http://app:8000")
 @app.get("/health")
 async def health():
     return {"status": "ok", "service": "browser-auth"}
+
+
+@app.get("/session-health")
+async def session_health():
+    """Lightweight M365 session status check — no navigation, no chat."""
+    try:
+        result = await check_session_health(ENV_PATH)
+        status_code = 200
+        return JSONResponse(result, status_code=status_code)
+    except Exception as exc:
+        import datetime
+        now = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        return JSONResponse(
+            {"session": "unknown", "profile": "unknown", "reason": str(exc), "checked_at": now},
+            status_code=503,
+        )
 
 
 @app.post("/token")
@@ -123,7 +140,33 @@ fieldset{{margin-top:1rem;border:1px solid #ccc;padding:1rem;border-radius:8px;}
 legend{{font-weight:700;padding:0 .35rem;}}
 .portal-row{{display:flex;gap:.5rem;align-items:flex-start;margin-top:.65rem;font-weight:400;}}
 .portal-row input{{margin-top:.2rem;}}
+/* M365 Session LED */
+#session-led{{
+  position:fixed;top:1rem;right:1rem;
+  display:inline-flex;align-items:center;gap:.45rem;
+  font-size:.78rem;padding:.28rem .7rem;border-radius:20px;
+  border:1px solid #ccc;background:#fff;cursor:default;white-space:nowrap;
+  box-shadow:0 1px 4px rgba(0,0,0,.15);z-index:9999;
+}}
+#session-led-dot{{
+  width:9px;height:9px;border-radius:50%;flex-shrink:0;
+}}
+#session-led.active{{border-color:#2da44e;}}
+#session-led.active #session-led-dot{{background:#2da44e;}}
+#session-led.active #session-led-lbl{{color:#2da44e;}}
+#session-led.expired{{border-color:#cf222e;}}
+#session-led.expired #session-led-dot{{background:#cf222e;animation:led-pulse 1.2s ease-in-out infinite;}}
+#session-led.expired #session-led-lbl{{color:#cf222e;}}
+#session-led.unknown{{border-color:#d4a72c;}}
+#session-led.unknown #session-led-dot{{background:#d4a72c;}}
+#session-led.checking{{border-color:#888;}}
+#session-led.checking #session-led-dot{{background:#888;}}
+@keyframes led-pulse{{0%,100%{{opacity:1;}}50%{{opacity:.35;}}}}
 </style></head><body>
+<div id="session-led" class="checking" title="M365 browser session status">
+  <span id="session-led-dot"></span>
+  <span id="session-led-lbl">Checking…</span>
+</div>
 <h1>Choose Copilot portal</h1>
 {banner}
 <p class="note">LAN-only UI. Pick where you will sign in. Values are saved to the mounted <code>.env</code> (no cookies shown).</p>
@@ -190,6 +233,36 @@ legend{{font-weight:700;padding:0 .35rem;}}
 }})();
 </script>
 <p><a href="/health">health</a> · <a href="/status">status</a></p>
+<script>
+(function(){{
+  function updateLed(data) {{
+    var led = document.getElementById("session-led");
+    var dot = document.getElementById("session-led-dot");
+    var lbl = document.getElementById("session-led-lbl");
+    if (!led) return;
+    var s = data.session || "unknown";
+    led.className = s;
+    if (s === "active") {{
+      lbl.textContent = "M365 Session: Active";
+      led.title = "Session active — profile: " + (data.profile || "");
+    }} else if (s === "expired") {{
+      lbl.textContent = "M365 Session: Expired — sign in here";
+      led.title = "Session expired: " + (data.reason || "");
+    }} else {{
+      lbl.textContent = "M365 Session: Unknown";
+      led.title = "Could not check: " + (data.reason || "");
+    }}
+  }}
+  function pollLed() {{
+    fetch("/session-health")
+      .then(function(r){{ return r.json(); }})
+      .then(function(d){{ updateLed(d); }})
+      .catch(function(){{ updateLed({{session:"unknown",reason:"network error"}}); }});
+  }}
+  pollLed();
+  setInterval(pollLed, 30000);
+}})();
+</script>
 </body></html>"""
 
 

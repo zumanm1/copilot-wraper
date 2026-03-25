@@ -1242,3 +1242,44 @@ async def close():
     if _playwright:
         await _playwright.stop()
         _playwright = None
+
+
+# Public alias so server.py can import without leading underscore
+is_logged_in = _is_logged_in
+
+
+async def check_session_health(env_path: str = "/app/.env") -> dict:
+    """
+    Lightweight M365 session health check — no navigation, no chat.
+
+    Uses the first non-pool page (the warm/setup page) and calls _is_logged_in()
+    which inspects the current URL, cookies, and DOM text.  Typically takes
+    <300ms and is safe to poll frequently.
+
+    Returns:
+        {"session": "active"|"expired"|"unknown", "profile": str, "reason": str|None}
+    """
+    import datetime
+    now = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        profile, portal_base_override, _ = portal_settings_from_env_file(env_path)
+        landing = portal_landing_url(profile, portal_base_override)
+        from urllib.parse import urlparse
+        netloc = (urlparse(landing).netloc or "").lower()
+        host_markers = (netloc,) if netloc else ("copilot.microsoft.com", "m365.cloud.microsoft")
+
+        context = await _get_context()
+        page = await _get_or_create_page(context)
+
+        logged_in = await _is_logged_in(page, host_markers, profile)
+        if logged_in:
+            return {"session": "active", "profile": profile, "reason": None, "checked_at": now}
+        else:
+            return {
+                "session": "expired",
+                "profile": profile,
+                "reason": "auth_required_or_not_on_portal",
+                "checked_at": now,
+            }
+    except Exception as exc:
+        return {"session": "unknown", "profile": "unknown", "reason": str(exc), "checked_at": now}

@@ -18,7 +18,40 @@
       <a href="{{ url_for('page_sessions') }}">Sessions</a>
       <a href="{{ url_for('page_api_reference') }}">API</a>
     </nav>
+    <div id="session-led" class="session-led checking" title="M365 browser session status">
+      <span class="session-led-dot"></span>
+      <span class="session-led-label">Checking…</span>
+    </div>
   </header>
+  <script>
+  (function() {
+    function updateLed(data) {
+      var led = document.getElementById('session-led');
+      if (!led) return;
+      var dot = led.querySelector('.session-led-dot');
+      var lbl = led.querySelector('.session-led-label');
+      led.className = 'session-led ' + (data.session || 'unknown');
+      if (data.session === 'active') {
+        lbl.textContent = 'M365 Session: Active';
+        led.title = 'Session active — profile: ' + (data.profile || '');
+      } else if (data.session === 'expired') {
+        lbl.textContent = 'M365 Session: Expired — sign in via noVNC :6080';
+        led.title = 'Session expired: ' + (data.reason || '') + ' — Sign in via noVNC at port 6080';
+      } else {
+        lbl.textContent = 'M365 Session: Unknown';
+        led.title = 'Could not reach C3: ' + (data.reason || '');
+      }
+    }
+    function pollSession() {
+      fetch('/api/session-health')
+        .then(function(r) { return r.json(); })
+        .then(function(d) { updateLed(d); })
+        .catch(function() { updateLed({session: 'unknown', reason: 'network error'}); });
+    }
+    pollSession();
+    setInterval(pollSession, 30000);
+  })();
+  </script>
   <main>
     {% block content %}{% endblock %}
   </main>
