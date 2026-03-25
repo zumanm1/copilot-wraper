@@ -568,6 +568,21 @@ requests.post(f"{BASE}/v1/agent/stop")
 
 All agent containers (C2, C5, C6, C7a, C7b, C8) run in **standby mode** by default: a lightweight health server listens on port 8080 so Docker can report them as healthy. You attach interactively with `docker compose exec` or run one-shot commands with `docker compose run --rm`.
 
+**Detailed setup guides:**
+- [C2 Aider Setup Guide](docs/C2-Aider-Setup-Guide.md)
+- [C5 Claude Code Setup Guide](docs/C5-Claude-Code-Setup-Guide.md)
+- [C8 Hermes Agent Setup Guide](docs/C8-Hermes-Setup-Guide.md)
+
+**Integration validation status (all confirmed working with C1+C3 M365 pipeline):**
+
+| Container | API Path | Agent ID | Status |
+|-----------|----------|----------|--------|
+| C2 Aider | OpenAI `/v1/chat/completions` | `c2-aider` | ✅ Validated |
+| C5 Claude Code | Anthropic `/v1/messages` | `c5-claude-code` | ✅ Validated |
+| C6 KiloCode | OpenAI `/v1/chat/completions` | `c6-kilocode` | ✅ Validated |
+| C7b OpenClaw CLI | OpenAI `/v1/chat/completions` | `c7-openclaw` | ✅ Validated |
+| C8 Hermes Agent | OpenAI `/v1/chat/completions` | `c8-hermes` | ✅ Validated |
+
 ### C2 — Agent Terminal (Aider + OpenCode)
 
 **Image:** `copilot-agent-terminal:latest`  
