@@ -93,6 +93,36 @@ python3 tests/validate_all_agents.py --parallel</pre>
     document.getElementById('time-' + agentId).textContent = '—';
   }
 
+  const PREVIEW_LEN = 300;
+
+  function makeExpandable(full, colorStyle) {
+    if (!full) return '<small class="muted">—</small>';
+    const safe = escapeHtml(full);
+    if (full.length <= PREVIEW_LEN) {
+      return '<small' + (colorStyle ? ' style="' + colorStyle + '"' : '') + '>' + safe + '</small>';
+    }
+    const preview = escapeHtml(full.substring(0, PREVIEW_LEN));
+    const uid = 'exp-' + Math.random().toString(36).slice(2);
+    return '<small' + (colorStyle ? ' style="' + colorStyle + '"' : '') + '>' +
+      '<span id="' + uid + '-short">' + preview + '… ' +
+        '<a href="#" class="expand-link" data-target="' + uid + '" style="font-size:0.75rem">Show full ▼</a>' +
+      '</span>' +
+      '<span id="' + uid + '-full" style="display:none">' + safe + ' ' +
+        '<a href="#" class="expand-link" data-target="' + uid + '" data-collapse="1" style="font-size:0.75rem">Show less ▲</a>' +
+      '</span>' +
+    '</small>';
+  }
+
+  document.addEventListener('click', function(e) {
+    const a = e.target.closest('.expand-link');
+    if (!a) return;
+    e.preventDefault();
+    const uid = a.dataset.target;
+    const collapse = a.dataset.collapse === '1';
+    document.getElementById(uid + '-short').style.display = collapse ? '' : 'none';
+    document.getElementById(uid + '-full').style.display = collapse ? 'none' : '';
+  });
+
   function setRowResult(agentId, ok, elapsed_ms, text, error) {
     document.getElementById('status-' + agentId).innerHTML =
       '<span class="badge ' + (ok ? 'ok' : 'fail') + '">' + (ok ? 'PASS' : 'FAIL') + '</span>';
@@ -100,11 +130,10 @@ python3 tests/validate_all_agents.py --parallel</pre>
     document.getElementById('time-' + agentId).textContent =
       ms !== null ? (ms / 1000).toFixed(2) + 's' : '—';
     if (ok) {
-      document.getElementById('resp-' + agentId).innerHTML =
-        '<small>' + escapeHtml((text || '').substring(0, 300)) + '</small>';
+      document.getElementById('resp-' + agentId).innerHTML = makeExpandable(text || '');
     } else {
       document.getElementById('resp-' + agentId).innerHTML =
-        '<small style="color:var(--fail)">' + escapeHtml((error || text || 'failed').substring(0, 200)) + '</small>';
+        makeExpandable(error || text || 'failed', 'color:var(--fail)');
     }
   }
 
@@ -219,7 +248,7 @@ python3 tests/validate_all_agents.py --parallel</pre>
               '<td>' + escapeHtml(p.pair_name) + '</td>' +
               '<td><span class="badge ' + (p.ok ? 'ok' : 'fail') + '">' + (p.ok ? 'PASS' : 'FAIL') + '</span></td>' +
               '<td class="muted">' + (p.duration_ms ? (p.duration_ms/1000).toFixed(2)+'s' : '—') + '</td>' +
-              '<td><small>' + escapeHtml((p.detail || '').substring(0, 200)) + '</small></td>' +
+              '<td>' + makeExpandable(p.detail || '', p.ok ? '' : 'color:var(--fail)') + '</td>' +
               '</tr>';
           }).join('');
           return '<details class="history-run">' +
