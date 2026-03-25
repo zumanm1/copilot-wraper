@@ -448,6 +448,8 @@ async def list_agent_sessions():
 # Anthropic-compatible Endpoint  (POST /v1/messages)
 # ══════════════════════════════════════════════════════════════════════
 
+_SYSTEM_PREFIX_CAP = 500  # chars — keep system context short for Copilot
+
 def _anthropic_messages_to_prompt(request: AnthropicRequest) -> str:
     """
     Convert Anthropic messages[] + optional system prompt → flat prompt string
@@ -462,18 +464,37 @@ def _anthropic_messages_to_prompt(request: AnthropicRequest) -> str:
         [User]: Hello
         ...
         (last user message is the actual prompt)
+
+    Large system prompts (e.g. Claude Code's ~20 KB prompt) are truncated to
+    avoid C3 browser-proxy timeouts — M365 Copilot ignores them anyway.
     """
     parts: list[str] = []
     if request.system:
-        parts.append(f"[System]: {request.system}")
+        # system can be str or list[{type, text, ...}]
+        if isinstance(request.system, list):
+            sys_text = " ".join(
+                b.get("text", "") if isinstance(b, dict) else str(b)
+                for b in request.system
+            ).strip()
+        else:
+            sys_text = request.system
+        if len(sys_text) > _SYSTEM_PREFIX_CAP:
+            sys_text = sys_text[:_SYSTEM_PREFIX_CAP] + "…[truncated]"
+        if sys_text:
+            parts.append(f"[System]: {sys_text}")
     for msg in request.messages:
         prefix = "[User]" if msg.role == "user" else "[Assistant]"
         if isinstance(msg.content, str):
             parts.append(f"{prefix}: {msg.content}")
         else:
             for block in msg.content:
-                if block.text:
-                    parts.append(f"{prefix}: {block.text}")
+                # block may be AnthropicContentBlock or raw dict
+                if isinstance(block, dict):
+                    txt = block.get("text", "")
+                else:
+                    txt = getattr(block, "text", "")
+                if txt:
+                    parts.append(f"{prefix}: {txt}")
     return "\n".join(parts) if parts else ""
 
 

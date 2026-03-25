@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import time
 from typing import Literal
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ChatMessage(BaseModel):
@@ -234,22 +234,29 @@ class AgentClearHistoryResponse(BaseModel):
 # ─────────────────────────────────────────────────────────────────────
 
 class AnthropicContentBlock(BaseModel):
-    """A content block in Anthropic message format."""
-    type: Literal["text"] = "text"
+    """A content block in Anthropic message format.
+    Permissive: accepts text, tool_use, tool_result, image, etc.
+    We only extract text; other types are silently ignored."""
+    model_config = ConfigDict(extra="allow")
+    type: str = "text"
     text: str = ""
 
 
 class AnthropicMessage(BaseModel):
     """A message in Anthropic format (role + content list)."""
-    role: Literal["user", "assistant"]
-    content: str | list[AnthropicContentBlock]
+    model_config = ConfigDict(extra="allow")
+    role: str  # user, assistant, tool, etc.
+    content: str | list[AnthropicContentBlock] | list[dict]
 
 
 class AnthropicRequest(BaseModel):
-    """Request body for POST /v1/messages (Anthropic SDK format)."""
+    """Request body for POST /v1/messages (Anthropic SDK format).
+    Permissive: extra fields (tools, metadata, stop_sequences, etc.)
+    are accepted and ignored — only messages/system/stream are used."""
+    model_config = ConfigDict(extra="allow")
     model: str = "claude-3-5-sonnet-20241022"
     messages: list[AnthropicMessage]
-    system: str | None = None
+    system: str | list | None = None
     max_tokens: int = 4096
     temperature: float | None = None
     top_p: float | None = None

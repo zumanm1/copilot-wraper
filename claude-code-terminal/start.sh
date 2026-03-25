@@ -193,9 +193,14 @@ http.server.HTTPServer(('0.0.0.0',8080),H).serve_forever()
             exit 0
             ;;
         bash|sh)
-            print_banner
-            setup_shell
-            exec bash --rcfile /tmp/.claude_code_rc
+            shift
+            if [ $# -gt 0 ]; then
+                exec bash "$@"
+            else
+                print_banner
+                setup_shell
+                exec bash --rcfile /tmp/.claude_code_rc
+            fi
             ;;
         python3)
             exec "$@"

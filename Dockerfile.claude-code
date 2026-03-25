@@ -25,4 +25,14 @@ WORKDIR /workspace
 COPY claude-code-terminal/ /claude-code-terminal/
 RUN chmod +x /claude-code-terminal/start.sh
 
+# Pre-seed ~/.claude credentials so Claude Code skips the interactive login
+# prompt when ANTHROPIC_BASE_URL is pointed at a custom server (C1).
+# The apiKeyHelper script echoes the env var key at runtime, bypassing
+# Anthropic's auth validation entirely.
+RUN mkdir -p /root/.claude && \
+    echo '{"claudeAiOauth":{"accessToken":"sk-ant-oat01-placeholder","refreshToken":"sk-ant-ort01-placeholder","expiresAt":9999999999999,"scopes":["user:inference","user:profile"],"subscriptionType":"pro"}}' \
+        > /root/.claude/.credentials.json && \
+    echo '{"apiKeyHelper":"/bin/sh -c \"echo ${ANTHROPIC_API_KEY:-sk-ant-not-needed-xxxxxxxxxxxxx}\"","hasCompletedOnboarding":true,"primaryApiType":"apiKey"}' \
+        > /root/.claude/settings.json
+
 ENTRYPOINT ["/claude-code-terminal/start.sh"]
