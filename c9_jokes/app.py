@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -114,11 +115,19 @@ def create_app() -> Flask:
 
     # ── Chat proxy helper (shared by /api/chat and /api/validate) ─────────────
 
-    def _chat_one(agent_id: str, prompt: str, c1_url: str) -> dict:
-        """Call C1 for a single agent. Returns {ok, http_status, text, elapsed_ms}."""
+    def _chat_one(agent_id: str, prompt: str, c1_url: str, bust_cache: bool = False) -> dict:
+        """Call C1 for a single agent. Returns {ok, http_status, text, elapsed_ms}.
+
+        bust_cache=True appends a per-agent suffix so C1's (style, prompt) dedup
+        cache treats each agent's request as distinct, ensuring unique real responses.
+        """
+        # Add an invisible per-agent tag that makes the cache key unique per agent.
+        # C1's _in_flight dedup is keyed on (style, prompt) with no agent_id, so
+        # without this all agents with the same prompt share one Copilot call.
+        actual_prompt = f"{prompt}\n\n[agent:{agent_id}]" if bust_cache else prompt
         body = {
             "model": "copilot",
-            "messages": [{"role": "user", "content": prompt}],
+            "messages": [{"role": "user", "content": actual_prompt}],
             "stream": False,
         }
         t0 = time.monotonic()
@@ -326,51 +335,60 @@ def create_app() -> Flask:
     def api_validate():
         """
         Run all agents with a prompt, persist to validation_runs + pair_results.
-        Body: {prompt: str, agent_ids: [str] (optional, default all)}
-        Returns: {run_id, passed, failed, results: [...]}
+
+        Body:
+          prompt:     str  (default "Tell me a joke")
+          agent_ids:  list (optional, default all)
+          parallel:   bool (default false) — fire all agents concurrently via
+                      ThreadPoolExecutor; each agent gets a cache-busting suffix
+                      so C1's (style, prompt) dedup never merges their calls.
+
+        Returns: {run_id, mode, passed, failed, total, wall_ms, results: [...]}
         """
         c1 = _urls()["c1"]
         payload = request.get_json(silent=True) or {}
         prompt = (payload.get("prompt") or "Tell me a joke").strip()
+        parallel = bool(payload.get("parallel", False))
         requested_ids = payload.get("agent_ids") or [a["id"] for a in AGENTS]
         agents_to_run = [a for a in AGENTS if a["id"] in requested_ids]
         if not agents_to_run:
             return jsonify({"ok": False, "error": "no matching agents"}), 400
 
+        # Parallel always busts the dedup cache so every agent gets a real
+        # independent Copilot call.  Sequential also busts when >1 agent so
+        # responses differ even in serial mode.
+        bust = len(agents_to_run) > 1
+
+        mode = "web-parallel" if parallel else "web-sequential"
         started_at = datetime.now(timezone.utc).isoformat()
+        wall_t0 = time.monotonic()
         run_id = None
         try:
             with _db() as conn:
                 cur = conn.execute(
                     "INSERT INTO validation_runs (started_at, mode, passed, failed) VALUES (?,?,0,0)",
-                    (started_at, "web"),
+                    (started_at, mode),
                 )
                 run_id = cur.lastrowid
         except sqlite3.Error:
             pass
 
-        results = []
-        passed = 0
-        failed = 0
-        for agent in agents_to_run:
-            r = _chat_one(agent["id"], prompt, c1)
+        def _run_one(agent: dict) -> dict:
+            r = _chat_one(agent["id"], prompt, c1, bust_cache=bust)
             ok = r["ok"] and bool((r.get("text") or "").strip())
             detail = r.get("text") or r.get("error") or r.get("raw") or ""
-            if ok:
-                passed += 1
-            else:
-                failed += 1
-            # Persist pair result
+            # Each thread writes its own pair_result immediately
             if run_id:
                 try:
                     with _db() as conn:
                         conn.execute(
-                            "INSERT INTO pair_results (run_id, pair_name, ok, detail, duration_ms) VALUES (?,?,?,?,?)",
+                            "INSERT INTO pair_results (run_id, pair_name, ok, detail, duration_ms) "
+                            "VALUES (?,?,?,?,?)",
                             (run_id, agent["id"], 1 if ok else 0, detail[:500], r.get("elapsed_ms")),
                         )
                 except sqlite3.Error:
                     pass
-            results.append({
+            return {
                 "agent_id": agent["id"],
                 "label": agent["label"],
                 "ok": ok,
@@ -378,23 +396,56 @@ def create_app() -> Flask:
                 "text": r.get("text", ""),
                 "elapsed_ms": r.get("elapsed_ms"),
                 "error": r.get("error"),
-            })
+            }
 
+        results: list[dict] = []
+
+        if parallel:
+            # Fire all agents concurrently. C3's _chat_lock will queue them
+            # internally; C1 treats each as a distinct session via X-Agent-ID.
+            # max_workers = number of agents so all start immediately.
+            with ThreadPoolExecutor(max_workers=len(agents_to_run)) as pool:
+                futures = {pool.submit(_run_one, agent): agent for agent in agents_to_run}
+                # Collect in submission order for consistent table display
+                ordered: dict = {}
+                for fut in as_completed(futures):
+                    agent = futures[fut]
+                    try:
+                        ordered[agent["id"]] = fut.result()
+                    except Exception as exc:
+                        ordered[agent["id"]] = {
+                            "agent_id": agent["id"], "label": agent["label"],
+                            "ok": False, "http_status": None,
+                            "text": "", "elapsed_ms": None,
+                            "error": str(exc),
+                        }
+            # Preserve original agent order
+            results = [ordered[a["id"]] for a in agents_to_run if a["id"] in ordered]
+        else:
+            for agent in agents_to_run:
+                results.append(_run_one(agent))
+
+        wall_ms = int((time.monotonic() - wall_t0) * 1000)
+        passed = sum(1 for r in results if r["ok"])
+        failed = len(results) - passed
         finished_at = datetime.now(timezone.utc).isoformat()
+
         if run_id:
             try:
                 with _db() as conn:
                     conn.execute(
                         "UPDATE validation_runs SET finished_at=?, passed=?, failed=?, raw_summary=? WHERE id=?",
-                        (finished_at, passed, failed, f"{passed}/{passed+failed} passed", run_id),
+                        (finished_at, passed, failed, f"{passed}/{len(results)} passed ({mode})", run_id),
                     )
             except sqlite3.Error:
                 pass
 
         return jsonify({
             "run_id": run_id,
+            "mode": mode,
             "started_at": started_at,
             "finished_at": finished_at,
+            "wall_ms": wall_ms,
             "passed": passed,
             "failed": failed,
             "total": len(results),

@@ -155,6 +155,52 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 }
 .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
 
+/* Parallel run button */
+.btn-parallel {
+  width: auto;
+  padding: 0.4rem 0.9rem;
+  background: rgba(63, 185, 80, 0.12);
+  color: var(--ok);
+  border: 1px solid rgba(63, 185, 80, 0.4);
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.88rem;
+  white-space: nowrap;
+  margin-top: 0;
+}
+.btn-parallel:hover:not(:disabled) {
+  background: rgba(63, 185, 80, 0.22);
+  border-color: var(--ok);
+}
+.btn-parallel:disabled { opacity: 0.45; cursor: not-allowed; }
+
+/* Reset button */
+.btn-reset {
+  width: auto;
+  padding: 0.4rem 0.85rem;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  margin-top: 0;
+}
+.btn-reset:hover:not(:disabled) { border-color: var(--fail); color: var(--fail); }
+
+/* Running badge */
+.badge-running {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--accent);
+  animation: pulse 1.2s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.55; }
+}
+
 /* ── Agent selector + chat controls ──────────────────────────────────────── */
 .chat-controls {
   background: var(--card);

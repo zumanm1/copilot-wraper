@@ -9,9 +9,11 @@
     <label>Prompt sent to every agent</label>
     <input id="val-prompt" value="Tell me a joke" />
   </div>
-  <div style="display:flex;gap:0.5rem;margin-top:0.5rem;flex-wrap:wrap;">
+  <div style="display:flex;gap:0.5rem;margin-top:0.5rem;flex-wrap:wrap;align-items:center;">
     <button type="button" id="run-all">Run all agents</button>
+    <button type="button" id="run-parallel" class="btn-parallel">Run All Parallel ⚡</button>
     <button type="button" id="load-history" class="btn-secondary">Load history</button>
+    <button type="button" id="reset-all" class="btn-reset">Reset All</button>
   </div>
 </div>
 
@@ -62,9 +64,11 @@ python3 tests/validate_all_agents.py --parallel</pre>
 <script>
 (function() {
   const agents = {{ agents | tojson }};
-  const runBtn = document.getElementById('run-all');
-  const histBtn = document.getElementById('load-history');
-  const summaryEl = document.getElementById('summary');
+  const runBtn      = document.getElementById('run-all');
+  const parallelBtn = document.getElementById('run-parallel');
+  const histBtn     = document.getElementById('load-history');
+  const resetBtn    = document.getElementById('reset-all');
+  const summaryEl   = document.getElementById('summary');
   let busy = false;
 
   function escapeHtml(s) {
@@ -73,9 +77,17 @@ python3 tests/validate_all_agents.py --parallel</pre>
     return d.innerHTML;
   }
 
+  function setRowPending(agentId) {
+    document.getElementById('status-' + agentId).innerHTML =
+      '<span class="badge" style="opacity:0.4">PENDING</span>';
+    document.getElementById('resp-' + agentId).innerHTML =
+      '<small class="muted">Not tested yet</small>';
+    document.getElementById('time-' + agentId).textContent = '—';
+  }
+
   function setRowRunning(agentId) {
     document.getElementById('status-' + agentId).innerHTML =
-      '<span class="badge" style="background:rgba(88,166,255,0.15);color:var(--accent)">RUNNING</span>';
+      '<span class="badge badge-running">RUNNING</span>';
     document.getElementById('resp-' + agentId).innerHTML =
       '<small class="muted">Waiting…</small>';
     document.getElementById('time-' + agentId).textContent = '—';
@@ -84,8 +96,9 @@ python3 tests/validate_all_agents.py --parallel</pre>
   function setRowResult(agentId, ok, elapsed_ms, text, error) {
     document.getElementById('status-' + agentId).innerHTML =
       '<span class="badge ' + (ok ? 'ok' : 'fail') + '">' + (ok ? 'PASS' : 'FAIL') + '</span>';
+    const ms = (elapsed_ms !== null && elapsed_ms !== undefined) ? elapsed_ms : null;
     document.getElementById('time-' + agentId).textContent =
-      elapsed_ms !== null ? (elapsed_ms / 1000).toFixed(1) + 's' : '—';
+      ms !== null ? (ms / 1000).toFixed(2) + 's' : '—';
     if (ok) {
       document.getElementById('resp-' + agentId).innerHTML =
         '<small>' + escapeHtml((text || '').substring(0, 300)) + '</small>';
@@ -93,6 +106,28 @@ python3 tests/validate_all_agents.py --parallel</pre>
       document.getElementById('resp-' + agentId).innerHTML =
         '<small style="color:var(--fail)">' + escapeHtml((error || text || 'failed').substring(0, 200)) + '</small>';
     }
+  }
+
+  function setBusy(state) {
+    busy = state;
+    runBtn.disabled = state;
+    parallelBtn.disabled = state;
+    if (state) {
+      runBtn.textContent = 'Running…';
+      parallelBtn.textContent = 'Running…';
+    } else {
+      runBtn.textContent = 'Run all agents';
+      parallelBtn.textContent = 'Run All Parallel ⚡';
+    }
+  }
+
+  function buildSummary(j) {
+    const color = j.passed === j.total ? 'var(--ok)' : 'var(--fail)';
+    const modeLabel = j.mode === 'web-parallel' ? '⚡ parallel' : 'sequential';
+    const wallSec = j.wall_ms !== undefined ? ' · ' + (j.wall_ms / 1000).toFixed(1) + 's wall' : '';
+    return '<strong style="color:' + color + '">Run #' + (j.run_id || '?') +
+      ': ' + j.passed + '/' + j.total + ' agents passed</strong>' +
+      ' <span class="muted" style="font-size:0.8rem">(' + modeLabel + wallSec + ' · persisted to DB)</span>';
   }
 
   async function runAgent(agentId, prompt) {
@@ -113,38 +148,41 @@ python3 tests/validate_all_agents.py --parallel</pre>
     }
   }
 
-  // Run all button → POST /api/validate with all agent IDs
-  runBtn.addEventListener('click', async function() {
+  async function doRun(useParallel) {
     if (busy) return;
-    busy = true;
-    runBtn.disabled = true;
-    runBtn.textContent = 'Running…';
+    setBusy(true);
     summaryEl.innerHTML = '';
     const prompt = document.getElementById('val-prompt').value.trim() || 'Tell me a joke';
-
-    // Mark all as running immediately
     agents.forEach(a => setRowRunning(a.id));
-
     try {
       const r = await fetch('/api/validate', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ prompt })
+        body: JSON.stringify({ prompt, parallel: useParallel })
       });
       const j = await r.json();
       (j.results || []).forEach(function(res) {
         setRowResult(res.agent_id, res.ok, res.elapsed_ms, res.text, res.error);
       });
-      const color = j.passed === j.total ? 'var(--ok)' : 'var(--fail)';
-      summaryEl.innerHTML = '<strong style="color:' + color + '">Run #' + (j.run_id || '?') +
-        ': ' + j.passed + '/' + j.total + ' agents passed</strong>' +
-        ' <span class="muted" style="font-size:0.8rem">(persisted to DB)</span>';
+      summaryEl.innerHTML = buildSummary(j);
     } catch(e) {
+      agents.forEach(a => setRowPending(a.id));
       summaryEl.innerHTML = '<span style="color:var(--fail)">Error: ' + escapeHtml(e.message) + '</span>';
     }
-    busy = false;
-    runBtn.disabled = false;
-    runBtn.textContent = 'Run all agents';
+    setBusy(false);
+  }
+
+  // Run all sequential
+  runBtn.addEventListener('click', function() { doRun(false); });
+
+  // Run all parallel
+  parallelBtn.addEventListener('click', function() { doRun(true); });
+
+  // Reset All — client-side only, no server call
+  resetBtn.addEventListener('click', function() {
+    if (busy) return;
+    agents.forEach(a => setRowPending(a.id));
+    summaryEl.innerHTML = '';
   });
 
   // Individual run buttons
@@ -172,20 +210,23 @@ python3 tests/validate_all_agents.py --parallel</pre>
         list.innerHTML = '<p class="muted">No runs yet.</p>';
       } else {
         list.innerHTML = runs.map(function(run) {
-          const allPass = run.passed === (run.passed + run.failed);
+          const total = run.passed + run.failed;
+          const allPass = run.passed === total;
           const color = allPass ? 'var(--ok)' : 'var(--fail)';
+          const modeTag = run.mode ? ' <span class="muted" style="font-size:0.75rem">[' + run.mode + ']</span>' : '';
           const pairsHtml = (run.pairs || []).map(function(p) {
             return '<tr>' +
               '<td>' + escapeHtml(p.pair_name) + '</td>' +
               '<td><span class="badge ' + (p.ok ? 'ok' : 'fail') + '">' + (p.ok ? 'PASS' : 'FAIL') + '</span></td>' +
-              '<td class="muted">' + (p.duration_ms ? (p.duration_ms/1000).toFixed(1)+'s' : '—') + '</td>' +
+              '<td class="muted">' + (p.duration_ms ? (p.duration_ms/1000).toFixed(2)+'s' : '—') + '</td>' +
               '<td><small>' + escapeHtml((p.detail || '').substring(0, 200)) + '</small></td>' +
               '</tr>';
           }).join('');
           return '<details class="history-run">' +
             '<summary><strong style="color:' + color + '">Run #' + run.id + '</strong>' +
-            ' — ' + escapeHtml(run.started_at || '') +
-            ' — <span style="color:' + color + '">' + run.passed + '/' + (run.passed + run.failed) + ' passed</span>' +
+            modeTag +
+            ' — ' + escapeHtml((run.started_at || '').substring(0, 19)) +
+            ' — <span style="color:' + color + '">' + run.passed + '/' + total + ' passed</span>' +
             '</summary>' +
             (pairsHtml ? '<table><thead><tr><th>Agent</th><th>Result</th><th>Time</th><th>Response</th></tr></thead><tbody>' + pairsHtml + '</tbody></table>' : '<p class="muted">No pair data.</p>') +
             '</details>';
