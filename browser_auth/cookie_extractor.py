@@ -908,19 +908,39 @@ async def _browser_chat_on_page(
                     target = msg.get("target", "")
                     events_recv.append(f"sr:{target}")
                     args = msg.get("arguments", [])
-                    # Extract text from M365 Copilot response
+                    # #region agent log - hypothesis: M365 sends cumulative text per sr_type=1
+                    _dbg_before = len("".join(collected_text))
+                    # #endregion
+                    # Extract text from M365 Copilot response — collect into a temp list
+                    # first so we can do a single clear+replace (M365 sends FULL cumulative
+                    # text in each streaming event, not just the delta — appending causes
+                    # N-times duplication).
+                    _texts_this_event: list = []
                     for arg in args:
                         if isinstance(arg, dict):
                             # Check for streaming text in various M365 response shapes
                             text = arg.get("text") or arg.get("messageText") or ""
                             if text:
-                                collected_text.append(text)
+                                _texts_this_event.append(text)
                             # Check messages array
                             for m in arg.get("messages", []):
                                 if isinstance(m, dict):
                                     t = m.get("text") or m.get("content") or ""
                                     if t:
-                                        collected_text.append(t)
+                                        _texts_this_event.append(t)
+                    if _texts_this_event:
+                        # Replace — not accumulate — since each sr_type=1 contains
+                        # the full text generated so far, not just new characters.
+                        collected_text.clear()
+                        collected_text.extend(_texts_this_event)
+                    # #region agent log
+                    _dbg_after = len("".join(collected_text))
+                    import json as _j, time as _tm
+                    try:
+                        open("/Users/macbook/Documents/API-WRAPPER/copilot-openai-wrapper/.cursor/debug-21dd47.log","a").write(_j.dumps({"sessionId":"21dd47","hypothesisId":"cumulative-text","location":"cookie_extractor.py:sr_type1","message":"streaming chunk","data":{"target":target,"before_len":_dbg_before,"after_len":_dbg_after,"events_this":len(_texts_this_event)},"timestamp":int(_tm.time()*1000)})+"\n")
+                    except Exception:
+                        pass
+                    # #endregion
                     print(f"[browser_chat] WS_RECV SR_INV: target={target} args_keys={[list(a.keys()) if isinstance(a, dict) else type(a).__name__ for a in args][:3]} text_so_far={len(''.join(collected_text))}")
                 elif sr_type == 2:  # Completion with full response
                     events_recv.append("sr:completion")
@@ -1182,6 +1202,13 @@ async def _browser_chat_on_page(
             print(f"[browser_chat] WS timeout after {timeout_s}s — trying DOM fallback")
 
         text = "".join(collected_text)
+        # #region agent log
+        try:
+            import json as _j2, time as _tm2
+            open("/Users/macbook/Documents/API-WRAPPER/copilot-openai-wrapper/.cursor/debug-21dd47.log","a").write(_j2.dumps({"sessionId":"21dd47","hypothesisId":"cumulative-text","location":"cookie_extractor.py:join","message":"final join","data":{"collected_count":len(collected_text),"final_text_len":len(text)},"timestamp":int(_tm2.time()*1000)})+"\n")
+        except Exception:
+            pass
+        # #endregion
 
         # ── DOM fallback: extract response text from the page if WS gave nothing ──
         if not text:

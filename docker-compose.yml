@@ -482,6 +482,7 @@ services:
       - ENV_PATH=/app/.env
       - API1_URL=http://app:8000
       - VNC_RESOLUTION=1280x1024x24
+      - C3_CHAT_TAB_POOL_SIZE=6
     volumes:
       # Share .env with Container 1 so extracted cookies persist
       - ./.env:/app/.env
