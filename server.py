@@ -115,8 +115,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, restrict this to internal container hostnames
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["X-Agent-ID", "x-generation-params-note"],
@@ -305,7 +305,7 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
     if request.stream:
         return StreamingResponse(
             stream_gen(
-                release_fn, backend, prompt, attachment, request.model, request.max_tokens,
+                release_fn, backend, prompt, attachment, request.model, request.max_tokens, agent_id or "",
             ),
             media_type="text/event-stream",
             headers={"x-generation-params-note": gen_note},
@@ -346,7 +346,7 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
         _cleanup_attachment(attachment)
 
 
-async def stream_gen(release_fn, backend, prompt, attachment, model, max_tokens):
+async def stream_gen(release_fn, backend, prompt, attachment, model, max_tokens, agent_id=""):
     """SSE generator — releases backend (or no-ops for agent sessions) after streaming."""
     chat_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())   # computed once, not per-token
@@ -365,7 +365,7 @@ async def stream_gen(release_fn, backend, prompt, attachment, model, max_tokens)
         end_fr = "stop"
         char_budget = max_tokens * 4 if max_tokens else 0
         chars_sent = 0
-        async for token in backend.chat_completion_stream(prompt=prompt, attachment_path=attachment):
+        async for token in backend.chat_completion_stream(prompt=prompt, attachment_path=attachment, agent_id=agent_id or ""):
             if char_budget:
                 chars_sent += len(token)
                 if chars_sent > char_budget:
@@ -530,7 +530,7 @@ async def anthropic_messages(request: AnthropicRequest, raw_request: Request):
     # ── Streaming path ──────────────────────────────────────────────────
     if request.stream:
         return StreamingResponse(
-            _anthropic_stream_gen(release_fn, backend, prompt, request.model),
+            _anthropic_stream_gen(release_fn, backend, prompt, request.model, agent_id or ""),
             media_type="text/event-stream",
         )
 
@@ -554,7 +554,7 @@ async def anthropic_messages(request: AnthropicRequest, raw_request: Request):
         await release_fn(backend)
 
 
-async def _anthropic_stream_gen(release_fn, backend, prompt: str, model: str):
+async def _anthropic_stream_gen(release_fn, backend, prompt: str, model: str, agent_id: str = ""):
     """SSE generator in Anthropic streaming format."""
     msg_id  = f"msg_{uuid.uuid4().hex[:20]}"
 
@@ -567,7 +567,7 @@ async def _anthropic_stream_gen(release_fn, backend, prompt: str, model: str):
     total_chars = 0
     stream_ok = False
     try:
-        async for token in backend.chat_completion_stream(prompt=prompt):
+        async for token in backend.chat_completion_stream(prompt=prompt, agent_id=agent_id or ""):
             total_chars += len(token)
             yield f"data: {_dumps({'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'text_delta', 'text': token}})}\n\n"
         stream_ok = True

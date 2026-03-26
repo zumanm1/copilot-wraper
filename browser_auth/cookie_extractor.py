@@ -155,9 +155,11 @@ _playwright = None
 _browser: Browser | None = None
 _context: BrowserContext | None = None
 _lock = asyncio.Lock()
+_context_init_lock = asyncio.Lock()
 _chat_lock = asyncio.Lock()  # kept as fallback; pool mode bypasses this
 _pool_pages: set = set()      # pages owned by PagePool; skipped by _get_or_create_page
 _page_pool: "PagePool | None" = None  # initialized lazily on first browser_chat call
+_chat_semaphore: asyncio.Semaphore | None = None  # limits concurrent Playwright operations
 _DISMISS_AUTH_DIALOG = os.getenv("BROWSER_AUTH_AUTO_DISMISS_AUTH_DIALOG", "false").strip().lower() == "true"
 
 
@@ -168,61 +170,53 @@ async def _get_context() -> BrowserContext:
     if _context is not None:
         return _context
 
-    profile_dir = Path(os.getenv("BROWSER_PROFILE_DIR", "/browser-profile"))
-    profile_dir.mkdir(parents=True, exist_ok=True)
+    async with _context_init_lock:
+        if _context is not None:
+            return _context
 
-    # Remove stale Chrome lock files left by a previous container restart.
-    # Chrome uses dangling symlinks for locks — Path.exists() returns False for
-    # dangling symlinks, so we must use os.path.lexists() or os.remove() directly.
-    for lock in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
-        lock_path = profile_dir / lock
-        if os.path.lexists(lock_path):   # True even for dangling symlinks
-            try:
-                os.remove(lock_path)
-                print(f"[cookie_extractor] Removed stale lock: {lock_path}")
-            except OSError:
-                pass
+        profile_dir = Path(os.getenv("BROWSER_PROFILE_DIR", "/browser-profile"))
+        profile_dir.mkdir(parents=True, exist_ok=True)
 
-    _playwright = await async_playwright().start()
-    _context = await _playwright.chromium.launch_persistent_context(
-        user_data_dir=str(profile_dir),
-        headless=False,               # headed so VNC/noVNC shows the browser
-        args=[
-            "--no-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-blink-features=AutomationControlled",
-            "--disable-quic",
-            "--window-size=1280,1024",
-            "--window-position=0,0",
-            "--start-maximized",
-            "--hide-crash-restore-bubble",
-            "--test-type",
-            # Allow M365 silent-auth popup windows (token refresh flow).
-            # Without this, Chromium blocks the hidden login.microsoftonline.com
-            # popup that M365 uses for silent token renewal, causing the
-            # 'Authentication required' dialog and ?from=PopupFailed redirects.
-            "--disable-popup-blocking",
-        ],
-        ignore_default_args=["--enable-automation", "--disable-infobars"],
-        viewport=None,    # let --start-maximized + --window-size fill the Xvfb display
-        ignore_https_errors=False,
-        accept_downloads=False,
-    )
+        for lock in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+            lock_path = profile_dir / lock
+            if os.path.lexists(lock_path):
+                try:
+                    os.remove(lock_path)
+                    print(f"[cookie_extractor] Removed stale lock: {lock_path}")
+                except OSError:
+                    pass
 
-    # Handle M365 silent-auth popup windows.
-    # M365 opens a hidden popup to login.microsoftonline.com to silently refresh
-    # its session token. We must let it complete and then close it.
-    def _on_new_page(popup: Page) -> None:
-        asyncio.ensure_future(_handle_auth_popup(popup))
+        _playwright = await async_playwright().start()
+        _context = await _playwright.chromium.launch_persistent_context(
+            user_data_dir=str(profile_dir),
+            headless=False,
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-quic",
+                "--window-size=1280,1024",
+                "--window-position=0,0",
+                "--start-maximized",
+                "--hide-crash-restore-bubble",
+                "--test-type",
+                "--disable-popup-blocking",
+            ],
+            ignore_default_args=["--enable-automation", "--disable-infobars"],
+            viewport=None,
+            ignore_https_errors=False,
+            accept_downloads=False,
+        )
 
-    _context.on("page", _on_new_page)
+        def _on_new_page(popup: Page) -> None:
+            asyncio.ensure_future(_handle_auth_popup(popup))
 
-    # Keep manual mouse/keyboard control by default.
-    # Opt-in only when explicit auto-dismiss is desired.
-    if _DISMISS_AUTH_DIALOG:
-        asyncio.ensure_future(_auth_dialog_monitor())
+        _context.on("page", _on_new_page)
 
-    return _context
+        if _DISMISS_AUTH_DIALOG:
+            asyncio.ensure_future(_auth_dialog_monitor())
+
+        return _context
 
 
 async def _handle_auth_popup(popup: Page) -> None:
@@ -295,96 +289,171 @@ async def _get_or_create_page(context: BrowserContext) -> Page:
 
 class PagePool:
     """
-    Pool of N browser tabs, each pre-navigated to M365 Chat.
+    Agent-keyed pool of browser tabs for M365 Chat.
 
-    Tabs are acquired from an asyncio.Queue (fair FIFO) and returned after use.
-    Concurrent requests share the pool rather than all serialising on one
-    global _chat_lock.  Pool size is set via C3_CHAT_TAB_POOL_SIZE (default 3).
+    Pre-creates N tabs at startup (with concurrency limit of 2 to avoid
+    overwhelming Chromium).  Tabs are then lazily **assigned** to agents
+    on first request — each AI agent (c2-aider, c5-claude-code, etc.) gets
+    a dedicated sticky tab.  Per-agent asyncio.Lock serialises concurrent
+    requests within one agent while different agents run in full parallel.
     """
 
     _M365_CHAT_URL = "https://m365.cloud.microsoft/chat"
+    _COMPOSER_SEL = (
+        '[data-testid="composer-input"], '
+        '[role="textbox"][contenteditable="true"], '
+        'textarea'
+    )
+    _CREATE_CONCURRENCY = 2
 
     def __init__(self, size: int) -> None:
         self._size = size
-        self._queue: asyncio.Queue = asyncio.Queue()
-        self._pages: list[Page] = []
+        self._agent_tabs: dict[str, Page] = {}
+        self._agent_locks: dict[str, asyncio.Lock] = {}
+        self._free_tabs: asyncio.Queue[Page] = asyncio.Queue()
+        self._meta_lock = asyncio.Lock()
         self._init_lock = asyncio.Lock()
         self._initialized = False
+        self._context: BrowserContext | None = None
 
     async def initialize(self, context: BrowserContext) -> None:
-        """Create pool tabs and navigate each to M365 Chat (parallel)."""
+        """Pre-create N tabs (concurrency-limited to avoid browser overload)."""
         async with self._init_lock:
             if self._initialized:
                 return
+            self._context = context
             _t0 = time.monotonic()
-            print(f"[PagePool] Initializing {self._size} chat tabs (parallel)...")
+            print(f"[PagePool] Pre-creating {self._size} tabs (max {self._CREATE_CONCURRENCY} concurrent)...")
+            sem = asyncio.Semaphore(self._CREATE_CONCURRENCY)
 
             async def _init_one(idx: int) -> "Page | None":
-                try:
-                    page = await context.new_page()
-                    _pool_pages.add(page)
-                    await page.goto(
-                        self._M365_CHAT_URL,
-                        wait_until="domcontentloaded",
-                        timeout=30_000,
-                    )
-                    print(f"[PagePool] Tab {idx + 1}/{self._size} ready: {page.url[:60]}")
-                    return page
-                except Exception as exc:
-                    print(f"[PagePool] Tab {idx + 1} init error (skipped): {exc}")
-                    return None
+                async with sem:
+                    try:
+                        page = await context.new_page()
+                        _pool_pages.add(page)
+                        await page.goto(
+                            self._M365_CHAT_URL,
+                            wait_until="domcontentloaded",
+                            timeout=30_000,
+                        )
+                        try:
+                            await page.wait_for_selector(
+                                self._COMPOSER_SEL, state="visible", timeout=25_000,
+                            )
+                        except Exception:
+                            pass
+                        print(f"[PagePool] Tab {idx + 1}/{self._size} ready: {page.url[:60]}")
+                        return page
+                    except Exception as exc:
+                        print(f"[PagePool] Tab {idx + 1} init error (skipped): {exc}")
+                        return None
 
             results = await asyncio.gather(*[_init_one(i) for i in range(self._size)])
             for page in results:
                 if page is not None:
-                    self._pages.append(page)
-                    await self._queue.put(page)
-            _init_ms = int((time.monotonic() - _t0) * 1000)
-            print(f"[PagePool] {self._queue.qsize()}/{self._size} tabs ready in {_init_ms}ms")
+                    await self._free_tabs.put(page)
+            _ms = int((time.monotonic() - _t0) * 1000)
+            print(f"[PagePool] {self._free_tabs.qsize()}/{self._size} tabs ready in {_ms}ms")
             self._initialized = True
 
-    async def acquire(self, timeout: float = 120.0) -> Page:
-        """Block until a tab is available, then remove it from the pool."""
+    async def _create_tab(self, label: str) -> Page:
+        """Create one new tab (for replacement after failures)."""
+        assert self._context is not None
+        page = await self._context.new_page()
+        _pool_pages.add(page)
+        await page.goto(
+            self._M365_CHAT_URL,
+            wait_until="domcontentloaded",
+            timeout=30_000,
+        )
         try:
-            return await asyncio.wait_for(self._queue.get(), timeout=timeout)
+            await page.wait_for_selector(
+                self._COMPOSER_SEL, state="visible", timeout=25_000,
+            )
+        except Exception:
+            pass
+        print(f"[PagePool] Replacement tab for '{label}' ready: {page.url[:60]}")
+        return page
+
+    async def acquire(self, agent_id: str = "", timeout: float = 120.0) -> Page:
+        """Acquire the dedicated tab for *agent_id*.
+
+        First call for an agent assigns a pre-created tab from the free pool.
+        Subsequent calls reuse the same sticky tab.  Blocks on the per-agent
+        lock so concurrent requests from the same agent are serialised.
+        """
+        if not agent_id:
+            agent_id = "__default__"
+
+        async with self._meta_lock:
+            if agent_id not in self._agent_locks:
+                self._agent_locks[agent_id] = asyncio.Lock()
+
+        lock = self._agent_locks[agent_id]
+        try:
+            await asyncio.wait_for(lock.acquire(), timeout=timeout)
         except asyncio.TimeoutError:
             raise TimeoutError(
-                f"PagePool: no tab available after {timeout:.0f}s "
-                f"(pool_size={self._size})"
+                f"PagePool: tab for agent '{agent_id}' busy after {timeout:.0f}s"
             )
 
-    def release(self, page: Page) -> None:
-        """Return a tab to the pool."""
-        self._queue.put_nowait(page)
+        if agent_id not in self._agent_tabs:
+            try:
+                page = await asyncio.wait_for(self._free_tabs.get(), timeout=30)
+                self._agent_tabs[agent_id] = page
+                print(f"[PagePool] Assigned tab to agent '{agent_id}'")
+            except (asyncio.TimeoutError, Exception) as exc:
+                lock.release()
+                raise TimeoutError(
+                    f"PagePool: no free tab for agent '{agent_id}': {exc}"
+                )
 
-    async def replace(self, bad_page: Page, context: BrowserContext) -> Page:
-        """Close a failed tab, create a healthy replacement, and register it."""
+        return self._agent_tabs[agent_id]
+
+    def release(self, agent_id: str = "") -> None:
+        """Release the per-agent lock so the tab can accept new work."""
+        if not agent_id:
+            agent_id = "__default__"
+        lock = self._agent_locks.get(agent_id)
+        if lock and lock.locked():
+            try:
+                lock.release()
+            except RuntimeError:
+                pass
+
+    async def replace(self, agent_id: str, bad_page: Page, context: BrowserContext) -> Page:
+        """Close a failed tab, create a healthy replacement for *agent_id*."""
+        if not agent_id:
+            agent_id = "__default__"
         _pool_pages.discard(bad_page)
         try:
             await bad_page.close()
         except Exception:
             pass
-        new_page = await context.new_page()
-        _pool_pages.add(new_page)
-        try:
-            await new_page.goto(
-                self._M365_CHAT_URL,
-                wait_until="domcontentloaded",
-                timeout=30_000,
-            )
-            await asyncio.sleep(1)
-            print(f"[PagePool] Replacement tab ready: {new_page.url[:60]}")
-        except Exception as exc:
-            print(f"[PagePool] Replacement tab nav failed: {exc}")
+        new_page = await self._create_tab(agent_id)
+        self._agent_tabs[agent_id] = new_page
         return new_page
+
+    def update_tab(self, agent_id: str, page: Page) -> None:
+        """Update the tab reference for an agent (e.g. after page replacement)."""
+        if not agent_id:
+            agent_id = "__default__"
+        _pool_pages.discard(self._agent_tabs.get(agent_id))
+        _pool_pages.add(page)
+        self._agent_tabs[agent_id] = page
 
     @property
     def available(self) -> int:
-        return self._queue.qsize()
+        return self._free_tabs.qsize()
 
     @property
     def size(self) -> int:
         return self._size
+
+    @property
+    def agents(self) -> list[str]:
+        """Agent IDs that currently have a dedicated tab."""
+        return list(self._agent_tabs.keys())
 
 
 async def _is_logged_in(
@@ -798,45 +867,56 @@ async def extract_access_token() -> dict:
     return {"access_token": None, "useridentitytype": None}
 
 
-async def browser_chat(prompt: str, mode: str = "chat", timeout_ms: int = 60000) -> dict:
+async def browser_chat(prompt: str, mode: str = "chat", timeout_ms: int = 60000, agent_id: str = "") -> dict:
     """Execute a Copilot chat via the M365 browser UI + WebSocket frame interception.
 
-    Uses a PagePool of N pre-navigated browser tabs for concurrency.
-    Each tab is acquired from the pool (FIFO queue), used for one request,
-    then returned.  Within each tab, Phase 3 'New chat' fast-reset avoids
-    the costly about:blank → m365 full-page teardown between requests.
+    Each AI agent gets a **dedicated** browser tab (agent-to-tab affinity).
+    Tabs are pre-created at startup and assigned lazily on first request.
+    A global semaphore limits concurrent Playwright operations to 3 to prevent
+    browser resource exhaustion.  Different agents run in parallel; concurrent
+    requests from the same agent are serialised by a per-agent lock.
 
     Returns dict with 'text', 'events', 'success', and optionally 'error'.
     """
-    global _page_pool
+    global _page_pool, _chat_semaphore
 
     context = await _get_context()
 
-    pool_size = max(1, int(os.getenv("C3_CHAT_TAB_POOL_SIZE", "3")))
-    if _page_pool is None:
-        _page_pool = PagePool(pool_size)
+    pool_size = max(1, int(os.getenv("C3_CHAT_TAB_POOL_SIZE", "6")))
+    async with _chat_lock:
+        if _page_pool is None:
+            _page_pool = PagePool(pool_size)
+        if _chat_semaphore is None:
+            max_concurrent = max(1, int(os.getenv("C3_CHAT_MAX_CONCURRENT", "3")))
+            _chat_semaphore = asyncio.Semaphore(max_concurrent)
     await _page_pool.initialize(context)
 
+    _aid = agent_id or "__default__"
     lock_timeout = (timeout_ms / 1000.0) + 30
-    try:
-        page = await _page_pool.acquire(timeout=lock_timeout)
-    except TimeoutError as exc:
-        return {"success": False, "error": str(exc), "events": [], "text": ""}
 
-    final_page = page
-    try:
-        result, final_page = await _browser_chat_on_page(
-            page, context, prompt, mode=mode, timeout_ms=timeout_ms
-        )
-    except Exception as exc:
-        print(f"[browser_chat] Unexpected error: {exc}")
-        result = {"success": False, "error": str(exc), "events": [], "text": ""}
+    async with _chat_semaphore:
         try:
-            final_page = await _page_pool.replace(page, context)
-        except Exception:
-            final_page = page
-    finally:
-        _page_pool.release(final_page)
+            page = await _page_pool.acquire(agent_id=_aid, timeout=lock_timeout)
+        except TimeoutError as exc:
+            return {"success": False, "error": str(exc), "events": [], "text": ""}
+
+        final_page = page
+        try:
+            result, final_page = await _browser_chat_on_page(
+                page, context, prompt, mode=mode, timeout_ms=timeout_ms
+            )
+            result["agent_tab"] = _aid
+        except Exception as exc:
+            print(f"[browser_chat] [{_aid}] Unexpected error: {exc}")
+            result = {"success": False, "error": str(exc), "events": [], "text": ""}
+            try:
+                final_page = await _page_pool.replace(_aid, page, context)
+            except Exception:
+                final_page = page
+        finally:
+            if final_page is not page:
+                _page_pool.update_tab(_aid, final_page)
+            _page_pool.release(agent_id=_aid)
 
     return result
 
@@ -908,39 +988,20 @@ async def _browser_chat_on_page(
                     target = msg.get("target", "")
                     events_recv.append(f"sr:{target}")
                     args = msg.get("arguments", [])
-                    # #region agent log - hypothesis: M365 sends cumulative text per sr_type=1
-                    _dbg_before = len("".join(collected_text))
-                    # #endregion
-                    # Extract text from M365 Copilot response — collect into a temp list
-                    # first so we can do a single clear+replace (M365 sends FULL cumulative
-                    # text in each streaming event, not just the delta — appending causes
-                    # N-times duplication).
                     _texts_this_event: list = []
                     for arg in args:
                         if isinstance(arg, dict):
-                            # Check for streaming text in various M365 response shapes
                             text = arg.get("text") or arg.get("messageText") or ""
                             if text:
                                 _texts_this_event.append(text)
-                            # Check messages array
                             for m in arg.get("messages", []):
                                 if isinstance(m, dict):
                                     t = m.get("text") or m.get("content") or ""
                                     if t:
                                         _texts_this_event.append(t)
                     if _texts_this_event:
-                        # Replace — not accumulate — since each sr_type=1 contains
-                        # the full text generated so far, not just new characters.
                         collected_text.clear()
                         collected_text.extend(_texts_this_event)
-                    # #region agent log
-                    _dbg_after = len("".join(collected_text))
-                    import json as _j, time as _tm
-                    try:
-                        open("/Users/macbook/Documents/API-WRAPPER/copilot-openai-wrapper/.cursor/debug-21dd47.log","a").write(_j.dumps({"sessionId":"21dd47","hypothesisId":"cumulative-text","location":"cookie_extractor.py:sr_type1","message":"streaming chunk","data":{"target":target,"before_len":_dbg_before,"after_len":_dbg_after,"events_this":len(_texts_this_event)},"timestamp":int(_tm.time()*1000)})+"\n")
-                    except Exception:
-                        pass
-                    # #endregion
                     print(f"[browser_chat] WS_RECV SR_INV: target={target} args_keys={[list(a.keys()) if isinstance(a, dict) else type(a).__name__ for a in args][:3]} text_so_far={len(''.join(collected_text))}")
                 elif sr_type == 2:  # Completion with full response
                     events_recv.append("sr:completion")
@@ -1016,41 +1077,50 @@ async def _browser_chat_on_page(
     # ── Attach WS listener — M365 opens a NEW WS per chat message ──
     page.on("websocket", _on_websocket)
 
-    # ── Phase 3: fast reset via 'New chat' button ──────────────────────────────
+    # ── Phase 3: fast reset ─────────────────────────────────────────────────────
+    # Priority order:
+    #   1. Composer already visible (fresh tab or idle) → use immediately
+    #   2. Click "New chat" sidebar button → wait for composer
+    #   3. Full page teardown (about:blank → m365 chat) as last resort
     _t_nav_start = time.monotonic()
     _M365_CHAT_URL = "https://m365.cloud.microsoft/chat"
     _fast_reset_ok = False
+    _combined = (
+        '[data-testid="composer-input"], '
+        '[role="textbox"][contenteditable="true"], '
+        'textarea'
+    )
     if "m365.cloud.microsoft" in (page.url or ""):
         try:
-            _clicked = await page.evaluate("""() => {
-                const nc = document.querySelector(
-                    '[data-testid="sidebar-new-conversation-nav-item"]'
-                );
-                if (nc) { nc.click(); return true; }
-                for (const b of document.querySelectorAll('button,[role="button"]')) {
-                    const t = ((b.textContent || '') +
-                               (b.getAttribute('aria-label') || '')).toLowerCase();
-                    if (t.includes('new chat') || t.includes('new conversation')) {
-                        b.click();
-                        return true;
-                    }
-                }
-                return false;
-            }""")
-            if _clicked:
-                _combined = (
-                    '[data-testid="composer-input"], '
-                    '[role="textbox"][contenteditable="true"], '
-                    'textarea'
-                )
-                try:
-                    await page.wait_for_selector(_combined, state="visible", timeout=5_000)
-                    _fast_reset_ok = True
-                    print(f"[browser_chat] Fast reset via 'New chat' — {page.url[:60]}")
-                except Exception:
-                    pass
+            await page.wait_for_selector(_combined, state="visible", timeout=3_000)
+            _fast_reset_ok = True
+            print(f"[browser_chat] Composer ready (no reset needed) — {page.url[:60]}")
         except Exception:
-            pass
+            try:
+                _clicked = await page.evaluate("""() => {
+                    const nc = document.querySelector(
+                        '[data-testid="sidebar-new-conversation-nav-item"]'
+                    );
+                    if (nc) { nc.click(); return true; }
+                    for (const b of document.querySelectorAll('button,[role="button"]')) {
+                        const t = ((b.textContent || '') +
+                                   (b.getAttribute('aria-label') || '')).toLowerCase();
+                        if (t.includes('new chat') || t.includes('new conversation')) {
+                            b.click();
+                            return true;
+                        }
+                    }
+                    return false;
+                }""")
+                if _clicked:
+                    try:
+                        await page.wait_for_selector(_combined, state="visible", timeout=10_000)
+                        _fast_reset_ok = True
+                        print(f"[browser_chat] Fast reset via 'New chat' — {page.url[:60]}")
+                    except Exception:
+                        pass
+            except Exception:
+                pass
 
     if not _fast_reset_ok:
         print("[browser_chat] Fast reset unavailable — full page teardown")
@@ -1063,7 +1133,7 @@ async def _browser_chat_on_page(
                 'textarea'
             )
             try:
-                await page.wait_for_selector(_combined_teardown, state="visible", timeout=15_000)
+                await page.wait_for_selector(_combined_teardown, state="visible", timeout=25_000)
             except Exception:
                 pass
             print(f"[browser_chat] Full teardown complete: {page.url}")
@@ -1166,27 +1236,21 @@ async def _browser_chat_on_page(
             print(f"[browser_chat] {err}")
             return {"success": False, "error": err, "events": [], "text": ""}, page
 
-        # ── Use Playwright native methods for text input (triggers real events for React) ──
+        # ── Text input via execCommand (fast + overlay-resilient) ────────
         _t_type_start = time.monotonic()
         composer = page.locator(composer_sel).first
         await composer.click(force=True, timeout=10_000)
         await asyncio.sleep(0.15)
 
-        # Clear existing content
         await page.keyboard.press("Control+A")
         await page.keyboard.press("Backspace")
 
-        # For large prompts (>200 chars), use execCommand('insertText') — instant
-        # and fires beforeinput/input events that React's synthetic system picks up.
-        # .type() at 20ms/char would timeout on Aider's ~2000+ char system prompts.
-        if len(prompt) > 200:
-            await page.evaluate("(text) => document.execCommand('insertText', false, text)", prompt)
-            await asyncio.sleep(0.2)
-            print(f"[browser_chat] Inserted prompt via execCommand ({len(prompt)} chars)")
-        else:
-            await composer.type(prompt, delay=15)
-            await asyncio.sleep(0.2)
-            print(f"[browser_chat] Typed prompt via Playwright ({len(prompt)} chars)")
+        # Always use execCommand('insertText') — instant, fires React-compatible
+        # beforeinput/input events, and doesn't depend on Playwright actionability
+        # checks that can timeout on stale M365 pages.
+        await page.evaluate("(text) => document.execCommand('insertText', false, text)", prompt)
+        await asyncio.sleep(0.2)
+        print(f"[browser_chat] Inserted prompt ({len(prompt)} chars)")
 
         # ── Submit via Enter key (most reliable for React apps) ──
         _timings["type_ms"] = int((time.monotonic() - _t_type_start) * 1000)
@@ -1202,13 +1266,6 @@ async def _browser_chat_on_page(
             print(f"[browser_chat] WS timeout after {timeout_s}s — trying DOM fallback")
 
         text = "".join(collected_text)
-        # #region agent log
-        try:
-            import json as _j2, time as _tm2
-            open("/Users/macbook/Documents/API-WRAPPER/copilot-openai-wrapper/.cursor/debug-21dd47.log","a").write(_j2.dumps({"sessionId":"21dd47","hypothesisId":"cumulative-text","location":"cookie_extractor.py:join","message":"final join","data":{"collected_count":len(collected_text),"final_text_len":len(text)},"timestamp":int(_tm2.time()*1000)})+"\n")
-        except Exception:
-            pass
-        # #endregion
 
         # ── DOM fallback: extract response text from the page if WS gave nothing ──
         if not text:
@@ -1279,9 +1336,13 @@ async def check_session_health(env_path: str = "/app/.env") -> dict:
     """
     Lightweight M365 session health check — no navigation, no chat.
 
-    Uses the first non-pool page (the warm/setup page) and calls _is_logged_in()
-    which inspects the current URL, cookies, and DOM text.  Typically takes
-    <300ms and is safe to poll frequently.
+    Strategy (fast, page-URL-independent):
+      1. Check browser-context cookies for the portal domain.
+         m365_hub → OH.SID on m365.cloud.microsoft
+         consumer → _U on copilot.microsoft.com / bing.com
+      2. Fall back to _is_logged_in() if the warm page happens to be on the portal.
+
+    Typically <100ms and safe to poll frequently.
 
     Returns:
         {"session": "active"|"expired"|"unknown", "profile": str, "reason": str|None}
@@ -1296,17 +1357,35 @@ async def check_session_health(env_path: str = "/app/.env") -> dict:
         host_markers = (netloc,) if netloc else ("copilot.microsoft.com", "m365.cloud.microsoft")
 
         context = await _get_context()
-        page = await _get_or_create_page(context)
 
+        # --- Strategy 1: check context cookies directly (URL-independent) ---
+        cookie_urls = [f"https://{netloc}"] if netloc else [
+            "https://m365.cloud.microsoft",
+            "https://copilot.microsoft.com",
+        ]
+        try:
+            jar = await context.cookies(cookie_urls)
+            cookie_names = {c.get("name", "") for c in jar if isinstance(c, dict)}
+        except Exception:
+            cookie_names = set()
+
+        is_m365 = (profile or "").strip().lower() == "m365_hub"
+        if is_m365 and "OH.SID" in cookie_names:
+            return {"session": "active", "profile": profile, "reason": None, "checked_at": now}
+        if not is_m365 and "_U" in cookie_names:
+            return {"session": "active", "profile": profile, "reason": None, "checked_at": now}
+
+        # --- Strategy 2: fall back to page-based check ---
+        page = await _get_or_create_page(context)
         logged_in = await _is_logged_in(page, host_markers, profile)
         if logged_in:
             return {"session": "active", "profile": profile, "reason": None, "checked_at": now}
-        else:
-            return {
-                "session": "expired",
-                "profile": profile,
-                "reason": "auth_required_or_not_on_portal",
-                "checked_at": now,
-            }
+
+        return {
+            "session": "expired",
+            "profile": profile,
+            "reason": "auth_required_or_not_on_portal",
+            "checked_at": now,
+        }
     except Exception as exc:
         return {"session": "unknown", "profile": "unknown", "reason": str(exc), "checked_at": now}

@@ -139,7 +139,7 @@ def create_app() -> Flask:
                 f"{c1_url}/v1/chat/completions",
                 headers={"Content-Type": "application/json", "X-Agent-ID": agent_id},
                 json=body,
-                timeout=120,
+                timeout=180,
             )
             elapsed_ms = int((time.monotonic() - t0) * 1000)
             text = ""

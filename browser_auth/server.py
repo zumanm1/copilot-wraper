@@ -52,8 +52,22 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             print(f"[browser-auth] noVNC warm skipped: {e}")
 
+    async def _pre_init_page_pool() -> None:
+        """Pre-create chat tabs in the background so they're ready for requests."""
+        await asyncio.sleep(8)
+        try:
+            pool_size = max(1, int(os.getenv("C3_CHAT_TAB_POOL_SIZE", "6")))
+            context = await get_context()
+            if _ce._page_pool is None:
+                _ce._page_pool = _ce.PagePool(pool_size)
+            await _ce._page_pool.initialize(context)
+            print(f"[browser-auth] PagePool pre-initialized ({pool_size} tabs)")
+        except Exception as e:
+            print(f"[browser-auth] PagePool pre-init skipped: {e}")
+
     if not skip_warm:
         asyncio.create_task(_delayed_warm_novnc())
+    asyncio.create_task(_pre_init_page_pool())
     yield
 
 
@@ -119,9 +133,10 @@ async def chat(request: Request):
 
     mode = body.get("mode", "chat")
     timeout_ms = int(body.get("timeout", 30000))
+    agent_id = body.get("agent_id", "")
 
     try:
-        result = await browser_chat(prompt, mode=mode, timeout_ms=timeout_ms)
+        result = await browser_chat(prompt, mode=mode, timeout_ms=timeout_ms, agent_id=agent_id)
         status = 200 if result.get("success") else 502
         return JSONResponse(result, status_code=status)
     except Exception as e:

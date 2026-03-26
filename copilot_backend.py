@@ -291,7 +291,7 @@ class CopilotBackend:
         _t0 = _time.monotonic()
 
         if attachment_path:
-            return await self._do_chat_completion(prompt, attachment_path, context)
+            return await self._do_chat_completion(prompt, attachment_path, context, agent_id=agent_id)
 
         key = _cache_key(self.style, prompt, agent_id)
         if key in _response_cache:
@@ -314,7 +314,7 @@ class CopilotBackend:
 
         result_future = _in_flight[key]
         try:
-            result = await self._do_chat_completion(prompt, None, context)
+            result = await self._do_chat_completion(prompt, None, context, agent_id=agent_id)
             _response_cache[key] = result
             result_future.set_result(result)
             logger.info("PERF chat_completion: cache_miss agent=%s total=%dms", agent_id, int((_time.monotonic()-_t0)*1000))
@@ -327,14 +327,14 @@ class CopilotBackend:
             async with _in_flight_lock:
                 _in_flight.pop(key, None)
 
-    async def _do_chat_completion(self, prompt, attachment_path, context) -> str:
+    async def _do_chat_completion(self, prompt, attachment_path, context, agent_id: str = "") -> str:
         breaker = get_circuit_breaker(
             threshold=config.CIRCUIT_BREAKER_THRESHOLD,
             timeout_seconds=config.CIRCUIT_BREAKER_TIMEOUT,
         )
 
         try:
-            return await breaker.call(self._raw_copilot_call, prompt, context, attachment_path)
+            return await breaker.call(self._raw_copilot_call, prompt, context, attachment_path, agent_id)
         except RuntimeError as exc:
             msg = str(exc).lower()
             # If we hit a challenge or auth failure, try to trigger a refresh
@@ -354,8 +354,7 @@ class CopilotBackend:
                                 # Start a fresh conversation after refresh
                                 await self.reset_conversation()
                                 logger.info("Retrying chat completion after refresh...")
-                                # Retry once
-                                return await breaker.call(self._raw_copilot_call, prompt, context, attachment_path)
+                                return await breaker.call(self._raw_copilot_call, prompt, context, attachment_path, agent_id)
                             else:
                                 logger.error("Cookie refresh failed: HTTP %s", resp.status)
                 except Exception as refresh_exc:
@@ -370,12 +369,12 @@ class CopilotBackend:
             # If not a challenge or refresh failed, re-raise
             raise
 
-    async def _raw_copilot_call(self, prompt: str, context, attachment_path=None) -> str:
+    async def _raw_copilot_call(self, prompt: str, context, attachment_path=None, agent_id: str = "") -> str:
         """Accumulates all appendText events into a single string.
         M365 provider proxies through C3 browser-auth /chat endpoint.
         Consumer Copilot uses direct WebSocket."""
         if self.provider.name == "m365":
-            return await self._c3_proxy_call(prompt)
+            return await self._c3_proxy_call(prompt, agent_id=agent_id)
 
         chunks = []
         async for chunk in self._ws_stream(prompt, context, attachment_path):
@@ -396,32 +395,36 @@ class CopilotBackend:
             )
         return cls._c3_session
 
-    async def _c3_proxy_call(self, prompt: str) -> str:
+    async def _c3_proxy_call(self, prompt: str, agent_id: str = "") -> str:
         """Proxy chat through C3 browser-auth /chat endpoint (M365 SignalR)."""
         import time as _time
         _t0 = _time.monotonic()
         c3_url = os.getenv("C3_URL", "http://browser-auth:8001")
-        logger.info("M365 proxy via C3: %s/chat prompt='%s'", c3_url, prompt[:60])
+        logger.info("M365 proxy via C3: %s/chat agent=%s prompt='%s'", c3_url, agent_id, prompt[:60])
         try:
             session = self._get_c3_session()
             async with session.post(
                 f"{c3_url}/chat",
-                json={"prompt": prompt, "timeout": int(config.REQUEST_TIMEOUT * 1000)},
-                timeout=aiohttp.ClientTimeout(total=config.REQUEST_TIMEOUT + 10),
+                json={"prompt": prompt, "timeout": int(config.REQUEST_TIMEOUT * 1000), "agent_id": agent_id},
+                timeout=aiohttp.ClientTimeout(total=max(config.REQUEST_TIMEOUT + 10, 180)),
             ) as resp:
+                ct = resp.headers.get("content-type", "")
+                if "application/json" not in ct:
+                    body = await resp.text()
+                    raise RuntimeError(f"C3 /chat non-JSON response (status={resp.status}): {body[:200]}")
                 data = await resp.json()
                 _c3_ms = int((_time.monotonic() - _t0) * 1000)
                 _c3_perf = data.get("perf", {})
                 logger.info("PERF _c3_proxy_call: total=%dms c3_internal=%s", _c3_ms, _c3_perf)
                 if data.get("success") and data.get("text"):
                     return data["text"]
-                    error = (
-                        data.get("error")
-                        or data.get("message")
-                        or data.get("detail")
-                        or "No response from M365 Copilot (empty reply)"
-                    )
-                    raise RuntimeError(f"C3 /chat failed: {error}")
+                error = (
+                    data.get("error")
+                    or data.get("message")
+                    or data.get("detail")
+                    or "No response from M365 Copilot (empty reply)"
+                )
+                raise RuntimeError(f"C3 /chat failed: {error}")
         except aiohttp.ClientError as exc:
             raise RuntimeError(
                 f"C3 browser-auth unreachable at {c3_url}/chat: {exc}"
@@ -650,11 +653,11 @@ class CopilotBackend:
             except RuntimeError as exc:
                 raise
 
-    async def chat_completion_stream(self, prompt: str, attachment_path=None, context=None) -> AsyncGenerator[str, None]:
+    async def chat_completion_stream(self, prompt: str, attachment_path=None, context=None, agent_id: str = "") -> AsyncGenerator[str, None]:
         """Streaming interface — yields text tokens as they arrive.
         M365 provider returns full text in one chunk (C3 proxy is non-streaming)."""
         if self.provider.name == "m365":
-            text = await self._c3_proxy_call(prompt)
+            text = await self._c3_proxy_call(prompt, agent_id=agent_id)
             yield text
             return
         try:
