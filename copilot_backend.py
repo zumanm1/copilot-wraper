@@ -34,17 +34,29 @@ from circuit_breaker import get_circuit_breaker, CircuitOpenError
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s:%(name)s:%(message)s")
 
+# #region agent log
+import time as _dbg_time
+_DBG_LOG = "/app/.cursor/debug-aa3936.log"
+def _dlog(loc, msg, data=None):
+    try:
+        with open(_DBG_LOG, "a") as _f:
+            _f.write(json.dumps({"sessionId":"aa3936","location":loc,"message":msg,"data":data or {},"timestamp":int(_dbg_time.time()*1000)}) + "\n")
+    except Exception:
+        pass
+# #endregion
+
 # ── Streaming event protocol ──────────────────────────────────────────────────
 _DONE_EVENTS = {"done", "error", "throttled", "badMessage"}
 
 # ── Response cache ────────────────────────────────────────────────────────────
-_response_cache: TTLCache = TTLCache(maxsize=200, ttl=300)
+_response_cache: TTLCache = TTLCache(maxsize=1000, ttl=300)
 _cache_hits: int = 0
 _cache_misses: int = 0
 
-# ── In-flight deduplication ───────────────────────────────────────────────────
+# ── In-flight deduplication (per-key locks to avoid global contention) ────────
 _in_flight: dict[str, asyncio.Future] = {}
-_in_flight_lock = asyncio.Lock()
+_in_flight_key_locks: dict[str, asyncio.Lock] = {}
+_in_flight_registry_lock = asyncio.Lock()
 
 # ── Shared TLS connector (reuse TCP to copilot.microsoft.com; sessions stay per-call for cookie safety)
 _shared_connector: aiohttp.TCPConnector | None = None
@@ -82,6 +94,7 @@ def _cache_key(style: str, prompt: str, agent_id: str = "") -> str:
 
 
 _cached_cookie: str | None = None
+_cached_cookie_pairs: dict[str, str] | None = None
 
 def _make_cookie_header() -> str:
     """Return cached Cookie header; refreshed on reload_cookies()."""
@@ -90,10 +103,25 @@ def _make_cookie_header() -> str:
         _cached_cookie = os.getenv("COPILOT_COOKIES") or os.getenv("BING_COOKIES") or ""
     return _cached_cookie
 
+def _get_parsed_cookies() -> dict[str, str]:
+    """Return pre-parsed cookie dict; rebuilt on reload_cookies()."""
+    global _cached_cookie_pairs
+    if _cached_cookie_pairs is None:
+        raw = _make_cookie_header()
+        pairs: dict[str, str] = {}
+        for pair in raw.split(";"):
+            pair = pair.strip()
+            if "=" in pair:
+                name, _, val = pair.partition("=")
+                pairs[name.strip()] = val.strip()
+        _cached_cookie_pairs = pairs
+    return _cached_cookie_pairs
+
 def reload_cookies() -> None:
     """Invalidate the cached cookie so the next call re-reads the env."""
-    global _cached_cookie
+    global _cached_cookie, _cached_cookie_pairs
     _cached_cookie = None
+    _cached_cookie_pairs = None
 
 
 def _make_headers(provider_name: str = "copilot") -> dict:
@@ -187,6 +215,115 @@ def _auto_refresh_allowed() -> bool:
 
 # ── Backend ───────────────────────────────────────────────────────────────────
 
+class _ConversationIdPool:
+    """Pre-creates conversation IDs so requests don't wait for the HTTP POST.
+
+    Maintains a small queue of ready-to-use IDs. A background refill task
+    keeps the queue topped up without blocking the request path.
+    """
+
+    def __init__(self, target_size: int = 3):
+        self._target = target_size
+        self._queue: asyncio.Queue[str] = asyncio.Queue(maxsize=target_size * 2)
+        self._refill_event = asyncio.Event()
+        self._running = False
+
+    async def get(self, session: aiohttp.ClientSession, provider: _ProviderBase) -> str:
+        """Return a pre-created conversation ID, or create one on demand."""
+        try:
+            return self._queue.get_nowait()
+        except asyncio.QueueEmpty:
+            pass
+        cid = await _create_conversation_for_provider(session, provider)
+        self._schedule_refill()
+        return cid
+
+    def _schedule_refill(self) -> None:
+        self._refill_event.set()
+
+    async def start(self) -> None:
+        if self._running:
+            return
+        self._running = True
+        asyncio.create_task(self._refill_loop())
+
+    async def _refill_loop(self) -> None:
+        while True:
+            await self._refill_event.wait()
+            self._refill_event.clear()
+            while self._queue.qsize() < self._target:
+                try:
+                    connector = await _get_shared_connector()
+                    headers = _make_headers()
+                    async with aiohttp.ClientSession(
+                        connector=connector,
+                        connector_owner=False,
+                        headers={k: v for k, v in headers.items() if k != "Cookie"},
+                        cookie_jar=aiohttp.CookieJar(unsafe=True),
+                    ) as session:
+                        parsed_cookies = _get_parsed_cookies()
+                        if parsed_cookies:
+                            session.cookie_jar.update_cookies(parsed_cookies)
+                        provider = _build_provider()
+                        cid = await _create_conversation_for_provider(session, provider)
+                        await self._queue.put(cid)
+                except Exception:
+                    break
+            await asyncio.sleep(1)
+
+
+async def _create_conversation_for_provider(session: aiohttp.ClientSession, provider: _ProviderBase) -> str:
+    if provider.name == "m365":
+        return await _create_conversation_m365_static(session, provider)
+    url = provider.conversations_url()
+    async with session.post(url, json={}) as resp:
+        if resp.status != 200:
+            raise RuntimeError(f"Failed to create {provider.name} conversation: HTTP {resp.status}")
+        data = await resp.json()
+        return data["id"]
+
+
+async def _create_conversation_m365_static(session: aiohttp.ClientSession, provider: _ProviderBase) -> str:
+    url = provider.conversations_url()
+    async with session.get(url, allow_redirects=False) as get_resp:
+        if get_resp.status in (301, 302, 303, 307, 308):
+            location = (get_resp.headers.get("Location") or "").lower()
+            if "login.microsoftonline.com" in location or "oauth2" in location:
+                raise RuntimeError("M365 conversation bootstrap redirected to Microsoft login/OAuth.")
+            raise RuntimeError(f"M365 conversation bootstrap redirected (HTTP {get_resp.status}).")
+        if get_resp.status == 200:
+            try:
+                data = await get_resp.json(content_type=None)
+                if isinstance(data, dict):
+                    convs = data.get("conversations") or data.get("items") or data.get("value")
+                    if isinstance(convs, list):
+                        for item in convs:
+                            if isinstance(item, dict):
+                                cid = item.get("id") or item.get("conversationId")
+                                if isinstance(cid, str) and cid:
+                                    return cid
+                    if isinstance(data.get("id"), str) and data.get("id"):
+                        return data["id"]
+            except Exception as exc:
+                logger.warning("M365 GET bootstrap returned non-JSON; trying POST fallback: %s", exc)
+        elif get_resp.status not in (404, 405):
+            raise RuntimeError(f"Failed to create m365 conversation via GET: HTTP {get_resp.status}")
+    async with session.post(url, json={}) as post_resp:
+        if post_resp.status != 200:
+            raise RuntimeError(f"Failed to create {provider.name} conversation: HTTP {post_resp.status}")
+        try:
+            data = await post_resp.json(content_type=None)
+        except Exception as exc:
+            raise RuntimeError("M365 conversation bootstrap response-envelope mismatch.") from exc
+        cid = data.get("id") if isinstance(data, dict) else None
+        if isinstance(cid, str) and cid:
+            return cid
+        raise RuntimeError("M365 conversation bootstrap returned no conversation id.")
+
+
+_conv_pool = _ConversationIdPool(target_size=3)
+
+
 class CopilotBackend:
     def __init__(self, style=None, persona=None):
         self.style = style or config.COPILOT_STYLE
@@ -197,18 +334,19 @@ class CopilotBackend:
         self._last_suggestions: list[str] = []
 
     async def _ensure_conversation(self, session: aiohttp.ClientSession) -> str:
-        """Create a new conversation if we don't have one."""
+        """Get a conversation ID from the pre-creation pool, or create on demand."""
         if self._conversation_id:
             return self._conversation_id
         async with self._lock:
             if self._conversation_id:
                 return self._conversation_id
-            # M365 may expose a different bootstrap contract (GET list, or non-JSON redirect),
-            # so use provider-aware probing before committing to a conversation id.
-            if self.provider.name == "m365":
-                self._conversation_id = await self._create_conversation_m365(session)
-            else:
-                self._conversation_id = await self._create_conversation_copilot(session)
+            try:
+                self._conversation_id = await _conv_pool.get(session, self.provider)
+            except Exception:
+                if self.provider.name == "m365":
+                    self._conversation_id = await self._create_conversation_m365(session)
+                else:
+                    self._conversation_id = await self._create_conversation_copilot(session)
         return self._conversation_id
 
     async def _create_conversation_copilot(self, session: aiohttp.ClientSession) -> str:
@@ -289,6 +427,9 @@ class CopilotBackend:
         global _cache_hits, _cache_misses
         import time as _time
         _t0 = _time.monotonic()
+        # #region agent log
+        _dlog("copilot_backend.py:chat_completion", "entry", {"agent_id": agent_id, "provider": self.provider.name, "style": self.style, "prompt_len": len(prompt), "hypothesisId": "H4"})
+        # #endregion
 
         if attachment_path:
             return await self._do_chat_completion(prompt, attachment_path, context, agent_id=agent_id)
@@ -301,7 +442,11 @@ class CopilotBackend:
 
         _cache_misses += 1
 
-        async with _in_flight_lock:
+        # Per-key lock: only requests with the same cache key contend
+        async with _in_flight_registry_lock:
+            if key not in _in_flight_key_locks:
+                _in_flight_key_locks[key] = asyncio.Lock()
+            key_lock = _in_flight_key_locks[key]
             if key in _in_flight:
                 fut = _in_flight[key]
             else:
@@ -324,8 +469,9 @@ class CopilotBackend:
                 result_future.set_exception(exc)
             raise
         finally:
-            async with _in_flight_lock:
+            async with _in_flight_registry_lock:
                 _in_flight.pop(key, None)
+                _in_flight_key_locks.pop(key, None)
 
     async def _do_chat_completion(self, prompt, attachment_path, context, agent_id: str = "") -> str:
         breaker = get_circuit_breaker(
@@ -452,16 +598,9 @@ class CopilotBackend:
             headers={k: v for k, v in headers.items() if k != "Cookie"},
             cookie_jar=aiohttp.CookieJar(unsafe=True),
         ) as session:
-            # Set cookies manually from the verified headers
-            cookie_str = headers.get("Cookie", "")
-            if cookie_str:
-                for pair in cookie_str.split(";"):
-                    pair = pair.strip()
-                    if "=" in pair:
-                        name, _, val = pair.partition("=")
-                        session.cookie_jar.update_cookies(
-                            {name.strip(): val.strip()},
-                        )
+            parsed_cookies = _get_parsed_cookies()
+            if parsed_cookies:
+                session.cookie_jar.update_cookies(parsed_cookies)
 
             try:
                 conv_id = await self._ensure_conversation(session)
@@ -493,11 +632,11 @@ class CopilotBackend:
                     sys.stderr.write(f"Bounty Hunter: WS_LINK_ESTABLISHED conv={conv_id}\n")
                     sys.stderr.flush()
 
-                    # Pre-send challenge probe: Copilot may send a challenge event
-                    # immediately after 'connected' and BEFORE it accepts a 'send'.
-                    # Respond to it here so the 'send' is not rejected as invalid-event.
+                    # Quick pre-send challenge check: use 0.15s instead of 2s.
+                    # Challenges are also handled inline during the response stream,
+                    # so this only needs to catch immediate post-connect challenges.
                     try:
-                        pre_msg = await asyncio.wait_for(ws.receive_str(), timeout=2.0)
+                        pre_msg = await asyncio.wait_for(ws.receive_str(), timeout=0.15)
                         pre_data = json.loads(pre_msg)
                         pre_ev = pre_data.get("event", "")
                         sys.stderr.write(f"WS_PRE_SEND_EVENT: {pre_ev}\n")
@@ -525,11 +664,9 @@ class CopilotBackend:
                             sys.stderr.write(f"WS_PRE_SEND_CHALLENGE_HANDLED: method={pre_method!r}\n")
                             sys.stderr.flush()
                         elif pre_ev:
-                            # Unexpected non-challenge event before send — log and ignore
                             sys.stderr.write(f"WS_PRE_SEND_UNEXPECTED: {pre_data}\n")
                             sys.stderr.flush()
                     except asyncio.TimeoutError:
-                        # No pre-send challenge — proceed normally
                         pass
 
                     # Map legacy style names to new copilot.microsoft.com API modes

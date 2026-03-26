@@ -56,7 +56,7 @@ async def lifespan(app: FastAPI):
         """Pre-create chat tabs in the background so they're ready for requests."""
         await asyncio.sleep(8)
         try:
-            pool_size = max(1, int(os.getenv("C3_CHAT_TAB_POOL_SIZE", "6")))
+            pool_size = max(1, int(os.getenv("C3_CHAT_TAB_POOL_SIZE", "10")))
             context = await get_context()
             if _ce._page_pool is None:
                 _ce._page_pool = _ce.PagePool(pool_size)

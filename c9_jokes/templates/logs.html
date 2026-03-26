@@ -74,7 +74,7 @@
 
 <div class="pagination">
   {% if has_prev %}
-  <a href="{{ url_for('page_logs', agent=agent_filter, offset=prev_offset) }}" class="btn-sm">← Previous</a>
+  <a href="/logs?agent={{ agent_filter }}&offset={{ prev_offset }}" class="btn-sm">← Previous</a>
   {% else %}
   <span class="btn-sm disabled">← Previous</span>
   {% endif %}
@@ -84,7 +84,7 @@
   </span>
 
   {% if has_next %}
-  <a href="{{ url_for('page_logs', agent=agent_filter, offset=next_offset) }}" class="btn-sm">Next →</a>
+  <a href="/logs?agent={{ agent_filter }}&offset={{ next_offset }}" class="btn-sm">Next →</a>
   {% else %}
   <span class="btn-sm disabled">Next →</span>
   {% endif %}

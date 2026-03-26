@@ -40,7 +40,7 @@ openclaw gateway run \
     --dev \
     --allow-unconfigured \
     --port "${GATEWAY_PORT}" \
-    --bind loopback \
+    --bind all \
     --token "${GATEWAY_TOKEN}" &
 GW_PID=$!
 

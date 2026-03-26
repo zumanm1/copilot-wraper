@@ -10,7 +10,7 @@ from models import (
     AgentResumeResponse, AgentTaskRequest, AgentTaskResponse,
     AgentStatusResponse, AgentHistoryResponse, AgentClearHistoryResponse,
 )
-from copilot_backend import CopilotBackend, get_connection_pool, get_cache_stats
+from copilot_backend import CopilotBackend, get_connection_pool, get_cache_stats, _conv_pool
 from circuit_breaker import get_circuit_breaker
 from agent_manager import (
     get_agent_manager,
@@ -22,26 +22,36 @@ import config
 
 logger = logging.getLogger(__name__)
 
-# ── Per-agent session registry ────────────────────────────────────────────────
+# ── Per-agent session registry (per-agent locks to avoid global contention) ──
 # Containers send X-Agent-ID header; each ID gets its own dedicated
 # CopilotBackend so conversations stay isolated across C2/C4/C5/C6.
 _agent_sessions: dict[str, CopilotBackend] = {}          # type: ignore[name-defined]
 _agent_session_last_used: dict[str, float] = {}
-_agent_session_lock: asyncio.Lock | None = None
+_agent_per_id_locks: dict[str, asyncio.Lock] = {}
+_agent_registry_lock: asyncio.Lock | None = None
 AGENT_SESSION_TTL: int = int(os.getenv("AGENT_SESSION_TTL", "1800"))   # 30 min idle expiry
 
 
-def _get_session_lock() -> asyncio.Lock:
-    global _agent_session_lock
-    if _agent_session_lock is None:
-        _agent_session_lock = asyncio.Lock()
-    return _agent_session_lock
+def _get_registry_lock() -> asyncio.Lock:
+    global _agent_registry_lock
+    if _agent_registry_lock is None:
+        _agent_registry_lock = asyncio.Lock()
+    return _agent_registry_lock
 
 
 async def _get_or_create_agent_session(agent_id: str) -> "CopilotBackend":
-    """Return the dedicated backend for agent_id, creating it on first call."""
-    lock = _get_session_lock()
-    async with lock:
+    """Return the dedicated backend for agent_id, creating it on first call.
+
+    Uses per-agent-ID locks so different agents never block each other.
+    The registry lock is held only briefly to fetch/create the per-ID lock.
+    """
+    registry_lock = _get_registry_lock()
+    async with registry_lock:
+        if agent_id not in _agent_per_id_locks:
+            _agent_per_id_locks[agent_id] = asyncio.Lock()
+        id_lock = _agent_per_id_locks[agent_id]
+
+    async with id_lock:
         if agent_id not in _agent_sessions:
             backend = CopilotBackend()       # type: ignore[name-defined]
             _agent_sessions[agent_id] = backend
@@ -60,8 +70,8 @@ async def _session_reaper() -> None:
     while True:
         await asyncio.sleep(300)   # check every 5 minutes
         now = time.time()
-        lock = _get_session_lock()
-        async with lock:
+        registry_lock = _get_registry_lock()
+        async with registry_lock:
             stale = [
                 aid for aid, last in _agent_session_last_used.items()
                 if now - last > AGENT_SESSION_TTL
@@ -69,6 +79,7 @@ async def _session_reaper() -> None:
             for aid in stale:
                 backend = _agent_sessions.pop(aid, None)
                 _agent_session_last_used.pop(aid, None)
+                _agent_per_id_locks.pop(aid, None)
                 if backend:
                     try:
                         await backend.close()
@@ -133,10 +144,12 @@ if _limiter:
 
 @app.on_event("startup")
 async def startup_event():
-    """Pre-warm the connection pool and start the agent session reaper."""
+    """Pre-warm the connection pool, conversation ID pool, and start reapers."""
     pool = get_connection_pool()
     warm_tasks = [_warm_one(pool) for _ in range(config.POOL_WARM_COUNT)]
     await asyncio.gather(*warm_tasks, return_exceptions=True)
+    await _conv_pool.start()
+    _conv_pool._schedule_refill()
     asyncio.create_task(_session_reaper())
     asyncio.create_task(agent_registry_reaper_loop())
 

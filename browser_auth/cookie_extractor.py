@@ -171,52 +171,52 @@ async def _get_context() -> BrowserContext:
         return _context
 
     async with _context_init_lock:
-    if _context is not None:
-        return _context
+        if _context is not None:
+            return _context
 
-    profile_dir = Path(os.getenv("BROWSER_PROFILE_DIR", "/browser-profile"))
-    profile_dir.mkdir(parents=True, exist_ok=True)
+        profile_dir = Path(os.getenv("BROWSER_PROFILE_DIR", "/browser-profile"))
+        profile_dir.mkdir(parents=True, exist_ok=True)
 
-    for lock in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
-        lock_path = profile_dir / lock
+        for lock in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+            lock_path = profile_dir / lock
             if os.path.lexists(lock_path):
-            try:
-                os.remove(lock_path)
-                print(f"[cookie_extractor] Removed stale lock: {lock_path}")
-            except OSError:
-                pass
+                try:
+                    os.remove(lock_path)
+                    print(f"[cookie_extractor] Removed stale lock: {lock_path}")
+                except OSError:
+                    pass
 
-    _playwright = await async_playwright().start()
-    _context = await _playwright.chromium.launch_persistent_context(
-        user_data_dir=str(profile_dir),
+        _playwright = await async_playwright().start()
+        _context = await _playwright.chromium.launch_persistent_context(
+            user_data_dir=str(profile_dir),
             headless=False,
-        args=[
-            "--no-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-blink-features=AutomationControlled",
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
                 "--disable-quic",
-            "--window-size=1280,1024",
-            "--window-position=0,0",
-            "--start-maximized",
-            "--hide-crash-restore-bubble",
-            "--test-type",
-            "--disable-popup-blocking",
-        ],
-        ignore_default_args=["--enable-automation", "--disable-infobars"],
+                "--window-size=1280,1024",
+                "--window-position=0,0",
+                "--start-maximized",
+                "--hide-crash-restore-bubble",
+                "--test-type",
+                "--disable-popup-blocking",
+            ],
+            ignore_default_args=["--enable-automation", "--disable-infobars"],
             viewport=None,
-        ignore_https_errors=False,
-        accept_downloads=False,
-    )
+            ignore_https_errors=False,
+            accept_downloads=False,
+        )
 
-    def _on_new_page(popup: Page) -> None:
-        asyncio.ensure_future(_handle_auth_popup(popup))
+        def _on_new_page(popup: Page) -> None:
+            asyncio.ensure_future(_handle_auth_popup(popup))
 
-    _context.on("page", _on_new_page)
+        _context.on("page", _on_new_page)
 
         if _DISMISS_AUTH_DIALOG:
-    asyncio.ensure_future(_auth_dialog_monitor())
+            asyncio.ensure_future(_auth_dialog_monitor())
 
-    return _context
+        return _context
 
 
 async def _handle_auth_popup(popup: Page) -> None:
@@ -304,7 +304,7 @@ class PagePool:
         '[role="textbox"][contenteditable="true"], '
         'textarea'
     )
-    _CREATE_CONCURRENCY = 2
+    _CREATE_CONCURRENCY = 4
 
     def __init__(self, size: int) -> None:
         self._size = size
@@ -515,7 +515,7 @@ async def _is_logged_in(
             if any(tok in html for tok in signed_in_ui_markers):
                 return True
             if any(tok in html for tok in ("sign in", "log in")):
-        return False
+                return False
             return False
 
         # Consumer flow keeps previous behavior (portal host is enough).
@@ -751,7 +751,7 @@ async def extract_and_save(env_path: str = "/app/.env") -> dict:
         if profile == "m365_hub":
             has_auth = "OH.SID" in cookies
         else:
-        has_auth = any(c in cookies for c in AUTH_COOKIES)
+            has_auth = any(c in cookies for c in AUTH_COOKIES)
         mode = "authenticated" if has_auth else "anonymous"
 
         # Step 6: Write to .env (works for both authenticated and anonymous sessions)
@@ -763,7 +763,7 @@ async def extract_and_save(env_path: str = "/app/.env") -> dict:
             if profile == "m365_hub":
                 msg = f"Extracted {len(cookies)} cookies in authenticated mode (OH.SID present)."
             else:
-            msg = f"Extracted {len(cookies)} cookies in authenticated mode (_U cookie present)."
+                msg = f"Extracted {len(cookies)} cookies in authenticated mode (_U cookie present)."
         else:
             if profile == "m365_hub":
                 msg = (
@@ -772,13 +772,13 @@ async def extract_and_save(env_path: str = "/app/.env") -> dict:
                     f"To fix: (1) Open http://localhost:6080, (2) Complete M365 sign-in, "
                     f"(3) Re-run: curl -X POST http://localhost:8001/extract"
                 )
-        else:
-            msg = (
-                f"Extracted {len(cookies)} cookies but NO _U COOKIE (Microsoft account auth). "
-                f"Copilot API calls will fail with 403. "
-                f"To fix: (1) Open http://localhost:6080, (2) Sign in with your Microsoft account, "
-                f"(3) Re-run: curl -X POST http://localhost:8001/extract"
-            )
+            else:
+                msg = (
+                    f"Extracted {len(cookies)} cookies but NO _U COOKIE (Microsoft account auth). "
+                    f"Copilot API calls will fail with 403. "
+                    f"To fix: (1) Open http://localhost:6080, (2) Sign in with your Microsoft account, "
+                    f"(3) Re-run: curl -X POST http://localhost:8001/extract"
+                )
         print(f"[cookie_extractor] {msg}")
         return {
             "status": "ok",
@@ -887,7 +887,7 @@ async def browser_chat(prompt: str, mode: str = "chat", timeout_ms: int = 60000,
         if _page_pool is None:
             _page_pool = PagePool(pool_size)
         if _chat_semaphore is None:
-            max_concurrent = max(1, int(os.getenv("C3_CHAT_MAX_CONCURRENT", "3")))
+            max_concurrent = max(1, int(os.getenv("C3_CHAT_MAX_CONCURRENT", "6")))
             _chat_semaphore = asyncio.Semaphore(max_concurrent)
     await _page_pool.initialize(context)
 
@@ -964,9 +964,14 @@ async def _browser_chat_on_page(
     ws_urls = []
     done_event = asyncio.Event()
 
-    def _parse_frame(payload: str) -> list[dict]:
+    def _parse_frame(payload) -> list[dict]:
         """Parse one or more JSON messages from a WebSocket frame.
         SignalR frames are delimited by \\x1e (record separator)."""
+        if isinstance(payload, (bytes, bytearray, memoryview)):
+            try:
+                payload = bytes(payload).decode("utf-8", errors="replace")
+            except Exception:
+                return []
         results = []
         for part in payload.split("\x1e"):
             part = part.strip()
@@ -978,7 +983,7 @@ async def _browser_chat_on_page(
                 pass
         return results
 
-    def _on_ws_recv(payload: str) -> None:
+    def _on_ws_recv(payload) -> None:
         """Handle received WebSocket text frames (SignalR or Copilot protocol)."""
         for msg in _parse_frame(payload):
             # SignalR protocol (M365 Copilot via substrate.office.com)
@@ -1056,7 +1061,7 @@ async def _browser_chat_on_page(
                     events_recv.append(f"error:{msg.get('errorCode', 'unknown')}")
                     done_event.set()
 
-    def _on_ws_sent(payload: str) -> None:
+    def _on_ws_sent(payload) -> None:
         """Log sent WebSocket frames."""
         for msg in _parse_frame(payload):
             sr_type = msg.get("type")
@@ -1092,35 +1097,43 @@ async def _browser_chat_on_page(
     )
     if "m365.cloud.microsoft" in (page.url or ""):
         try:
-            await page.wait_for_selector(_combined, state="visible", timeout=3_000)
-            _fast_reset_ok = True
-            print(f"[browser_chat] Composer ready (no reset needed) — {page.url[:60]}")
-        except Exception:
-            try:
-                _clicked = await page.evaluate("""() => {
-                    const nc = document.querySelector(
-                        '[data-testid="sidebar-new-conversation-nav-item"]'
-                    );
-                    if (nc) { nc.click(); return true; }
-                    for (const b of document.querySelectorAll('button,[role="button"]')) {
-                        const t = ((b.textContent || '') +
-                                   (b.getAttribute('aria-label') || '')).toLowerCase();
-                        if (t.includes('new chat') || t.includes('new conversation')) {
-                            b.click();
-                            return true;
-                        }
+            _clicked = await page.evaluate("""() => {
+                // Use dispatchEvent so React's synthetic event system receives the click
+                function _reactClick(el) {
+                    el.dispatchEvent(new MouseEvent('click', {
+                        bubbles: true, cancelable: true, view: window
+                    }));
+                }
+                const nc = document.querySelector(
+                    '[data-testid="sidebar-new-conversation-nav-item"]'
+                );
+                if (nc) { _reactClick(nc); return true; }
+                for (const b of document.querySelectorAll('button,[role="button"]')) {
+                    const t = ((b.textContent || '') +
+                               (b.getAttribute('aria-label') || '')).toLowerCase();
+                    if (t.includes('new chat') || t.includes('new conversation')) {
+                        _reactClick(b);
+                        return true;
                     }
-                    return false;
-                }""")
-                if _clicked:
-                    try:
-                        await page.wait_for_selector(_combined, state="visible", timeout=10_000)
-                        _fast_reset_ok = True
-                        print(f"[browser_chat] Fast reset via 'New chat' — {page.url[:60]}")
-                    except Exception:
-                        pass
-            except Exception:
-                pass
+                }
+                return false;
+            }""")
+            if _clicked:
+                try:
+                    await page.wait_for_selector(_combined, state="visible", timeout=10_000)
+                    _fast_reset_ok = True
+                    print(f"[browser_chat] Fast reset via 'New chat' — {page.url[:60]}")
+                except Exception:
+                    pass
+            else:
+                try:
+                    await page.wait_for_selector(_combined, state="visible", timeout=3_000)
+                    _fast_reset_ok = True
+                    print(f"[browser_chat] Composer ready (no new-chat btn) — {page.url[:60]}")
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     if not _fast_reset_ok:
         print("[browser_chat] Fast reset unavailable — full page teardown")
@@ -1236,27 +1249,68 @@ async def _browser_chat_on_page(
             print(f"[browser_chat] {err}")
             return {"success": False, "error": err, "events": [], "text": ""}, page
 
-        # ── Text input via execCommand (fast + overlay-resilient) ────────
+        # ── Text input via Playwright keyboard (React-compatible) ────────
         _t_type_start = time.monotonic()
         composer = page.locator(composer_sel).first
-        await composer.click(force=True, timeout=10_000)
+        try:
+            await composer.click(force=True, timeout=5_000)
+        except Exception:
+            await page.evaluate(f"""(sel) => {{
+                const el = document.querySelector(sel);
+                if (el) {{ el.focus(); el.click(); }}
+            }}""", composer_sel)
         await asyncio.sleep(0.15)
 
         await page.keyboard.press("Control+A")
         await page.keyboard.press("Backspace")
+        await asyncio.sleep(0.1)
 
-        # Always use execCommand('insertText') — instant, fires React-compatible
-        # beforeinput/input events, and doesn't depend on Playwright actionability
-        # checks that can timeout on stale M365 pages.
-        await page.evaluate("(text) => document.execCommand('insertText', false, text)", prompt)
-        await asyncio.sleep(0.2)
-        print(f"[browser_chat] Inserted prompt ({len(prompt)} chars)")
+        await page.keyboard.type(prompt, delay=20)
+        await asyncio.sleep(0.3)
+        print(f"[browser_chat] Typed prompt ({len(prompt)} chars)")
 
-        # ── Submit via Enter key (most reliable for React apps) ──
+        # ── Submit: 3-tier strategy for React synthetic events ──
+        # Tier 1: Enter key (keyboard events always reach React, no element targeting needed)
+        # Tier 2: Playwright native click (dispatches full pointer events React handles)
+        # Tier 3: dispatchEvent with bubbles:true (bubbles through React's event delegation)
         _timings["type_ms"] = int((time.monotonic() - _t_type_start) * 1000)
         _t_submit = time.monotonic()
+        send_sel = dom_info.get("sendBtn")
+
+        # Tier 1: Enter key on the focused composer
         await page.keyboard.press("Enter")
-        print("[browser_chat] Pressed Enter to submit")
+        print("[browser_chat] Tier1: submitted via Enter key")
+        await asyncio.sleep(0.5)
+
+        # Check if send button is still enabled (means Enter didn't submit)
+        _btn_still_active = False
+        if send_sel:
+            try:
+                _btn_still_active = await page.evaluate("""(sel) => {
+                    const el = document.querySelector(sel);
+                    return el ? !el.disabled : false;
+                }""", send_sel)
+            except Exception:
+                pass
+
+        if _btn_still_active:
+            print(f"[browser_chat] Enter did not submit (btn still active) — Tier2/3")
+            # Tier 2: Playwright native click (full pointer event chain)
+            try:
+                btn = page.locator(send_sel).first
+                await btn.click(force=True, timeout=3_000)
+                print(f"[browser_chat] Tier2: Playwright clicked send button")
+            except Exception:
+                # Tier 3: React-compatible dispatchEvent (bubbles through event delegation)
+                await page.evaluate("""(sel) => {
+                    const el = document.querySelector(sel);
+                    if (el) {
+                        el.dispatchEvent(new MouseEvent('click', {
+                            bubbles: true, cancelable: true, view: window
+                        }));
+                    }
+                }""", send_sel)
+                print(f"[browser_chat] Tier3: dispatchEvent on send button")
 
         # Wait for the done event or timeout
         timeout_s = timeout_ms / 1000.0
