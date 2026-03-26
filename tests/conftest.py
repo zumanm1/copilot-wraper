@@ -40,7 +40,7 @@ async def _fake_ws_stream(self, prompt, context, attachment_path=None):
     yield " response"
 
 
-async def _fake_c3_proxy(self, prompt):
+async def _fake_c3_proxy(self, prompt, agent_id="", chat_mode=""):
     """Avoid real C3 browser-auth call; returns canned text (M365 path)."""
     return "Mocked Copilot response"
 

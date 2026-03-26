@@ -473,7 +473,7 @@ async def api_validate(request: Request):
         pass
 
     async def _run_one(agent: dict) -> dict:
-        r = await _chat_one(agent["id"], prompt, c1)
+        r = await _chat_one(agent["id"], prompt, c1, chat_mode=chat_mode)
         ok = r["ok"] and bool((r.get("text") or "").strip())
         detail = r.get("text") or r.get("error") or r.get("raw") or ""
         if run_id:
