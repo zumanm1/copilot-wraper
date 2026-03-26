@@ -171,52 +171,52 @@ async def _get_context() -> BrowserContext:
         return _context
 
     async with _context_init_lock:
-        if _context is not None:
-            return _context
+    if _context is not None:
+        return _context
 
-        profile_dir = Path(os.getenv("BROWSER_PROFILE_DIR", "/browser-profile"))
-        profile_dir.mkdir(parents=True, exist_ok=True)
+    profile_dir = Path(os.getenv("BROWSER_PROFILE_DIR", "/browser-profile"))
+    profile_dir.mkdir(parents=True, exist_ok=True)
 
-        for lock in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
-            lock_path = profile_dir / lock
+    for lock in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+        lock_path = profile_dir / lock
             if os.path.lexists(lock_path):
-                try:
-                    os.remove(lock_path)
-                    print(f"[cookie_extractor] Removed stale lock: {lock_path}")
-                except OSError:
-                    pass
+            try:
+                os.remove(lock_path)
+                print(f"[cookie_extractor] Removed stale lock: {lock_path}")
+            except OSError:
+                pass
 
-        _playwright = await async_playwright().start()
-        _context = await _playwright.chromium.launch_persistent_context(
-            user_data_dir=str(profile_dir),
+    _playwright = await async_playwright().start()
+    _context = await _playwright.chromium.launch_persistent_context(
+        user_data_dir=str(profile_dir),
             headless=False,
-            args=[
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled",
+        args=[
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-blink-features=AutomationControlled",
                 "--disable-quic",
-                "--window-size=1280,1024",
-                "--window-position=0,0",
-                "--start-maximized",
-                "--hide-crash-restore-bubble",
-                "--test-type",
-                "--disable-popup-blocking",
-            ],
-            ignore_default_args=["--enable-automation", "--disable-infobars"],
+            "--window-size=1280,1024",
+            "--window-position=0,0",
+            "--start-maximized",
+            "--hide-crash-restore-bubble",
+            "--test-type",
+            "--disable-popup-blocking",
+        ],
+        ignore_default_args=["--enable-automation", "--disable-infobars"],
             viewport=None,
-            ignore_https_errors=False,
-            accept_downloads=False,
-        )
+        ignore_https_errors=False,
+        accept_downloads=False,
+    )
 
-        def _on_new_page(popup: Page) -> None:
-            asyncio.ensure_future(_handle_auth_popup(popup))
+    def _on_new_page(popup: Page) -> None:
+        asyncio.ensure_future(_handle_auth_popup(popup))
 
-        _context.on("page", _on_new_page)
+    _context.on("page", _on_new_page)
 
         if _DISMISS_AUTH_DIALOG:
-            asyncio.ensure_future(_auth_dialog_monitor())
+    asyncio.ensure_future(_auth_dialog_monitor())
 
-        return _context
+    return _context
 
 
 async def _handle_auth_popup(popup: Page) -> None:
@@ -515,7 +515,7 @@ async def _is_logged_in(
             if any(tok in html for tok in signed_in_ui_markers):
                 return True
             if any(tok in html for tok in ("sign in", "log in")):
-                return False
+        return False
             return False
 
         # Consumer flow keeps previous behavior (portal host is enough).
@@ -751,7 +751,7 @@ async def extract_and_save(env_path: str = "/app/.env") -> dict:
         if profile == "m365_hub":
             has_auth = "OH.SID" in cookies
         else:
-            has_auth = any(c in cookies for c in AUTH_COOKIES)
+        has_auth = any(c in cookies for c in AUTH_COOKIES)
         mode = "authenticated" if has_auth else "anonymous"
 
         # Step 6: Write to .env (works for both authenticated and anonymous sessions)
@@ -763,7 +763,7 @@ async def extract_and_save(env_path: str = "/app/.env") -> dict:
             if profile == "m365_hub":
                 msg = f"Extracted {len(cookies)} cookies in authenticated mode (OH.SID present)."
             else:
-                msg = f"Extracted {len(cookies)} cookies in authenticated mode (_U cookie present)."
+            msg = f"Extracted {len(cookies)} cookies in authenticated mode (_U cookie present)."
         else:
             if profile == "m365_hub":
                 msg = (
@@ -772,13 +772,13 @@ async def extract_and_save(env_path: str = "/app/.env") -> dict:
                     f"To fix: (1) Open http://localhost:6080, (2) Complete M365 sign-in, "
                     f"(3) Re-run: curl -X POST http://localhost:8001/extract"
                 )
-            else:
-                msg = (
-                    f"Extracted {len(cookies)} cookies but NO _U COOKIE (Microsoft account auth). "
-                    f"Copilot API calls will fail with 403. "
-                    f"To fix: (1) Open http://localhost:6080, (2) Sign in with your Microsoft account, "
-                    f"(3) Re-run: curl -X POST http://localhost:8001/extract"
-                )
+        else:
+            msg = (
+                f"Extracted {len(cookies)} cookies but NO _U COOKIE (Microsoft account auth). "
+                f"Copilot API calls will fail with 403. "
+                f"To fix: (1) Open http://localhost:6080, (2) Sign in with your Microsoft account, "
+                f"(3) Re-run: curl -X POST http://localhost:8001/extract"
+            )
         print(f"[cookie_extractor] {msg}")
         return {
             "status": "ok",
