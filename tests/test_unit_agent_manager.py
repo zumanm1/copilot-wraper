@@ -8,9 +8,6 @@ import pytest_asyncio
 from unittest.mock import AsyncMock, patch
 
 
-pytestmark = pytest.mark.asyncio
-
-
 @pytest.fixture
 def mock_backend():
     b = AsyncMock()

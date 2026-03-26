@@ -75,9 +75,6 @@ class TestNormalisation:
 # B. C9 _chat_one — X-Chat-Mode header
 # ═════════════════════════════════════════════════════════════════════════════
 
-pytestmark = pytest.mark.asyncio
-
-
 @pytest.fixture
 def c9_app():
     """C9 FastAPI app with its HTTP client replaced by a mock."""

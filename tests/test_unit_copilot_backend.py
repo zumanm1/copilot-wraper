@@ -10,9 +10,6 @@ import pytest
 from unittest.mock import AsyncMock, patch
 
 
-pytestmark = pytest.mark.asyncio
-
-
 async def _fake_ws_tokens(self, prompt, context, attachment_path=None):
     for t in ["tok1", "tok2", "tok3"]:
         yield t
