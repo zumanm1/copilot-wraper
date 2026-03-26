@@ -145,6 +145,20 @@ if _limiter:
 @app.on_event("startup")
 async def startup_event():
     """Pre-warm the connection pool, conversation ID pool, and start reapers."""
+    # ── Provider/profile consistency check ───────────────────────────────────
+    _effective = config.resolved_provider()
+    _explicit  = config.COPILOT_PROVIDER
+    if _explicit not in ("auto", _effective):
+        logger.warning(
+            "Provider mismatch: COPILOT_PROVIDER=%s but COPILOT_PORTAL_PROFILE=%s "
+            "resolves to '%s'. All requests will use '%s'. "
+            "Re-save the setup form at APP1 :8080/setup to fix this automatically.",
+            _explicit, config.COPILOT_PORTAL_PROFILE, _effective, _effective,
+        )
+    else:
+        logger.info("Provider check OK: COPILOT_PROVIDER=%s → effective=%s (profile=%s)",
+                    _explicit, _effective, config.COPILOT_PORTAL_PROFILE)
+    # ─────────────────────────────────────────────────────────────────────────
     pool = get_connection_pool()
     warm_tasks = [_warm_one(pool) for _ in range(config.POOL_WARM_COUNT)]
     await asyncio.gather(*warm_tasks, return_exceptions=True)

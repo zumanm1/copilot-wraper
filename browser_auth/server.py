@@ -155,6 +155,7 @@ label{{display:block;margin-top:1rem;font-weight:600;}}
 input[type=text]{{width:100%;box-sizing:border-box;padding:.4rem;}}
 button{{margin-top:1.25rem;padding:.5rem 1rem;}}
 p.note{{color:#555;font-size:.9rem;}}
+p.warn{{color:#b45309;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;padding:.5rem .75rem;font-size:.88rem;}}
 fieldset{{margin-top:1rem;border:1px solid #ccc;padding:1rem;border-radius:8px;}}
 legend{{font-weight:700;padding:0 .35rem;}}
 .portal-row{{display:flex;gap:.5rem;align-items:flex-start;margin-top:.65rem;font-weight:400;}}
@@ -188,6 +189,7 @@ legend{{font-weight:700;padding:0 .35rem;}}
 </div>
 <h1>Choose Copilot portal</h1>
 {banner}
+{mismatch_banner}
 <p class="note">LAN-only UI. Pick where you will sign in. Values are saved to the mounted <code>.env</code> (no cookies shown).</p>
 <p class="note">If noVNC at <code>:6080</code> stays black for a long time, wait a few seconds after the container starts (browser warms to this page), or run <code>POST /navigate</code> or <code>POST /extract</code>.</p>
 <form method="post" action="/setup">
@@ -300,8 +302,18 @@ legend{{font-weight:700;padding:0 .35rem;}}
 @app.get("/setup", response_class=HTMLResponse)
 async def setup_get(request: Request):
     profile, portal_base, api_base = portal_settings_from_env_file(ENV_PATH)
-    _env_data = _read_env_keys(ENV_PATH, ("M365_CHAT_MODE",))
+    _env_data = _read_env_keys(ENV_PATH, ("M365_CHAT_MODE", "COPILOT_PROVIDER"))
     chat_mode = (os.getenv("M365_CHAT_MODE") or _env_data.get("M365_CHAT_MODE") or "work").strip().lower()
+    current_provider = (os.getenv("COPILOT_PROVIDER") or _env_data.get("COPILOT_PROVIDER") or "auto").strip().lower()
+    expected_provider = "m365" if profile == "m365_hub" else "copilot"
+    mismatch_banner = ""
+    if current_provider not in ("auto", expected_provider):
+        mismatch_banner = (
+            f'<p class="warn">&#9888; <strong>Provider mismatch:</strong> '
+            f'<code>COPILOT_PROVIDER={html.escape(current_provider)}</code> but profile '
+            f'<code>{html.escape(profile)}</code> expects <code>{expected_provider}</code>. '
+            f'Save settings below to fix automatically.</p>'
+        )
     banner = ""
     ok = request.query_params.get("ok")
     if ok == "1":
@@ -316,6 +328,7 @@ async def setup_get(request: Request):
         )
     return _SETUP_HTML.format(
         banner=banner,
+        mismatch_banner=mismatch_banner,
         chk_m365="checked" if profile == "m365_hub" else "",
         chk_consumer="checked" if profile == "consumer" else "",
         chk_work="checked" if chat_mode != "web" else "",
@@ -343,6 +356,9 @@ async def setup_post(
         cm = "work"
     patch_env_variable(ENV_PATH, "COPILOT_PORTAL_PROFILE", p)
     patch_env_variable(ENV_PATH, "M365_CHAT_MODE", cm)
+    # Keep COPILOT_PROVIDER in sync with the profile so an explicit "copilot" value
+    # in .env can never silently override an m365_hub profile (or vice-versa).
+    patch_env_variable(ENV_PATH, "COPILOT_PROVIDER", "m365" if p == "m365_hub" else "copilot")
     portal_base = normalize_copilot_portal_url((portal_base or "").strip())
     api_base = normalize_copilot_portal_url((api_base or "").strip())
     patch_env_variable(ENV_PATH, "COPILOT_PORTAL_BASE_URL", portal_base)
