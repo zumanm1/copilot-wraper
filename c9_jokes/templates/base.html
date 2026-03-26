@@ -32,8 +32,9 @@
       var lbl = led.querySelector('.session-led-label');
       led.className = 'session-led ' + (data.session || 'unknown');
       if (data.session === 'active') {
-        lbl.textContent = 'M365 Session: Active';
-        led.title = 'Session active — profile: ' + (data.profile || '');
+        var modeStr = data.chat_mode ? ' | ' + data.chat_mode.charAt(0).toUpperCase() + data.chat_mode.slice(1) : '';
+        lbl.textContent = 'M365 Session: Active' + modeStr;
+        led.title = 'Session active — profile: ' + (data.profile || '') + (data.chat_mode ? ' — mode: ' + data.chat_mode : '');
       } else if (data.session === 'expired') {
         lbl.textContent = 'M365 Session: Expired — sign in via noVNC :6080';
         led.title = 'Session expired: ' + (data.reason || '') + ' — Sign in via noVNC at port 6080';

@@ -149,13 +149,16 @@ async def _probe_all() -> list[dict]:
 
 # ── Chat proxy helper (async) ────────────────────────────────────────────────
 
-async def _chat_one(agent_id: str, prompt: str, c1_url: str) -> dict:
+async def _chat_one(agent_id: str, prompt: str, c1_url: str, chat_mode: str = "") -> dict:
     """Call C1 for a single agent. Returns {ok, http_status, text, elapsed_ms}."""
     body = {
         "model": "copilot",
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
     }
+    headers = {"Content-Type": "application/json", "X-Agent-ID": agent_id}
+    if chat_mode:
+        headers["X-Chat-Mode"] = chat_mode
     client = _get_http()
     t0 = time.monotonic()
     # #region agent log
@@ -164,7 +167,7 @@ async def _chat_one(agent_id: str, prompt: str, c1_url: str) -> dict:
     try:
         r = await client.post(
             f"{c1_url}/v1/chat/completions",
-            headers={"Content-Type": "application/json", "X-Agent-ID": agent_id},
+            headers=headers,
             json=body,
             timeout=180,
         )
@@ -415,9 +418,10 @@ async def api_chat(request: Request):
         payload_in = {}
     agent_id = (payload_in.get("agent_id") or "c9-jokes").strip()
     prompt = (payload_in.get("prompt") or "").strip()
+    chat_mode = (payload_in.get("chat_mode") or "").strip().lower()
     if not prompt:
         return JSONResponse({"ok": False, "error": "prompt required"}, status_code=400)
-    result = await _chat_one(agent_id, prompt, c1)
+    result = await _chat_one(agent_id, prompt, c1, chat_mode=chat_mode)
     try:
         with _db() as conn:
             conn.execute(
@@ -448,6 +452,7 @@ async def api_validate(request: Request):
     except Exception:
         payload = {}
     prompt = (payload.get("prompt") or "Tell me a joke").strip()
+    chat_mode = (payload.get("chat_mode") or "").strip().lower()
     requested_ids = payload.get("agent_ids") or [a["id"] for a in AGENTS]
     agents_to_run = [a for a in AGENTS if a["id"] in requested_ids]
     if not agents_to_run:

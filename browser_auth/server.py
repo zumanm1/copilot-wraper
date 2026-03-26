@@ -26,6 +26,7 @@ from portal_urls import normalize_copilot_portal_url
 
 from cookie_extractor import (
     browser_chat,
+    _read_env_keys,
     check_session_health,
     extract_and_save,
     extract_access_token,
@@ -91,6 +92,7 @@ async def session_health():
     """Lightweight M365 session status check — no navigation, no chat."""
     try:
         result = await check_session_health(ENV_PATH)
+        result["chat_mode"] = os.getenv("M365_CHAT_MODE", "work")
         status_code = 200
         return JSONResponse(result, status_code=status_code)
     except Exception as exc:
@@ -119,7 +121,7 @@ async def chat(request: Request):
     The browser's native TLS fingerprint bypasses the null-method challenge
     that blocks programmatic WebSocket connections from aiohttp/httpx.
 
-    Body: {"prompt": "...", "mode": "chat|smart|reasoning", "timeout": 30000}
+    Body: {"prompt": "...", "chat_mode": "work|web", "timeout": 30000, "agent_id": ""}
     Returns: {"success": bool, "text": "...", "events": [...]}
     """
     try:
@@ -131,7 +133,9 @@ async def chat(request: Request):
     if not prompt:
         return JSONResponse({"error": "prompt is required"}, status_code=400)
 
-    mode = body.get("mode", "chat")
+    # chat_mode: "work"|"web" — selects M365 Work/Web toggle before each message
+    # Falls back to legacy "mode" field, then env default (M365_CHAT_MODE)
+    mode = body.get("chat_mode") or body.get("mode") or ""
     timeout_ms = int(body.get("timeout", 30000))
     agent_id = body.get("agent_id", "")
 
@@ -197,6 +201,18 @@ legend{{font-weight:700;padding:0 .35rem;}}
 <label class="portal-row">
 <input type="radio" name="profile" value="consumer" {chk_consumer}/>
 <span><strong>Consumer Copilot</strong><br/><span class="note">https://copilot.microsoft.com/</span></span>
+</label>
+</fieldset>
+<fieldset style="margin-top:1rem;">
+<legend>Default chat mode</legend>
+<p class="note" style="margin-top:0">Selects Work (enterprise M365 data) or Web (public internet) grounding before each message. Saved as <code>M365_CHAT_MODE</code> in <code>.env</code>.</p>
+<label class="portal-row">
+<input type="radio" name="chat_mode" value="work" {{chk_work}}/>
+<span><strong>Work</strong><br/><span class="note">Email, Teams, SharePoint, OneDrive</span></span>
+</label>
+<label class="portal-row">
+<input type="radio" name="chat_mode" value="web" {{chk_web}}/>
+<span><strong>Web</strong><br/><span class="note">Public internet search results</span></span>
 </label>
 </fieldset>
 <label for="portal_base">Optional override: COPILOT_PORTAL_BASE_URL</label>
@@ -284,6 +300,8 @@ legend{{font-weight:700;padding:0 .35rem;}}
 @app.get("/setup", response_class=HTMLResponse)
 async def setup_get(request: Request):
     profile, portal_base, api_base = portal_settings_from_env_file(ENV_PATH)
+    _env_data = _read_env_keys(ENV_PATH, ("M365_CHAT_MODE",))
+    chat_mode = (os.getenv("M365_CHAT_MODE") or _env_data.get("M365_CHAT_MODE") or "work").strip().lower()
     banner = ""
     ok = request.query_params.get("ok")
     if ok == "1":
@@ -300,6 +318,8 @@ async def setup_get(request: Request):
         banner=banner,
         chk_m365="checked" if profile == "m365_hub" else "",
         chk_consumer="checked" if profile == "consumer" else "",
+        chk_work="checked" if chat_mode != "web" else "",
+        chk_web="checked" if chat_mode == "web" else "",
         portal_base=html.escape(portal_base, quote=True),
         api_base=html.escape(api_base, quote=True),
     )
@@ -310,6 +330,7 @@ async def setup_post(
     profile: str = Form(...),
     portal_base: str = Form(""),
     api_base: str = Form(""),
+    chat_mode: str = Form("work"),
 ):
     p = (profile or "").strip().lower()
     if p not in ("consumer", "m365_hub"):
@@ -317,7 +338,11 @@ async def setup_post(
             status_code=400,
             content={"status": "error", "message": "profile must be consumer or m365_hub"},
         )
+    cm = (chat_mode or "work").strip().lower()
+    if cm not in ("work", "web"):
+        cm = "work"
     patch_env_variable(ENV_PATH, "COPILOT_PORTAL_PROFILE", p)
+    patch_env_variable(ENV_PATH, "M365_CHAT_MODE", cm)
     portal_base = normalize_copilot_portal_url((portal_base or "").strip())
     api_base = normalize_copilot_portal_url((api_base or "").strip())
     patch_env_variable(ENV_PATH, "COPILOT_PORTAL_BASE_URL", portal_base)

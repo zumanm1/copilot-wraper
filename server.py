@@ -289,6 +289,7 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
     # CRITICAL: Always print to stderr for Docker logs visibility
     print(f"Bounty Hunter Trace: API_ENTRY model={request.model} streaming={request.stream}", file=sys.stderr, flush=True)
     agent_id = raw_request.headers.get("X-Agent-ID")
+    chat_mode = (raw_request.headers.get("X-Chat-Mode") or "").strip().lower()
     prompt = extract_user_prompt(request.messages)
     try:
         attachment = extract_image(request.messages)
@@ -318,7 +319,7 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
     if request.stream:
         return StreamingResponse(
             stream_gen(
-                release_fn, backend, prompt, attachment, request.model, request.max_tokens, agent_id or "",
+                release_fn, backend, prompt, attachment, request.model, request.max_tokens, agent_id or "", chat_mode,
             ),
             media_type="text/event-stream",
             headers={"x-generation-params-note": gen_note},
@@ -326,7 +327,7 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
 
     # ── Non-streaming path ────────────────────────────────────────────
     try:
-        response = await backend.chat_completion(prompt=prompt, attachment_path=attachment, agent_id=agent_id or "")
+        response = await backend.chat_completion(prompt=prompt, attachment_path=attachment, agent_id=agent_id or "", chat_mode=chat_mode)
         sys.stderr.write(f"Bounty Hunter Trace: RESPONSE_CONTENT='{response[:100]}...'\n")
         sys.stderr.flush()
         response, truncated = truncate_by_approx_tokens(response, request.max_tokens)
@@ -359,7 +360,7 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
         _cleanup_attachment(attachment)
 
 
-async def stream_gen(release_fn, backend, prompt, attachment, model, max_tokens, agent_id=""):
+async def stream_gen(release_fn, backend, prompt, attachment, model, max_tokens, agent_id="", chat_mode=""):
     """SSE generator — releases backend (or no-ops for agent sessions) after streaming."""
     chat_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())   # computed once, not per-token
@@ -378,7 +379,7 @@ async def stream_gen(release_fn, backend, prompt, attachment, model, max_tokens,
         end_fr = "stop"
         char_budget = max_tokens * 4 if max_tokens else 0
         chars_sent = 0
-        async for token in backend.chat_completion_stream(prompt=prompt, attachment_path=attachment, agent_id=agent_id or ""):
+        async for token in backend.chat_completion_stream(prompt=prompt, attachment_path=attachment, agent_id=agent_id or "", chat_mode=chat_mode):
             if char_budget:
                 chars_sent += len(token)
                 if chars_sent > char_budget:

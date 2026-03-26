@@ -1161,6 +1161,39 @@ async def _browser_chat_on_page(
     _timings["nav_ms"] = int((time.monotonic() - _t_nav_start) * 1000)
     _timings["nav_method"] = "fast_reset" if _fast_reset_ok else "full_teardown"
 
+    # ── Phase 3.5: Click Work or Web mode toggle ──────────────────────────────
+    # M365 Copilot Chat shows a "Work | Web" segmented button at page top.
+    # Per-request override via `mode` arg; env var sets the persistent default.
+    _chat_mode_target = (mode or os.getenv("M365_CHAT_MODE", "work")).strip().lower()
+    if _chat_mode_target in ("work", "web") and "m365.cloud.microsoft" in (page.url or ""):
+        _mode_label = _chat_mode_target.capitalize()
+        try:
+            _clicked_mode = await page.evaluate("""(label) => {
+                const lo = label.toLowerCase();
+                const candidates = [
+                    ...document.querySelectorAll('[role="tab"],[role="button"],button')
+                ];
+                const el = candidates.find(b => {
+                    const txt = (b.textContent || '').trim().toLowerCase();
+                    const aria = (b.getAttribute('aria-label') || '').trim().toLowerCase();
+                    return txt === lo || aria === lo || aria.startsWith(lo);
+                });
+                if (el) {
+                    el.dispatchEvent(new MouseEvent('click', {
+                        bubbles: true, cancelable: true, view: window
+                    }));
+                    return true;
+                }
+                return false;
+            }""", _mode_label)
+            if _clicked_mode:
+                await asyncio.sleep(0.3)  # let React re-render after mode switch
+                print(f"[browser_chat] Mode set to '{_mode_label}'")
+            else:
+                print(f"[browser_chat] Work/Web toggle not found — current page mode unchanged")
+        except Exception as _mode_err:
+            print(f"[browser_chat] Mode click error (non-fatal): {_mode_err}")
+
     try:
         # Use page.evaluate() for auth dialog check — immune to overlay dialogs
         await asyncio.sleep(0.3)  # Brief settle after nav

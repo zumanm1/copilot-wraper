@@ -9,6 +9,15 @@
     <label>Prompt sent to every agent</label>
     <input id="val-prompt" value="Tell me a joke" />
   </div>
+  <div class="control-row" style="margin-top:0.5rem;align-items:center;">
+    <label>Chat mode</label>
+    <div class="mode-toggle" style="display:flex;gap:0.25rem;">
+      <button type="button" id="mode-work" class="mode-btn active" data-mode="work"
+              style="padding:0.25rem 0.75rem;border:1px solid var(--border,#555);border-radius:4px 0 0 4px;background:var(--accent,#0078d4);color:#fff;cursor:pointer;">Work</button>
+      <button type="button" id="mode-web"  class="mode-btn"        data-mode="web"
+              style="padding:0.25rem 0.75rem;border:1px solid var(--border,#555);border-left:none;border-radius:0 4px 4px 0;background:transparent;cursor:pointer;">Web</button>
+    </div>
+  </div>
   <div style="display:flex;gap:0.5rem;margin-top:0.5rem;flex-wrap:wrap;align-items:center;">
     <button type="button" id="run-all">Run all agents</button>
     <button type="button" id="run-parallel" class="btn-parallel">Run All Parallel ⚡</button>
@@ -70,6 +79,20 @@ python3 tests/validate_all_agents.py --parallel</pre>
   const resetBtn    = document.getElementById('reset-all');
   const summaryEl   = document.getElementById('summary');
   let busy = false;
+  let activeChatMode = 'work';
+
+  // Work/Web mode toggle
+  document.querySelectorAll('.mode-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      activeChatMode = btn.dataset.mode;
+      document.querySelectorAll('.mode-btn').forEach(function(b) {
+        const isActive = b.dataset.mode === activeChatMode;
+        b.style.background = isActive ? 'var(--accent,#0078d4)' : 'transparent';
+        b.style.color = isActive ? '#fff' : '';
+        if (isActive) b.classList.add('active'); else b.classList.remove('active');
+      });
+    });
+  });
 
   function escapeHtml(s) {
     const d = document.createElement('div');
@@ -165,7 +188,7 @@ python3 tests/validate_all_agents.py --parallel</pre>
       const r = await fetch('/api/validate', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ prompt, agent_ids: [agentId] })
+        body: JSON.stringify({ prompt, agent_ids: [agentId], chat_mode: activeChatMode })
       });
       const j = await r.json();
       const res = (j.results || [])[0] || {};
@@ -187,7 +210,7 @@ python3 tests/validate_all_agents.py --parallel</pre>
       const r = await fetch('/api/validate', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ prompt, parallel: useParallel })
+        body: JSON.stringify({ prompt, parallel: useParallel, chat_mode: activeChatMode })
       });
       const j = await r.json();
       (j.results || []).forEach(function(res) {
