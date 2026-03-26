@@ -7,14 +7,20 @@
 <table>
   <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td>GET</td><td><code>/api/status</code></td><td>JSON health probe for all 8 containers</td></tr>
-    <tr><td>POST</td><td><code>/api/chat</code></td><td>Proxy chat to C1. Body: <code>{"agent_id":"c2-aider","prompt":"Tell me a joke"}</code></td></tr>
+    <tr><td>GET</td><td><code>/api/status</code></td><td>JSON health for all <code>TARGETS</code> keys plus <code>c3-status</code> (C3 <code>/status</code>); persists rows to <code>health_snapshots</code></td></tr>
+    <tr><td>GET</td><td><code>/api/session-health</code></td><td>Proxies C3 M365 session LED data (active / expired)</td></tr>
+    <tr><td>GET</td><td><code>/api/health-history</code></td><td>Query: <code>?target=c1&amp;limit=10</code> — last snapshots for one target (or omit <code>target</code> for recent rows)</td></tr>
+    <tr><td>POST</td><td><code>/api/chat</code></td><td>Proxy chat to C1. Body: <code>{"agent_id":"c2-aider","prompt":"Tell me a joke"}</code>; logs to SQLite</td></tr>
+    <tr><td>POST</td><td><code>/api/validate</code></td><td>Pair validation. Body: <code>{"prompt":"…","parallel":true,"agent_ids":["c2-aider"]}</code> (omit <code>agent_ids</code> for all)</td></tr>
+    <tr><td>GET</td><td><code>/api/validation-runs</code></td><td>Query: <code>?limit=10</code> — recent runs with <code>pairs</code> detail</td></tr>
+    <tr><td>GET</td><td><code>/api/logs</code></td><td>Query: <code>?agent=c2-aider&amp;offset=0&amp;limit=20</code> — JSON chat log rows + total</td></tr>
     <tr><td>GET</td><td><code>/</code></td><td>Dashboard — container status grid</td></tr>
-    <tr><td>GET</td><td><code>/health</code></td><td>Detailed health table with HTTP status</td></tr>
+    <tr><td>GET</td><td><code>/health</code></td><td>Detailed health table + per-target history dots</td></tr>
     <tr><td>GET</td><td><code>/pairs</code></td><td>Run pair validation from UI</td></tr>
     <tr><td>GET</td><td><code>/chat</code></td><td>Interactive agent chat</td></tr>
     <tr><td>GET</td><td><code>/logs</code></td><td>Chat log history (SQLite)</td></tr>
-    <tr><td>GET</td><td><code>/sessions</code></td><td>C1 backend session list</td></tr>
+    <tr><td>GET</td><td><code>/sessions</code></td><td>C1 <code>/v1/sessions</code> list</td></tr>
+    <tr><td>GET</td><td><code>/api</code></td><td>This API reference page</td></tr>
   </tbody>
 </table>
 

@@ -22,7 +22,7 @@
   </thead>
   <tbody>
   {% for p in probes %}
-    <tr id="hrow-{{ loop.index0 }}" data-key="{{ p.name | lower | replace(' ', '-') }}">
+    <tr id="hrow-{{ loop.index0 }}" data-target-key="{{ p.target_key }}">
       <td><strong>{{ p.name }}</strong></td>
       <td><small>{{ p.url }}</small></td>
       <td id="hbadge-{{ loop.index0 }}">
@@ -69,13 +69,14 @@
     } catch(e) {}
   }
 
+  const ROW_TARGET_KEYS = {{ probes | map(attribute='target_key') | list | tojson }};
+
   async function refresh() {
     document.getElementById('health-refresh').textContent = '…';
     try {
       const resp = await fetch('/api/status');
       const data = await resp.json();
-      const containers = Object.keys(data).filter(k => k !== 'ts');
-      containers.forEach(function(key, idx) {
+      ROW_TARGET_KEYS.forEach(function(key, idx) {
         const p = data[key];
         if (!p) return;
         const badgeEl = document.getElementById('hbadge-' + idx);
@@ -99,10 +100,7 @@
     document.getElementById('health-refresh').textContent = 'Refresh now';
   }
 
-  // Initial history load
-  const containers = {{ probes | map(attribute='name') | list | tojson }};
-  containers.forEach(function(name, idx) {
-    const key = name.split(' ')[0].toLowerCase();
+  ROW_TARGET_KEYS.forEach(function(key, idx) {
     loadHistory(key, idx);
   });
 

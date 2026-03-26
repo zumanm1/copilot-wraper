@@ -115,10 +115,17 @@ def create_app() -> Flask:
 
     def _probe_all() -> list[dict]:
         urls = _urls()
-        return [
-            probe_health(TARGETS[key]["label"], urls[key], TARGETS[key]["health"])
-            for key in TARGETS
-        ]
+        with ThreadPoolExecutor(max_workers=len(TARGETS)) as pool:
+            futures = {
+                key: pool.submit(probe_health, TARGETS[key]["label"], urls[key], TARGETS[key]["health"])
+                for key in TARGETS
+            }
+            out: list[dict] = []
+            for key in TARGETS:
+                p = futures[key].result()
+                p["target_key"] = key
+                out.append(p)
+            return out
 
     # ── Chat proxy helper (shared by /api/chat and /api/validate) ─────────────
 
@@ -174,7 +181,9 @@ def create_app() -> Flask:
     def page_health():
         probes = _probe_all()
         urls = _urls()
-        probes.append(probe_health("C3 /status", urls["c3"], "/status"))
+        extra = probe_health("C3 /status", urls["c3"], "/status")
+        extra["target_key"] = "c3-status"
+        probes.append(extra)
         return render_template("health.html", probes=probes)
 
     @app.get("/pairs")
@@ -270,15 +279,24 @@ def create_app() -> Flask:
         result = {}
         ts = datetime.now(timezone.utc).isoformat()
         rows_to_insert = []
+        import json
+
         for key in TARGETS:
-            p = probe_health(key, urls[key], TARGETS[key]["health"])
+            p = probe_health(TARGETS[key]["label"], urls[key], TARGETS[key]["health"])
             result[key] = p
-            import json
             rows_to_insert.append((
                 ts, key,
                 p.get("http_status"),
                 json.dumps(p.get("body") or {"error": p.get("error", "")}),
             ))
+        # Secondary C3 probe — matches Health page extra row; same labels as probe_health for JSON shape
+        p3s = probe_health("C3 /status", urls["c3"], "/status")
+        result["c3-status"] = p3s
+        rows_to_insert.append((
+            ts, "c3-status",
+            p3s.get("http_status"),
+            json.dumps(p3s.get("body") or {"error": p3s.get("error", "")}),
+        ))
         # Persist to health_snapshots (Feature 1 — wire dead table)
         try:
             with _db() as conn:
@@ -363,13 +381,12 @@ def create_app() -> Flask:
         c1 = _urls()["c1"]
         payload = request.get_json(silent=True) or {}
         prompt = (payload.get("prompt") or "Tell me a joke").strip()
-        parallel = bool(payload.get("parallel", False))
         requested_ids = payload.get("agent_ids") or [a["id"] for a in AGENTS]
         agents_to_run = [a for a in AGENTS if a["id"] in requested_ids]
         if not agents_to_run:
             return jsonify({"ok": False, "error": "no matching agents"}), 400
 
-        mode = "web-parallel" if parallel else "web-sequential"
+        mode = "web-parallel"
         started_at = datetime.now(timezone.utc).isoformat()
         wall_t0 = time.monotonic()
         run_id = None
@@ -410,30 +427,21 @@ def create_app() -> Flask:
 
         results: list[dict] = []
 
-        if parallel:
-            # Fire all agents concurrently. C3's _chat_lock will queue them
-            # internally; C1 treats each as a distinct session via X-Agent-ID.
-            # max_workers = number of agents so all start immediately.
-            with ThreadPoolExecutor(max_workers=len(agents_to_run)) as pool:
-                futures = {pool.submit(_run_one, agent): agent for agent in agents_to_run}
-                # Collect in submission order for consistent table display
-                ordered: dict = {}
-                for fut in as_completed(futures):
-                    agent = futures[fut]
-                    try:
-                        ordered[agent["id"]] = fut.result()
-                    except Exception as exc:
-                        ordered[agent["id"]] = {
-                            "agent_id": agent["id"], "label": agent["label"],
-                            "ok": False, "http_status": None,
-                            "text": "", "elapsed_ms": None,
-                            "error": str(exc),
-                        }
-            # Preserve original agent order
-            results = [ordered[a["id"]] for a in agents_to_run if a["id"] in ordered]
-        else:
-            for agent in agents_to_run:
-                results.append(_run_one(agent))
+        with ThreadPoolExecutor(max_workers=len(agents_to_run)) as pool:
+            futures = {pool.submit(_run_one, agent): agent for agent in agents_to_run}
+            ordered: dict = {}
+            for fut in as_completed(futures):
+                agent = futures[fut]
+                try:
+                    ordered[agent["id"]] = fut.result()
+                except Exception as exc:
+                    ordered[agent["id"]] = {
+                        "agent_id": agent["id"], "label": agent["label"],
+                        "ok": False, "http_status": None,
+                        "text": "", "elapsed_ms": None,
+                        "error": str(exc),
+                    }
+        results = [ordered[a["id"]] for a in agents_to_run if a["id"] in ordered]
 
         wall_ms = int((time.monotonic() - wall_t0) * 1000)
         passed = sum(1 for r in results if r["ok"])

@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Dashboard{% endblock %}
 {% block content %}
-<div class="status-bar" id="status-bar">
+<div class="status-bar{% if up == total %} bar-ok{% elif up == 0 %} bar-fail{% else %} bar-warn{% endif %}" id="status-bar">
   <span id="summary-text">
     <strong id="up-count">{{ up }}</strong> / <strong>{{ total }}</strong> containers UP
   </span>
@@ -34,7 +34,6 @@
 <script>
 (function() {
   const INTERVAL = 15000;
-  const keys = {{ probes | map(attribute='name') | list | tojson }};
   let timer = null;
 
   function fmtTime(d) {
@@ -59,19 +58,20 @@
     card.classList.toggle('card-down', !up);
   }
 
+  const STATUS_KEYS = {{ targets.keys() | list | tojson }};
+
   async function refresh() {
     document.getElementById('refresh-btn').textContent = '…';
     try {
       const resp = await fetch('/api/status');
       const data = await resp.json();
-      const containers = Object.keys(data).filter(k => k !== 'ts');
       let up = 0;
-      containers.forEach((key, idx) => {
+      STATUS_KEYS.forEach((key, idx) => {
         const p = data[key];
         if (p && p.ok) up++;
         updateCard(idx, p || {});
       });
-      const total = containers.length;
+      const total = STATUS_KEYS.length;
       document.getElementById('up-count').textContent = up;
       const bar = document.getElementById('status-bar');
       bar.classList.toggle('bar-ok', up === total);
