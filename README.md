@@ -1,6 +1,6 @@
 # Copilot OpenAI-Compatible API Wrapper
 
-> **Use Microsoft Copilot with any OpenAI or Anthropic client — eight containerised services, zero configuration conflicts.**
+> **Use Microsoft Copilot with any OpenAI or Anthropic client — nine containerised services, zero configuration conflicts.**
 
 ---
 
@@ -19,6 +19,7 @@
 11. [Testing](#11-testing)
 12. [Configuration Reference](#12-configuration-reference)
 13. [Troubleshooting](#13-troubleshooting)
+14. [C9 Validation Console](#14-c9-validation-console)
 
 ---
 
@@ -29,7 +30,7 @@ Microsoft Copilot is a powerful AI assistant with no official public API. This p
 - **OpenAI-compatible** — `/v1/chat/completions` works with any OpenAI SDK, LangChain, AutoGen, Open WebUI, Aider, OpenCode, KiloCode, and more
 - **Anthropic-compatible** — `/v1/messages` works with Claude Code, the Anthropic SDK, and any client that targets Claude's API
 
-Eight Docker containers make up the full stack:
+Nine Docker containers make up the full stack:
 
 ```
 Your App / OpenAI SDK / Claude Code / Hermes / ...
@@ -120,6 +121,7 @@ C1 receives prompt → POST C3 /chat → Playwright types in M365 UI → SignalR
 | C7a | `C7a_openclaw-gateway` | `copilot-openclaw-gateway:latest` | `18789` | OpenClaw gateway (WebSocket hub) |
 | C7b | `C7b_openclaw-cli` | `copilot-openclaw-cli:latest` | `8080` (health) | OpenClaw CLI / TUI |
 | C8 | `C8_hermes-agent` | `copilot-hermes-agent:latest` | `8080` (health) | Hermes Agent (memory, skills, cron) |
+| C9 | `C9_jokes` | `copilot-c9-jokes:latest` | `6090` | Validation console — chat, pairs, logs, health UI |
 | CT | `CT_tests` | `copilot-openai-wrapper-test:latest` | — | Playwright automated test suite |
 
 ### Architecture Diagram
@@ -158,46 +160,94 @@ Host Machine
 
 ## 4. Quick Start
 
-> **Prerequisite:** Docker Desktop installed and running.
+> See **[INSTALL.md](INSTALL.md)** for a complete step-by-step guide with Linux and macOS platform notes, build-time estimates, and a full troubleshooting section.
 
-### Step 1 — Clone the repository
+### Prerequisites
+
+| Requirement | macOS | Linux (Ubuntu/Debian) |
+|---|---|---|
+| Docker | [Docker Desktop ≥ 4.x](https://www.docker.com/products/docker-desktop/) | Docker Engine + Compose plugin |
+| Git | `xcode-select --install` | `sudo apt-get install git` |
+| curl | Built-in | `sudo apt-get install curl` |
+| Free ports | 8000, 6080, 8001, 18789, 6090 | Same |
+
+**Linux Docker install (one-time):**
+```bash
+sudo apt-get update && sudo apt-get install -y docker.io docker-compose-plugin
+sudo usermod -aG docker $USER   # then log out and back in
+```
+
+**Verify Docker:**
+```bash
+docker --version           # Docker version 24.x or later
+docker compose version     # Docker Compose version v2.x or later
+```
+
+---
+
+### Step 1 — Clone
 
 ```bash
 git clone https://github.com/zumanm1/copilot-wraper.git
-cd copilot-openai-wrapper
+cd copilot-wraper/copilot-openai-wrapper
 ```
 
 ### Step 2 — Configure
 
 ```bash
 cp .env.example .env
-# .env will be populated automatically by C3 in Step 3
-# Or manually: set BING_COOKIES=<your _U cookie value>
+# Cookies are populated automatically by C3 in Step 4.
+# Manual fallback: set BING_COOKIES=<your _U cookie value>
 ```
 
-### Step 3 — Start the core stack (C1 + C3)
+**Linux users — Chrome data path:**
+
+The docker-compose.yml mounts your host Chrome profile into C1 (read-only). The default path is the macOS path. On Linux, add this to your `.env`:
 
 ```bash
-# Start API server and browser-auth together (recommended)
+echo 'CHROME_DATA_PATH=${HOME}/.config/google-chrome' >> .env
+```
+
+Or edit `docker-compose.yml` under the `app:` service volumes section:
+```yaml
+# Change:
+- ${HOME}/Library/Application Support/Google/Chrome:/chrome-data:ro
+# To:
+- ${HOME}/.config/google-chrome:/chrome-data:ro
+```
+
+### Step 3 — Build and start the core stack (C1 + C3)
+
+```bash
+# Build C1 and C3 images (first run: ~5–10 min)
+docker compose build app browser-auth
+
+# Start C1 (API server) and C3 (browser auth)
 docker compose up app browser-auth -d
 
-# Verify C1 is healthy
+# Verify both are healthy
+docker compose ps
 curl http://localhost:8000/health
 # → {"status":"ok","service":"copilot-openai-wrapper"}
 ```
 
-### Step 4 — Authenticate via browser (C3)
+### Step 4 — Authenticate via C3 (noVNC)
 
 ```bash
-# Open the noVNC browser — log in to copilot.microsoft.com inside it
-open http://localhost:6080
+# Open the noVNC browser in your host browser
+open http://localhost:6080           # macOS
+xdg-open http://localhost:6080       # Linux (or paste the URL manually)
 
-# Once logged in, extract cookies
+# Inside noVNC: navigate to https://copilot.microsoft.com and sign in
+# Then extract cookies:
 curl -X POST http://localhost:8001/extract
-# → {"status":"ok","message":"Cookies extracted and saved"}
+# → {"status":"ok","cookies_saved":true}
 
-# Reload C1 config so it picks up the new cookies
+# Reload C1 so it picks up the new cookies
 curl -X POST http://localhost:8000/v1/reload-config
+
+# Verify C1 has valid cookies
+curl http://localhost:8000/v1/debug/cookie
 ```
 
 ### Step 5 — Send your first request
@@ -216,20 +266,85 @@ curl -X POST http://localhost:8000/v1/messages \
   -d '{"model":"claude-sonnet-4-6","max_tokens":512,"messages":[{"role":"user","content":"Hello!"}]}'
 ```
 
-### Start all agent containers
+### Step 6 — Build and start the full stack (all 9 containers)
 
 ```bash
-# Start the full stack (C1, C3, C2, C5, C6, C7a, C7b, C8)
+# Build all images — C2, C5, C6, C7a, C7b, C8, C9 (~10–20 min first run)
+docker compose build
+
+# Start all 9 containers
 docker compose up -d
 
-# Check all containers are healthy
+# Check status
 docker compose ps
 ```
+
+### Step 7 — Verify all containers
+
+Run these checks after `docker compose up -d`:
+
+```bash
+# C1 — FastAPI API server
+curl http://localhost:8000/health
+
+# C3 — Browser auth API
+curl http://localhost:8001/health
+
+# C3 — noVNC web UI
+curl -sf http://localhost:6080/ | head -5
+
+# C7a — OpenClaw gateway
+curl http://localhost:18789/healthz
+
+# C9 — Validation console
+curl http://localhost:6090/api/status
+
+# Agent containers (exec into each)
+docker compose exec agent-terminal      curl -sf http://localhost:8080/health
+docker compose exec claude-code-terminal curl -sf http://localhost:8080/health
+docker compose exec kilocode-terminal   curl -sf http://localhost:8080/health
+docker compose exec openclaw-cli        curl -sf http://localhost:8080/health
+docker compose exec hermes-agent        curl -sf http://localhost:8080/health
+```
+
+**Full container health table:**
+
+| Container | Service Name | Host URL | Expected |
+|---|---|---|---|
+| C1 | `app` | `http://localhost:8000/health` | `{"status":"ok"}` |
+| C2 | `agent-terminal` | (exec only — no host port) | `ok` |
+| C3 API | `browser-auth` | `http://localhost:8001/health` | `{"status":"ok"}` |
+| C3 noVNC | `browser-auth` | `http://localhost:6080/` | HTML |
+| C5 | `claude-code-terminal` | (exec only) | `ok` |
+| C6 | `kilocode-terminal` | (exec only) | `ok` |
+| C7a | `openclaw-gateway` | `http://localhost:18789/healthz` | `{"status":"ok"}` |
+| C7b | `openclaw-cli` | (exec only) | `ok` |
+| C8 | `hermes-agent` | (exec only) | `ok` |
+| C9 | `c9-jokes` | `http://localhost:6090/api/status` | JSON dict |
+
+### Step 8 — Open the C9 Validation Console
+
+```bash
+open http://localhost:6090          # macOS
+xdg-open http://localhost:6090      # Linux
+```
+
+| Page | URL | Purpose |
+|---|---|---|
+| Dashboard | `http://localhost:6090/` | Container health overview |
+| Chat | `http://localhost:6090/chat` | Chat with any agent (thinking mode + file upload) |
+| Pairs | `http://localhost:6090/pairs` | Batch: run one prompt against multiple agents |
+| Logs | `http://localhost:6090/logs` | Full history — source, elapsed_ms, response excerpts |
+| Health | `http://localhost:6090/health` | Live health snapshots for all containers |
+| API Docs | `http://localhost:6090/api/docs` | C9 interactive API reference |
 
 ### Stop everything
 
 ```bash
 docker compose down
+
+# ⚠ Also remove persistent volumes (browser session, Hermes memory, C9 database):
+docker compose down -v
 ```
 
 ---
@@ -1319,9 +1434,10 @@ copilot-openai-wrapper/
 ├── Dockerfile.openclaw-gw   C7a: node:22-alpine + OpenClaw gateway
 ├── Dockerfile.openclaw-cli  C7b: node:22-alpine + OpenClaw CLI
 ├── Dockerfile.hermes        C8: python:3.11-slim + uv + Hermes Agent v2026.3.17
+├── Dockerfile.c9-jokes      C9: python:3.11-slim + FastAPI + SQLite validation console
 ├── Dockerfile.test          CT: Playwright test runner
 │
-├── docker-compose.yml       Full stack orchestration (C1–C8 + CT)
+├── docker-compose.yml       Full stack orchestration (C1–C9 + CT)
 │
 ├── .env                     Your local secrets (NOT committed)
 ├── .env.example             Template for all configuration variables
@@ -1355,6 +1471,13 @@ copilot-openai-wrapper/
 │   ├── start.sh             standby/ask/hermes/status/bash modes
 │   └── hermes-config.yaml   Pre-seeded config (local backend, compression)
 │
+├── c9_jokes/                C9 Validation Console (FastAPI + SQLite + Jinja2 web UI)
+│   ├── app.py               Main FastAPI application
+│   ├── schema.sql           SQLite schema (chat_logs, validation_runs, pair_results, health_snapshots)
+│   ├── requirements.txt     fastapi, uvicorn, httpx, jinja2, python-multipart
+│   ├── static/              CSS + JS assets
+│   └── templates/           Jinja2 HTML templates (dashboard, chat, pairs, logs, health, api_reference)
+│
 ├── workspace/               Shared volume mounted by all agent containers
 │   ├── ask_helper.py        Universal one-shot ask script (OpenAI + Anthropic)
 │   ├── calculator.py        Built-in calculator demo
@@ -1370,6 +1493,77 @@ copilot-openai-wrapper/
     ├── validators.py          Response schema validators
     └── reports/               Generated HTML reports + screenshots
 ```
+
+---
+
+## 14. C9 Validation Console
+
+C9 (`c9-jokes`, port **6090**) is a lightweight FastAPI application with a full web UI for interacting with the entire stack in one place. It connects to every other container over the internal `copilot-net` Docker network and stores all activity in a **SQLite database** at `/app/data/c9.db` (persisted by the `c9-data` named volume).
+
+### Access
+
+```bash
+open http://localhost:6090          # macOS
+xdg-open http://localhost:6090      # Linux
+```
+
+### Pages
+
+| Page | URL | Description |
+|---|---|---|
+| **Dashboard** | `/` | Real-time health card for every container (C1–C8) |
+| **Chat** | `/chat` | Single-turn chat — select agent, thinking mode, Work/Web toggle, file upload |
+| **Pairs** | `/pairs` | Batch mode — run one prompt against multiple agents (sequential or parallel) |
+| **Logs** | `/logs` | Full history of all chat + validation calls (source, elapsed_ms, response excerpt, errors) |
+| **Health** | `/health` | Timestamped container health snapshots |
+| **API Docs** | `/api/docs` | Interactive C9 API reference (all endpoints) |
+
+### Features
+
+- **Thinking mode** — dropdown pill: Auto / Quick Response / Think Deeper (maps to Copilot's balanced / precise / creative styles via `X-Chat-Mode` header to C1)
+- **Work / Web toggle** — controls M365 scope via `X-Work-Mode` header to C1
+- **File upload** — "+" button supports images (PNG, JPG, GIF, WebP) and documents (PDF, TXT, DOCX, XLSX, PPTX); files are uploaded to C1 `/v1/files` and referenced by `file_id` in the chat message
+- **Source tracking** — Logs page shows `chat` vs `validate` source column so you can distinguish interactive chats from batch validation runs
+- **Elapsed time** — Every log row shows `elapsed_ms` so you can benchmark response times across agents and thinking modes
+
+### C9 API Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/api/status` | Health dict for all containers |
+| `POST` | `/api/chat` | Single chat call to one agent |
+| `POST` | `/api/validate` | Batch validation: prompt → N agents (sequential or parallel) |
+| `POST` | `/api/upload` | Upload a file to C1; returns `{file_id, filename}` |
+| `GET` | `/api/logs` | Paginated chat + validation history |
+| `GET` | `/api/health-history` | Historical health snapshots |
+| `GET` | `/api/session-health` | Live health probe for each container |
+
+### Environment Variables (set automatically by docker-compose)
+
+| Variable | Value | Purpose |
+|---|---|---|
+| `C1_URL` | `http://app:8000` | C1 FastAPI server |
+| `C2_URL` | `http://agent-terminal:8080` | C2 health probe |
+| `C3_URL` | `http://browser-auth:8001` | C3 health probe |
+| `C5_URL` | `http://claude-code-terminal:8080` | C5 health probe |
+| `C6_URL` | `http://kilocode-terminal:8080` | C6 health probe |
+| `C7A_URL` | `http://openclaw-gateway:18789` | C7a gateway probe |
+| `C7B_URL` | `http://openclaw-cli:8080` | C7b health probe |
+| `C8_URL` | `http://hermes-agent:8080` | C8 health probe |
+| `DATABASE_PATH` | `/app/data/c9.db` | SQLite database path |
+
+All values are pre-wired in `docker-compose.yml` — no manual configuration needed.
+
+### Database Schema
+
+C9 maintains three SQLite tables:
+
+| Table | Key Columns | Purpose |
+|---|---|---|
+| `chat_logs` | `id, agent_id, prompt, response_excerpt, elapsed_ms, source, created_at` | Every chat + validate call |
+| `validation_runs` | `id, prompt, agents, mode, created_at` | Batch run metadata |
+| `pair_results` | `run_id, agent_id, response, elapsed_ms, error` | Per-agent results from batch runs |
+| `health_snapshots` | `id, snapshot_json, created_at` | Container health history |
 
 ---
 
