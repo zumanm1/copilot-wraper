@@ -13,16 +13,18 @@
 # ──────────────────────────────────────────────────────────────────────────────
 FROM python:3.11-slim
 
-# Install system tools: bash, curl, git, nodejs, npm, gcc (for native pip pkgs)
+# Install system tools — use NodeSource for lean Node.js 20 LTS (avoids pulling
+# 400+ debian npm transitive packages that apt brings in)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     bash \
     curl \
     git \
-    nodejs \
-    npm \
     gcc \
     make \
-    python3-pip \
+    ca-certificates \
+    gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root sandbox user and workspace directory
