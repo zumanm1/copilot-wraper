@@ -1,206 +1,349 @@
-# 02 — Authentication Flow
+# 02 — Authentication & Configuration Flow
+
+> **Last updated: 2026-03-27**
+> Cookie authentication, portal profiles, X-Chat-Mode vs X-Work-Mode separation, and config reload lifecycle.
+
+---
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Cookie Authentication](#cookie-authentication)
+- [Portal Profiles](#portal-profiles)
+- [Authentication Flow — Consumer Profile](#authentication-flow--consumer-profile)
+- [Authentication Flow — M365 Profile](#authentication-flow--m365-profile)
+- [X-Chat-Mode — Thinking Depth](#x-chat-mode--thinking-depth)
+- [X-Work-Mode — M365 Scope](#x-work-mode--m365-scope)
+- [Header Separation Summary](#header-separation-summary)
+- [Config Reload Lifecycle](#config-reload-lifecycle)
+- [Auto-Cookie Refresh](#auto-cookie-refresh)
+- [Manual Cookie Fallback](#manual-cookie-fallback)
+- [Session Health Check](#session-health-check)
+- [Environment Variable Reference](#environment-variable-reference)
+
+---
 
 ## Overview
 
-Authentication is **browser-session based**. There is no API key for the upstream M365 Copilot service. Instead:
+Authentication is **browser-session based**. There is no API key for the upstream Copilot service. Instead:
 
-1. A real Chromium browser (in C3) is signed in to M365 via the noVNC UI
-2. Session cookies are extracted and written to `.env`
-3. C1 reads those cookies and attaches them to every upstream request
+```
+C3 (headless browser)
+  └── User logs in via noVNC
+        └── POST /extract → C3 extracts cookies → writes to .env
+              └── POST C1 /v1/reload-config → C1 reads new cookies
+                    └── All subsequent requests use fresh cookies
+```
 
-There are two provider modes with different auth flows:
-
-| Mode | Provider | How auth works |
-|------|----------|---------------|
-| `m365` (default) | `COPILOT_PROVIDER=m365` | C3 Playwright browser holds the live M365 session — cookies are used by the browser itself, not forwarded |
-| `copilot` (consumer) | `COPILOT_PROVIDER=copilot` | Cookies extracted to `.env` → C1 sends them as HTTP `Cookie:` header on direct WebSocket calls |
-
-The current deployment uses **`m365` mode** (`COPILOT_PORTAL_PROFILE=m365_hub`).
+Two pieces of configuration control every request:
+1. **Which Copilot endpoint** to call (`COPILOT_PORTAL_PROFILE` → consumer or M365)
+2. **How Copilot reasons** (`X-Chat-Mode`) and **what context to use** (`X-Work-Mode`)
 
 ---
 
-## M365 Auth Flow (Current Default)
+## Cookie Authentication
+
+### COPILOT_COOKIES
+
+`COPILOT_COOKIES` is a full cookie string (same format as the browser's `Cookie:` header), extracted by C3:
 
 ```
-Developer action:
-  1. Open http://localhost:6080  (noVNC — C3's browser UI)
-  2. Navigate to https://m365.cloud.microsoft/chat
-  3. Sign in with M365 account
-  4. Browser now has active session cookies (OH.SID, MSFPC, etc.)
+COPILOT_COOKIES=_U=ABC123...; MUID=DEF456...; SRCHD=...; MUIDB=...
+```
 
-Cookie extraction (optional but recommended for persistence):
+C1 loads this string from `.env` at startup and on every `POST /v1/reload-config`. It is injected as the `Cookie:` header on every WebSocket connection to Copilot.
+
+### BING_COOKIES
+
+A simpler fallback — just the `_U` cookie value from `bing.com` / `copilot.microsoft.com`:
+
+```
+BING_COOKIES=ABC123...
+```
+
+If `COPILOT_COOKIES` is empty, C1 falls back to `_U=<BING_COOKIES>`.
+
+### Cookie Validity
+
+Cookies expire periodically (typically every few days). Signs of expired cookies:
+- C1 returns 401 or 403 from Copilot
+- C3 `/session-health` reports `auth_ok: false`
+- Chat responses return error text instead of an answer
+
+Re-run the C3 extraction flow to refresh.
+
+---
+
+## Portal Profiles
+
+`COPILOT_PORTAL_PROFILE` (in `.env`) selects which Copilot product is used:
+
+| Profile | Copilot product | Auth requirement |
+|---|---|---|
+| `consumer` | `copilot.microsoft.com` | Personal Microsoft account |
+| `m365_hub` | `m365.cloud.microsoft` | Microsoft 365 work/school account |
+
+This controls:
+- Which URL C3 logs into during cookie extraction
+- Which backend provider C1 uses (`copilot` WebSocket vs `m365` C3 proxy)
+- Whether C3's PagePool proxies requests (m365 only)
+
+---
+
+## Authentication Flow — Consumer Profile
+
+```
+COPILOT_PORTAL_PROFILE=consumer
+
+Step 1 — Login (one-time)
+  User → http://localhost:6080 (noVNC)
+  In noVNC browser: navigate to https://copilot.microsoft.com
+  Sign in with personal Microsoft account
+  Complete MFA / consent prompts
+
+Step 2 — Extract cookies
   curl -X POST http://localhost:8001/extract
-  → C3 reads cookies from the Playwright browser context
-  → Writes COPILOT_COOKIES=... to /app/.env (shared volume)
-  → C1 hot-reloads config (POST http://app:8000/v1/reload-config)
+  C3 Playwright:
+    → context.cookies() from copilot.microsoft.com domain
+    → writes COPILOT_COOKIES=... to .env
+    → POSTs http://app:8000/v1/reload-config
 
-Runtime (every chat request):
-  Agent → C1 POST /v1/chat/completions
-       → C1._c3_proxy_call()
-       → C3 POST /chat { prompt, agent_id, mode }
-       → C3 Playwright browser (already signed in) types prompt
-       → M365 Copilot responds via SignalR WS
-       → C3 returns text to C1
-       → C1 returns JSON to agent
-```
+Step 3 — C1 uses cookies on every request
+  WSS wss://copilot.microsoft.com/c/api/chat?...
+    Cookie: {COPILOT_COOKIES}
+    Origin: https://copilot.microsoft.com
+    Referer: https://copilot.microsoft.com/
 
-In M365 mode, **the cookies never leave C3**. The Playwright browser is already authenticated; C1 only needs to call C3's `/chat` HTTP endpoint.
-
----
-
-## Required M365 Cookies
-
-C3 validates the session by checking for these cookies in the browser context:
-
-| Cookie | Domain | Purpose |
-|--------|--------|---------|
-| `OH.SID` | `m365.cloud.microsoft` | M365 Copilot session ID (primary) |
-| `MSFPC` | `*.microsoft.com` | Microsoft first-party cookie (secondary) |
-| `OH.FLID` | `m365.cloud.microsoft` | Feature flags / load balancer |
-| `OH.DCAffinity` | `m365.cloud.microsoft` | Datacenter affinity |
-
-If `OH.SID` is absent, C3's `session-health` endpoint returns `session: "expired"`.
-
----
-
-## Consumer (Copilot) Auth Flow
-
-Used when `COPILOT_PROVIDER=copilot` or `COPILOT_PORTAL_PROFILE=consumer`.
-
-```
-1. Open http://localhost:6080 (noVNC)
-2. Navigate to https://copilot.microsoft.com
-3. Sign in
-4. POST http://localhost:8001/extract
-   → Extracts cookies: __Host-copilot-anon, MUID, _EDGE_S, MSFPC, _U (bing)
-   → Writes to /app/.env as COPILOT_COOKIES=...
-
-Runtime:
-  Agent → C1 POST /v1/chat/completions
-       → CopilotBackend._raw_copilot_call()
-       → _make_cookie_header() reads COPILOT_COOKIES from env
-       → POST https://copilot.microsoft.com/c/api/conversations
-         Cookie: <extracted cookies>
-       → WSS wss://copilot.microsoft.com/c/api/chat
-         Cookie: <extracted cookies>
-       → Streaming response chunks
+Step 4 — Copilot WebSocket handshake
+  101 Switching Protocols (auth via Cookie header)
+  → protocol: sydneyv2 / bing-echo
+  → send: {"text": prompt, "style": "smart"}
+  → receive: appendText events → partCompleted
 ```
 
 ---
 
-## How Cookies Flow Through the Stack
+## Authentication Flow — M365 Profile
 
 ```
-User signs in via noVNC (C3 browser)
-         │
-         ▼
-C3: context.cookies()  →  cookie string
-         │
-         ▼
-/app/.env  (shared volume between C1 and C3)
-  COPILOT_COOKIES=OH.SID=xxx; MSFPC=xxx; ...
-         │
-         ▼
-C1: config.py  os.getenv("COPILOT_COOKIES")
-         │
-         ▼
-copilot_backend._make_cookie_header()
-  → returns "OH.SID=xxx; MSFPC=xxx; ..."
-         │
-         ▼
-aiohttp request headers:
-  Cookie: OH.SID=xxx; MSFPC=xxx; ...
-  Origin: https://m365.cloud.microsoft
-  Referer: https://m365.cloud.microsoft/chat
+COPILOT_PORTAL_PROFILE=m365_hub
+
+Step 1 — Login (one-time)
+  User → http://localhost:6080 (noVNC)
+  In noVNC browser: navigate to https://m365.cloud.microsoft
+  Sign in with Microsoft 365 work/school account
+  Complete MFA, select tenant if multi-tenant
+  Navigate to https://m365.cloud.microsoft/chat
+  Confirm chat UI is visible
+
+Step 2 — Extract cookies
+  curl -X POST http://localhost:8001/extract
+  C3 Playwright:
+    → walks m365.cloud.microsoft → bing.com → copilot.microsoft.com
+    → merges cookies from all domains into COPILOT_COOKIES
+    → writes to .env
+    → POSTs http://app:8000/v1/reload-config
+
+Step 3 — C1 proxies every request through C3
+  C1 _c3_proxy_call():
+    POST http://browser-auth:8001/chat
+    { "prompt": "...", "agent_id": "c2-aider", "mode": "work" }
+
+Step 4 — C3 PagePool serves the request
+  PagePool.acquire("c2-aider") → sticky Tab 1
+  Tab 1: already logged into https://m365.cloud.microsoft/chat
+  Type prompt → Press Enter
+  Intercept SignalR WS (substrate.office.com) → extract type=2 frame
+  Return { "success": true, "text": "..." }
+
+Key difference: In M365 mode, C1 does NOT open a direct WebSocket to Copilot.
+C3's active Playwright browser session IS the authentication — OAuth tokens live
+in the browser context, not in a cookie string.
 ```
 
 ---
 
-## X-Chat-Mode Header
+## X-Chat-Mode — Thinking Depth
 
-The `X-Chat-Mode` header controls which M365 Copilot mode is used:
+`X-Chat-Mode` controls **how deeply Copilot reasons** before responding. This is independent of authentication.
 
-| Value | M365 UI Mode | Use case |
-|-------|-------------|---------|
-| `work` (default) | Work tab — accesses M365 data, calendar, email, files | Code agents, productivity queries |
-| `web` | Web tab — general web search | Consumer-style queries |
+```
+Client → C1: Header X-Chat-Mode: deep
+                │
+                ▼
+        C1 resolve_chat_style_with_mode(model, temperature, chat_mode)
 
-Passed from agent → C1 → C3 → Playwright (clicks Work/Web toggle in M365 UI).
+        THINKING_MODE_MAP = {
+            "auto":  "smart",      ← default — balanced reasoning
+            "quick": "balanced",   ← fast, surface-level response
+            "deep":  "reasoning",  ← deep step-by-step thinking (o1-style)
+        }
+                │
+                ▼
+        backend.style = "reasoning"  (used in WebSocket message to Copilot)
+```
+
+**Who sets X-Chat-Mode:**
+- **C9 chat/pairs pages** — thinking mode dropdown (Auto / Quick Response / Think Deeper)
+- **Direct API callers** — set header manually
+- **Agent containers** — use default (`auto` / `smart`) unless explicitly set
+
+**Note:** When both model name and `X-Chat-Mode` are provided, `X-Chat-Mode` takes precedence.
 
 ---
 
-## Auth Dialog Handling (C3)
+## X-Work-Mode — M365 Scope
 
-When M365 shows an "Authentication required" dialog (session expired mid-use):
+`X-Work-Mode` controls **what knowledge Copilot draws on**. Only meaningful in M365 profile mode.
 
-1. C3 detects the `h2` element containing "Authentication required"
-2. Clicks the "Continue" button (M365 auth gate)
-3. Waits 8 seconds for re-authentication
-4. Re-checks if the dialog is still present
-5. If still blocked: returns `{"success": false, "error": "Authentication required..."}`
+```
+Client → C1: Header X-Work-Mode: work
+                │
+                ▼
+        C1 → C3 POST /chat  { "mode": "work" }
+                │
+                ▼
+        C3 _browser_chat_on_page(page, prompt, mode="work")
+          └─ Clicks the Work/Web toggle in M365 Copilot UI before typing
 
-**Recovery:** Sign in again via noVNC at `http://localhost:6080` then retry.
+Values:
+  work  → M365 Work tab (SharePoint, Teams, Emails, Calendar)
+  web   → Web tab (public internet search)
+  ""    → default (last selected state)
+```
+
+**Who sets X-Work-Mode:**
+- **C9 chat/pairs pages** — Work / Web toggle button
+- **Direct API callers** — set header manually
+
+**Has no effect in consumer profile mode** (copilot.microsoft.com has no Work/Web toggle).
+
+---
+
+## Header Separation Summary
+
+`X-Chat-Mode` and `X-Work-Mode` are **completely separate concerns** and are often confused:
+
+| Header | Purpose | Controls |
+|---|---|---|
+| `X-Agent-ID` | Session isolation | Which `CopilotBackend` instance handles the request |
+| `X-Chat-Mode` | **Thinking depth** | Copilot reasoning style: `smart` / `balanced` / `reasoning` |
+| `X-Work-Mode` | **M365 data scope** | C3 clicks Work or Web tab in M365 UI |
+
+All three can be combined freely:
+```bash
+curl -X POST http://localhost:8000/v1/chat/completions \
+  -H "X-Agent-ID: c8-hermes" \
+  -H "X-Chat-Mode: deep" \
+  -H "X-Work-Mode: work" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"copilot","messages":[{"role":"user","content":"Summarise my recent emails"}]}'
+```
+
+---
+
+## Config Reload Lifecycle
+
+The `.env` file is the shared config between C1 and C3:
+
+```
+.env (shared bind-mount: both C1 and C3 have it at /app/.env)
+  ├── C1 reads at: startup + POST /v1/reload-config
+  └── C3 writes at: POST /extract
+
+Reload sequence:
+  1. C3 /extract  → writes COPILOT_COOKIES to .env
+  2. C3 /extract  → POST http://app:8000/v1/reload-config  (auto-triggers)
+  3. C1 handler   → load_dotenv(override=True)
+                  → config.reload_cookies()  (refreshes _cached_cookie)
+                  → returns {"status":"ok","cookies_loaded":true}
+  4. All new requests use updated cookies immediately
+  5. In-flight requests complete with old cookies (no interruption)
+
+Manual trigger:
+  curl -X POST http://localhost:8000/v1/reload-config
+```
+
+---
+
+## Auto-Cookie Refresh
+
+When `AUTO_COOKIE_REFRESH=true` (default), C1 can automatically trigger C3 to refresh cookies on auth failures:
+
+```python
+# On 401/403 from Copilot WebSocket (consumer profile):
+if AUTO_COOKIE_REFRESH and provider == "copilot":
+    → POST http://browser-auth:8001/extract
+    → POST /v1/reload-config (self)
+    → retry original request once
+```
+
+Auto-refresh is **disabled for M365** by default (`AUTO_COOKIE_REFRESH_M365=false`) because triggering a new extraction during an active M365 session can disrupt in-flight C3 PagePool requests.
+
+---
+
+## Manual Cookie Fallback
+
+If C3 is unavailable or noVNC is inaccessible:
+
+```bash
+# 1. Open https://copilot.microsoft.com in your host browser and sign in
+# 2. Press F12 → Application → Cookies → https://copilot.microsoft.com
+# 3. Copy the _U cookie value
+# 4. Edit .env:
+BING_COOKIES=<paste _U value here>
+
+# 5. Reload C1:
+curl -X POST http://localhost:8000/v1/reload-config
+
+# Verify:
+curl http://localhost:8000/v1/debug/cookie
+```
 
 ---
 
 ## Session Health Check
 
-```bash
-curl http://localhost:8001/session-health
-```
-
-Response:
-```json
-{
-  "session": "active",       // or "expired" / "unknown"
-  "profile": "m365_hub",
-  "reason": null,            // error string if not active
-  "checked_at": "2026-03-27T...",
-  "pool_warning": null,      // "pool_exhausted" if all tabs busy
-  "chat_mode": "work"
-}
-```
+C3 exposes a session health endpoint (queried by C9):
 
 ```bash
-curl http://localhost:8001/status
+GET http://localhost:8001/session-health
 ```
 
-Response:
 ```json
 {
-  "status": "ok",
-  "browser": "running",
-  "open_pages": 7,
+  "browser_ok": true,
   "pool_size": 6,
-  "pool_available": 6,
-  "pool_initialized": true
+  "tabs_available": 5,
+  "tabs_busy": 1,
+  "auth_ok": true,
+  "m365_session_valid": true,
+  "warnings": []
 }
 ```
 
----
-
-## Pool Recovery (after restart with DNS failure)
-
-If C3 starts before DNS resolves (M365 not reachable), tabs may fail to initialize:
-
-```bash
-# Reset PagePool without restarting C3
-curl -X POST http://localhost:8001/pool-reset
-```
-
-This reinitializes all tabs. Safe to call at any time.
+Warning conditions:
+- `tabs_available < 2` — pool may be exhausted under load
+- `auth_ok: false` — cookies expired; re-run `/extract`
+- `m365_session_valid: false` — M365 session needs re-login in noVNC
 
 ---
 
-## Provider Auto-Detection
+## Environment Variable Reference
 
-`config.resolved_provider()` resolves the effective provider:
-
-| `COPILOT_PROVIDER` | `COPILOT_PORTAL_PROFILE` | Effective |
-|--------------------|--------------------------|-----------|
-| `auto` | `m365_hub` | `m365` |
-| `auto` | `consumer` | `copilot` |
-| `m365` | any | `m365` |
-| `copilot` | any | `copilot` |
-
-A mismatch warning is logged at C1 startup if `COPILOT_PROVIDER` and `COPILOT_PORTAL_PROFILE` disagree.
+| Variable | Default | Description |
+|---|---|---|
+| `COPILOT_COOKIES` | (empty) | Full browser cookie string — primary auth |
+| `BING_COOKIES` | (empty) | Fallback: just the `_U` cookie value |
+| `COPILOT_PORTAL_PROFILE` | `consumer` | `consumer` or `m365_hub` |
+| `COPILOT_PROVIDER` | `auto` | Override: `copilot`, `m365`, or `auto` |
+| `COPILOT_STYLE` | `balanced` | Default Copilot style when no `X-Chat-Mode` header |
+| `COPILOT_PERSONA` | `copilot` | Copilot persona (copilot / bing) |
+| `AUTO_COOKIE_REFRESH` | `true` | Auto-trigger C3 extract on 401 (consumer) |
+| `AUTO_COOKIE_REFRESH_M365` | `false` | Auto-trigger extract on 401 (M365, risky) |
+| `CHROME_KEY_PASSWORD` | (empty) | Chrome keyring password for cookie decryption |
+| `REQUEST_TIMEOUT` | `180` | Seconds before C1 times out waiting for Copilot |
+| `CONNECT_TIMEOUT` | `15` | Seconds for WebSocket connection timeout |
+| `RATE_LIMIT` | `100/minute` | slowapi rate limit on C1 endpoints |
+| `API_KEY` | (empty) | If set, clients must send `Authorization: Bearer <key>` |
+| `C3_CHAT_TAB_POOL_SIZE` | `6` | Number of C3 Playwright tabs in the PagePool |

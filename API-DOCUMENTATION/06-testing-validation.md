@@ -1,235 +1,499 @@
 # 06 — Testing & Validation
 
+> **Last updated: 2026-03-27**
+> How to verify every layer of the stack is working — from a single `curl` to full parallel batch validation using the C9 console.
+
+---
+
+## Table of Contents
+
+- [Prerequisites Checklist](#prerequisites-checklist)
+- [Test 1 — C1 Health Smoke Test](#test-1--c1-health-smoke-test)
+- [Test 2 — C3 Browser Auth Smoke Test](#test-2--c3-browser-auth-smoke-test)
+- [Test 3 — First Chat Request (OpenAI Format)](#test-3--first-chat-request-openai-format)
+- [Test 4 — Anthropic Format (C5 Path)](#test-4--anthropic-format-c5-path)
+- [Test 5 — Thinking Mode (X-Chat-Mode)](#test-5--thinking-mode-x-chat-mode)
+- [Test 6 — Work/Web Toggle (X-Work-Mode)](#test-6--workweb-toggle-x-work-mode)
+- [Test 7 — File Upload + Chat](#test-7--file-upload--chat)
+- [Test 8 — Per-Agent Session Isolation](#test-8--per-agent-session-isolation)
+- [Test 9 — All Agent Containers Health](#test-9--all-agent-containers-health)
+- [Test 10 — C9 Validation Console (Browser UI)](#test-10--c9-validation-console-browser-ui)
+- [Test 11 — Batch Validation via C9 API](#test-11--batch-validation-via-c9-api)
+- [Test 12 — Streaming SSE](#test-12--streaming-sse)
+- [Test 13 — Unit Tests (pytest)](#test-13--unit-tests-pytest)
+- [Test 14 — End-to-End Playwright Tests](#test-14--end-to-end-playwright-tests)
+- [Timeout Configuration Reference](#timeout-configuration-reference)
+- [Log Viewing](#log-viewing)
+- [State Reset Commands](#state-reset-commands)
+- [Failure Modes & Fixes](#failure-modes--fixes)
+
+---
+
 ## Prerequisites Checklist
 
-Before running any test, verify these are all true:
+Before running any test, confirm all of these:
 
 ```bash
-# 1. All containers healthy
-docker compose ps --format "table {{.Names}}\t{{.Status}}"
-# Expected: all show "Up ... (healthy)"
+# 1. Docker containers running
+docker compose ps
+# Expected: all services show "running" or "healthy"
 
-# 2. C1 responds
-curl -s http://localhost:8000/health
-# {"status":"ok","service":"copilot-openai-wrapper"}
+# 2. C1 healthy
+curl -sf http://localhost:8000/health && echo "C1 OK"
 
-# 3. C3 pool initialized
-curl -s http://localhost:8001/status
-# pool_initialized: true, pool_available: 6
+# 3. C3 healthy
+curl -sf http://localhost:8001/health && echo "C3 OK"
 
-# 4. M365 session active
-curl -s http://localhost:8001/session-health
-# session: "active"
+# 4. C9 healthy
+curl -sf http://localhost:6090/api/status && echo "C9 OK"
+
+# 5. Cookies loaded in C1
+curl http://localhost:8000/v1/debug/cookie
+# Should show: "copilot_cookies_set": true
 ```
 
-If session is expired: sign in at `http://localhost:6080` (noVNC).
+If step 5 fails, run the cookie extraction flow first:
+```bash
+open http://localhost:6080   # noVNC — log into copilot.microsoft.com
+curl -X POST http://localhost:8001/extract
+curl -X POST http://localhost:8000/v1/reload-config
+```
 
 ---
 
-## Test 1 — Direct curl Smoke Test (fastest)
+## Test 1 — C1 Health Smoke Test
 
-Tests C1 with a specific agent ID. Validates the full C1 → C3 → M365 path.
+```bash
+curl http://localhost:8000/health
+```
+
+✅ **Pass:**
+```json
+{"status": "ok", "service": "copilot-openai-wrapper"}
+```
+
+❌ **Fail:** Connection refused → C1 is not running. Run `docker compose up app -d`.
+
+---
+
+## Test 2 — C3 Browser Auth Smoke Test
+
+```bash
+# API health
+curl http://localhost:8001/health
+
+# Pool status
+curl http://localhost:8001/status
+
+# Session health (M365 profile only)
+curl http://localhost:8001/session-health
+```
+
+✅ **Pass:**
+```json
+{"status": "ok"}
+{"browser_running": true, "pool_size": 6, "tabs_open": 6}
+{"auth_ok": true, "m365_session_valid": true}
+```
+
+❌ **Fail `auth_ok: false`:** Cookies expired. Re-run extraction flow.
+❌ **Fail `m365_session_valid: false`:** M365 session needs re-login in noVNC.
+
+---
+
+## Test 3 — First Chat Request (OpenAI Format)
 
 ```bash
 curl -s -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "X-Agent-ID: c10-myagent" \
-  -H "X-Chat-Mode: work" \
-  -d '{"model":"copilot","messages":[{"role":"user","content":"Say OK"}],"stream":false}' \
-  --max-time 360
+  -d '{"model":"copilot","messages":[{"role":"user","content":"Reply with exactly: hello world"}]}' \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['choices'][0]['message']['content'])"
 ```
 
-**Pass criteria:**
-- HTTP 200
-- `choices[0].message.content` is non-empty
+✅ **Pass:** Prints `hello world` (or similar)
+❌ **Fail HTTP 401/403:** Cookies expired → re-run extraction.
+❌ **Fail empty content:** Copilot responded but returned no text — check C3 logs.
 
-**Quick one-liner with pass/fail output:**
+---
+
+## Test 4 — Anthropic Format (C5 Path)
+
 ```bash
-curl -s -X POST http://localhost:8000/v1/chat/completions \
+curl -s -X POST http://localhost:8000/v1/messages \
   -H "Content-Type: application/json" \
-  -H "X-Agent-ID: c10-myagent" \
-  -H "X-Chat-Mode: work" \
-  -d '{"model":"copilot","messages":[{"role":"user","content":"Say OK"}],"stream":false}' \
-  --max-time 360 \
-  | python3 -c "
-import sys, json
-d = json.load(sys.stdin)
-text = d.get('choices',[{}])[0].get('message',{}).get('content','')
-print('PASS:', text[:80]) if text else print('FAIL:', d.get('detail','no detail'))
-sys.exit(0 if text else 1)
-"
+  -H "x-api-key: not-needed" \
+  -H "anthropic-version: 2023-06-01" \
+  -H "X-Agent-ID: c5-claude-code" \
+  -d '{"model":"claude-sonnet-4-6","max_tokens":64,"messages":[{"role":"user","content":"Say: test ok"}]}' \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['content'][0]['text'])"
 ```
+
+✅ **Pass:** Prints `test ok` (or similar)
+❌ **Fail `400 Bad Request`:** Check `anthropic-version` header is present.
 
 ---
 
-## Test 2 — validate_new_agent.sh (automated)
-
-Runs all checks in sequence and prints a clean PASS/FAIL summary.
+## Test 5 — Thinking Mode (X-Chat-Mode)
 
 ```bash
-bash API-DOCUMENTATION/stubs/validate_new_agent.sh c10-myagent
-```
-
-Exit code 0 = pass, 1 = fail.
-
-See `stubs/validate_new_agent.sh` for the full script.
-
----
-
-## Test 3 — Sequential All-Agents curl Loop
-
-Tests all 6 existing agents + your new one in sequence:
-
-```bash
-for agent in c2-aider c5-claude-code c6-kilocode c7-openclaw c8-hermes c9-jokes c10-myagent; do
-  result=$(curl -s -X POST http://localhost:8000/v1/chat/completions \
+# Test all three thinking modes
+for mode in auto quick deep; do
+  echo "=== Mode: $mode ==="
+  curl -s -X POST http://localhost:8000/v1/chat/completions \
     -H "Content-Type: application/json" \
-    -H "X-Agent-ID: $agent" \
-    -H "X-Chat-Mode: work" \
-    -d '{"model":"copilot","messages":[{"role":"user","content":"Say OK"}],"stream":false}' \
-    --max-time 360)
-  text=$(echo "$result" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('choices',[{}])[0].get('message',{}).get('content','')[:40])" 2>/dev/null)
-  if [ -n "$text" ]; then
-    echo "  [PASS] $agent: $text"
-  else
-    echo "  [FAIL] $agent: $(echo "$result" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('detail','?'))" 2>/dev/null)"
-  fi
+    -H "X-Chat-Mode: $mode" \
+    -d '{"model":"copilot","messages":[{"role":"user","content":"What is 1+1?"}]}' \
+    | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['choices'][0]['message']['content'][:80])"
 done
 ```
 
----
+✅ **Pass:** All three return "2" or similar — each mode should work without error.
 
-## Test 4 — C9 Parallel Validate (via API)
-
-Runs all agents in parallel via C9's `/api/validate` endpoint. Only tests agents in C9's AGENTS list.
-
-```bash
-curl -s -X POST http://localhost:6090/api/validate \
-  -H "Content-Type: application/json" \
-  -d '{"prompt":"Say OK","chat_mode":"work"}' \
-  --max-time 600 \
-  | python3 -m json.tool
-```
-
-Pass criteria: `"passed": N, "failed": 0` where N = total agents in the list.
+**Via C9 UI:**
+1. Open `http://localhost:6090/chat`
+2. Select each thinking mode from the dropdown (Auto / Quick Response / Think Deeper)
+3. Send "What is 1+1?" — should receive a response for each mode
 
 ---
 
-## Test 5 — pytest E2E Suite
+## Test 6 — Work/Web Toggle (X-Work-Mode)
 
-Runs the full E2E test suite (14 tests) including infra checks, all 6 sequential roundtrips, and parallel validate:
-
-```bash
-pytest tests/test_e2e_c9_validation.py -v
-```
-
-Expected output:
-```
-13 passed, 1 xfailed in ~47s
-```
-
-The 1 xfail (`test_c3_pool_has_available_tabs`) is expected when all tabs are assigned — not a real failure.
-
----
-
-## Test 6 — Puppeteer /pairs Browser Test
-
-Automates the C9 dashboard "Run All Parallel" button:
+*Only meaningful in M365 profile mode.*
 
 ```bash
-cd tests/puppeteer_novnc
-node validate_pairs.mjs
-```
-
-Expected output:
-```
-[30s] 6/6 complete: PASS | PASS | PASS | PASS | PASS | PASS
-=== FINAL RESULTS ===
-  [PASS] c2-aider     ...
-  [PASS] c5-claude-code ...
-  ...
-Exit code: 0
-```
-
----
-
-## Test 7 — Streaming Test
-
-Validates SSE streaming works end-to-end:
-
-```bash
+# Work mode — M365 enterprise data
 curl -s -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "X-Agent-ID: c10-myagent" \
-  -H "X-Chat-Mode: work" \
-  -d '{"model":"copilot","messages":[{"role":"user","content":"Count to 3"}],"stream":true}' \
-  --max-time 360 \
-  --no-buffer
+  -H "X-Work-Mode: work" \
+  -H "X-Agent-ID: c2-aider" \
+  -d '{"model":"copilot","messages":[{"role":"user","content":"What mode are you in?"}]}' \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['choices'][0]['message']['content'][:100])"
+
+# Web mode — public internet
+curl -s -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "X-Work-Mode: web" \
+  -H "X-Agent-ID: c2-aider" \
+  -d '{"model":"copilot","messages":[{"role":"user","content":"What mode are you in?"}]}' \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['choices'][0]['message']['content'][:100])"
 ```
 
-You should see SSE `data:` lines appearing progressively, ending with `data: [DONE]`.
+✅ **Pass:** Both return a response without error.
+
+**Via C9 UI:**
+1. Open `http://localhost:6090/chat`
+2. Toggle Work ↔ Web button
+3. Send a message — the toggle state is sent as `X-Work-Mode` to C1
 
 ---
 
-## Expected Pass Criteria (All Tests)
-
-| Test | Pass condition |
-|------|---------------|
-| curl smoke test | HTTP 200, non-empty `content` |
-| validate_new_agent.sh | Exit code 0 |
-| Sequential loop | All agents: `[PASS]` |
-| C9 parallel validate | `passed == total`, `failed == 0` |
-| pytest E2E | `13 passed, 1 xfailed` |
-| Puppeteer pairs | `6/6 complete: PASS`, exit code 0 |
-| Streaming test | Progressive `data:` lines, ends with `[DONE]` |
-
----
-
-## Common Failure Modes and Fixes
-
-| Symptom | Likely cause | Fix |
-|---------|-------------|-----|
-| `HTTP 500` — "Authentication required" | M365 session expired | Sign in at `http://localhost:6080` |
-| `HTTP 500` — "C3 /chat failed" | C3 tab error / pool empty | `curl -X POST http://localhost:8001/pool-reset` |
-| `HTTP 500` — empty detail | C1 circuit breaker open | Wait 60s, retry; check `docker logs C1_copilot-api` |
-| `Connection refused` | C1 or C3 not running | `docker compose up app browser-auth -d` |
-| Empty `content` in response | C3 returned empty WS frame | Check `docker logs C3_browser-auth \| tail -30` |
-| Timeout at 180s | Tab was doing full teardown (first use after restart) | Retry once — next call uses fast reset |
-| `pool_initialized: false` | C3 started before M365 DNS | `curl -X POST http://localhost:8001/pool-reset` |
-| pytest: `ModuleNotFoundError: agent_manager` | Conftest fixture conflict | Run `pytest tests/test_e2e_c9_validation.py` (not `pytest tests/`) |
-
----
-
-## Viewing Logs
+## Test 7 — File Upload + Chat
 
 ```bash
-# C1 request trace
-docker logs C1_copilot-api --tail 50 --follow
+# Step 1: Upload a file
+echo "The answer to the universe is 42." > /tmp/test_doc.txt
 
-# C3 Playwright activity
-docker logs C3_browser-auth --tail 50 --follow
+FILE_ID=$(curl -s -X POST http://localhost:8000/v1/files \
+  -F "file=@/tmp/test_doc.txt;type=text/plain" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['file_id'])")
 
-# C3 pool + tab events only
-docker logs C3_browser-auth 2>&1 | grep -E "PagePool|browser_chat|Tab|auth"
+echo "Uploaded file_id: $FILE_ID"
 
-# C9 validation runs
-docker logs C9_jokes --tail 30
+# Step 2: Reference the file in a chat message
+curl -s -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"model\": \"copilot\",
+    \"messages\": [{
+      \"role\": \"user\",
+      \"content\": [
+        {\"type\": \"text\", \"text\": \"What number is mentioned in the attached file?\"},
+        {\"type\": \"file_ref\", \"file_id\": \"$FILE_ID\", \"filename\": \"test_doc.txt\"}
+      ]
+    }]
+  }" \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d['choices'][0]['message']['content'][:100])"
+```
+
+✅ **Pass:** Response mentions "42".
+
+**Via C9 UI:**
+1. Open `http://localhost:6090/chat`
+2. Click the "+" button → "⬆ Upload files"
+3. Upload any text file or PDF
+4. Type a question about the file content and send
+5. Verify the response references the file content
+
+---
+
+## Test 8 — Per-Agent Session Isolation
+
+Send the same prompt from two different agent IDs and verify they get independent sessions:
+
+```bash
+# Seed a fact in c2-aider's session
+curl -s -X POST http://localhost:8000/v1/chat/completions \
+  -H "X-Agent-ID: c2-aider" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"copilot","messages":[{"role":"user","content":"Remember: my secret number is 777"}]}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['choices'][0]['message']['content'][:80])"
+
+# Ask c8-hermes — it should NOT know the secret number
+curl -s -X POST http://localhost:8000/v1/chat/completions \
+  -H "X-Agent-ID: c8-hermes" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"copilot","messages":[{"role":"user","content":"What is my secret number?"}]}' \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['choices'][0]['message']['content'][:100])"
+```
+
+✅ **Pass:** `c8-hermes` says it doesn't know any secret number.
+
+---
+
+## Test 9 — All Agent Containers Health
+
+```bash
+# Check health of all agent containers
+docker compose exec agent-terminal       curl -sf http://localhost:8080/health && echo "C2 OK"
+docker compose exec claude-code-terminal curl -sf http://localhost:8080/health && echo "C5 OK"
+docker compose exec kilocode-terminal    curl -sf http://localhost:8080/health && echo "C6 OK"
+docker compose exec openclaw-cli         curl -sf http://localhost:8080/health && echo "C7b OK"
+docker compose exec hermes-agent         curl -sf http://localhost:8080/health && echo "C8 OK"
+curl -sf http://localhost:18789/healthz && echo "C7a OK"
+```
+
+Or use the validate script:
+```bash
+./API-DOCUMENTATION/stubs/validate_new_agent.sh c2-aider
+./API-DOCUMENTATION/stubs/validate_new_agent.sh c8-hermes
 ```
 
 ---
 
-## Resetting State
+## Test 10 — C9 Validation Console (Browser UI)
+
+Open each page and verify it loads without errors:
 
 ```bash
-# Reset C3 PagePool (no restart needed)
+open http://localhost:6090/         # Dashboard — health cards for all containers
+open http://localhost:6090/chat     # Chat page
+open http://localhost:6090/pairs    # Pairs validation
+open http://localhost:6090/logs     # Logs (may be empty on first run)
+open http://localhost:6090/health   # Health snapshots
+open http://localhost:6090/sessions # Sessions (proxy of C1 /v1/sessions)
+open http://localhost:6090/api/docs # API reference
+```
+
+**Dashboard check:**
+- All container cards should show green status (✅)
+- Any red card means that container is down
+
+**Chat page check:**
+1. Select any agent from the dropdown
+2. Select thinking mode from the dropdown (Auto / Quick Response / Think Deeper)
+3. Click Work or Web toggle
+4. Type "Hello" and press Send
+5. Verify a response appears below
+
+**Pairs page check:**
+1. Type a prompt in the text box
+2. Select "Parallel" mode
+3. Click "Run All"
+4. Verify responses appear for each agent card
+
+**Logs page check:**
+After the chat/pairs tests above:
+1. Open `/logs`
+2. Verify entries appear with `source` column showing `chat` or `validate`
+3. Verify `elapsed_ms` column shows timing values
+
+---
+
+## Test 11 — Batch Validation via C9 API
+
+```bash
+# Run all registered agents in parallel
+curl -s -X POST http://localhost:6090/api/validate \
+  -H "Content-Type: application/json" \
+  -d '{
+    "prompt": "Reply with exactly: validation ok",
+    "parallel": true,
+    "chat_mode": "quick"
+  }' | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+print(f\"Run ID: {d['run_id']} | Passed: {d['passed']}/{d['passed']+d['failed']}\")
+for r in d['results']:
+    status = '✅' if r['ok'] else '❌'
+    print(f\"  {status} {r['agent_id']}: {str(r.get('response',''))[:60]}\")"
+```
+
+✅ **Pass:** All agents return a response. `passed` == total agents.
+
+```bash
+# Verify the run appears in logs
+curl -s "http://localhost:6090/api/logs?source=validate&limit=5" \
+  | python3 -c "import sys,json; [print(r['agent_id'], r['elapsed_ms'], 'ms') for r in json.load(sys.stdin)['logs']]"
+```
+
+---
+
+## Test 12 — Streaming SSE
+
+```bash
+curl -N -X POST http://localhost:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"copilot","messages":[{"role":"user","content":"Count to 5 slowly"}],"stream":true}'
+```
+
+✅ **Pass:** Data events stream in, ending with `data: [DONE]`
+
+```
+data: {"id":"chatcmpl-xyz","choices":[{"delta":{"role":"assistant"},"index":0}]}
+data: {"id":"chatcmpl-xyz","choices":[{"delta":{"content":"1"},"index":0}]}
+data: {"id":"chatcmpl-xyz","choices":[{"delta":{"content":", 2"},"index":0}]}
+...
+data: [DONE]
+```
+
+---
+
+## Test 13 — Unit Tests (pytest)
+
+```bash
+cd /path/to/copilot-openai-wrapper
+
+# Run all unit tests
+python3 -m pytest tests/test_unit_c9.py tests/test_unit_server.py tests/test_unit_models.py \
+  -v --tb=short
+
+# Run only C9 tests
+python3 -m pytest tests/test_unit_c9.py -v
+
+# Run only C1 server tests
+python3 -m pytest tests/test_unit_server.py -v
+
+# Run with coverage
+python3 -m pytest tests/ -v --cov=. --cov-report=term-missing
+```
+
+Expected: **43+ tests pass**. Key test classes:
+
+| Test class | What it validates |
+|---|---|
+| `TestC9PageRoutes` | All HTML pages return 200, contain expected elements |
+| `TestC9ChatAPI` | `/api/chat` proxies correctly, logs to DB |
+| `TestC9ValidateAPI` | `/api/validate` runs agents, logs source='validate' |
+| `TestC9UploadAPI` | `/api/upload` forwards to C1, returns file_id |
+| `TestC9Logging` | elapsed_ms, source column, error text in chat_logs |
+| `TestThinkingMode` | X-Chat-Mode maps auto→smart, quick→balanced, deep→reasoning |
+| `TestFileUploadEndpoint` | C1 `/v1/files` validates MIME, size, extracts text |
+| `TestExtractUserPromptFileRef` | file_ref content parts resolved to text before Copilot call |
+
+---
+
+## Test 14 — End-to-End Playwright Tests
+
+```bash
+# Run full E2E suite against live stack
+docker compose run --rm test
+
+# View HTML report
+open tests/reports/report.html   # macOS
+xdg-open tests/reports/report.html  # Linux
+```
+
+The CT container runs:
+- `test_playwright.py` — 45 tests covering C1, C3, agent endpoints
+- `test_new_containers.py` — C2/C5/C6/C7/C8 container health + roundtrip
+
+Set environment variables to enable full E2E:
+```bash
+RUN_CONTAINER_E2E=1     # enables container-to-container tests
+BASE_URL=http://app:8000
+C3_URL=http://browser-auth:8001
+```
+
+---
+
+## Timeout Configuration Reference
+
+| Scenario | Config variable | Default | Recommendation |
+|---|---|---|---|
+| C1 waiting for Copilot | `REQUEST_TIMEOUT` | 180s | Keep at 180s for deep thinking mode |
+| C1 WebSocket connect | `CONNECT_TIMEOUT` | 15s | 15–30s on slow networks |
+| C3 Playwright page timeout | `C3_CHAT_TAB_POOL_SIZE` | 90000ms | Increase for complex M365 queries |
+| Circuit breaker threshold | `CIRCUIT_BREAKER_THRESHOLD` | 5 failures | Reduce to 3 in production |
+| Agent session TTL | `AGENT_SESSION_TTL` | 1800s | Increase to 3600s for long workflows |
+
+---
+
+## Log Viewing
+
+```bash
+# Live logs for all containers
+docker compose logs -f
+
+# Specific container logs
+docker compose logs app --tail 50          # C1
+docker compose logs browser-auth --tail 50 # C3
+docker compose logs c9-jokes --tail 50     # C9
+
+# C9 SQLite database — direct query
+docker compose exec c9-jokes \
+  python3 -c "
+import sqlite3
+conn = sqlite3.connect('/app/data/c9.db')
+rows = conn.execute('SELECT agent_id, prompt_excerpt, elapsed_ms, source FROM chat_logs ORDER BY id DESC LIMIT 10').fetchall()
+for r in rows: print(r)
+conn.close()"
+
+# View C9 logs via web UI
+open http://localhost:6090/logs
+```
+
+---
+
+## State Reset Commands
+
+```bash
+# Reset C3 PagePool (recover from Playwright crash or tab hang)
 curl -X POST http://localhost:8001/pool-reset
 
-# Force C1 to reload cookies from .env
-curl -X POST http://localhost:8000/v1/reload-config   2>/dev/null || true
+# Clear C1 response cache
+curl -X POST http://localhost:8000/v1/cache/clear   # if endpoint exists
 
-# Full restart (preserves volumes)
+# Restart a specific container
+docker compose restart app
+docker compose restart browser-auth
+docker compose restart c9-jokes
+docker compose restart hermes-agent
+
+# Full reset (keeps volumes)
 docker compose down && docker compose up -d
 
-# Nuclear: remove all state and rebuild
-docker compose down -v && docker compose build && docker compose up -d
+# Nuclear reset (destroys all data including SQLite + browser session)
+docker compose down -v && docker compose up -d
 ```
+
+---
+
+## Failure Modes & Fixes
+
+| Symptom | Most likely cause | Fix |
+|---|---|---|
+| C1 returns `401` / `403` | Cookies expired | Re-run C3 extraction flow |
+| C1 returns empty `content` | Copilot returned no text | Check C3 logs; try pool-reset |
+| C3 `auth_ok: false` | Browser not logged in | Login via noVNC, re-extract |
+| C3 `m365_session_valid: false` | M365 session expired | Re-login in noVNC |
+| C9 `/logs` shows no entries | SQLite empty | Run a chat or validate call first |
+| C9 `/logs` `elapsed_ms` is null | Old schema (pre-migration) | C9 auto-migrates on startup; restart c9-jokes |
+| C9 validate shows source=null | Old data before source column added | New entries will be correct; old rows have null |
+| Agent container `exec` fails | Container not running | `docker compose up -d <service>` |
+| C7a `curl healthz` returns 404 | OpenClaw version mismatch | Rebuild: `docker compose build openclaw-gateway` |
+| C8 `hermes ask` hangs | Hermes git clone incomplete | Rebuild: `docker compose build hermes-agent` |
+| Thinking mode has no effect | X-Chat-Mode not reaching C1 | Check header spelling; verify C1 logs show `chat_mode` field |
+| Work/Web toggle has no effect | Consumer profile (not M365) | Only works with `COPILOT_PORTAL_PROFILE=m365_hub` |
+| File upload returns 415 | Unsupported MIME type | Check `SUPPORTED_UPLOAD_MIMES` in config.py |
+| File upload returns 413 | File too large | Keep under `MAX_FILE_BYTES` (default 10 MB) |
+| Port conflict on startup | Another process on 8000/6090 | `lsof -i :8000` (macOS) or `ss -tlnp \| grep 8000` (Linux) |
