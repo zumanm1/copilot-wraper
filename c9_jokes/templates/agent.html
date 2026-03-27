@@ -1,0 +1,802 @@
+{% extends "base.html" %}
+{% block title %}Agent Workspace{% endblock %}
+{% block content %}
+
+<style>
+/* ── Agent Workspace Layout ──────────────────────────────────────────────── */
+/* Override main padding for full-width workspace feel */
+.agent-workspace {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  grid-template-rows: auto 1fr auto;
+  gap: 0;
+  height: calc(100vh - 120px);
+  min-height: 600px;
+  margin: -1.25rem;  /* undo main padding */
+  overflow: hidden;
+}
+
+/* ── Toolbar row (spans full width) ─────────────────────────────────────── */
+.agent-toolbar {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+}
+.agent-toolbar h2 {
+  margin: 0;
+  font-size: 1rem;
+  white-space: nowrap;
+}
+.agent-toolbar .spacer { flex: 1; }
+.step-counter {
+  font-size: 0.78rem;
+  color: var(--muted);
+  white-space: nowrap;
+  padding: 0.2rem 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--bg);
+}
+.step-counter.running { color: var(--accent); border-color: rgba(88,166,255,0.4); animation: pulse 1.2s ease-in-out infinite; }
+
+/* ── File Tree panel ─────────────────────────────────────────────────────── */
+.agent-filetree {
+  grid-column: 1;
+  grid-row: 2;
+  border-right: 1px solid var(--border);
+  background: var(--card);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.filetree-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+.filetree-list {
+  flex: 1;
+  padding: 0.35rem 0;
+  overflow-y: auto;
+}
+.filetree-empty {
+  color: var(--muted);
+  font-size: 0.82rem;
+  padding: 1rem 0.75rem;
+  text-align: center;
+}
+.filetree-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.25rem 0.75rem;
+  font-size: 0.82rem;
+  cursor: pointer;
+  border-radius: 4px;
+  margin: 0 0.25rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg);
+  text-decoration: none;
+  transition: background 0.1s;
+}
+.filetree-item:hover { background: var(--surface2); }
+.filetree-item.active { background: rgba(88,166,255,0.12); color: var(--accent); }
+.filetree-item.dir { color: var(--warn); cursor: default; }
+.filetree-icon { font-size: 0.9rem; flex-shrink: 0; }
+
+/* ── File preview modal ──────────────────────────────────────────────────── */
+.file-preview-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.65);
+  z-index: 500;
+  align-items: center;
+  justify-content: center;
+}
+.file-preview-overlay.open { display: flex; }
+.file-preview-modal {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  width: min(90vw, 900px);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.file-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.65rem 1rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+.file-preview-body {
+  flex: 1;
+  overflow: auto;
+  padding: 1rem;
+}
+.file-preview-body pre {
+  margin: 0;
+  background: #010409;
+  border: none;
+  border-radius: 6px;
+  padding: 1rem;
+  font-size: 0.82rem;
+  max-height: 60vh;
+  overflow: auto;
+}
+
+/* ── Main right panel ────────────────────────────────────────────────────── */
+.agent-main {
+  grid-column: 2;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* ── Stream output ───────────────────────────────────────────────────────── */
+.agent-stream {
+  flex: 1;
+  background: #010409;
+  overflow-y: auto;
+  padding: 0.85rem 1rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  min-height: 0;
+}
+.stream-empty {
+  color: var(--muted);
+  text-align: center;
+  padding: 3rem 0;
+  font-family: system-ui, sans-serif;
+}
+.stream-entry { margin-bottom: 0.5rem; padding: 0.35rem 0.6rem; border-radius: 5px; }
+.stream-entry.thinking   { color: #c9d1d9; background: rgba(255,255,255,0.03); }
+.stream-entry.tool_call  { color: var(--accent); background: rgba(88,166,255,0.07); border-left: 2px solid var(--accent); }
+.stream-entry.observation { color: var(--ok); background: rgba(63,185,80,0.05); border-left: 2px solid var(--ok); }
+.stream-entry.observation.fail { color: var(--fail); background: rgba(248,81,73,0.05); border-left-color: var(--fail); }
+.stream-entry.file_update { color: var(--warn); background: rgba(210,153,34,0.07); }
+.stream-entry.final      { color: var(--ok); background: rgba(63,185,80,0.1); border: 1px solid rgba(63,185,80,0.3); font-weight: 600; font-family: system-ui, sans-serif; }
+.stream-entry.error      { color: var(--fail); background: rgba(248,81,73,0.07); border-left: 2px solid var(--fail); }
+.stream-entry.step_info  { color: var(--muted); font-size: 0.76rem; }
+
+.stream-label { font-size: 0.7rem; font-weight: 700; opacity: 0.7; text-transform: uppercase; margin-right: 0.4rem; letter-spacing: 0.05em; }
+.stream-cmd   { opacity: 0.85; }
+.stream-output { white-space: pre-wrap; word-break: break-word; margin-top: 0.2rem; font-size: 0.8rem; opacity: 0.9; }
+
+/* ── Input bar (bottom of right panel) ──────────────────────────────────── */
+.agent-input-bar {
+  border-top: 1px solid var(--border);
+  background: var(--card);
+  padding: 0.65rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+.agent-input-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.agent-input-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+.agent-input-row textarea {
+  flex: 1;
+  resize: none;
+  min-height: 3rem;
+  max-height: 140px;
+  font-family: system-ui, sans-serif;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.btn-run {
+  width: auto;
+  padding: 0.5rem 1.4rem;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 0.92rem;
+  cursor: pointer;
+  white-space: nowrap;
+  margin-top: 0;
+  transition: filter 0.1s;
+}
+.btn-run:hover:not(:disabled) { filter: brightness(1.15); }
+.btn-run:disabled { opacity: 0.45; cursor: not-allowed; }
+.btn-stop {
+  width: auto;
+  padding: 0.5rem 1rem;
+  background: rgba(248,81,73,0.12);
+  color: var(--fail);
+  border: 1px solid rgba(248,81,73,0.4);
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 0.92rem;
+  cursor: pointer;
+  white-space: nowrap;
+  margin-top: 0;
+}
+.btn-stop:hover { background: rgba(248,81,73,0.22); }
+.btn-reset-ws {
+  width: auto;
+  padding: 0.3rem 0.75rem;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  margin-top: 0;
+  white-space: nowrap;
+}
+.btn-reset-ws:hover { border-color: var(--fail); color: var(--fail); }
+
+/* ── Thinking dropdown (reuse pairs.html pattern) ────────────────────────── */
+.thinking-dropdown { position: relative; display: inline-block; }
+.thinking-pill {
+  display: inline-flex; align-items: center; gap: 2px;
+  background: var(--surface2, #2a2a2a); border: 1px solid var(--border, #444);
+  color: var(--text, #e0e0e0); border-radius: 999px; padding: 4px 12px;
+  font-size: 0.82rem; cursor: pointer; white-space: nowrap; margin-top: 0;
+}
+.thinking-pill:hover { background: var(--surface3, #333); }
+.thinking-menu {
+  position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 300;
+  background: var(--surface2, #2a2a2a); border: 1px solid var(--border, #444);
+  border-radius: 10px; padding: 4px; min-width: 220px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.5);
+}
+.thinking-opt {
+  display: flex; flex-direction: column; align-items: flex-start;
+  width: 100%; background: none; border: none; border-radius: 8px;
+  color: var(--text, #e0e0e0); padding: 8px 12px; cursor: pointer; text-align: left; margin-top: 0;
+}
+.thinking-opt:hover { background: var(--surface3, #333); }
+.thinking-opt.selected { background: var(--surface3, #3a3a3a); }
+.thinking-opt-name { font-size: 0.88rem; font-weight: 500; }
+.thinking-opt-desc { font-size: 0.76rem; color: var(--muted, #888); margin-top: 1px; }
+
+/* Work/Web toggle */
+.mode-btn {
+  padding: 0.25rem 0.75rem;
+  border: 1px solid var(--border,#555);
+  cursor: pointer;
+  font-size: 0.82rem;
+  margin-top: 0;
+  transition: background 0.1s;
+}
+.mode-btn:first-of-type { border-radius: 4px 0 0 4px; }
+.mode-btn:last-of-type  { border-left: none; border-radius: 0 4px 4px 0; }
+.mode-btn.active { background: var(--accent,#0078d4); color: #fff; }
+
+/* Agent select */
+.agent-select {
+  font-size: 0.82rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--surface2);
+  color: var(--fg);
+  cursor: pointer;
+  margin-top: 0;
+  width: auto;
+}
+
+/* Input bar bottom section — bottom of workspace */
+.agent-input-area {
+  grid-column: 2;
+  grid-row: 3;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.55; }
+}
+</style>
+
+<div class="agent-workspace">
+
+  <!-- ── Toolbar ────────────────────────────────────────────────────────── -->
+  <div class="agent-toolbar">
+    <h2>⚡ Agent Workspace</h2>
+    <span class="muted" style="font-size:0.8rem;">Autonomous task execution via C10 sandbox</span>
+    <div class="spacer"></div>
+    <span id="step-counter" class="step-counter" style="display:none">Step 0/15</span>
+    <!-- Thinking mode -->
+    <div class="thinking-dropdown" id="thinking-dropdown">
+      <button type="button" class="thinking-pill" id="thinking-pill" aria-haspopup="true" aria-expanded="false">
+        <span id="thinking-label">Auto</span>
+        <svg width="10" height="6" viewBox="0 0 10 6" fill="none" style="margin-left:4px"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="thinking-menu" id="thinking-menu" hidden>
+        <button type="button" class="thinking-opt" data-mode="auto">
+          <span class="thinking-opt-name">Auto</span>
+          <span class="thinking-opt-desc">Decides how long to think</span>
+        </button>
+        <button type="button" class="thinking-opt" data-mode="quick">
+          <span class="thinking-opt-name">Quick Response</span>
+          <span class="thinking-opt-desc">Faster, shorter reasoning</span>
+        </button>
+        <button type="button" class="thinking-opt" data-mode="deep">
+          <span class="thinking-opt-name">Think Deeper</span>
+          <span class="thinking-opt-desc">More thorough for complex tasks</span>
+        </button>
+      </div>
+    </div>
+    <!-- Work/Web -->
+    <div style="display:flex;align-items:center;gap:0;">
+      <button type="button" id="mode-work" class="mode-btn active" data-mode="work">Work</button>
+      <button type="button" id="mode-web"  class="mode-btn"        data-mode="web">Web</button>
+    </div>
+    <!-- Agent selector -->
+    <select id="agent-select" class="agent-select" title="Agent session ID used with C1">
+      {% for agent in agents %}
+      <option value="{{ agent.id }}"{% if agent.id == 'c9-jokes' %} selected{% endif %}>{{ agent.label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <!-- ── File Tree ──────────────────────────────────────────────────────── -->
+  <div class="agent-filetree">
+    <div class="filetree-header">
+      <span>📁 Workspace</span>
+      <button type="button" class="btn-sm" id="refresh-files" title="Refresh file tree">↺</button>
+    </div>
+    <div class="filetree-list" id="filetree-list">
+      <div class="filetree-empty" id="filetree-empty">Empty workspace</div>
+    </div>
+  </div>
+
+  <!-- ── Stream Output + Input ──────────────────────────────────────────── -->
+  <div class="agent-main">
+    <!-- Stream log -->
+    <div class="agent-stream" id="agent-stream">
+      <div class="stream-empty" id="stream-empty">
+        <div style="font-size:2rem;margin-bottom:0.75rem;">🤖</div>
+        <div style="font-size:1rem;color:var(--fg);margin-bottom:0.4rem;">Agent Workspace</div>
+        <div style="font-size:0.85rem;">Describe a task below and the AI agent will plan, code, run, and validate it.</div>
+        <div style="font-size:0.78rem;margin-top:0.5rem;color:var(--muted);">
+          Try: <em>"Write a Python script that fetches a joke from an API and prints it"</em>
+        </div>
+      </div>
+    </div>
+
+    <!-- Input bar -->
+    <div class="agent-input-bar">
+      <div class="agent-input-row">
+        <textarea
+          id="task-input"
+          rows="2"
+          placeholder="Describe what you want to build… (Ctrl+Enter to run)"
+        ></textarea>
+        <div style="display:flex;flex-direction:column;gap:0.4rem;">
+          <button type="button" class="btn-run" id="btn-run">▶ Run</button>
+          <button type="button" class="btn-stop" id="btn-stop" style="display:none">◼ Stop</button>
+        </div>
+      </div>
+      <div class="agent-input-controls">
+        <button type="button" class="btn-reset-ws" id="btn-reset-ws">🗑 Reset Workspace</button>
+        <span class="muted" style="font-size:0.76rem;">C10 sandbox · non-root · 512 MB · 0.5 CPU</span>
+      </div>
+    </div>
+  </div>
+
+</div><!-- end .agent-workspace -->
+
+<!-- ── File Preview Modal ───────────────────────────────────────────────── -->
+<div class="file-preview-overlay" id="file-preview-overlay">
+  <div class="file-preview-modal">
+    <div class="file-preview-header">
+      <span id="file-preview-title">file.py</span>
+      <button type="button" class="btn-sm" id="close-preview">✕ Close</button>
+    </div>
+    <div class="file-preview-body">
+      <pre id="file-preview-content"></pre>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  const agents = {{ agents | tojson }};
+
+  // ── DOM refs ──────────────────────────────────────────────────────────────
+  const streamEl       = document.getElementById('agent-stream');
+  const streamEmpty    = document.getElementById('stream-empty');
+  const filetreeList   = document.getElementById('filetree-list');
+  const filetreeEmpty  = document.getElementById('filetree-empty');
+  const taskInput      = document.getElementById('task-input');
+  const btnRun         = document.getElementById('btn-run');
+  const btnStop        = document.getElementById('btn-stop');
+  const btnResetWs     = document.getElementById('btn-reset-ws');
+  const btnRefresh     = document.getElementById('refresh-files');
+  const stepCounter    = document.getElementById('step-counter');
+  const agentSelect    = document.getElementById('agent-select');
+  const previewOverlay = document.getElementById('file-preview-overlay');
+  const previewTitle   = document.getElementById('file-preview-title');
+  const previewContent = document.getElementById('file-preview-content');
+  const closePreview   = document.getElementById('close-preview');
+
+  let activeSource = null;   // EventSource
+  let running = false;
+  let currentStep = 0;
+  let maxSteps = 15;
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  function escapeHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = String(s == null ? '' : s);
+    return d.innerHTML;
+  }
+
+  function scrollToBottom() {
+    streamEl.scrollTop = streamEl.scrollHeight;
+  }
+
+  function hideEmpty() {
+    if (streamEmpty) streamEmpty.style.display = 'none';
+  }
+
+  function appendEntry(type, html, extraClass) {
+    hideEmpty();
+    const div = document.createElement('div');
+    div.className = 'stream-entry ' + type + (extraClass ? ' ' + extraClass : '');
+    div.innerHTML = html;
+    streamEl.appendChild(div);
+    scrollToBottom();
+    return div;
+  }
+
+  // ── Thinking-mode dropdown (same pattern as pairs.html) ───────────────────
+  const THINKING_LABELS = { auto: 'Auto', quick: 'Quick Response', deep: 'Think Deeper' };
+  let thinkingMode = localStorage.getItem('agentThinkingMode') || 'auto';
+  const thinkingPill  = document.getElementById('thinking-pill');
+  const thinkingMenu  = document.getElementById('thinking-menu');
+  const thinkingLabel = document.getElementById('thinking-label');
+
+  function applyThinkingMode(mode) {
+    thinkingMode = mode;
+    thinkingLabel.textContent = THINKING_LABELS[mode] || 'Auto';
+    localStorage.setItem('agentThinkingMode', mode);
+    document.querySelectorAll('.thinking-opt').forEach(function(btn) {
+      btn.classList.toggle('selected', btn.dataset.mode === mode);
+    });
+    thinkingMenu.hidden = true;
+    thinkingPill.setAttribute('aria-expanded', 'false');
+  }
+  applyThinkingMode(thinkingMode);
+
+  thinkingPill.addEventListener('click', function(e) {
+    e.stopPropagation();
+    const open = !thinkingMenu.hidden;
+    thinkingMenu.hidden = open;
+    thinkingPill.setAttribute('aria-expanded', String(!open));
+  });
+  document.querySelectorAll('.thinking-opt').forEach(function(btn) {
+    btn.addEventListener('click', function() { applyThinkingMode(btn.dataset.mode); });
+  });
+
+  // ── Work/Web mode toggle ──────────────────────────────────────────────────
+  let activeWorkMode = 'work';
+  document.querySelectorAll('.mode-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      activeWorkMode = btn.dataset.mode;
+      document.querySelectorAll('.mode-btn').forEach(function(b) {
+        const active = b.dataset.mode === activeWorkMode;
+        b.style.background = active ? 'var(--accent,#0078d4)' : 'transparent';
+        b.style.color = active ? '#fff' : '';
+        b.classList.toggle('active', active);
+      });
+    });
+  });
+
+  // ── File tree ─────────────────────────────────────────────────────────────
+  function renderFileTree(entries) {
+    filetreeList.innerHTML = '';
+    if (!entries || !entries.length) {
+      filetreeList.innerHTML = '<div class="filetree-empty" id="filetree-empty">Empty workspace</div>';
+      return;
+    }
+    entries.forEach(function(entry) {
+      const item = document.createElement('div');
+      item.className = 'filetree-item' + (entry.type === 'dir' ? ' dir' : '');
+      const depth = (entry.path.match(/\//g) || []).length;
+      item.style.paddingLeft = (0.75 + depth * 0.8) + 'rem';
+      const icon = entry.type === 'dir' ? '📁' : getFileIcon(entry.path);
+      item.innerHTML = '<span class="filetree-icon">' + icon + '</span>' + escapeHtml(entry.path.split('/').pop());
+      item.title = entry.path;
+      if (entry.type === 'file') {
+        item.addEventListener('click', function() { openFilePreview(entry.path, item); });
+      }
+      filetreeList.appendChild(item);
+    });
+  }
+
+  function getFileIcon(path) {
+    const ext = (path.split('.').pop() || '').toLowerCase();
+    const icons = {
+      py: '🐍', js: '📜', ts: '📘', jsx: '⚛', tsx: '⚛',
+      html: '🌐', css: '🎨', json: '📋', md: '📝',
+      txt: '📄', sh: '⚙', yml: '⚙', yaml: '⚙',
+      toml: '⚙', env: '🔑', sql: '🗄',
+    };
+    return icons[ext] || '📄';
+  }
+
+  async function refreshFiles() {
+    btnRefresh.textContent = '…';
+    try {
+      const r = await fetch('/api/agent/files');
+      const data = await r.json();
+      renderFileTree(data.entries || []);
+    } catch(e) {
+      // silently fail on refresh
+    }
+    btnRefresh.textContent = '↺';
+  }
+
+  btnRefresh.addEventListener('click', refreshFiles);
+
+  // ── File preview modal ────────────────────────────────────────────────────
+  function openFilePreview(path, activeItem) {
+    document.querySelectorAll('.filetree-item').forEach(function(i) { i.classList.remove('active'); });
+    if (activeItem) activeItem.classList.add('active');
+    previewTitle.textContent = path;
+    previewContent.textContent = 'Loading…';
+    previewOverlay.classList.add('open');
+
+    fetch('/api/agent/file?path=' + encodeURIComponent(path))
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        previewContent.textContent = d.content || ('Error: ' + (d.error || d.detail || 'unknown'));
+      })
+      .catch(function(e) { previewContent.textContent = 'Error: ' + e.message; });
+  }
+
+  closePreview.addEventListener('click', function() {
+    previewOverlay.classList.remove('open');
+    document.querySelectorAll('.filetree-item').forEach(function(i) { i.classList.remove('active'); });
+  });
+  previewOverlay.addEventListener('click', function(e) {
+    if (e.target === previewOverlay) {
+      previewOverlay.classList.remove('open');
+      document.querySelectorAll('.filetree-item').forEach(function(i) { i.classList.remove('active'); });
+    }
+  });
+
+  // ── SSE stream rendering ──────────────────────────────────────────────────
+
+  function handleThinking(data) {
+    const text = (data.text || '').trim();
+    if (!text) return;
+    const stepLabel = data.step > 0 ? '<span class="stream-label">Step ' + data.step + '</span>' : '';
+    appendEntry('thinking', stepLabel + escapeHtml(text));
+  }
+
+  function handleToolCall(data) {
+    let inner = '<span class="stream-label">🔧 ' + escapeHtml(data.tool) + '</span>';
+    if (data.command) {
+      inner += ' <span class="stream-cmd">$ ' + escapeHtml(data.command) + '</span>';
+    } else if (data.path && data.tool === 'write_file') {
+      inner += ' <span class="stream-cmd">→ ' + escapeHtml(data.path) + '</span>';
+      if (data.preview) {
+        inner += '<div class="stream-output">' + escapeHtml(data.preview) + (data.preview.length >= 200 ? '…' : '') + '</div>';
+      }
+    } else if (data.path) {
+      inner += ' <span class="stream-cmd">' + escapeHtml(data.path) + '</span>';
+    } else if (data.package) {
+      inner += ' <span class="stream-cmd">' + escapeHtml(data.package) + ' (' + escapeHtml(data.manager || 'pip') + ')</span>';
+    }
+    appendEntry('tool_call', inner);
+  }
+
+  function handleObservation(data) {
+    const failed = data.exit_code !== undefined && data.exit_code !== 0;
+    const result = (data.result || '').trim();
+    let inner = '<span class="stream-label">' + (failed ? '❌ Result' : '✅ Result') + '</span>';
+    if (data.exit_code !== undefined) {
+      inner += ' <span style="font-size:0.75rem;opacity:0.7">exit ' + data.exit_code + '</span>';
+    }
+    if (data.timed_out) {
+      inner += ' <span style="color:var(--warn)"> [TIMED OUT]</span>';
+    }
+    if (result) {
+      inner += '<div class="stream-output">' + escapeHtml(result) + '</div>';
+    }
+    appendEntry('observation', inner, failed ? 'fail' : '');
+  }
+
+  function handleFileUpdate(data) {
+    const inner = '<span class="stream-label">📁 File</span> ' +
+      escapeHtml(data.path) + ' <span style="opacity:0.6">(' + escapeHtml(data.action || 'updated') + ')</span>';
+    appendEntry('file_update', inner);
+    // Refresh file tree
+    refreshFiles();
+  }
+
+  function handleStepDone(data) {
+    currentStep = data.step;
+    maxSteps = data.max_steps || 15;
+    stepCounter.style.display = '';
+    stepCounter.textContent = 'Step ' + currentStep + '/' + maxSteps;
+    stepCounter.className = 'step-counter running';
+  }
+
+  function handleFinal(data) {
+    const summary = data.summary || 'Task complete.';
+    const steps = data.steps_taken || currentStep;
+    const files = (data.files_created || []);
+    let inner = '<span style="font-size:1rem;">✅ Task Complete</span><br>' +
+      escapeHtml(summary) +
+      '<div style="font-size:0.78rem;color:var(--muted);margin-top:0.4rem;">' +
+      steps + ' steps · ' + files.length + ' file(s)' +
+      (data.max_steps_reached ? ' · ⚠ max steps reached' : '') +
+      '</div>';
+    appendEntry('final', inner);
+    setIdle();
+    refreshFiles();
+  }
+
+  function handleError(data) {
+    appendEntry('error', '<span class="stream-label">❌ Error</span> ' + escapeHtml(data.message || 'Unknown error'));
+    setIdle();
+  }
+
+  // ── Run / stop state ──────────────────────────────────────────────────────
+  function setRunning() {
+    running = true;
+    btnRun.style.display = 'none';
+    btnStop.style.display = '';
+    btnResetWs.disabled = true;
+    taskInput.disabled = true;
+    agentSelect.disabled = true;
+    stepCounter.style.display = '';
+    stepCounter.textContent = 'Starting…';
+    stepCounter.className = 'step-counter running';
+  }
+
+  function setIdle() {
+    running = false;
+    btnRun.style.display = '';
+    btnStop.style.display = 'none';
+    btnRun.disabled = false;
+    btnResetWs.disabled = false;
+    taskInput.disabled = false;
+    agentSelect.disabled = false;
+    stepCounter.className = 'step-counter';
+    if (activeSource) {
+      activeSource.close();
+      activeSource = null;
+    }
+  }
+
+  // ── Run task ──────────────────────────────────────────────────────────────
+  function runTask() {
+    const task = taskInput.value.trim();
+    if (!task || running) return;
+
+    // Clear stream
+    streamEl.innerHTML = '';
+    hideEmpty();
+    currentStep = 0;
+
+    setRunning();
+
+    const agentId  = agentSelect.value || 'c9-jokes';
+    const params = new URLSearchParams({
+      task:       task,
+      agent_id:   agentId,
+      chat_mode:  thinkingMode,
+      work_mode:  activeWorkMode,
+      max_steps:  '15',
+    });
+
+    appendEntry('step_info',
+      '<span class="stream-label">🚀 Task</span> ' + escapeHtml(task));
+
+    const src = new EventSource('/api/agent/run?' + params.toString());
+    activeSource = src;
+
+    src.addEventListener('thinking',    function(e) { handleThinking(JSON.parse(e.data)); });
+    src.addEventListener('tool_call',   function(e) { handleToolCall(JSON.parse(e.data)); });
+    src.addEventListener('observation', function(e) { handleObservation(JSON.parse(e.data)); });
+    src.addEventListener('file_update', function(e) { handleFileUpdate(JSON.parse(e.data)); });
+    src.addEventListener('step_done',   function(e) { handleStepDone(JSON.parse(e.data)); });
+    src.addEventListener('final',       function(e) { handleFinal(JSON.parse(e.data)); });
+    src.addEventListener('error',       function(e) {
+      // EventSource fires 'error' on connection close too; only show if data present
+      if (e.data) {
+        try { handleError(JSON.parse(e.data)); } catch(_) { handleError({message: e.data}); }
+      } else if (running) {
+        // Connection dropped
+        appendEntry('error', '<span class="stream-label">❌ Error</span> Connection to server lost.');
+        setIdle();
+      }
+    });
+    src.onopen = function() {};
+  }
+
+  btnRun.addEventListener('click', runTask);
+
+  taskInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      runTask();
+    }
+  });
+
+  // ── Stop ──────────────────────────────────────────────────────────────────
+  btnStop.addEventListener('click', function() {
+    if (activeSource) {
+      activeSource.close();
+      activeSource = null;
+    }
+    appendEntry('step_info', '<span class="stream-label">⏹ Stopped</span> Task execution cancelled by user.');
+    setIdle();
+  });
+
+  // ── Reset workspace ───────────────────────────────────────────────────────
+  btnResetWs.addEventListener('click', async function() {
+    if (running) return;
+    if (!confirm('Reset C10 workspace? This will delete all files in /workspace.')) return;
+    btnResetWs.textContent = 'Resetting…';
+    btnResetWs.disabled = true;
+    try {
+      const r = await fetch('/api/agent/reset', { method: 'POST' });
+      const d = await r.json();
+      appendEntry('step_info',
+        '<span class="stream-label">🗑 Workspace Reset</span> Deleted ' + (d.deleted_count || 0) + ' item(s).');
+      await refreshFiles();
+    } catch(e) {
+      appendEntry('error', '<span class="stream-label">❌</span> Reset failed: ' + escapeHtml(e.message));
+    }
+    btnResetWs.textContent = '🗑 Reset Workspace';
+    btnResetWs.disabled = false;
+  });
+
+  // ── Click-outside to close dropdowns ─────────────────────────────────────
+  document.addEventListener('click', function() {
+    if (!thinkingMenu.hidden) {
+      thinkingMenu.hidden = true;
+      thinkingPill.setAttribute('aria-expanded', 'false');
+    }
+  });
+
+  // ── Initial file tree load ────────────────────────────────────────────────
+  refreshFiles();
+
+})();
+</script>
+
+{% endblock %}

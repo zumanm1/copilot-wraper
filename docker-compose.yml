@@ -527,6 +527,7 @@ services:
       - C7B_URL=http://openclaw-cli:8080
       - C8_URL=http://hermes-agent:8080
       - DATABASE_PATH=/app/data/c9.db
+      - C10_URL=http://c10-sandbox:8100
     volumes:
       - ./c9_jokes:/app/c9_jokes
       - c9-data:/app/data
@@ -542,6 +543,40 @@ services:
       interval: 30s
       timeout: 10s
       start_period: 15s
+      retries: 3
+
+  # ──────────────────────────────────────────────────────────
+  # C10: AI Agent Sandbox (internal only — no host port)
+  #
+  # Isolated execution environment for the AI agent workspace.
+  # The agent can create files, run code, install packages, test,
+  # and validate results — all sandboxed from the host system.
+  #
+  # REST API on :8100 (internal Docker network only)
+  # Resource limits: 512 MB RAM, 0.5 CPU
+  # Non-root user: sandbox | Workspace: /workspace (named volume)
+  # ──────────────────────────────────────────────────────────
+  c10-sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile.c10-sandbox
+    image: copilot-c10-sandbox:latest
+    container_name: C10_sandbox
+    mem_limit: 512m
+    cpus: 0.5
+    # No host port binding — accessible only via copilot-net as c10-sandbox:8100
+    environment:
+      - WORKSPACE=/workspace
+    volumes:
+      - c10-workspace:/workspace
+    networks:
+      - copilot-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8100/health >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
       retries: 3
 
 # ── Shared network ────────────────────────────────────────────
@@ -560,3 +595,5 @@ volumes:
   hermes-config:
   # C9 validation SQLite DB
   c9-data:
+  # C10 agent workspace — persists files between agent runs
+  c10-workspace:

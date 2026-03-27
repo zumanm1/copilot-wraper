@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import sqlite3
 
 # #region agent log
@@ -26,12 +27,15 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Request, UploadFile, File
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DB = Path(os.environ.get("DATABASE_PATH", "/app/data/c9.db"))
+
+# ── C10 Sandbox URL ───────────────────────────────────────────────────────────
+C10_URL = os.environ.get("C10_URL", "http://c10-sandbox:8100").rstrip("/")
 
 # ── Container targets ─────────────────────────────────────────────────────────
 TARGETS = {
@@ -109,6 +113,232 @@ def _urls() -> dict[str, str]:
         key: os.environ.get(t["env"], t["default"]).rstrip("/")
         for key, t in TARGETS.items()
     }
+
+
+# ── C10 Sandbox helpers ───────────────────────────────────────────────────────
+
+async def _c10_exec(command: str, timeout: int = 30, cwd: str = ".") -> dict:
+    """Execute a shell command in the C10 sandbox."""
+    client = _get_http()
+    try:
+        r = await client.post(
+            f"{C10_URL}/exec",
+            json={"command": command, "timeout": timeout, "cwd": cwd},
+            timeout=timeout + 10,
+        )
+        return r.json()
+    except Exception as exc:
+        return {"stdout": "", "stderr": str(exc), "exit_code": -1, "timed_out": False}
+
+
+async def _c10_write_file(path: str, content: str) -> dict:
+    """Write a file to the C10 workspace."""
+    client = _get_http()
+    try:
+        r = await client.post(
+            f"{C10_URL}/file/write",
+            json={"path": path, "content": content},
+            timeout=15,
+        )
+        return r.json()
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+async def _c10_read_file(path: str) -> dict:
+    """Read a file from the C10 workspace."""
+    client = _get_http()
+    try:
+        r = await client.get(f"{C10_URL}/file/read", params={"path": path}, timeout=10)
+        return r.json()
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+async def _c10_list_files(path: str = ".") -> dict:
+    """List files in the C10 workspace."""
+    client = _get_http()
+    try:
+        r = await client.post(
+            f"{C10_URL}/file/ls",
+            json={"path": path, "recursive": True},
+            timeout=10,
+        )
+        return r.json()
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "entries": []}
+
+
+async def _c10_reset() -> dict:
+    """Reset (wipe) the C10 workspace."""
+    client = _get_http()
+    try:
+        r = await client.post(f"{C10_URL}/workspace/reset", timeout=15)
+        return r.json()
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+# ── Agentic loop — system prompt ──────────────────────────────────────────────
+
+AGENT_SYSTEM_PROMPT = """You are an expert AI software engineer with access to an isolated Linux sandbox.
+Your job is to complete the user's task by writing code, running it, testing it, and validating results.
+
+You have access to these tools — use them by writing XML tags in your response:
+
+1. Execute a shell command:
+<tool_call><tool>exec</tool><command>BASH_COMMAND_HERE</command></tool_call>
+
+2. Write a file:
+<tool_call><tool>write_file</tool><path>relative/path/to/file.py</path><content>
+FILE_CONTENT_HERE
+</content></tool_call>
+
+3. Read a file:
+<tool_call><tool>read_file</tool><path>relative/path/to/file.py</path></tool_call>
+
+4. List workspace files:
+<tool_call><tool>list_files</tool></tool_call>
+
+5. Install a package:
+<tool_call><tool>install</tool><package>PACKAGE_NAME</package><manager>pip</manager></tool_call>
+(manager can be "pip" or "npm")
+
+RULES:
+1. Think step by step. Plan before you code.
+2. Write code, execute it, read the output, fix any errors, then validate.
+3. The sandbox has: Python 3.11, Node.js, npm, git, bash, curl, pip.
+4. You run as non-root user 'sandbox' in /workspace directory.
+5. Always test/validate your code before declaring done.
+6. When the task is fully complete and validated, write EXACTLY:
+   <final_answer>YOUR_SUMMARY_OF_WHAT_WAS_BUILT_AND_VALIDATED</final_answer>
+7. Maximum 15 steps — be efficient, do not repeat yourself.
+8. Only one tool_call per response is allowed (keep the loop clean)."""
+
+
+# ── Agentic loop — XML parser ─────────────────────────────────────────────────
+
+def _parse_tool_call(text: str) -> dict | None:
+    """
+    Extract the first <tool_call>...</tool_call> block from LLM response text.
+    Returns a dict with 'tool' key plus tool-specific fields, or None if not found.
+    """
+    match = re.search(r"<tool_call>(.*?)</tool_call>", text, re.DOTALL)
+    if not match:
+        return None
+    inner = match.group(1).strip()
+
+    def _extract(tag: str) -> str:
+        m = re.search(rf"<{tag}>(.*?)</{tag}>", inner, re.DOTALL)
+        return m.group(1).strip() if m else ""
+
+    tool = _extract("tool")
+    if not tool:
+        return None
+
+    result: dict = {"tool": tool}
+    if tool == "exec":
+        result["command"] = _extract("command")
+    elif tool == "write_file":
+        result["path"] = _extract("path")
+        # content may contain newlines — use a more permissive extract
+        cm = re.search(r"<content>(.*?)</content>", inner, re.DOTALL)
+        result["content"] = cm.group(1) if cm else ""
+    elif tool == "read_file":
+        result["path"] = _extract("path")
+    elif tool == "list_files":
+        pass  # no args
+    elif tool == "install":
+        result["package"] = _extract("package")
+        result["manager"] = _extract("manager") or "pip"
+    return result
+
+
+def _parse_final_answer(text: str) -> str | None:
+    """Extract <final_answer> content if present."""
+    m = re.search(r"<final_answer>(.*?)</final_answer>", text, re.DOTALL)
+    return m.group(1).strip() if m else None
+
+
+def _strip_tool_xml(text: str) -> str:
+    """Remove XML tool tags so the thinking portion is clean."""
+    cleaned = re.sub(r"<tool_call>.*?</tool_call>", "", text, flags=re.DOTALL)
+    cleaned = re.sub(r"<final_answer>.*?</final_answer>", "", cleaned, flags=re.DOTALL)
+    return cleaned.strip()
+
+
+async def _execute_tool(tool: dict) -> tuple[str, dict]:
+    """
+    Dispatch a parsed tool dict to C10 and return (observation_text, metadata).
+    observation_text is what gets fed back to the LLM as <observation>.
+    """
+    name = tool.get("tool", "")
+    meta: dict = {"tool": name}
+
+    if name == "exec":
+        cmd = tool.get("command", "")
+        meta["command"] = cmd
+        result = await _c10_exec(cmd, timeout=60)
+        meta["exit_code"] = result.get("exit_code", -1)
+        meta["timed_out"] = result.get("timed_out", False)
+        stdout = result.get("stdout", "")
+        stderr = result.get("stderr", "")
+        obs = f"STDOUT:\n{stdout}\nSTDERR:\n{stderr}\nEXIT_CODE: {result.get('exit_code', -1)}"
+        if result.get("timed_out"):
+            obs += "\n[TIMED OUT]"
+        return obs, meta
+
+    elif name == "write_file":
+        path = tool.get("path", "file.txt")
+        content = tool.get("content", "")
+        meta["path"] = path
+        result = await _c10_write_file(path, content)
+        meta["ok"] = result.get("ok", False)
+        meta["size"] = result.get("size")
+        if result.get("ok"):
+            obs = f"File written: {path} ({result.get('size', 0)} bytes)"
+        else:
+            obs = f"Error writing file: {result.get('error', 'unknown error')}"
+        return obs, meta
+
+    elif name == "read_file":
+        path = tool.get("path", "")
+        meta["path"] = path
+        result = await _c10_read_file(path)
+        if result.get("ok"):
+            obs = f"File content of {path}:\n{result.get('content', '')}"
+        else:
+            obs = f"Error reading file: {result.get('error', result.get('detail', 'not found'))}"
+        return obs, meta
+
+    elif name == "list_files":
+        result = await _c10_list_files()
+        entries = result.get("entries", [])
+        if entries:
+            lines = [f"  {'[DIR] ' if e['type']=='dir' else '      '}{e['path']}" for e in entries]
+            obs = "Workspace files:\n" + "\n".join(lines)
+        else:
+            obs = "Workspace is empty."
+        return obs, meta
+
+    elif name == "install":
+        pkg = tool.get("package", "")
+        mgr = tool.get("manager", "pip")
+        meta["package"] = pkg
+        meta["manager"] = mgr
+        if mgr == "npm":
+            cmd = f"npm install {pkg}"
+        else:
+            cmd = f"pip install --quiet {pkg}"
+        result = await _c10_exec(cmd, timeout=120)
+        meta["exit_code"] = result.get("exit_code", -1)
+        stdout = result.get("stdout", "")
+        stderr = result.get("stderr", "")
+        obs = f"Install {pkg} ({mgr}):\nSTDOUT: {stdout}\nSTDERR: {stderr}\nEXIT_CODE: {result.get('exit_code', -1)}"
+        return obs, meta
+
+    else:
+        return f"Unknown tool: {name!r}", meta
 
 
 # ── Core probe helper (async) ────────────────────────────────────────────────
@@ -357,6 +587,15 @@ async def page_sessions(request: Request):
 async def page_api_reference(request: Request):
     return templates.TemplateResponse(request, "api_reference.html", {
         "urls": _urls(), "targets": TARGETS, "agents": AGENTS,
+    })
+
+
+@app.get("/agent", response_class=HTMLResponse, name="page_agent")
+async def page_agent(request: Request):
+    """AI Agent Workspace — IDE-like agentic task execution via C10 sandbox."""
+    return templates.TemplateResponse(request, "agent.html", {
+        "agents": AGENTS,
+        "c10_url": C10_URL,
     })
 
 
@@ -680,6 +919,220 @@ async def api_logs(agent: str = "", limit: int = 20, offset: int = 0):
         "limit": limit,
         "rows": [dict(r) for r in rows],
     })
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# AGENT WORKSPACE API ROUTES  (/api/agent/*)
+# ─────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/agent/run", name="api_agent_run")
+async def api_agent_run(
+    request: Request,
+    task: str = "",
+    agent_id: str = "c9-jokes",
+    chat_mode: str = "auto",
+    work_mode: str = "work",
+    max_steps: int = 15,
+):
+    """
+    SSE stream of the full agentic execution loop.
+
+    Query params:
+      task       — the user task description
+      agent_id   — which agent session to use with C1 (default: c9-jokes)
+      chat_mode  — thinking depth: auto | quick | deep
+      work_mode  — scope: work | web
+      max_steps  — max ReAct iterations (default 15, max 20)
+
+    SSE events (each line: 'event: TYPE\\ndata: JSON\\n\\n'):
+      thinking    — LLM reasoning text before tool call
+      tool_call   — tool being dispatched
+      observation — tool execution result
+      file_update — file created/modified in workspace
+      step_done   — step N complete
+      final       — task complete with summary
+      error       — unrecoverable error
+    """
+    task = task.strip()
+    max_steps = max(1, min(20, max_steps))
+    c1 = _urls()["c1"]
+
+    def _sse(event: str, data: dict) -> str:
+        return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+    async def generate():
+        if not task:
+            yield _sse("error", {"message": "No task provided."})
+            return
+
+        # Check C10 is reachable
+        client = _get_http()
+        try:
+            health_r = await client.get(f"{C10_URL}/health", timeout=5)
+            if health_r.status_code != 200:
+                yield _sse("error", {"message": f"C10 sandbox unhealthy (HTTP {health_r.status_code}). Is c10-sandbox running?"})
+                return
+        except Exception as exc:
+            yield _sse("error", {"message": f"C10 sandbox unreachable: {exc}. Run: docker compose up c10-sandbox -d"})
+            return
+
+        # Build multi-turn conversation history
+        history: list[dict] = []
+        files_created: list[str] = []
+
+        yield _sse("thinking", {"step": 0, "text": f"🚀 Starting agent task: {task[:120]}...", "total_steps": max_steps})
+
+        for step in range(1, max_steps + 1):
+            yield _sse("step_done", {"step": step, "max_steps": max_steps, "status": "running"})
+
+            # Build messages for C1
+            messages: list[dict] = [
+                {"role": "system", "content": AGENT_SYSTEM_PROMPT},
+            ]
+            if not history:
+                messages.append({"role": "user", "content": task})
+            else:
+                messages.extend(history)
+
+            # Call C1 (Copilot LLM)
+            headers = {
+                "Content-Type": "application/json",
+                "X-Agent-ID": agent_id,
+            }
+            if chat_mode:
+                headers["X-Chat-Mode"] = chat_mode
+            if work_mode in ("work", "web"):
+                headers["X-Work-Mode"] = work_mode
+
+            body = {
+                "model": "copilot",
+                "messages": messages,
+                "stream": False,
+            }
+
+            try:
+                llm_r = await client.post(
+                    f"{c1}/v1/chat/completions",
+                    headers=headers,
+                    json=body,
+                    timeout=180,
+                )
+                if llm_r.status_code != 200:
+                    raw = llm_r.text[:400]
+                    yield _sse("error", {"message": f"C1 returned HTTP {llm_r.status_code}: {raw}"})
+                    return
+                llm_data = llm_r.json()
+                response_text: str = llm_data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            except Exception as exc:
+                yield _sse("error", {"message": f"LLM call failed: {exc}"})
+                return
+
+            # Emit thinking text (stripped of XML)
+            thinking_text = _strip_tool_xml(response_text)
+            if thinking_text:
+                yield _sse("thinking", {"step": step, "text": thinking_text})
+
+            # Check for final answer first
+            final_answer = _parse_final_answer(response_text)
+            if final_answer:
+                yield _sse("final", {
+                    "summary": final_answer,
+                    "steps_taken": step,
+                    "files_created": files_created,
+                })
+                return
+
+            # Parse tool call
+            tool = _parse_tool_call(response_text)
+            if not tool:
+                # No tool call and no final answer — ask LLM to continue or finalize
+                history.append({"role": "assistant", "content": response_text})
+                history.append({
+                    "role": "user",
+                    "content": "Please continue. Use a tool to make progress, or write <final_answer> if the task is complete.",
+                })
+                continue
+
+            # Emit tool_call SSE
+            tool_event: dict = {"step": step, "tool": tool["tool"]}
+            if tool.get("command"):
+                tool_event["command"] = tool["command"]
+            if tool.get("path"):
+                tool_event["path"] = tool["path"]
+            if tool.get("package"):
+                tool_event["package"] = tool["package"]
+            if tool.get("content"):
+                # Send a preview of the content (first 200 chars)
+                tool_event["preview"] = tool["content"][:200]
+            yield _sse("tool_call", tool_event)
+
+            # Execute the tool
+            observation, meta = await _execute_tool(tool)
+
+            # Track file updates
+            if tool["tool"] == "write_file" and meta.get("ok"):
+                path = meta.get("path", "")
+                if path and path not in files_created:
+                    files_created.append(path)
+                yield _sse("file_update", {"path": path, "action": "created"})
+
+            # Emit observation SSE
+            obs_event: dict = {
+                "step": step,
+                "tool": tool["tool"],
+                "result": observation[:800],  # truncate for stream
+            }
+            if "exit_code" in meta:
+                obs_event["exit_code"] = meta["exit_code"]
+            if meta.get("timed_out"):
+                obs_event["timed_out"] = True
+            yield _sse("observation", obs_event)
+
+            # Append to conversation history
+            if not history:
+                history.append({"role": "user", "content": task})
+            history.append({"role": "assistant", "content": response_text})
+            history.append({
+                "role": "user",
+                "content": f"<observation>\n{observation}\n</observation>\n\nContinue with the next step, or write <final_answer> if the task is complete and validated.",
+            })
+
+        # Reached max_steps without final_answer
+        yield _sse("final", {
+            "summary": f"Reached maximum steps ({max_steps}). Task may be partially complete. Check the file tree for created files.",
+            "steps_taken": max_steps,
+            "files_created": files_created,
+            "max_steps_reached": True,
+        })
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@app.post("/api/agent/reset", name="api_agent_reset")
+async def api_agent_reset():
+    """Reset (wipe) the C10 workspace. Returns {ok, deleted_count}."""
+    result = await _c10_reset()
+    return JSONResponse(result)
+
+
+@app.get("/api/agent/files", name="api_agent_files")
+async def api_agent_files():
+    """List all files currently in the C10 workspace."""
+    result = await _c10_list_files()
+    return JSONResponse(result)
+
+
+@app.get("/api/agent/file", name="api_agent_file")
+async def api_agent_file(path: str = ""):
+    """Read a single file from the C10 workspace. Query param: path="""
+    if not path:
+        return JSONResponse({"ok": False, "error": "path required"}, status_code=400)
+    result = await _c10_read_file(path)
+    return JSONResponse(result)
 
 
 if __name__ == "__main__":
