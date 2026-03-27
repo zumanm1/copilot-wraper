@@ -34,5 +34,7 @@ CREATE TABLE IF NOT EXISTS chat_logs (
     agent_id TEXT NOT NULL,
     prompt_excerpt TEXT,
     response_excerpt TEXT,
-    http_status INTEGER
+    http_status INTEGER,
+    elapsed_ms INTEGER,
+    source TEXT DEFAULT 'chat'  -- 'chat' | 'validate'
 );

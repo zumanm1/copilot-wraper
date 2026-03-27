@@ -326,6 +326,54 @@ class TestC9ApiValidate:
         })
         assert r.status_code == 400
 
+    def test_validate_mode_parallel(self, c9_app):
+        r = c9_app.post("/api/validate", json={"prompt": "Joke", "parallel": True})
+        assert r.json()["mode"] == "parallel"
+
+    def test_validate_mode_sequential(self, c9_app):
+        r = c9_app.post("/api/validate", json={"prompt": "Joke", "parallel": False})
+        assert r.json()["mode"] == "sequential"
+
+    def test_validate_calls_appear_in_logs(self, c9_app):
+        """Validation runs must be visible in /logs (source='validate')."""
+        # Run a single-agent validate
+        c9_app.post("/api/validate", json={
+            "prompt": "Validate log test",
+            "agent_ids": ["c9-jokes"],
+        })
+        r = c9_app.get("/logs")
+        assert r.status_code == 200
+        assert "validate" in r.text  # source badge visible
+
+    def test_chat_logs_include_elapsed_ms(self, c9_app):
+        """chat_logs must store elapsed_ms so /logs can display response time."""
+        c9_app.post("/api/chat", json={"agent_id": "c9-jokes", "prompt": "Timing test"})
+        r = c9_app.get("/api/logs")
+        assert r.status_code == 200
+        rows = r.json()["rows"]
+        assert len(rows) > 0
+        # elapsed_ms should be present (may be 0 in test but not absent)
+        assert "elapsed_ms" in rows[0]
+
+    def test_failed_chat_logs_error_text(self, c9_app):
+        """When C1 returns an error, response_excerpt must contain the error, not be blank."""
+        import c9_jokes.app as c9_mod
+        error_resp = {"detail": "Upstream timeout from Copilot"}
+        mock_resp = MagicMock()
+        mock_resp.status_code = 503
+        mock_resp.json = MagicMock(return_value=error_resp)
+        mock_resp.text = json.dumps(error_resp)
+        mock_http = _make_mock_http(error_resp, status=503)
+        mock_http.post = AsyncMock(return_value=mock_resp)
+        with patch.object(c9_mod, "_get_http", return_value=mock_http):
+            c9_app.post("/api/chat", json={"agent_id": "c9-jokes", "prompt": "Will fail"})
+        r = c9_app.get("/api/logs")
+        rows = r.json()["rows"]
+        assert len(rows) > 0
+        latest = rows[0]
+        assert latest["http_status"] == 503
+        assert "Upstream timeout" in (latest["response_excerpt"] or "")
+
 
 # ── /pairs page: header correctness tests ────────────────────────────────────
 

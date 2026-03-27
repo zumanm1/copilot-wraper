@@ -89,6 +89,17 @@ def _init_db() -> None:
 def _ensure_db() -> None:
     if not DEFAULT_DB.exists():
         _init_db()
+    # Migrate: add columns introduced after initial schema
+    try:
+        with _db() as conn:
+            conn.execute("ALTER TABLE chat_logs ADD COLUMN elapsed_ms INTEGER")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+    try:
+        with _db() as conn:
+            conn.execute("ALTER TABLE chat_logs ADD COLUMN source TEXT DEFAULT 'chat'")
+    except sqlite3.OperationalError:
+        pass  # column already exists
 
 
 # ── URL helpers ───────────────────────────────────────────────────────────────
@@ -297,14 +308,14 @@ async def page_logs(request: Request):
                     "SELECT COUNT(*) FROM chat_logs WHERE agent_id=?", (agent_filter,)
                 ).fetchone()[0]
                 rows = conn.execute(
-                    "SELECT id, created_at, agent_id, prompt_excerpt, response_excerpt, http_status "
+                    "SELECT id, created_at, agent_id, prompt_excerpt, response_excerpt, http_status, elapsed_ms, source "
                     "FROM chat_logs WHERE agent_id=? ORDER BY id DESC LIMIT ? OFFSET ?",
                     (agent_filter, limit, offset),
                 ).fetchall()
             else:
                 total = conn.execute("SELECT COUNT(*) FROM chat_logs").fetchone()[0]
                 rows = conn.execute(
-                    "SELECT id, created_at, agent_id, prompt_excerpt, response_excerpt, http_status "
+                    "SELECT id, created_at, agent_id, prompt_excerpt, response_excerpt, http_status, elapsed_ms, source "
                     "FROM chat_logs ORDER BY id DESC LIMIT ? OFFSET ?",
                     (limit, offset),
                 ).fetchall()
@@ -479,14 +490,16 @@ async def api_chat(request: Request):
     try:
         with _db() as conn:
             conn.execute(
-                "INSERT INTO chat_logs (created_at, agent_id, prompt_excerpt, response_excerpt, http_status) "
-                "VALUES (?,?,?,?,?)",
+                "INSERT INTO chat_logs (created_at, agent_id, prompt_excerpt, response_excerpt, http_status, elapsed_ms, source) "
+                "VALUES (?,?,?,?,?,?,?)",
                 (
                     datetime.now(timezone.utc).isoformat(),
                     agent_id,
                     prompt[:200],
-                    (result.get("text") or "")[:500],
+                    (result.get("text") or result.get("error") or "")[:500],
                     result.get("http_status"),
+                    result.get("elapsed_ms"),
+                    "chat",
                 ),
             )
     except sqlite3.Error:
@@ -514,7 +527,8 @@ async def api_validate(request: Request):
     if not agents_to_run:
         return JSONResponse({"ok": False, "error": "no matching agents"}, status_code=400)
 
-    mode = "web-parallel"
+    parallel = payload.get("parallel", True)
+    mode = "parallel" if parallel else "sequential"
     started_at = datetime.now(timezone.utc).isoformat()
     wall_t0 = time.monotonic()
     run_id = None
@@ -532,16 +546,23 @@ async def api_validate(request: Request):
         r = await _chat_one(agent["id"], prompt, c1, chat_mode=chat_mode, work_mode=work_mode, attachments=attachments)
         ok = r["ok"] and bool((r.get("text") or "").strip())
         detail = r.get("text") or r.get("error") or r.get("raw") or ""
-        if run_id:
-            try:
-                with _db() as conn:
+        ts = datetime.now(timezone.utc).isoformat()
+        try:
+            with _db() as conn:
+                if run_id:
                     conn.execute(
                         "INSERT INTO pair_results (run_id, pair_name, ok, detail, duration_ms) "
                         "VALUES (?,?,?,?,?)",
                         (run_id, agent["id"], 1 if ok else 0, detail[:500], r.get("elapsed_ms")),
                     )
-            except sqlite3.Error:
-                pass
+                # Also write to chat_logs so /logs shows all AI calls regardless of source
+                conn.execute(
+                    "INSERT INTO chat_logs (created_at, agent_id, prompt_excerpt, response_excerpt, http_status, elapsed_ms, source) "
+                    "VALUES (?,?,?,?,?,?,?)",
+                    (ts, agent["id"], prompt[:200], detail[:500], r.get("http_status"), r.get("elapsed_ms"), "validate"),
+                )
+        except sqlite3.Error:
+            pass
         return {
             "agent_id": agent["id"],
             "label": agent["label"],
@@ -635,14 +656,14 @@ async def api_logs(agent: str = "", limit: int = 20, offset: int = 0):
                     "SELECT COUNT(*) FROM chat_logs WHERE agent_id=?", (agent,)
                 ).fetchone()[0]
                 rows = conn.execute(
-                    "SELECT id, created_at, agent_id, prompt_excerpt, response_excerpt, http_status "
+                    "SELECT id, created_at, agent_id, prompt_excerpt, response_excerpt, http_status, elapsed_ms, source "
                     "FROM chat_logs WHERE agent_id=? ORDER BY id DESC LIMIT ? OFFSET ?",
                     (agent, limit, offset),
                 ).fetchall()
             else:
                 total = conn.execute("SELECT COUNT(*) FROM chat_logs").fetchone()[0]
                 rows = conn.execute(
-                    "SELECT id, created_at, agent_id, prompt_excerpt, response_excerpt, http_status "
+                    "SELECT id, created_at, agent_id, prompt_excerpt, response_excerpt, http_status, elapsed_ms, source "
                     "FROM chat_logs ORDER BY id DESC LIMIT ? OFFSET ?",
                     (limit, offset),
                 ).fetchall()

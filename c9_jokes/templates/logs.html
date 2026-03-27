@@ -29,9 +29,11 @@
       <th style="width:2.5rem">#</th>
       <th style="width:10rem">Time</th>
       <th style="width:8rem">Agent</th>
+      <th style="width:4rem">Source</th>
       <th>Prompt</th>
       <th>Response</th>
       <th style="width:3.5rem">HTTP</th>
+      <th style="width:4rem">Time (ms)</th>
     </tr>
   </thead>
   <tbody>
@@ -40,6 +42,10 @@
       <td class="muted">{{ row['id'] }}</td>
       <td><small>{{ row['created_at'][:19] if row['created_at'] else '—' }}</small></td>
       <td><code style="font-size:0.78rem">{{ row['agent_id'] }}</code></td>
+      <td>
+        {% set src = row['source'] or 'chat' %}
+        <span class="badge {{ 'ok' if src == 'chat' else '' }}" style="font-size:0.7rem;opacity:0.85">{{ src }}</span>
+      </td>
       <td>
         <div class="log-excerpt">{{ row['prompt_excerpt'] or '—' }}</div>
       </td>
@@ -60,6 +66,9 @@
         <span class="badge {{ 'ok' if row['http_status'] == 200 else 'fail' }}">
           {{ row['http_status'] or '—' }}
         </span>
+      </td>
+      <td class="muted" style="font-size:0.8rem">
+        {{ row['elapsed_ms'] if row['elapsed_ms'] is not none else '—' }}
       </td>
     </tr>
   {% endfor %}
