@@ -99,6 +99,20 @@ MAX_CONTEXT_CHARS = int(os.getenv("MAX_CONTEXT_CHARS", "32000"))
 # Multimodal: reject attachments larger than this (bytes)
 MAX_IMAGE_BYTES = int(os.getenv("MAX_IMAGE_BYTES", str(4 * 1024 * 1024)))
 
+# File upload: max size for document uploads (bytes); default 10 MB
+MAX_FILE_BYTES = int(os.getenv("MAX_FILE_BYTES", str(10 * 1024 * 1024)))
+
+# File upload: allowed MIME types
+SUPPORTED_UPLOAD_MIMES = frozenset({
+    "image/png", "image/jpeg", "image/gif", "image/webp",
+    "application/pdf",
+    "text/plain",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",  # .docx
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",        # .xlsx
+    "application/vnd.ms-excel",                                                  # .xls
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation", # .pptx
+})
+
 # Named agent API sessions: idle TTL for stopped sessions (seconds)
 AGENT_API_SESSION_TTL = int(os.getenv("AGENT_API_SESSION_TTL", "1800"))
 

@@ -194,3 +194,161 @@ class TestAgentEndpoints:
     def test_history_before_start(self, test_app):
         r = test_app.get("/v1/agent/history")
         assert r.status_code == 200
+
+
+# ── Thinking Mode (resolve_chat_style_with_mode) ─────────────────────
+
+class TestThinkingMode:
+    def test_auto_maps_to_smart(self):
+        from server import resolve_chat_style_with_mode
+        assert resolve_chat_style_with_mode("copilot", 0.7, "auto") == "smart"
+
+    def test_quick_maps_to_balanced(self):
+        from server import resolve_chat_style_with_mode
+        assert resolve_chat_style_with_mode("copilot", 0.7, "quick") == "balanced"
+
+    def test_deep_maps_to_reasoning(self):
+        from server import resolve_chat_style_with_mode
+        assert resolve_chat_style_with_mode("copilot", 0.7, "deep") == "reasoning"
+
+    def test_empty_mode_falls_through_to_model_map(self):
+        from server import resolve_chat_style_with_mode
+        # "copilot" is in MODEL_MAP → "smart" regardless of temperature
+        assert resolve_chat_style_with_mode("copilot", 0.7, "") == "smart"
+
+    def test_empty_mode_falls_through_temperature(self):
+        from server import resolve_chat_style_with_mode
+        # low temp → precise when model not in MODEL_MAP
+        assert resolve_chat_style_with_mode("unknown-model", 0.1, "") == "precise"
+
+    def test_unknown_mode_falls_through(self):
+        from server import resolve_chat_style_with_mode
+        assert resolve_chat_style_with_mode("copilot", 0.7, "turbo") == "smart"
+
+    def test_x_chat_mode_header_sets_style(self, test_app):
+        """X-Chat-Mode: deep → backend.style=reasoning visible in gen_note header."""
+        r = test_app.post(
+            "/v1/chat/completions",
+            headers={"X-Chat-Mode": "deep"},
+            json={"model": "copilot", "messages": [{"role": "user", "content": "Hello"}]},
+        )
+        assert r.status_code == 200
+        note = r.headers.get("x-generation-params-note", "")
+        assert "copilot_style=reasoning" in note
+        assert "thinking_mode=deep" in note
+
+    def test_x_chat_mode_quick(self, test_app):
+        r = test_app.post(
+            "/v1/chat/completions",
+            headers={"X-Chat-Mode": "quick"},
+            json={"model": "copilot", "messages": [{"role": "user", "content": "Hello"}]},
+        )
+        assert r.status_code == 200
+        note = r.headers.get("x-generation-params-note", "")
+        assert "copilot_style=balanced" in note
+
+    def test_x_work_mode_in_gen_note(self, test_app):
+        """X-Work-Mode: web visible in gen_note header."""
+        r = test_app.post(
+            "/v1/chat/completions",
+            headers={"X-Work-Mode": "web"},
+            json={"model": "copilot", "messages": [{"role": "user", "content": "Hello"}]},
+        )
+        assert r.status_code == 200
+        note = r.headers.get("x-generation-params-note", "")
+        assert "work_mode=web" in note
+
+
+# ── File Ref in extract_user_prompt ──────────────────────────────────
+
+class TestExtractUserPromptFileRef:
+    def test_file_ref_injects_text(self):
+        from server import extract_user_prompt, _file_store
+        fid = "test_file_001"
+        _file_store[fid] = {"type": "text", "text": "Revenue: $1M", "filename": "report.pdf", "size": 100}
+        from models import ChatMessage, ContentPart
+        msg = ChatMessage(role="user", content=[
+            ContentPart(type="text", text="Summarise this"),
+            ContentPart(type="file_ref", file_id=fid, filename="report.pdf"),
+        ])
+        result = extract_user_prompt([msg])
+        assert "Summarise this" in result
+        assert "[Attached file: report.pdf]" in result
+        assert "Revenue: $1M" in result
+        del _file_store[fid]
+
+    def test_missing_file_ref_does_not_crash(self):
+        from server import extract_user_prompt
+        from models import ChatMessage, ContentPart
+        msg = ChatMessage(role="user", content=[
+            ContentPart(type="text", text="hi"),
+            ContentPart(type="file_ref", file_id="nonexistent_xyz"),
+        ])
+        result = extract_user_prompt([msg])
+        assert "hi" in result  # text part still included
+
+
+# ── File Upload Endpoint (/v1/files) ──────────────────────────────────
+
+class TestFileUploadEndpoint:
+    def test_upload_text_file(self, test_app):
+        r = test_app.post(
+            "/v1/files",
+            files={"file": ("hello.txt", b"Hello world", "text/plain")},
+        )
+        assert r.status_code == 200
+        body = r.json()
+        assert body["type"] == "text"
+        assert body["filename"] == "hello.txt"
+        assert "file_id" in body
+        assert "preview" in body
+
+    def test_upload_unsupported_type_returns_400(self, test_app):
+        r = test_app.post(
+            "/v1/files",
+            files={"file": ("virus.exe", b"\x00\x01", "application/octet-stream")},
+        )
+        assert r.status_code == 400
+
+    def test_upload_oversized_returns_413(self, test_app):
+        import server as srv
+        original = srv.config.MAX_FILE_BYTES
+        srv.config.MAX_FILE_BYTES = 5
+        try:
+            r = test_app.post(
+                "/v1/files",
+                files={"file": ("big.txt", b"0123456789", "text/plain")},
+            )
+            assert r.status_code == 413
+        finally:
+            srv.config.MAX_FILE_BYTES = original
+
+    def test_uploaded_file_id_resolves_in_prompt(self, test_app):
+        # Upload a text file, then send it in a chat
+        upload = test_app.post(
+            "/v1/files",
+            files={"file": ("note.txt", b"My secret note", "text/plain")},
+        )
+        assert upload.status_code == 200
+        fid = upload.json()["file_id"]
+
+        chat = test_app.post("/v1/chat/completions", json={
+            "model": "copilot",
+            "messages": [{"role": "user", "content": [
+                {"type": "text", "text": "What does the file say?"},
+                {"type": "file_ref", "file_id": fid, "filename": "note.txt"},
+            ]}],
+        })
+        assert chat.status_code == 200
+        # The mocked backend returns a canned response; we just verify no crash
+        body = chat.json()
+        assert body["choices"][0]["message"]["role"] == "assistant"
+
+    def test_upload_png_returns_image_type(self, test_app):
+        png_header = b"\x89PNG\r\n\x1a\n" + b"\x00" * 20
+        r = test_app.post(
+            "/v1/files",
+            files={"file": ("img.png", png_header, "image/png")},
+        )
+        assert r.status_code == 200
+        assert r.json()["type"] == "image"

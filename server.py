@@ -1,5 +1,5 @@
 import asyncio, time, uuid, base64, tempfile, os, logging, sys
-from fastapi import FastAPI, HTTPException, Request, Query
+from fastapi import FastAPI, HTTPException, Request, Query, UploadFile, File
 from fastapi.responses import StreamingResponse, JSONResponse
 from models import (
     ChatCompletionRequest, ChatCompletionResponse, ChatCompletionChoice,
@@ -217,6 +217,15 @@ def extract_user_prompt(messages):
                 for p in msg.content:
                     if p.type == "text" and p.text:
                         parts.append(p.text)
+                    elif p.type == "file_ref" and p.file_id:
+                        entry = _file_store.get(p.file_id)
+                        if entry and entry["type"] == "text":
+                            label = p.filename or entry.get("filename", p.file_id)
+                            parts.append(f"[Attached file: {label}]\n{entry['text']}")
+                        elif entry and entry["type"] == "image":
+                            pass  # image handled separately by extract_image()
+                        else:
+                            logger.warning("file_ref %s not found in store", p.file_id)
         elif msg.role == "assistant" and msg.content is not None:
             if isinstance(msg.content, str):
                 parts.append(f"[Assistant]: {msg.content}")
@@ -248,8 +257,24 @@ def resolve_anthropic_style(model_id: str, temperature: float | None) -> str:
     return "creative"
 
 
+# Thinking-mode selector → Copilot style (mirrors M365 Copilot UI)
+THINKING_MODE_MAP: dict[str, str] = {
+    "auto":  "smart",     # Auto — decides how long to think
+    "quick": "balanced",  # Quick Response — answers right away
+    "deep":  "reasoning", # Think Deeper — thinks longer for better answers
+}
+
+
+def resolve_chat_style_with_mode(model_id: str, temperature: float, chat_mode: str) -> str:
+    """Like resolve_chat_style but honours an explicit X-Chat-Mode override."""
+    if chat_mode in THINKING_MODE_MAP:
+        return THINKING_MODE_MAP[chat_mode]
+    return resolve_chat_style(model_id, temperature)
+
+
 def extract_image(messages):
-    """Return path to a temp file containing the first base64 image, or None."""
+    """Return path to a temp file containing the first image, or None.
+    Handles both base64 data URLs and file_ref uploads."""
     for msg in messages:
         if msg.role == "user" and isinstance(msg.content, list):
             for p in msg.content:
@@ -268,6 +293,10 @@ def extract_image(messages):
                             f.write(raw)
                         logger.info("Extracted image to: %s", path)
                         return path
+                elif p.type == "file_ref" and p.file_id:
+                    entry = _file_store.get(p.file_id)
+                    if entry and entry["type"] == "image":
+                        return entry["image_path"]  # already on disk from /v1/files
     return None
 
 
@@ -281,8 +310,108 @@ def _cleanup_attachment(path):
 
 
 # ══════════════════════════════════════════════════════════════════════
+# File Upload Store
+# In-memory store: file_id → {type, text, image_path, filename, size}
+# TTL not implemented; files are small and request-scoped in practice.
+# ══════════════════════════════════════════════════════════════════════
+
+_file_store: dict[str, dict] = {}
+_IMAGE_MIMES = frozenset({"image/png", "image/jpeg", "image/gif", "image/webp"})
+_MAX_FILES_PER_MSG = 5
+
+
+def extract_document_text(path: str, mime_type: str) -> str:
+    """Extract plain text from a document file. Truncates to MAX_CONTEXT_CHARS."""
+    try:
+        if mime_type == "application/pdf":
+            import pypdf
+            reader = pypdf.PdfReader(path)
+            parts = [page.extract_text() or "" for page in reader.pages]
+            text = "\n".join(parts)
+        elif mime_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+            import docx
+            doc = docx.Document(path)
+            text = "\n".join(p.text for p in doc.paragraphs if p.text)
+        elif mime_type in ("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            "application/vnd.ms-excel"):
+            import openpyxl
+            wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+            rows = []
+            for sheet in wb.worksheets:
+                rows.append(f"[Sheet: {sheet.title}]")
+                for row in sheet.iter_rows(values_only=True):
+                    rows.append("\t".join("" if v is None else str(v) for v in row))
+            text = "\n".join(rows)
+        elif mime_type == "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+            from pptx import Presentation
+            prs = Presentation(path)
+            lines = []
+            for i, slide in enumerate(prs.slides, 1):
+                lines.append(f"[Slide {i}]")
+                for shape in slide.shapes:
+                    if shape.has_text_frame:
+                        for para in shape.text_frame.paragraphs:
+                            t = para.text.strip()
+                            if t:
+                                lines.append(t)
+            text = "\n".join(lines)
+        elif mime_type == "text/plain":
+            with open(path, "r", errors="replace") as f:
+                text = f.read()
+        else:
+            return ""
+    except Exception as exc:
+        logger.warning("extract_document_text failed for %s (%s): %s", path, mime_type, exc)
+        return f"[Could not extract text: {exc}]"
+
+    if len(text) > config.MAX_CONTEXT_CHARS:
+        text = "[...truncated...]\n" + text[-config.MAX_CONTEXT_CHARS:]
+    return text
+
+
+# ══════════════════════════════════════════════════════════════════════
 # Core API Endpoints
 # ══════════════════════════════════════════════════════════════════════
+
+
+@app.post("/v1/files")
+async def upload_file(file: UploadFile = File(...)):
+    """Accept a multipart file upload, extract text (docs) or save image to /tmp.
+    Returns {file_id, type, filename, size, preview} for use in /v1/chat/completions."""
+    mime = file.content_type or "application/octet-stream"
+    if mime not in config.SUPPORTED_UPLOAD_MIMES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported file type: {mime}. Allowed: {', '.join(sorted(config.SUPPORTED_UPLOAD_MIMES))}",
+        )
+    raw = await file.read()
+    if len(raw) > config.MAX_FILE_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"File exceeds MAX_FILE_BYTES ({config.MAX_FILE_BYTES} bytes)",
+        )
+    file_id = uuid.uuid4().hex
+    fname = file.filename or f"upload_{file_id}"
+
+    if mime in _IMAGE_MIMES:
+        fd, path = tempfile.mkstemp(suffix=os.path.splitext(fname)[1] or ".png", dir="/tmp")
+        with os.fdopen(fd, "wb") as f_out:
+            f_out.write(raw)
+        _file_store[file_id] = {"type": "image", "image_path": path, "filename": fname, "size": len(raw)}
+        logger.info("File upload (image): %s → %s (%d bytes)", fname, path, len(raw))
+        return JSONResponse({"file_id": file_id, "type": "image", "filename": fname, "size": len(raw), "preview": None})
+    else:
+        # Write to temp, extract text, keep text in store
+        fd, path = tempfile.mkstemp(suffix=os.path.splitext(fname)[1] or ".bin", dir="/tmp")
+        with os.fdopen(fd, "wb") as f_out:
+            f_out.write(raw)
+        text = extract_document_text(path, mime)
+        os.unlink(path)  # no longer needed; text is cached
+        preview = text[:200].replace("\n", " ") if text else ""
+        _file_store[file_id] = {"type": "text", "text": text, "filename": fname, "size": len(raw)}
+        logger.info("File upload (doc): %s (%d bytes), extracted %d chars", fname, len(raw), len(text))
+        return JSONResponse({"file_id": file_id, "type": "text", "filename": fname, "size": len(raw), "preview": preview})
+
 
 @app.get("/v1/models")
 async def list_models():
@@ -303,7 +432,10 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
     # CRITICAL: Always print to stderr for Docker logs visibility
     print(f"Bounty Hunter Trace: API_ENTRY model={request.model} streaming={request.stream}", file=sys.stderr, flush=True)
     agent_id = raw_request.headers.get("X-Agent-ID")
+    # X-Chat-Mode = thinking depth (auto|quick|deep) → sets backend.style
     chat_mode = (raw_request.headers.get("X-Chat-Mode") or "").strip().lower()
+    # X-Work-Mode = M365 context scope (work|web) → forwarded to C3 browser-auth
+    work_mode = (raw_request.headers.get("X-Work-Mode") or "").strip().lower()
     prompt = extract_user_prompt(request.messages)
     try:
         attachment = extract_image(request.messages)
@@ -320,12 +452,14 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
         release_fn = _noop_release
     else:
         backend = await pool.acquire()
-        backend.style = resolve_chat_style(request.model, request.temperature)
         release_fn = pool.release
+    # Apply thinking-mode / temperature style override for every request
+    backend.style = resolve_chat_style_with_mode(request.model, request.temperature, chat_mode)
 
     temp_map = "off" if request.model in config.MODEL_MAP else "on"
     gen_note = (
-        f"copilot_style={backend.style};temperature_mapping={temp_map};"
+        f"copilot_style={backend.style};thinking_mode={chat_mode or 'auto'};"
+        f"work_mode={work_mode or 'default'};temperature_mapping={temp_map};"
         f"max_tokens={'word_truncation' if request.max_tokens else 'none'}"
     )
 
@@ -333,7 +467,8 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
     if request.stream:
         return StreamingResponse(
             stream_gen(
-                release_fn, backend, prompt, attachment, request.model, request.max_tokens, agent_id or "", chat_mode,
+                release_fn, backend, prompt, attachment, request.model, request.max_tokens,
+                agent_id or "", work_mode,
             ),
             media_type="text/event-stream",
             headers={"x-generation-params-note": gen_note},
@@ -341,7 +476,7 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
 
     # ── Non-streaming path ────────────────────────────────────────────
     try:
-        response = await backend.chat_completion(prompt=prompt, attachment_path=attachment, agent_id=agent_id or "", chat_mode=chat_mode)
+        response = await backend.chat_completion(prompt=prompt, attachment_path=attachment, agent_id=agent_id or "", chat_mode=work_mode)
         sys.stderr.write(f"Bounty Hunter Trace: RESPONSE_CONTENT='{response[:100]}...'\n")
         sys.stderr.flush()
         response, truncated = truncate_by_approx_tokens(response, request.max_tokens)
@@ -374,7 +509,7 @@ async def create_chat_completion(request: ChatCompletionRequest, raw_request: Re
         _cleanup_attachment(attachment)
 
 
-async def stream_gen(release_fn, backend, prompt, attachment, model, max_tokens, agent_id="", chat_mode=""):
+async def stream_gen(release_fn, backend, prompt, attachment, model, max_tokens, agent_id="", work_mode=""):
     """SSE generator — releases backend (or no-ops for agent sessions) after streaming."""
     chat_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())   # computed once, not per-token
@@ -393,7 +528,7 @@ async def stream_gen(release_fn, backend, prompt, attachment, model, max_tokens,
         end_fr = "stop"
         char_budget = max_tokens * 4 if max_tokens else 0
         chars_sent = 0
-        async for token in backend.chat_completion_stream(prompt=prompt, attachment_path=attachment, agent_id=agent_id or "", chat_mode=chat_mode):
+        async for token in backend.chat_completion_stream(prompt=prompt, attachment_path=attachment, agent_id=agent_id or "", chat_mode=work_mode):
             if char_budget:
                 chars_sent += len(token)
                 if chars_sent > char_budget:
@@ -540,6 +675,8 @@ def _anthropic_messages_to_prompt(request: AnthropicRequest) -> str:
 )
 async def anthropic_messages(request: AnthropicRequest, raw_request: Request):
     agent_id = raw_request.headers.get("X-Agent-ID")
+    chat_mode = (raw_request.headers.get("X-Chat-Mode") or "").strip().lower()
+    work_mode = (raw_request.headers.get("X-Work-Mode") or "").strip().lower()
     prompt = _anthropic_messages_to_prompt(request)
     if not prompt:
         raise HTTPException(status_code=400, detail="No message content found")
@@ -552,19 +689,23 @@ async def anthropic_messages(request: AnthropicRequest, raw_request: Request):
         release_fn = _noop_release
     else:
         backend = await pool.acquire()
-        backend.style = resolve_anthropic_style(request.model, request.temperature)
         release_fn = pool.release
+    # Apply thinking-mode / temperature style override for every request
+    if chat_mode in THINKING_MODE_MAP:
+        backend.style = THINKING_MODE_MAP[chat_mode]
+    else:
+        backend.style = resolve_anthropic_style(request.model, request.temperature)
 
     # ── Streaming path ──────────────────────────────────────────────────
     if request.stream:
         return StreamingResponse(
-            _anthropic_stream_gen(release_fn, backend, prompt, request.model, agent_id or ""),
+            _anthropic_stream_gen(release_fn, backend, prompt, request.model, agent_id or "", work_mode),
             media_type="text/event-stream",
         )
 
     # ── Non-streaming path ──────────────────────────────────────────────
     try:
-        response_text = await backend.chat_completion(prompt=prompt, agent_id=agent_id or "")
+        response_text = await backend.chat_completion(prompt=prompt, agent_id=agent_id or "", chat_mode=work_mode)
         token_in = count_tokens(prompt)
         token_out = count_tokens(response_text)
         sys.stderr.write(f"Bounty Hunter Trace: ANTHROPIC_RESPONSE_CONTENT='{response_text[:100]}...'\n")
@@ -582,7 +723,7 @@ async def anthropic_messages(request: AnthropicRequest, raw_request: Request):
         await release_fn(backend)
 
 
-async def _anthropic_stream_gen(release_fn, backend, prompt: str, model: str, agent_id: str = ""):
+async def _anthropic_stream_gen(release_fn, backend, prompt: str, model: str, agent_id: str = "", work_mode: str = ""):
     """SSE generator in Anthropic streaming format."""
     msg_id  = f"msg_{uuid.uuid4().hex[:20]}"
 
@@ -595,7 +736,7 @@ async def _anthropic_stream_gen(release_fn, backend, prompt: str, model: str, ag
     total_chars = 0
     stream_ok = False
     try:
-        async for token in backend.chat_completion_stream(prompt=prompt, agent_id=agent_id or ""):
+        async for token in backend.chat_completion_stream(prompt=prompt, agent_id=agent_id or "", chat_mode=work_mode):
             total_chars += len(token)
             yield f"data: {_dumps({'type': 'content_block_delta', 'index': 0, 'delta': {'type': 'text_delta', 'text': token}})}\n\n"
         stream_ok = True

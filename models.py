@@ -17,9 +17,12 @@ class ChatMessage(BaseModel):
 
 class ContentPart(BaseModel):
     """Content part for multimodal messages."""
-    type: Literal["text", "image_url"]
+    type: Literal["text", "image_url", "file_ref"]
     text: str | None = None
     image_url: ImageURL | None = None
+    # file_ref fields — used when C9 uploads a file via /v1/files
+    file_id: str | None = None
+    filename: str | None = None
 
 
 class ImageURL(BaseModel):

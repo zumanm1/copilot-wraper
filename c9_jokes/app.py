@@ -25,7 +25,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, UploadFile, File
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
@@ -149,16 +149,27 @@ async def _probe_all() -> list[dict]:
 
 # ── Chat proxy helper (async) ────────────────────────────────────────────────
 
-async def _chat_one(agent_id: str, prompt: str, c1_url: str, chat_mode: str = "") -> dict:
+async def _chat_one(agent_id: str, prompt: str, c1_url: str, chat_mode: str = "", attachments: list | None = None, work_mode: str = "") -> dict:
     """Call C1 for a single agent. Returns {ok, http_status, text, elapsed_ms}."""
+    if attachments:
+        # Build multi-part content: text + file_ref parts
+        content: list = [{"type": "text", "text": prompt}]
+        for att in attachments:
+            if att.get("file_id"):
+                content.append({"type": "file_ref", "file_id": att["file_id"], "filename": att.get("filename", "")})
+        user_msg = {"role": "user", "content": content}
+    else:
+        user_msg = {"role": "user", "content": prompt}
     body = {
         "model": "copilot",
-        "messages": [{"role": "user", "content": prompt}],
+        "messages": [user_msg],
         "stream": False,
     }
     headers = {"Content-Type": "application/json", "X-Agent-ID": agent_id}
     if chat_mode:
         headers["X-Chat-Mode"] = chat_mode
+    if work_mode in ("work", "web"):
+        headers["X-Work-Mode"] = work_mode
     client = _get_http()
     t0 = time.monotonic()
     # #region agent log
@@ -423,9 +434,35 @@ async def api_health_history(target: str = "", limit: int = 10):
     return JSONResponse([dict(r) for r in rows])
 
 
+@app.post("/api/upload", name="api_upload")
+async def api_upload(file: UploadFile = File(...)):
+    """Proxy a file upload to C1 POST /v1/files. Returns {ok, file_id, filename, type, preview}."""
+    c1 = _urls()["c1"]
+    raw = await file.read()
+    client = _get_http()
+    try:
+        r = await client.post(
+            f"{c1}/v1/files",
+            files={"file": (file.filename, raw, file.content_type or "application/octet-stream")},
+            timeout=60,
+        )
+        if r.status_code == 200:
+            data = r.json()
+            return JSONResponse({"ok": True, **data})
+        else:
+            detail = r.text[:500]
+            try:
+                detail = r.json().get("detail", detail)
+            except Exception:
+                pass
+            return JSONResponse({"ok": False, "error": str(detail)}, status_code=r.status_code)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
 @app.post("/api/chat", name="api_chat")
 async def api_chat(request: Request):
-    """Proxy a single chat to C1. Body: {agent_id, prompt}."""
+    """Proxy a single chat to C1. Body: {agent_id, prompt, chat_mode?, attachments?}."""
     c1 = _urls()["c1"]
     try:
         payload_in = await request.json()
@@ -434,9 +471,11 @@ async def api_chat(request: Request):
     agent_id = (payload_in.get("agent_id") or "c9-jokes").strip()
     prompt = (payload_in.get("prompt") or "").strip()
     chat_mode = (payload_in.get("chat_mode") or "").strip().lower()
+    work_mode = (payload_in.get("work_mode") or "").strip().lower()
+    attachments = payload_in.get("attachments") or []  # [{file_id, filename}, ...]
     if not prompt:
         return JSONResponse({"ok": False, "error": "prompt required"}, status_code=400)
-    result = await _chat_one(agent_id, prompt, c1, chat_mode=chat_mode)
+    result = await _chat_one(agent_id, prompt, c1, chat_mode=chat_mode, attachments=attachments, work_mode=work_mode)
     try:
         with _db() as conn:
             conn.execute(
@@ -468,6 +507,8 @@ async def api_validate(request: Request):
         payload = {}
     prompt = (payload.get("prompt") or "Tell me a joke").strip()
     chat_mode = (payload.get("chat_mode") or "").strip().lower()
+    work_mode = (payload.get("work_mode") or "").strip().lower()
+    attachments = payload.get("attachments") or []
     requested_ids = payload.get("agent_ids") or [a["id"] for a in AGENTS]
     agents_to_run = [a for a in AGENTS if a["id"] in requested_ids]
     if not agents_to_run:
@@ -488,7 +529,7 @@ async def api_validate(request: Request):
         pass
 
     async def _run_one(agent: dict) -> dict:
-        r = await _chat_one(agent["id"], prompt, c1, chat_mode=chat_mode)
+        r = await _chat_one(agent["id"], prompt, c1, chat_mode=chat_mode, work_mode=work_mode, attachments=attachments)
         ok = r["ok"] and bool((r.get("text") or "").strip())
         detail = r.get("text") or r.get("error") or r.get("raw") or ""
         if run_id:

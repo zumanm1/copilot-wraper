@@ -37,7 +37,8 @@ C9_URL = "http://localhost:6090"
 TIMEOUT_AGENT = 360          # seconds per individual agent call
 TIMEOUT_PARALLEL = 600       # seconds for full parallel run
 PROMPT = "Tell me a joke"
-CHAT_MODE = "work"
+WORK_MODE = "work"           # M365 context scope: "work" | "web"  (X-Work-Mode header)
+THINK_MODE = "auto"          # Thinking depth: "auto" | "quick" | "deep" (X-Chat-Mode header)
 
 AGENTS = [
     {"id": "c2-aider",       "label": "C2 Aider (OpenAI)",         "path": "C1→OpenAI"},
@@ -74,21 +75,23 @@ def _http_get(url: str, timeout: int = 10) -> tuple[int, dict]:
         return code, {"_raw": body[:120]}
 
 
-def _c1_chat(agent_id: str, prompt: str = PROMPT, mode: str = CHAT_MODE) -> dict:
+def _c1_chat(agent_id: str, prompt: str = PROMPT, work_mode: str = WORK_MODE, think_mode: str = THINK_MODE) -> dict:
     payload = {
         "model": "copilot",
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
     }
+    headers = {
+        "Content-Type": "application/json",
+        "X-Agent-ID": agent_id,
+        "X-Work-Mode": work_mode,    # M365 Work/Web toggle → forwarded to C3
+        "X-Chat-Mode": think_mode,   # Thinking depth → sets backend.style
+        "User-Agent": "c9-e2e-test/1.0",
+    }
     req = urllib.request.Request(
         f"{C1_URL}/v1/chat/completions",
         data=json.dumps(payload).encode(),
-        headers={
-            "Content-Type": "application/json",
-            "X-Agent-ID": agent_id,
-            "X-Chat-Mode": mode,
-            "User-Agent": "c9-e2e-test/1.0",
-        },
+        headers=headers,
         method="POST",
     )
     t0 = time.monotonic()
@@ -190,6 +193,29 @@ class TestAgentPipelinesSequential:
         )
         print(f"\n  [{agent['id']}] {result['elapsed']:.2f}s | {result['text'][:80]}")
 
+    @pytest.mark.parametrize("think", ["auto", "quick", "deep"],
+                              ids=["think=auto", "think=quick", "think=deep"])
+    def test_c9_jokes_thinking_modes(self, think):
+        """c9-jokes session (generic) must return a joke under each thinking mode."""
+        result = _c1_chat("c9-jokes", prompt="Tell me a short joke", think_mode=think)
+        assert result["ok"], (
+            f"c9-jokes think_mode={think} failed: {result['error']}"
+        )
+        assert len(result["text"].strip()) > 5, (
+            f"c9-jokes think_mode={think} returned empty: {result['text']!r}"
+        )
+        print(f"\n  [c9-jokes think={think}] {result['elapsed']:.2f}s | {result['text'][:80]}")
+
+    @pytest.mark.parametrize("work", ["work", "web"],
+                              ids=["work_mode=work", "work_mode=web"])
+    def test_c9_jokes_work_web_modes(self, work):
+        """c9-jokes session must respond under both Work and Web M365 scopes."""
+        result = _c1_chat("c9-jokes", prompt="Tell me a short joke", work_mode=work)
+        assert result["ok"], (
+            f"c9-jokes work_mode={work} failed: {result['error']}"
+        )
+        print(f"\n  [c9-jokes work={work}] {result['elapsed']:.2f}s | {result['text'][:80]}")
+
 
 # ── C9 /api/validate parallel test ───────────────────────────────────────────
 
@@ -200,7 +226,7 @@ class TestC9ParallelValidation:
         t0 = time.monotonic()
         code, body = _http_post(
             f"{C9_URL}/api/validate",
-            {"prompt": PROMPT, "chat_mode": CHAT_MODE},
+            {"prompt": PROMPT, "chat_mode": THINK_MODE, "work_mode": WORK_MODE},
             timeout=TIMEOUT_PARALLEL,
         )
         wall = time.monotonic() - t0
@@ -238,6 +264,71 @@ class TestC9ParallelValidation:
         assert "run-parallel" in html, "Run All Parallel button not found in /pairs HTML"
         for agent in AGENTS:
             assert agent["id"] in html, f"Agent row for {agent['id']} missing from /pairs"
+
+    def test_c9_chat_page_has_thinking_dropdown(self):
+        """C9 chat page must contain the thinking-mode pill and all three options."""
+        req = urllib.request.Request(
+            f"{C9_URL}/chat", headers={"User-Agent": "c9-e2e-test/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            assert resp.status == 200
+            html = resp.read().decode("utf-8", errors="replace")
+        assert "thinking-pill" in html, "Thinking mode pill button missing from /chat"
+        assert "data-mode=\"auto\"" in html, "Auto thinking option missing"
+        assert "data-mode=\"quick\"" in html, "Quick Response option missing"
+        assert "data-mode=\"deep\"" in html, "Think Deeper option missing"
+        assert "thinkingMode" in html, "localStorage thinkingMode key missing"
+
+    def test_c9_chat_page_has_work_web_toggle(self):
+        """C9 chat page must contain the Work/Web segmented toggle."""
+        req = urllib.request.Request(
+            f"{C9_URL}/chat", headers={"User-Agent": "c9-e2e-test/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            assert resp.status == 200
+            html = resp.read().decode("utf-8", errors="replace")
+        assert "work-web-toggle" in html, "Work/Web toggle missing from /chat"
+        assert "data-mode=\"work\"" in html, "Work button missing"
+        assert "data-mode=\"web\"" in html, "Web button missing"
+        assert "workMode" in html, "localStorage workMode key missing"
+
+    def test_c9_chat_page_has_file_upload_button(self):
+        """C9 chat page must contain the + file upload button and file input."""
+        req = urllib.request.Request(
+            f"{C9_URL}/chat", headers={"User-Agent": "c9-e2e-test/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            assert resp.status == 200
+            html = resp.read().decode("utf-8", errors="replace")
+        assert "attach-plus" in html, "File upload + button missing from /chat"
+        assert "file-input" in html, "File input missing from /chat"
+        assert "Upload files" in html, "Upload files option missing"
+        assert "/api/upload" in html, "/api/upload endpoint reference missing"
+
+    def test_c9_dashboard_page_loads(self):
+        """C9 dashboard (/) must load and contain container health cards."""
+        req = urllib.request.Request(
+            f"{C9_URL}/", headers={"User-Agent": "c9-e2e-test/1.0"}
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            assert resp.status == 200
+            html = resp.read().decode("utf-8", errors="replace")
+        # Dashboard shows target labels
+        assert "C1 copilot-api" in html, "C1 label missing from dashboard"
+        assert "C9" in html
+
+    def test_c9_api_chat_sends_chat_mode(self):
+        """POST /api/chat with chat_mode=deep must accept request (no error)."""
+        code, body = _http_post(
+            f"{C9_URL}/api/chat",
+            {"agent_id": "c9-jokes", "prompt": "Tell me a short joke", "chat_mode": "deep", "work_mode": "work"},
+            timeout=TIMEOUT_AGENT,
+        )
+        # We assert HTTP 200 and a non-empty response — the joke backend must respond
+        assert code == 200, f"POST /api/chat returned {code}"
+        assert body.get("ok") is True, f"chat failed: {body.get('error')}"
+        assert len((body.get("text") or "").strip()) > 5, "Empty joke response"
+        print(f"\n  [c9 chat_mode=deep] {body.get('text','')[:80]}")
 
 
 # ── standalone runner ─────────────────────────────────────────────────────────
@@ -282,7 +373,7 @@ def _standalone():
         t0 = time.monotonic()
         code, body = _http_post(
             f"{C9_URL}/api/validate",
-            {"prompt": PROMPT, "chat_mode": CHAT_MODE},
+            {"prompt": PROMPT, "chat_mode": THINK_MODE, "work_mode": WORK_MODE},
             timeout=TIMEOUT_PARALLEL,
         )
         wall = time.monotonic() - t0

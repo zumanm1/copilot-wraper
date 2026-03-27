@@ -79,6 +79,22 @@ class TestContentPart:
         assert part.type == "image_url"
         assert part.image_url.url.startswith("data:")
 
+    def test_file_ref_part(self):
+        part = ContentPart(type="file_ref", file_id="abc123", filename="report.pdf")
+        assert part.type == "file_ref"
+        assert part.file_id == "abc123"
+        assert part.filename == "report.pdf"
+
+    def test_file_ref_without_filename(self):
+        part = ContentPart(type="file_ref", file_id="xyz")
+        assert part.file_id == "xyz"
+        assert part.filename is None
+
+    def test_invalid_type_rejected(self):
+        from pydantic import ValidationError
+        with pytest.raises(ValidationError):
+            ContentPart(type="video_url", text="bad")
+
 
 class TestUsageInfo:
     def test_zero_tokens_valid(self):
