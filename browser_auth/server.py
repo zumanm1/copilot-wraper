@@ -400,6 +400,27 @@ async def status():
         return {"status": "error", "browser": str(e)}
 
 
+@app.post("/pool-reset")
+async def pool_reset():
+    """Re-initialize the PagePool (e.g. after startup DNS failure left 0 tabs ready)."""
+    try:
+        context = await get_context()
+        pool = _ce._page_pool
+        if pool is None:
+            pool_size = max(1, int(os.getenv("C3_CHAT_TAB_POOL_SIZE", "6")))
+            _ce._page_pool = _ce.PagePool(pool_size)
+            pool = _ce._page_pool
+        await pool.reinitialize(context)
+        return {
+            "status": "ok",
+            "pool_size": pool.size,
+            "pool_available": pool.available,
+            "pool_initialized": pool._initialized,
+        }
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
 @app.post("/extract")
 async def extract():
     """

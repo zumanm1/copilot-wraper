@@ -467,6 +467,13 @@ class CopilotBackend:
         except Exception as exc:
             if not result_future.done():
                 result_future.set_exception(exc)
+                # Suppress "Future exception was never retrieved" warning:
+                # if no waiter is currently attached, mark the exception as
+                # retrieved so asyncio doesn't log a spurious error.
+                try:
+                    result_future.exception()
+                except Exception:
+                    pass
             raise
         finally:
             async with _in_flight_registry_lock:

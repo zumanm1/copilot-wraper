@@ -57,7 +57,7 @@ services:
     environment:
       - RELOAD=false
       - PYTHONUNBUFFERED=1
-      - REQUEST_TIMEOUT=90
+      - REQUEST_TIMEOUT=180
       - CONNECT_TIMEOUT=15
       - CIRCUIT_BREAKER_THRESHOLD=50
       - BING_COOKIES=${BING_COOKIES}

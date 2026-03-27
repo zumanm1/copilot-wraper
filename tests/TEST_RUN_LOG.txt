@@ -1,3 +1,47 @@
+# === Phase C bug-fix validation (2026-03-26) ===
+# All 6 agent pipelines confirmed PASS after bug-fix session.
+#
+# Bugs fixed (see docs/validation-runbook.md for full details):
+#   Bug #1: PagePool self-healing — initialize() only marks ready when tabs>0;
+#            on-demand tab creation in acquire() as fallback; /pool-reset endpoint
+#   Bug #2: C9 dashboard generic "failed" → now parses C1 JSON error body
+#   Bug #3: session-health false positive → pool_warning field added
+#   Bug #4: "Future exception was never retrieved" → .exception() called after set_exception()
+#   Bug #5: Timeout cascade → C1 REQUEST_TIMEOUT 90→180s, C9 httpx read 180→360s
+#   Bug #6: Auth dialog immediately fails → now waits 8s + retries; also clicks "Continue"
+#
+# Sequential per-agent roundtrips (curl → C1, timeout=360s):
+#   C2 Aider       (C1→OpenAI)    PASS
+#   C5 Claude Code (C1→C3→M365)   PASS
+#   C6 KiloCode    (C1→C3→M365)   PASS
+#   C7b OpenClaw   (C1→C3→M365)   PASS
+#   C8 Hermes      (C1→C3→M365)   PASS
+#   C9 Jokes       (C1→C3→M365)   PASS
+#
+# C9 /api/validate parallel run (Run #108):
+#   6/6 passed, 0 failed | 31.5s wall time | persisted to DB
+#   c2-aider: 31499ms (warm tab from prior run)
+#   c5-claude-code: 612ms (cached tab — sticky session)
+#   c6-kilocode: 538ms
+#   c7-openclaw: 574ms
+#   c8-hermes: 635ms
+#   c9-jokes: 622ms
+#
+# Puppeteer /pairs UI automation (node validate_pairs.mjs):
+#   Page loaded: "Pair validation — Stack validation"
+#   All 6 agent rows present: c2-aider, c5-claude-code, c6-kilocode,
+#     c7-openclaw, c8-hermes, c9-jokes
+#   Run All Parallel clicked → all 6 badges → PASS at [30s]
+#   Exit code: 0 (PASS)
+#
+# New test artifact: tests/test_e2e_c9_validation.py
+# New doc artifact:  docs/validation-runbook.md
+#
+# Environment:
+#   C1 REQUEST_TIMEOUT=180, C9 httpx read=360s
+#   C3 pool_size=6, pool_available=6 at startup
+#   M365 session active (OH.SID present)
+
 # === Phase B M365 validation (2026-03-25) ===
 # M365 C3 proxy unit tests added to test_unit_copilot_backend.py
 # 3 new tests: M365 routing, streaming single chunk, error propagation

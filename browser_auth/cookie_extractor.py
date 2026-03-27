@@ -353,8 +353,15 @@ class PagePool:
                 if page is not None:
                     await self._free_tabs.put(page)
             _ms = int((time.monotonic() - _t0) * 1000)
-            print(f"[PagePool] {self._free_tabs.qsize()}/{self._size} tabs ready in {_ms}ms")
-            self._initialized = True
+            ready = self._free_tabs.qsize()
+            print(f"[PagePool] {ready}/{self._size} tabs ready in {_ms}ms")
+            # Only mark initialized if at least one tab succeeded.
+            # If all tabs failed (e.g. DNS timing race at startup), stay
+            # uninitialized so the next acquire() can trigger a re-init.
+            if ready > 0:
+                self._initialized = True
+            else:
+                print("[PagePool] 0 tabs ready — will retry on next acquire()")
 
     async def _create_tab(self, label: str) -> Page:
         """Create one new tab (for replacement after failures)."""
@@ -398,15 +405,29 @@ class PagePool:
             )
 
         if agent_id not in self._agent_tabs:
+            # Try to get a pre-created tab from the free pool (fast path).
+            # If none are available (e.g. pool failed to init at startup),
+            # create a new tab on-demand as a self-healing fallback.
+            page: "Page | None" = None
             try:
-                page = await asyncio.wait_for(self._free_tabs.get(), timeout=30)
-                self._agent_tabs[agent_id] = page
-                print(f"[PagePool] Assigned tab to agent '{agent_id}'")
-            except (asyncio.TimeoutError, Exception) as exc:
-                lock.release()
-                raise TimeoutError(
-                    f"PagePool: no free tab for agent '{agent_id}': {exc}"
-                )
+                page = self._free_tabs.get_nowait()
+                print(f"[PagePool] Assigned pre-created tab to agent '{agent_id}'")
+            except asyncio.QueueEmpty:
+                pass
+
+            if page is None:
+                # Free pool exhausted — create a tab on-demand (self-healing path).
+                print(f"[PagePool] Free pool empty — creating on-demand tab for '{agent_id}'")
+                assert self._context is not None, "PagePool context not set"
+                try:
+                    page = await self._create_tab(agent_id)
+                except Exception as exc:
+                    lock.release()
+                    raise TimeoutError(
+                        f"PagePool: failed to create on-demand tab for '{agent_id}': {exc}"
+                    )
+
+            self._agent_tabs[agent_id] = page
 
         return self._agent_tabs[agent_id]
 
@@ -433,6 +454,14 @@ class PagePool:
         new_page = await self._create_tab(agent_id)
         self._agent_tabs[agent_id] = new_page
         return new_page
+
+    async def reinitialize(self, context: "BrowserContext | None" = None) -> None:
+        """Reset and re-run pool initialization (e.g. after startup DNS failure)."""
+        async with self._init_lock:
+            self._initialized = False
+            if context is not None:
+                self._context = context
+        await self.initialize(self._context or context)
 
     def update_tab(self, agent_id: str, page: Page) -> None:
         """Update the tab reference for an agent (e.g. after page replacement)."""
@@ -1202,11 +1231,11 @@ async def _browser_chat_on_page(
         auth_blocked = await page.evaluate("""() => {
             const h = document.querySelector('h2');
             if (h && h.textContent.includes('Authentication required')) {
-                // Try to click Sign in / Refresh button
+                // Try to click any dismiss button: Sign in, Refresh, OK, Continue
                 const btns = document.querySelectorAll('button');
                 for (const b of btns) {
                     const t = b.textContent.trim().toLowerCase();
-                    if (t === 'sign in' || t === 'refresh' || t === 'ok') {
+                    if (t === 'sign in' || t === 'refresh' || t === 'ok' || t === 'continue') {
                         b.click();
                         return 'clicked:' + t;
                     }
@@ -1217,15 +1246,10 @@ async def _browser_chat_on_page(
         }""")
         if auth_blocked:
             print(f"[browser_chat] Auth check: {auth_blocked}")
-            if auth_blocked == "auth_dialog_present":
-                return {
-                    "success": False,
-                    "error": "Authentication required on m365.cloud.microsoft — sign in via noVNC at http://localhost:6080 then retry",
-                    "events": [], "text": "",
-                }, page
-            # Clicked a button — wait for re-auth
+            # Whether we clicked a button or found no button, wait and re-check.
+            # The background _auth_dialog_monitor may dismiss it within 15s;
+            # a clicked button also needs a few seconds to complete re-auth.
             await asyncio.sleep(8)
-            # Re-check
             still_blocked = await page.evaluate("""() => {
                 const h = document.querySelector('h2');
                 return h && h.textContent.includes('Authentication required');
@@ -1236,7 +1260,7 @@ async def _browser_chat_on_page(
                     "error": "Authentication required on m365.cloud.microsoft — sign in via noVNC at http://localhost:6080 then retry",
                     "events": [], "text": "",
                 }, page
-            print("[browser_chat] Auth dialog dismissed after button click")
+            print("[browser_chat] Auth dialog dismissed — proceeding")
 
         # ── Discover DOM elements via page.evaluate (fast, overlay-immune) ──
         dom_info = await page.evaluate("""() => {
@@ -1458,7 +1482,12 @@ async def check_session_health(env_path: str = "/app/.env") -> dict:
 
         is_m365 = (profile or "").strip().lower() == "m365_hub"
         if is_m365 and "OH.SID" in cookie_names:
-            return {"session": "active", "profile": profile, "reason": None, "checked_at": now}
+            # Cookies look valid — also check if the PagePool is functional.
+            pool_warning = None
+            if _page_pool is not None and _page_pool._initialized and _page_pool.available == 0 and not _page_pool.agents:
+                pool_warning = "pool_exhausted_no_tabs"
+            return {"session": "active", "profile": profile, "reason": None,
+                    "checked_at": now, "pool_warning": pool_warning}
         if not is_m365 and "_U" in cookie_names:
             return {"session": "active", "profile": profile, "reason": None, "checked_at": now}
 

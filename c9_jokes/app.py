@@ -65,7 +65,7 @@ def _get_http() -> httpx.AsyncClient:
     if _http is None or _http.is_closed:
         _http = httpx.AsyncClient(
             limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
-            timeout=httpx.Timeout(connect=5.0, read=180.0, write=10.0, pool=10.0),
+            timeout=httpx.Timeout(connect=5.0, read=360.0, write=10.0, pool=10.0),
         )
     return _http
 
@@ -169,24 +169,39 @@ async def _chat_one(agent_id: str, prompt: str, c1_url: str, chat_mode: str = ""
             f"{c1_url}/v1/chat/completions",
             headers=headers,
             json=body,
-            timeout=180,
+            timeout=360,
         )
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         # #region agent log
         _dlog("app.py:_chat_one", "chat_request_done", {"agent_id": agent_id, "status": r.status_code, "elapsed_ms": elapsed_ms, "hypothesisId": "H4"})
         # #endregion
         text = ""
+        error = None
         if 200 <= r.status_code < 300:
             try:
                 d = r.json()
                 text = d.get("choices", [{}])[0].get("message", {}).get("content", "")
             except Exception:
                 text = r.text[:2000]
+        else:
+            # Extract the actual error message from C1's JSON error body
+            # so the C9 dashboard shows it instead of a generic "failed".
+            raw = r.text[:2000]
+            try:
+                d = r.json()
+                error = (
+                    d.get("detail")
+                    or d.get("error")
+                    or d.get("message")
+                    or raw
+                )
+            except Exception:
+                error = raw
         return {
             "ok": 200 <= r.status_code < 300,
             "http_status": r.status_code,
             "text": text,
-            "raw": r.text[:2000] if not (200 <= r.status_code < 300) else None,
+            "error": error,
             "elapsed_ms": elapsed_ms,
         }
     except Exception as e:
