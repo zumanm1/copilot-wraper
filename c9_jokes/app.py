@@ -369,11 +369,16 @@ async def api_session_health():
     """Proxy C3's /session-health endpoint; used by the LED indicator on all pages."""
     c3_url = _urls().get("c3", "http://browser-auth:8001")
     client = _get_http()
+    now = datetime.now(timezone.utc).isoformat()
     try:
         r = await client.get(f"{c3_url}/session-health", timeout=5)
-        return JSONResponse(r.json(), status_code=r.status_code)
+        try:
+            body = r.json()
+        except Exception:
+            body = {"session": "unknown", "profile": "unknown",
+                    "reason": "C3 returned non-JSON body", "checked_at": now}
+        return JSONResponse(body, status_code=r.status_code)
     except Exception as exc:
-        now = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
         return JSONResponse(
             {"session": "unknown", "profile": "unknown", "reason": str(exc), "checked_at": now},
             status_code=503,

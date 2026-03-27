@@ -8,6 +8,10 @@
   --warn: #d29922;
   --card: #161b22;
   --border: #30363d;
+  /* Surface levels for layered UI (thinking dropdown, upload button, toggles) */
+  --surface2: #21262d;
+  --surface3: #30363d;
+  --text: #e6edf3;
 }
 * { box-sizing: border-box; }
 body {

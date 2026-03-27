@@ -88,8 +88,9 @@
         }
         if (timeEl) timeEl.textContent = (p.elapsed_ms !== undefined ? p.elapsed_ms + 'ms' : '—');
         if (bodyEl) {
-          if (p.error) bodyEl.innerHTML = '<pre>' + p.error + '</pre>';
-          else bodyEl.innerHTML = '<pre>' + JSON.stringify(p.body, null, 2) + '</pre>';
+          const pre = document.createElement('pre');
+          pre.textContent = p.error || JSON.stringify(p.body, null, 2) || '—';
+          bodyEl.replaceChildren(pre);
         }
         loadHistory(key, idx);
       });

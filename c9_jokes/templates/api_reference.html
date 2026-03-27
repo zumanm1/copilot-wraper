@@ -12,6 +12,7 @@
     <tr><td>GET</td><td><code>/api/health-history</code></td><td>Query: <code>?target=c1&amp;limit=10</code> — last snapshots for one target (or omit <code>target</code> for recent rows)</td></tr>
     <tr><td>POST</td><td><code>/api/chat</code></td><td>Proxy chat to C1. Body: <code>{"agent_id":"c2-aider","prompt":"Tell me a joke"}</code>; logs to SQLite</td></tr>
     <tr><td>POST</td><td><code>/api/validate</code></td><td>Pair validation. Body: <code>{"prompt":"…","parallel":true,"agent_ids":["c2-aider"]}</code> (omit <code>agent_ids</code> for all)</td></tr>
+    <tr><td>POST</td><td><code>/api/upload</code></td><td>Upload a file to C1. Multipart <code>file</code> field. Returns <code>{"ok":true,"file_id":"…","type":"text|image","preview":"…"}</code>. Use <code>file_id</code> in chat attachments.</td></tr>
     <tr><td>GET</td><td><code>/api/validation-runs</code></td><td>Query: <code>?limit=10</code> — recent runs with <code>pairs</code> detail</td></tr>
     <tr><td>GET</td><td><code>/api/logs</code></td><td>Query: <code>?agent=c2-aider&amp;offset=0&amp;limit=20</code> — JSON chat log rows + total</td></tr>
     <tr><td>GET</td><td><code>/</code></td><td>Dashboard — container status grid</td></tr>

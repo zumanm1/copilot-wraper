@@ -22,8 +22,10 @@
     </div>
     {% if p.error %}
       <pre id="body-{{ loop.index0 }}">{{ p.error }}</pre>
-    {% else %}
+    {% elif p.body %}
       <pre id="body-{{ loop.index0 }}">{{ p.body | tojson(indent=2) if p.body is mapping else p.body }}</pre>
+    {% else %}
+      <pre id="body-{{ loop.index0 }}">—</pre>
     {% endif %}
   </div>
 {% endfor %}
