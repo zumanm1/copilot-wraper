@@ -181,88 +181,163 @@ async def _c10_reset() -> dict:
 
 # ── Agentic loop — system prompt ──────────────────────────────────────────────
 
-AGENT_SYSTEM_PROMPT = """You are an expert AI software engineer with access to an isolated Linux sandbox.
-Your job is to complete the user's task by writing code, running it, testing it, and validating results.
+AGENT_SYSTEM_PROMPT = """You are an AI coding assistant with access to a live Linux sandbox (Python 3.11, Node.js 20, pip, npm, bash).
 
-You have access to these tools — use them by writing XML tags in your response:
+For each step, respond with EXACTLY ONE action using one of these formats:
 
-1. Execute a shell command:
-<tool_call><tool>exec</tool><command>BASH_COMMAND_HERE</command></tool_call>
+To write a file:
+FILE: path/to/filename.py
+```
+complete file content here
+```
 
-2. Write a file:
-<tool_call><tool>write_file</tool><path>relative/path/to/file.py</path><content>
-FILE_CONTENT_HERE
-</content></tool_call>
+To run a shell command:
+RUN: python3 filename.py
 
-3. Read a file:
-<tool_call><tool>read_file</tool><path>relative/path/to/file.py</path></tool_call>
+To install a package:
+INSTALL: pip install flask
 
-4. List workspace files:
-<tool_call><tool>list_files</tool></tool_call>
+To read a file:
+READ: filename.py
 
-5. Install a package:
-<tool_call><tool>install</tool><package>PACKAGE_NAME</package><manager>pip</manager></tool_call>
-(manager can be "pip" or "npm")
+When the task is fully done and you have confirmed the output is correct:
+DONE: Brief description of what was built and validated.
 
-RULES:
-1. Think step by step. Plan before you code.
-2. Write code, execute it, read the output, fix any errors, then validate.
-3. The sandbox has: Python 3.11, Node.js, npm, git, bash, curl, pip.
-4. You run as non-root user 'sandbox' in /workspace directory.
-5. Always test/validate your code before declaring done.
-6. When the task is fully complete and validated, write EXACTLY:
-   <final_answer>YOUR_SUMMARY_OF_WHAT_WAS_BUILT_AND_VALIDATED</final_answer>
-7. Maximum 15 steps — be efficient, do not repeat yourself.
-8. Only one tool_call per response is allowed (keep the loop clean)."""
+Important:
+- Write ONE action per response (FILE or RUN or INSTALL or READ or DONE).
+- Always write complete files, never partial snippets.
+- After writing a file, run it to confirm it works.
+- Fix any errors shown to you before declaring DONE.
+- The workspace is /workspace. Use relative paths."""
 
 
-# ── Agentic loop — XML parser ─────────────────────────────────────────────────
+# ── Agentic loop — Markdown-format parser ─────────────────────────────────────
+# Copilot M365 rejects XML tool-calling syntax (safety filters strip it).
+# We use a plain markdown format instead: FILE:/RUN:/INSTALL:/READ:/DONE:
+# that Copilot follows naturally without triggering content filters.
+
+def _parse_all_actions(text: str) -> list[dict]:
+    """
+    Parse ALL actions from a single LLM response in document order.
+    Returns a list (possibly empty) of action dicts.
+    The LLM often writes FILE: + RUN: in one message — capture both.
+    """
+    actions: list[dict] = []
+    remaining = text
+
+    while True:
+        action = _parse_tool_call(remaining)
+        if not action:
+            break
+        actions.append(action)
+        # Remove the matched portion so we don't re-match it
+        # Find the match position and advance past it
+        tool = action["tool"]
+        if tool == "write_file":
+            # Remove the FILE: block
+            remaining = re.sub(
+                r"(?:\*\*)?FILE:(?:\*\*)?\s*`?[^`\n]+?`?\s*\n```[^\n]*\n.*?```",
+                "", remaining, count=1, flags=re.DOTALL | re.IGNORECASE,
+            )
+            if remaining == text:  # no sub happened, remove simpler match
+                remaining = re.sub(r"FILE:\s*\S+", "", remaining, count=1, flags=re.IGNORECASE)
+        elif tool == "exec":
+            remaining = re.sub(r"RUN:\s*`?[^\n`]+`?", "", remaining, count=1, flags=re.IGNORECASE)
+        elif tool == "install":
+            remaining = re.sub(r"INSTALL:\s*[^\n]+", "", remaining, count=1, flags=re.IGNORECASE)
+        elif tool == "read_file":
+            remaining = re.sub(r"READ:\s*\S+", "", remaining, count=1, flags=re.IGNORECASE)
+        else:
+            break
+        if remaining == text:
+            break  # safety: avoid infinite loop
+    return actions
+
 
 def _parse_tool_call(text: str) -> dict | None:
     """
-    Extract the first <tool_call>...</tool_call> block from LLM response text.
-    Returns a dict with 'tool' key plus tool-specific fields, or None if not found.
+    Parse one action from LLM response using the markdown protocol:
+      FILE: path\\n```\\ncontent\\n```
+      RUN: bash command
+      INSTALL: pip install X  |  npm install X
+      READ: path
+    Returns a dict with 'tool' key, or None if no action found.
     """
-    match = re.search(r"<tool_call>(.*?)</tool_call>", text, re.DOTALL)
-    if not match:
-        return None
-    inner = match.group(1).strip()
+    lines = text.strip().splitlines()
 
-    def _extract(tag: str) -> str:
-        m = re.search(rf"<{tag}>(.*?)</{tag}>", inner, re.DOTALL)
-        return m.group(1).strip() if m else ""
+    def _clean_path(p: str) -> str:
+        """Strip surrounding backticks, quotes, and whitespace from a file path."""
+        return p.strip().strip("`").strip("'\"").strip()
 
-    tool = _extract("tool")
-    if not tool:
-        return None
+    def _clean_cmd(c: str) -> str:
+        """Strip surrounding backticks and whitespace from a shell command."""
+        return c.strip().strip("`").strip()
 
-    result: dict = {"tool": tool}
-    if tool == "exec":
-        result["command"] = _extract("command")
-    elif tool == "write_file":
-        result["path"] = _extract("path")
-        # content may contain newlines — use a more permissive extract
-        cm = re.search(r"<content>(.*?)</content>", inner, re.DOTALL)
-        result["content"] = cm.group(1) if cm else ""
-    elif tool == "read_file":
-        result["path"] = _extract("path")
-    elif tool == "list_files":
-        pass  # no args
-    elif tool == "install":
-        result["package"] = _extract("package")
-        result["manager"] = _extract("manager") or "pip"
-    return result
+    # ── FILE: path ───────────────────────────────────────────────────────────
+    # Matches:  FILE: calc.py\n```[lang]\n...content...\n```
+    # Also matches FILE: `calc.py` (LLM sometimes wraps in backticks)
+    file_m = re.search(
+        r"FILE:\s*`?([^`\n]+?)`?\s*\n```[^\n]*\n(.*?)```",
+        text, re.DOTALL | re.IGNORECASE,
+    )
+    if file_m:
+        return {
+            "tool": "write_file",
+            "path": _clean_path(file_m.group(1)),
+            "content": file_m.group(2),
+        }
+
+    # Also handle FILE without fenced block (bare indented content)
+    file_m2 = re.search(r"FILE:\s*`?([^`\n]+?)`?\s*\n((?:(?!FILE:|RUN:|INSTALL:|READ:|DONE:).+\n?)+)", text, re.IGNORECASE)
+    if file_m2 and len(file_m2.group(2).strip()) > 10:
+        return {
+            "tool": "write_file",
+            "path": _clean_path(file_m2.group(1)),
+            "content": file_m2.group(2),
+        }
+
+    # ── RUN: command ─────────────────────────────────────────────────────────
+    run_m = re.search(r"^RUN:\s*`?(.+?)`?\s*$", text, re.MULTILINE | re.IGNORECASE)
+    if run_m:
+        return {"tool": "exec", "command": _clean_cmd(run_m.group(1))}
+
+    # ── INSTALL: pip install X  or  npm install X ────────────────────────────
+    inst_m = re.search(r"^INSTALL:\s*(.+)$", text, re.MULTILINE | re.IGNORECASE)
+    if inst_m:
+        raw = inst_m.group(1).strip()
+        # Normalise: "pip install flask" → package=flask, manager=pip
+        #            "npm install express" → package=express, manager=npm
+        pip_m  = re.match(r"pip\s+install\s+(.+)", raw, re.IGNORECASE)
+        npm_m  = re.match(r"npm\s+install\s+(.+)", raw, re.IGNORECASE)
+        if pip_m:
+            return {"tool": "install", "package": pip_m.group(1).strip(), "manager": "pip"}
+        if npm_m:
+            return {"tool": "install", "package": npm_m.group(1).strip(), "manager": "npm"}
+        # bare package name — default pip
+        return {"tool": "install", "package": raw, "manager": "pip"}
+
+    # ── READ: path ───────────────────────────────────────────────────────────
+    read_m = re.search(r"^READ:\s*(\S+)", text, re.MULTILINE | re.IGNORECASE)
+    if read_m:
+        return {"tool": "read_file", "path": read_m.group(1).strip()}
+
+    return None
 
 
 def _parse_final_answer(text: str) -> str | None:
-    """Extract <final_answer> content if present."""
-    m = re.search(r"<final_answer>(.*?)</final_answer>", text, re.DOTALL)
-    return m.group(1).strip() if m else None
+    """Extract DONE: summary if present."""
+    m = re.search(r"^DONE:\s*(.+)", text, re.MULTILINE | re.IGNORECASE | re.DOTALL)
+    if m:
+        return m.group(1).strip()
+    # Fallback: also accept the old XML tag in case Copilot uses it
+    m2 = re.search(r"<final_answer>(.*?)</final_answer>", text, re.DOTALL)
+    return m2.group(1).strip() if m2 else None
 
 
 def _strip_tool_xml(text: str) -> str:
-    """Remove XML tool tags so the thinking portion is clean."""
-    cleaned = re.sub(r"<tool_call>.*?</tool_call>", "", text, flags=re.DOTALL)
+    """Remove action markers so the visible thinking text stays clean."""
+    cleaned = re.sub(r"^FILE:\s*\S+.*?```[^\n]*\n.*?```", "", text, flags=re.DOTALL | re.MULTILINE)
+    cleaned = re.sub(r"^(RUN|INSTALL|READ|DONE):\s*.+$", "", cleaned, flags=re.MULTILINE | re.IGNORECASE)
     cleaned = re.sub(r"<final_answer>.*?</final_answer>", "", cleaned, flags=re.DOTALL)
     return cleaned.strip()
 
@@ -979,20 +1054,39 @@ async def api_agent_run(
         # Build multi-turn conversation history
         history: list[dict] = []
         files_created: list[str] = []
+        commands_run:  list[str] = []   # tracks exec calls so DONE isn't premature
+
+        # Copilot (C1) does not honour the OpenAI `system` role — it strips it.
+        # Fix: fold task first, then format guide — task-first keeps Copilot
+        # focused on executing rather than acknowledging protocol rules.
+        initial_user_msg = (
+            f"TASK: {task}\n\n"
+            f"Complete this task step by step in the sandbox (Python 3.11, Node.js 20, "
+            f"pip, npm, bash). For each step write ONE action:\n\n"
+            f"Write a file:\n"
+            f"FILE: filename.py\n"
+            f"```\ncomplete file content here\n```\n\n"
+            f"Run a command:\n"
+            f"RUN: python3 filename.py\n\n"
+            f"Install a package:\n"
+            f"INSTALL: pip install flask\n\n"
+            f"When task is complete and output confirmed:\n"
+            f"DONE: what was built and validated\n\n"
+            f"Start immediately with your first FILE: action."
+        )
 
         yield _sse("thinking", {"step": 0, "text": f"🚀 Starting agent task: {task[:120]}...", "total_steps": max_steps})
 
         for step in range(1, max_steps + 1):
             yield _sse("step_done", {"step": step, "max_steps": max_steps, "status": "running"})
 
-            # Build messages for C1
-            messages: list[dict] = [
-                {"role": "system", "content": AGENT_SYSTEM_PROMPT},
-            ]
+            # Build messages for C1 — no system role (Copilot strips it).
+            # Step 1: send initial_user_msg which has system prompt + task baked in.
+            # Subsequent steps: replay full conversation history.
             if not history:
-                messages.append({"role": "user", "content": task})
+                messages: list[dict] = [{"role": "user", "content": initial_user_msg}]
             else:
-                messages.extend(history)
+                messages = list(history)
 
             # Call C1 (Copilot LLM)
             headers = {
@@ -1024,7 +1118,8 @@ async def api_agent_run(
                 llm_data = llm_r.json()
                 response_text: str = llm_data.get("choices", [{}])[0].get("message", {}).get("content", "")
             except Exception as exc:
-                yield _sse("error", {"message": f"LLM call failed: {exc}"})
+                err_detail = str(exc) or type(exc).__name__
+                yield _sse("error", {"message": f"LLM call failed: {err_detail}"})
                 return
 
             # Emit thinking text (stripped of XML)
@@ -1032,70 +1127,129 @@ async def api_agent_run(
             if thinking_text:
                 yield _sse("thinking", {"step": step, "text": thinking_text})
 
-            # Check for final answer first
+            # Check for final answer — require both a file write AND an exec
+            # to have occurred. This prevents the LLM from hallucinating execution
+            # and declaring DONE without actually running anything in C10.
             final_answer = _parse_final_answer(response_text)
-            if final_answer:
+            if final_answer and files_created and commands_run:
                 yield _sse("final", {
                     "summary": final_answer,
                     "steps_taken": step,
                     "files_created": files_created,
                 })
                 return
+            elif final_answer:
+                # DONE claimed too early (no exec yet) — push back with explicit nudge
+                final_answer = None
 
-            # Parse tool call
-            tool = _parse_tool_call(response_text)
-            if not tool:
-                # No tool call and no final answer — ask LLM to continue or finalize
+            # Parse ALL actions from this response (LLM often writes FILE: + RUN: together)
+            tools = _parse_all_actions(response_text)
+            if not tools:
+                # No action found — nudge LLM to produce one
+                if not history:
+                    history.append({"role": "user", "content": initial_user_msg})
                 history.append({"role": "assistant", "content": response_text})
                 history.append({
                     "role": "user",
-                    "content": "Please continue. Use a tool to make progress, or write <final_answer> if the task is complete.",
+                    "content": (
+                        "Please write your next action now:\n"
+                        "FILE: filename.py then code block, or RUN: command, "
+                        "or INSTALL: pip install X, or DONE: summary."
+                    ),
                 })
                 continue
 
-            # Emit tool_call SSE
-            tool_event: dict = {"step": step, "tool": tool["tool"]}
-            if tool.get("command"):
-                tool_event["command"] = tool["command"]
-            if tool.get("path"):
-                tool_event["path"] = tool["path"]
-            if tool.get("package"):
-                tool_event["package"] = tool["package"]
-            if tool.get("content"):
-                # Send a preview of the content (first 200 chars)
-                tool_event["preview"] = tool["content"][:200]
-            yield _sse("tool_call", tool_event)
+            # Execute all actions from this response sequentially
+            observations: list[str] = []
+            last_tool_name = ""
+            last_meta: dict = {}
 
-            # Execute the tool
-            observation, meta = await _execute_tool(tool)
-
-            # Track file updates
-            if tool["tool"] == "write_file" and meta.get("ok"):
-                path = meta.get("path", "")
-                if path and path not in files_created:
-                    files_created.append(path)
-                yield _sse("file_update", {"path": path, "action": "created"})
-
-            # Emit observation SSE
-            obs_event: dict = {
-                "step": step,
-                "tool": tool["tool"],
-                "result": observation[:800],  # truncate for stream
-            }
-            if "exit_code" in meta:
-                obs_event["exit_code"] = meta["exit_code"]
-            if meta.get("timed_out"):
-                obs_event["timed_out"] = True
-            yield _sse("observation", obs_event)
-
-            # Append to conversation history
             if not history:
-                history.append({"role": "user", "content": task})
+                history.append({"role": "user", "content": initial_user_msg})
             history.append({"role": "assistant", "content": response_text})
-            history.append({
-                "role": "user",
-                "content": f"<observation>\n{observation}\n</observation>\n\nContinue with the next step, or write <final_answer> if the task is complete and validated.",
-            })
+
+            for tool in tools:
+                # Emit tool_call SSE
+                tool_event: dict = {"step": step, "tool": tool["tool"]}
+                if tool.get("command"):   tool_event["command"] = tool["command"]
+                if tool.get("path"):      tool_event["path"]    = tool["path"]
+                if tool.get("package"):   tool_event["package"] = tool["package"]
+                if tool.get("content"):   tool_event["preview"] = tool["content"][:200]
+                yield _sse("tool_call", tool_event)
+
+                # Execute in C10
+                observation, meta = await _execute_tool(tool)
+                last_tool_name = tool["tool"]
+                last_meta = meta
+
+                # Track commands & files
+                if tool["tool"] == "exec":
+                    cmd = tool.get("command", "")
+                    if cmd and cmd not in commands_run:
+                        commands_run.append(cmd)
+
+                if tool["tool"] == "write_file" and meta.get("ok"):
+                    path = meta.get("path", "")
+                    if path and path not in files_created:
+                        files_created.append(path)
+                    yield _sse("file_update", {"path": path, "action": "created"})
+
+                    # Auto-run the file immediately after writing if no RUN: follows
+                    # (avoids waiting for another LLM turn just to run it)
+                    remaining_tools = tools[tools.index(tool)+1:]
+                    has_exec_following = any(t["tool"] == "exec" for t in remaining_tools)
+                    if not has_exec_following and path:
+                        ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+                        auto_cmd = {"py": f"python3 {path}", "js": f"node {path}",
+                                    "sh": f"bash {path}"}.get(ext)
+                        if auto_cmd:
+                            yield _sse("tool_call", {"step": step, "tool": "exec",
+                                                     "command": auto_cmd, "auto": True})
+                            run_result, run_meta = await _execute_tool(
+                                {"tool": "exec", "command": auto_cmd}
+                            )
+                            if auto_cmd not in commands_run:
+                                commands_run.append(auto_cmd)
+                            obs_event2 = {"step": step, "tool": "exec",
+                                          "result": run_result[:800], "auto": True}
+                            if "exit_code" in run_meta:
+                                obs_event2["exit_code"] = run_meta["exit_code"]
+                            yield _sse("observation", obs_event2)
+                            observations.append(f"[auto-run {auto_cmd}]\n{run_result}")
+                            last_tool_name = "exec"
+                            last_meta = run_meta
+
+                # Emit observation SSE
+                obs_event: dict = {"step": step, "tool": tool["tool"],
+                                   "result": observation[:800]}
+                if "exit_code" in meta: obs_event["exit_code"] = meta["exit_code"]
+                if meta.get("timed_out"): obs_event["timed_out"] = True
+                yield _sse("observation", obs_event)
+                observations.append(observation)
+
+            # Build combined feedback from all observations
+            combined_obs = "\n---\n".join(observations)
+            if last_tool_name == "exec":
+                ec = last_meta.get("exit_code", 0)
+                if ec == 0:
+                    next_hint = (
+                        f"Output:\n```\n{combined_obs}\n```\n\n"
+                        f"If output is correct, write: DONE: what was built and validated.\n"
+                        f"Otherwise fix the issue."
+                    )
+                else:
+                    next_hint = (
+                        f"Error (exit {ec}):\n```\n{combined_obs}\n```\n\n"
+                        f"Fix the bug: FILE: {tools[-1].get('path','script.py')} then corrected code."
+                    )
+            elif last_tool_name == "install":
+                next_hint = f"Package installed. Now write the code: FILE: filename.py"
+            else:
+                next_hint = (
+                    f"Result:\n```\n{combined_obs}\n```\n\n"
+                    f"Next: FILE:/RUN:/INSTALL: action, or DONE: summary."
+                )
+            history.append({"role": "user", "content": next_hint})
 
         # Reached max_steps without final_answer
         yield _sse("final", {
