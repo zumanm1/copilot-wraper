@@ -518,7 +518,7 @@
     <!-- Output tabs -->
     <div class="output-tabs">
       <button class="tab-btn active" data-tab="terminal" id="tab-terminal">⚡ Terminal</button>
-      <button class="tab-btn" data-tab="preview" id="tab-preview" style="display:none">🌐 Preview</button>
+      <button class="tab-btn" data-tab="preview" id="tab-preview">🌐 Preview</button>
     </div>
 
     <!-- Terminal panel -->
@@ -544,7 +544,15 @@
           <button type="button" class="btn-sm" id="btn-preview-refresh" title="Reload preview">↺</button>
           <button type="button" class="btn-sm" id="btn-preview-open" title="Open in new tab" style="display:none">↗</button>
         </div>
-        <iframe class="preview-iframe" id="preview-iframe" src="about:blank" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>
+        <div id="preview-placeholder" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#010409;color:var(--muted);font-family:system-ui,sans-serif;gap:0.75rem;padding:2rem;text-align:center;">
+          <div style="font-size:2.5rem;">🌐</div>
+          <div style="font-size:1rem;color:var(--fg);">Web Preview</div>
+          <div style="font-size:0.85rem;max-width:340px;">Run a web app task (Flask, Node.js/Express) and the live preview will appear here automatically.</div>
+          <div style="font-size:0.78rem;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:0.5rem 1rem;margin-top:0.5rem;">
+            Try: <em>"create flask app.py with one route returning Hello from Flask, start on port 5001"</em>
+          </div>
+        </div>
+        <iframe class="preview-iframe" id="preview-iframe" src="about:blank" sandbox="allow-scripts allow-same-origin allow-forms" style="display:none"></iframe>
       </div>
     </div>
 
@@ -668,10 +676,12 @@
   function showWebPreview(port) {
     currentWebPort = port;
     const url = '/api/agent/preview?port=' + port;
+    const placeholder = document.getElementById('preview-placeholder');
+    if (placeholder) placeholder.style.display = 'none';
+    previewIframe.style.display = '';
     previewIframe.src = url;
     previewUrlBar.textContent = 'http://localhost:' + port + '/  (proxied via C9)';
     tabPreview.textContent = '🌐 Preview :' + port;
-    tabPreview.style.display = '';
     btnPreviewOpen.style.display = '';
     btnPreviewOpen.onclick = function() { window.open(url, '_blank'); };
     switchTab('preview');
@@ -1003,11 +1013,18 @@
     const task = taskInput.value.trim();
     if (!task || running) return;
 
-    // Only clear stream for new sessions (not follow-ups)
+    // Only clear stream + reset preview for new sessions (not follow-ups)
     if (!currentSessId) {
       streamEl.innerHTML = '';
-      tabPreview.style.display = 'none';
       currentWebPort = null;
+      // Reset preview panel back to placeholder
+      const placeholder = document.getElementById('preview-placeholder');
+      if (placeholder) placeholder.style.display = '';
+      previewIframe.style.display = 'none';
+      previewIframe.src = 'about:blank';
+      previewUrlBar.textContent = '—';
+      tabPreview.textContent = '🌐 Preview';
+      btnPreviewOpen.style.display = 'none';
       switchTab('terminal');
     }
     hideEmpty();
