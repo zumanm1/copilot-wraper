@@ -61,29 +61,81 @@ class ExecRequest(BaseModel):
     cwd: str = "."       # relative to WORKSPACE
 
 
+def _is_background_command(cmd: str) -> bool:
+    """Detect commands that should run in background without waiting."""
+    stripped = cmd.strip()
+    return (
+        stripped.endswith("&")
+        or "nohup " in stripped
+        or stripped.startswith("nohup ")
+    )
+
+
 @app.post("/exec")
 async def exec_command(req: ExecRequest):
     """
     Run a shell command inside the workspace.
     Returns {stdout, stderr, exit_code, timed_out}.
+
+    Background commands (nohup / ending with &) are started in a new
+    process group and return immediately — they keep running after this
+    request completes. Use /exec again with `sleep N && curl ...` to
+    verify the server started.
     """
     timeout = max(1, min(120, req.timeout))
     cwd = _safe_path(req.cwd)
     cwd.mkdir(parents=True, exist_ok=True)
 
+    env = {
+        "HOME": str(Path.home()),
+        "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        "WORKSPACE": str(WORKSPACE),
+        "PYTHONUNBUFFERED": "1",
+    }
+
+    # ── Background command: start and return immediately ──────────────────────
+    if _is_background_command(req.command):
+        try:
+            # start_new_session=True puts the child in a new process group so
+            # it is NOT killed when our shell exits and doesn't inherit our PIPE fds.
+            proc = await asyncio.create_subprocess_shell(
+                req.command,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+                stdin=asyncio.subprocess.DEVNULL,
+                cwd=str(cwd),
+                env=env,
+                start_new_session=True,
+            )
+            # Give it 1s to fail-fast (e.g. syntax error)
+            await asyncio.sleep(1)
+            still_running = proc.returncode is None
+            return JSONResponse({
+                "stdout": f"Background process started (pid={proc.pid})",
+                "stderr": "" if still_running else f"Process exited early (code {proc.returncode})",
+                "exit_code": 0 if still_running else (proc.returncode or 1),
+                "timed_out": False,
+                "background": True,
+                "pid": proc.pid,
+                "command": req.command,
+                "cwd": str(cwd),
+            })
+        except Exception as exc:
+            return JSONResponse(
+                {"stdout": "", "stderr": str(exc), "exit_code": -1,
+                 "timed_out": False, "background": True, "command": req.command, "cwd": str(cwd)},
+                status_code=500,
+            )
+
+    # ── Foreground command: wait for completion ───────────────────────────────
     try:
         proc = await asyncio.create_subprocess_shell(
             req.command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.DEVNULL,
             cwd=str(cwd),
-            # Inherit minimal environment; set HOME so pip/npm work
-            env={
-                "HOME": str(Path.home()),
-                "PATH": "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-                "WORKSPACE": str(WORKSPACE),
-                "PYTHONUNBUFFERED": "1",
-            },
+            env=env,
         )
         try:
             stdout_bytes, stderr_bytes = await asyncio.wait_for(
@@ -95,7 +147,7 @@ async def exec_command(req: ExecRequest):
                 proc.kill()
             except Exception:
                 pass
-            stdout_bytes, stderr_bytes = b"", b"[killed: timeout]"
+            stdout_bytes, stderr_bytes = b"", b"[killed: timeout - use nohup cmd & for long-running servers]"
             timed_out = True
 
         return JSONResponse({
@@ -103,6 +155,7 @@ async def exec_command(req: ExecRequest):
             "stderr": stderr_bytes.decode("utf-8", errors="replace"),
             "exit_code": proc.returncode if not timed_out else -1,
             "timed_out": timed_out,
+            "background": False,
             "command": req.command,
             "cwd": str(cwd),
         })

@@ -318,8 +318,9 @@ def _parse_tool_call(text: str) -> dict | None:
             "content": file_m.group(2),
         }
 
-    # Also handle FILE without fenced block (bare indented content)
-    file_m2 = re.search(r"FILE:\s*`?([^`\n]+?)`?\s*\n((?:(?!FILE:|RUN:|INSTALL:|READ:|DONE:).+\n?)+)", text, re.IGNORECASE)
+    # Also handle FILE without fenced block (bare content, may have blank lines)
+    # Use .* (not .+) so empty lines inside file content are captured too
+    file_m2 = re.search(r"FILE:\s*`?([^`\n]+?)`?\s*\n((?:(?!FILE:|RUN:|INSTALL:|READ:|DONE:).*\n)+)", text, re.IGNORECASE)
     if file_m2 and len(file_m2.group(2).strip()) > 10:
         return {
             "tool": "write_file",
@@ -1134,24 +1135,17 @@ async def api_agent_run(
         # focused on executing rather than acknowledging protocol rules.
         initial_user_msg = (
             f"TASK: {task}\n\n"
-            f"Complete this task step by step in the sandbox (Python 3.11, Node.js 20, "
-            f"pip, npm, bash). For each step write ONE action:\n\n"
-            f"Write a file:\n"
-            f"FILE: filename.py\n"
-            f"```\ncomplete file content here\n```\n\n"
-            f"Run a command:\n"
-            f"RUN: python3 filename.py\n\n"
-            f"Install a package:\n"
-            f"INSTALL: pip install flask\n\n"
-            f"IMPORTANT for web servers (Flask/Node.js/Express):\n"
-            f"Start in background so it doesn't block:\n"
-            f"RUN: nohup python3 app.py > server.log 2>&1 &\n"
-            f"Then verify it started:\n"
-            f"RUN: sleep 2 && curl -sf http://localhost:PORT/ && echo SERVER_OK\n"
-            f"Include the port number in your DONE message.\n\n"
-            f"When task is complete and output confirmed:\n"
-            f"DONE: what was built and validated\n\n"
-            f"Start immediately with your first FILE: action."
+            f"You control a Linux sandbox (Python 3.11, Node.js 20, bash).\n"
+            f"Reply with ONE of these keywords per message:\n\n"
+            f"FILE: <filename>     — followed by the complete file content on the next lines\n"
+            f"RUN: <shell command> — execute a command\n"
+            f"INSTALL: <package>   — install a package\n"
+            f"DONE: <summary>      — when task is verified complete\n\n"
+            f"For web servers always use background launch:\n"
+            f"  RUN: nohup python3 app.py > server.log 2>&1 &\n"
+            f"  Then: RUN: sleep 2 && curl -sf http://localhost:<PORT>/ && echo OK\n"
+            f"  Include port number in DONE message.\n\n"
+            f"Write your first FILE: now."
         )
         if is_followup and history:
             # For follow-ups, append the new instruction as a user turn
@@ -1249,6 +1243,45 @@ async def api_agent_run(
                 # DONE claimed too early (no exec yet) — push back with explicit nudge
                 final_answer = None
 
+            # ── Detect Copilot's built-in code-executor responses ─────────────────
+            # Copilot M365 may execute code itself and return results in two formats:
+            # 1) JSON: {"executedCode":"...","status":"...","stdout":"...","outputFiles":[...]}
+            # 2) Markdown: "✅ **Commands executed successfully**\n**RUN: `cmd`**\n```\nout\n```"
+            # Detect both and redirect to our FILE:/RUN: protocol.
+            stripped_resp = response_text.strip()
+            _is_copilot_exec = False
+            if stripped_resp.startswith('{') and '"executedCode"' in stripped_resp:
+                try:
+                    exec_data = json.loads(stripped_resp)
+                    _is_copilot_exec = bool(exec_data.get("executedCode"))
+                except json.JSONDecodeError:
+                    pass
+            # Markdown code-executor pattern: Copilot shows "**RUN:" or "Commands executed"
+            # without FILE:/RUN:/INSTALL:/DONE: at the start of a line
+            elif ("**RUN:" in response_text or "Commands executed" in response_text
+                  or "Your script ran" in response_text
+                  or "already installed" in response_text and "**INSTALL:" in response_text):
+                # Only treat as copilot-exec if NO standard protocol keywords found
+                has_protocol = bool(re.search(r"^(FILE|RUN|INSTALL|DONE):", response_text, re.MULTILINE))
+                if not has_protocol:
+                    _is_copilot_exec = True
+            if _is_copilot_exec:
+                yield _sse("thinking", {"step": step, "text":
+                    f"⚠️ Copilot ran code in its own environment. Requesting FILE: action..."
+                })
+                if not history:
+                    history.append({"role": "user", "content": initial_user_msg})
+                history.append({"role": "assistant", "content": response_text})
+                history.append({
+                    "role": "user",
+                    "content": (
+                        "Please write the files to the workspace using the FILE: keyword, "
+                        "then RUN: to execute them. Use FILE: filename on one line, "
+                        "then the complete file content on the following lines."
+                    ),
+                })
+                continue
+
             # Parse ALL actions from this response (LLM often writes FILE: + RUN: together)
             tools = _parse_all_actions(response_text)
             if not tools:
@@ -1259,9 +1292,8 @@ async def api_agent_run(
                 history.append({
                     "role": "user",
                     "content": (
-                        "Please write your next action now:\n"
-                        "FILE: filename.py then code block, or RUN: command, "
-                        "or INSTALL: pip install X, or DONE: summary."
+                        "Write your next action: FILE: filename (then content), "
+                        "or RUN: command, or INSTALL: package, or DONE: summary."
                     ),
                 })
                 continue
@@ -1309,23 +1341,45 @@ async def api_agent_run(
                     if cmd and cmd not in commands_run:
                         commands_run.append(cmd)
                     # Detect background web server launch — emit web_server event
-                    if cmd and ("nohup" in cmd or "& " in cmd or cmd.endswith("&")):
-                        port_m = re.search(r'port[= ](\d{4,5})|:(\d{4,5})', cmd + " " + response_text)
-                        detected_port = int(port_m.group(1) or port_m.group(2)) if port_m else None
+                    # Also check background=True from C10 (returned for nohup cmds)
+                    is_bg = meta.get("background", False) or bool(
+                        cmd and ("nohup " in cmd or cmd.strip().endswith("&"))
+                    )
+                    if is_bg:
+                        # Scan command + response text + all written file contents for port
+                        search_corpus = cmd + " " + response_text
+                        for fc in files_created:
+                            fr = await _c10_read_file(fc)
+                            search_corpus += " " + (fr.get("content") or "")
+                        port_m = re.search(
+                            r'port\s*[=:,( ]\s*(\d{4,5})|\.run\s*\([^)]*port\s*=\s*(\d{4,5})',
+                            search_corpus, re.IGNORECASE
+                        )
+                        detected_port = None
+                        if port_m:
+                            detected_port = int(port_m.group(1) or port_m.group(2))
                         if detected_port:
                             yield _sse("web_server", {"port": detected_port})
 
                 if tool["tool"] == "write_file" and meta.get("ok"):
                     path = meta.get("path", "")
+                    file_content = tool.get("content", "")
                     if path and path not in files_created:
                         files_created.append(path)
                     yield _sse("file_update", {"path": path, "action": "created"})
 
                     # Auto-run the file immediately after writing if no RUN: follows
-                    # (avoids waiting for another LLM turn just to run it)
+                    # BUT: suppress auto-run for web server files (Flask/Express/Fastapi)
+                    # to avoid blocking the event loop with a long-running process.
+                    _web_server_patterns = (
+                        "flask", "fastapi", "uvicorn", "express()", "http.createserver",
+                        "app.listen(", "app.run(", "socketio", "tornado", "django",
+                    )
+                    is_web_server_file = any(p in file_content.lower() for p in _web_server_patterns)
+
                     remaining_tools = tools[tools.index(tool)+1:]
                     has_exec_following = any(t["tool"] == "exec" for t in remaining_tools)
-                    if not has_exec_following and path:
+                    if not has_exec_following and path and not is_web_server_file:
                         ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
                         auto_cmd = {"py": f"python3 {path}", "js": f"node {path}",
                                     "sh": f"bash {path}"}.get(ext)
@@ -1349,7 +1403,12 @@ async def api_agent_run(
                 # Emit observation SSE
                 obs_event: dict = {"step": step, "tool": tool["tool"],
                                    "result": observation[:800]}
-                if "exit_code" in meta: obs_event["exit_code"] = meta["exit_code"]
+                # Background processes return exit_code=0 always; don't show as error
+                if meta.get("background"):
+                    obs_event["exit_code"] = 0
+                    obs_event["background"] = True
+                elif "exit_code" in meta:
+                    obs_event["exit_code"] = meta["exit_code"]
                 if meta.get("timed_out"): obs_event["timed_out"] = True
                 yield _sse("observation", obs_event)
                 observations.append(observation)
@@ -1358,23 +1417,29 @@ async def api_agent_run(
             combined_obs = "\n---\n".join(observations)
             if last_tool_name == "exec":
                 ec = last_meta.get("exit_code", 0)
-                if ec == 0:
+                is_bg = last_meta.get("background", False)
+                if is_bg or ec == 0:
                     next_hint = (
                         f"Output:\n```\n{combined_obs}\n```\n\n"
-                        f"If output is correct, write: DONE: what was built and validated.\n"
-                        f"Otherwise fix the issue."
+                        + (
+                            f"Server started in background. Now verify: RUN: sleep 2 && curl -sf http://localhost:{detected_port or 5001}/ && echo SERVER_OK\n"
+                            if is_bg else
+                            f"If output is correct, write: DONE: what was built and validated.\n"
+                            f"Otherwise fix the issue."
+                        )
                     )
                 else:
                     next_hint = (
                         f"Error (exit {ec}):\n```\n{combined_obs}\n```\n\n"
-                        f"Fix the bug: FILE: {tools[-1].get('path','script.py')} then corrected code."
+                        f"Fix the bug using FILE: {tools[-1].get('path','script.py')} with corrected content on the following lines."
                     )
             elif last_tool_name == "install":
                 next_hint = f"Package installed. Now write the code: FILE: filename.py"
             else:
                 next_hint = (
                     f"Result:\n```\n{combined_obs}\n```\n\n"
-                    f"Next: FILE:/RUN:/INSTALL: action, or DONE: summary."
+                    f"Next: FILE: filename (content below), or RUN: cmd, or INSTALL: pkg, or DONE: summary.\n"
+                f"ONE action only. No code blocks."
                 )
             history.append({"role": "user", "content": next_hint})
 
