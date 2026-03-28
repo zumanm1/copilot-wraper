@@ -38,3 +38,28 @@ CREATE TABLE IF NOT EXISTS chat_logs (
     elapsed_ms INTEGER,
     source TEXT DEFAULT 'chat'  -- 'chat' | 'validate'
 );
+
+-- Agent workspace: one row per user task run (supports follow-up sessions)
+CREATE TABLE IF NOT EXISTS agent_sessions (
+    id TEXT PRIMARY KEY,              -- "sess_" + 8-char hex
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    task TEXT NOT NULL,               -- initial task prompt
+    agent_id TEXT NOT NULL,
+    chat_mode TEXT DEFAULT 'auto',
+    work_mode TEXT DEFAULT 'work',
+    status TEXT DEFAULT 'running',    -- running | completed | failed
+    steps_taken INTEGER DEFAULT 0,
+    files_created TEXT DEFAULT '[]',  -- JSON array of filenames
+    summary TEXT                      -- from DONE: final answer
+);
+
+-- Per-turn conversation messages for an agent session (enables follow-up)
+CREATE TABLE IF NOT EXISTS agent_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    turn INTEGER NOT NULL,            -- 1-based
+    role TEXT NOT NULL,               -- 'user' | 'assistant'
+    content TEXT NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES agent_sessions(id)
+);

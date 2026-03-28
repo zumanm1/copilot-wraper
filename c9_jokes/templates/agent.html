@@ -7,8 +7,8 @@
 /* Override main padding for full-width workspace feel */
 .agent-workspace {
   display: grid;
-  grid-template-columns: 260px 1fr;
-  grid-template-rows: auto 1fr auto;
+  grid-template-columns: 200px 240px 1fr;
+  grid-template-rows: auto 1fr;
   gap: 0;
   height: calc(100vh - 120px);
   min-height: 600px;
@@ -16,9 +16,135 @@
   overflow: hidden;
 }
 
-/* ── Toolbar row (spans full width) ─────────────────────────────────────── */
+/* ── History sidebar (far left) ──────────────────────────────────────────── */
+.agent-history {
+  grid-column: 1;
+  grid-row: 1 / -1;
+  border-right: 1px solid var(--border);
+  background: var(--card);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.78rem;
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+.history-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.3rem 0;
+}
+.history-item {
+  padding: 0.45rem 0.75rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+  border-radius: 4px;
+  margin: 0 0.25rem 0.1rem;
+  border-left: 2px solid transparent;
+  color: var(--fg);
+}
+.history-item:hover { background: var(--surface2); }
+.history-item.active { border-left-color: var(--accent); background: rgba(88,166,255,0.08); }
+.history-item.completed { border-left-color: var(--ok); }
+.history-item.failed    { border-left-color: var(--fail); }
+.history-task { font-size: 0.76rem; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.history-meta { font-size: 0.7rem; color: var(--muted); margin-top: 2px; }
+
+/* ── Output tabs ─────────────────────────────────────────────────────────── */
+.output-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+  flex-shrink: 0;
+  padding: 0 0.75rem;
+}
+.tab-btn {
+  padding: 0.4rem 0.85rem;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-size: 0.82rem;
+  cursor: pointer;
+  margin-bottom: -1px;
+  margin-top: 0;
+  transition: color 0.1s, border-color 0.1s;
+}
+.tab-btn:hover { color: var(--fg); }
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+.output-panel { display: none; flex: 1; overflow: hidden; min-height: 0; }
+.output-panel.active { display: flex; flex-direction: column; }
+
+/* Preview iframe panel */
+.preview-panel-inner {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.preview-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+.preview-url-bar {
+  flex: 1;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.2rem 0.5rem;
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-family: monospace;
+}
+.preview-iframe {
+  flex: 1;
+  border: none;
+  background: #fff;
+  width: 100%;
+}
+
+/* File attach badges */
+.attach-badges { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.attach-badge {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  background: rgba(88,166,255,0.12); color: var(--accent);
+  border: 1px solid rgba(88,166,255,0.3); border-radius: 4px;
+  font-size: 0.76rem; padding: 0.1rem 0.4rem;
+}
+.attach-badge button { background: none; border: none; cursor: pointer; color: var(--muted); padding: 0; font-size: 0.9rem; margin: 0; }
+
+/* Follow-up banner */
+.followup-banner {
+  display: none;
+  background: rgba(63,185,80,0.1);
+  border: 1px solid rgba(63,185,80,0.3);
+  border-radius: 6px;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.8rem;
+  color: var(--ok);
+}
+.followup-banner.show { display: block; }
+
+/* ── Toolbar row (spans file-tree + main, not history sidebar) ──────────── */
 .agent-toolbar {
-  grid-column: 1 / -1;
+  grid-column: 2 / -1;
   display: flex;
   align-items: center;
   gap: 0.6rem;
@@ -46,7 +172,7 @@
 
 /* ── File Tree panel ─────────────────────────────────────────────────────── */
 .agent-filetree {
-  grid-column: 1;
+  grid-column: 2;
   grid-row: 2;
   border-right: 1px solid var(--border);
   background: var(--card);
@@ -147,7 +273,7 @@
 
 /* ── Main right panel ────────────────────────────────────────────────────── */
 .agent-main {
-  grid-column: 2;
+  grid-column: 3;
   grid-row: 2;
   display: flex;
   flex-direction: column;
@@ -325,6 +451,17 @@
 
 <div class="agent-workspace">
 
+  <!-- ── History Sidebar ────────────────────────────────────────────────── -->
+  <div class="agent-history">
+    <div class="history-header">
+      <span>🕐 History</span>
+      <button type="button" class="btn-sm" id="refresh-history" title="Refresh history">↺</button>
+    </div>
+    <div class="history-list" id="history-list">
+      <div style="color:var(--muted);font-size:0.76rem;padding:0.75rem;text-align:center;">No sessions yet</div>
+    </div>
+  </div>
+
   <!-- ── Toolbar ────────────────────────────────────────────────────────── -->
   <div class="agent-toolbar">
     <h2>⚡ Agent Workspace</h2>
@@ -378,31 +515,60 @@
 
   <!-- ── Stream Output + Input ──────────────────────────────────────────── -->
   <div class="agent-main">
-    <!-- Stream log -->
-    <div class="agent-stream" id="agent-stream">
-      <div class="stream-empty" id="stream-empty">
-        <div style="font-size:2rem;margin-bottom:0.75rem;">🤖</div>
-        <div style="font-size:1rem;color:var(--fg);margin-bottom:0.4rem;">Agent Workspace</div>
-        <div style="font-size:0.85rem;">Describe a task below and the AI agent will plan, code, run, and validate it.</div>
-        <div style="font-size:0.78rem;margin-top:0.5rem;color:var(--muted);">
-          Try: <em>"Write a Python script that fetches a joke from an API and prints it"</em>
+    <!-- Output tabs -->
+    <div class="output-tabs">
+      <button class="tab-btn active" data-tab="terminal" id="tab-terminal">⚡ Terminal</button>
+      <button class="tab-btn" data-tab="preview" id="tab-preview" style="display:none">🌐 Preview</button>
+    </div>
+
+    <!-- Terminal panel -->
+    <div class="output-panel active" id="panel-terminal">
+      <div class="agent-stream" id="agent-stream">
+        <div class="stream-empty" id="stream-empty">
+          <div style="font-size:2rem;margin-bottom:0.75rem;">🤖</div>
+          <div style="font-size:1rem;color:var(--fg);margin-bottom:0.4rem;">Agent Workspace</div>
+          <div style="font-size:0.85rem;">Describe a task below and the AI agent will plan, code, run, and validate it.</div>
+          <div style="font-size:0.78rem;margin-top:0.5rem;color:var(--muted);">
+            Try: <em>"create a flask app on port 5001 with a hello route"</em> or <em>"write a python calc script"</em>
+          </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Web Preview panel -->
+    <div class="output-panel" id="panel-preview">
+      <div class="preview-panel-inner">
+        <div class="preview-toolbar">
+          <span style="color:var(--muted);font-size:0.78rem;">🌐</span>
+          <span class="preview-url-bar" id="preview-url-bar">—</span>
+          <button type="button" class="btn-sm" id="btn-preview-refresh" title="Reload preview">↺</button>
+          <button type="button" class="btn-sm" id="btn-preview-open" title="Open in new tab" style="display:none">↗</button>
+        </div>
+        <iframe class="preview-iframe" id="preview-iframe" src="about:blank" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>
       </div>
     </div>
 
     <!-- Input bar -->
     <div class="agent-input-bar">
+      <!-- Follow-up banner (shown after task completes) -->
+      <div class="followup-banner" id="followup-banner">
+        ✅ Task complete — type a follow-up below to improve or extend it (same session)
+      </div>
+      <!-- Attached files -->
+      <div class="attach-badges" id="attach-badges"></div>
       <div class="agent-input-row">
         <textarea
           id="task-input"
           rows="2"
           placeholder="Describe what you want to build… (Ctrl+Enter to run)"
         ></textarea>
-        <div style="display:flex;flex-direction:column;gap:0.4rem;">
+        <div style="display:flex;flex-direction:column;gap:0.4rem;align-items:center;">
           <button type="button" class="btn-run" id="btn-run">▶ Run</button>
           <button type="button" class="btn-stop" id="btn-stop" style="display:none">◼ Stop</button>
+          <button type="button" class="btn-sm" id="btn-attach" title="Attach file to workspace">📎</button>
         </div>
       </div>
+      <input type="file" id="attach-input" style="display:none" multiple>
       <div class="agent-input-controls">
         <button type="button" class="btn-reset-ws" id="btn-reset-ws">🗑 Reset Workspace</button>
         <span class="muted" style="font-size:0.76rem;">C10 sandbox · non-root · 512 MB · 0.5 CPU</span>
@@ -432,26 +598,42 @@
   const agents = {{ agents | tojson }};
 
   // ── DOM refs ──────────────────────────────────────────────────────────────
-  const streamEl       = document.getElementById('agent-stream');
-  const streamEmpty    = document.getElementById('stream-empty');
-  const filetreeList   = document.getElementById('filetree-list');
-  const filetreeEmpty  = document.getElementById('filetree-empty');
-  const taskInput      = document.getElementById('task-input');
-  const btnRun         = document.getElementById('btn-run');
-  const btnStop        = document.getElementById('btn-stop');
-  const btnResetWs     = document.getElementById('btn-reset-ws');
-  const btnRefresh     = document.getElementById('refresh-files');
-  const stepCounter    = document.getElementById('step-counter');
-  const agentSelect    = document.getElementById('agent-select');
-  const previewOverlay = document.getElementById('file-preview-overlay');
-  const previewTitle   = document.getElementById('file-preview-title');
-  const previewContent = document.getElementById('file-preview-content');
-  const closePreview   = document.getElementById('close-preview');
+  const streamEl         = document.getElementById('agent-stream');
+  const streamEmpty      = document.getElementById('stream-empty');
+  const filetreeList     = document.getElementById('filetree-list');
+  const taskInput        = document.getElementById('task-input');
+  const btnRun           = document.getElementById('btn-run');
+  const btnStop          = document.getElementById('btn-stop');
+  const btnResetWs       = document.getElementById('btn-reset-ws');
+  const btnRefresh       = document.getElementById('refresh-files');
+  const stepCounter      = document.getElementById('step-counter');
+  const agentSelect      = document.getElementById('agent-select');
+  const previewOverlay   = document.getElementById('file-preview-overlay');
+  const previewTitle     = document.getElementById('file-preview-title');
+  const previewContent   = document.getElementById('file-preview-content');
+  const closePreview     = document.getElementById('close-preview');
+  const historyList      = document.getElementById('history-list');
+  const btnRefreshHist   = document.getElementById('refresh-history');
+  const followupBanner   = document.getElementById('followup-banner');
+  const attachBadges     = document.getElementById('attach-badges');
+  const btnAttach        = document.getElementById('btn-attach');
+  const attachInput      = document.getElementById('attach-input');
+  const tabTerminal      = document.getElementById('tab-terminal');
+  const tabPreview       = document.getElementById('tab-preview');
+  const panelTerminal    = document.getElementById('panel-terminal');
+  const panelPreview     = document.getElementById('panel-preview');
+  const previewIframe    = document.getElementById('preview-iframe');
+  const previewUrlBar    = document.getElementById('preview-url-bar');
+  const btnPreviewRefresh= document.getElementById('btn-preview-refresh');
+  const btnPreviewOpen   = document.getElementById('btn-preview-open');
 
-  let activeSource = null;   // EventSource
-  let running = false;
-  let currentStep = 0;
-  let maxSteps = 15;
+  let activeSource  = null;
+  let running       = false;
+  let currentStep   = 0;
+  let maxSteps      = 15;
+  let currentSessId = '';   // session_id for follow-ups
+  let activeTab     = 'terminal';
+  let currentWebPort= null;
 
   // ── Helpers ────────────────────────────────────────────────────────────────
   function escapeHtml(s) {
@@ -459,14 +641,8 @@
     d.textContent = String(s == null ? '' : s);
     return d.innerHTML;
   }
-
-  function scrollToBottom() {
-    streamEl.scrollTop = streamEl.scrollHeight;
-  }
-
-  function hideEmpty() {
-    if (streamEmpty) streamEmpty.style.display = 'none';
-  }
+  function scrollToBottom() { streamEl.scrollTop = streamEl.scrollHeight; }
+  function hideEmpty() { if (streamEmpty) streamEmpty.style.display = 'none'; }
 
   function appendEntry(type, html, extraClass) {
     hideEmpty();
@@ -478,7 +654,33 @@
     return div;
   }
 
-  // ── Thinking-mode dropdown (same pattern as pairs.html) ───────────────────
+  // ── Output tabs ───────────────────────────────────────────────────────────
+  function switchTab(tab) {
+    activeTab = tab;
+    tabTerminal.classList.toggle('active', tab === 'terminal');
+    tabPreview.classList.toggle('active', tab === 'preview');
+    panelTerminal.classList.toggle('active', tab === 'terminal');
+    panelPreview.classList.toggle('active', tab === 'preview');
+  }
+  tabTerminal.addEventListener('click', function() { switchTab('terminal'); });
+  tabPreview.addEventListener('click',  function() { switchTab('preview'); });
+
+  function showWebPreview(port) {
+    currentWebPort = port;
+    const url = '/api/agent/preview?port=' + port;
+    previewIframe.src = url;
+    previewUrlBar.textContent = 'http://localhost:' + port + '/  (proxied via C9)';
+    tabPreview.textContent = '🌐 Preview :' + port;
+    tabPreview.style.display = '';
+    btnPreviewOpen.style.display = '';
+    btnPreviewOpen.onclick = function() { window.open(url, '_blank'); };
+    switchTab('preview');
+  }
+  btnPreviewRefresh.addEventListener('click', function() {
+    if (currentWebPort) previewIframe.src = '/api/agent/preview?port=' + currentWebPort + '&_=' + Date.now();
+  });
+
+  // ── Thinking-mode dropdown ─────────────────────────────────────────────────
   const THINKING_LABELS = { auto: 'Auto', quick: 'Quick Response', deep: 'Think Deeper' };
   let thinkingMode = localStorage.getItem('agentThinkingMode') || 'auto';
   const thinkingPill  = document.getElementById('thinking-pill');
@@ -496,7 +698,6 @@
     thinkingPill.setAttribute('aria-expanded', 'false');
   }
   applyThinkingMode(thinkingMode);
-
   thinkingPill.addEventListener('click', function(e) {
     e.stopPropagation();
     const open = !thinkingMenu.hidden;
@@ -521,11 +722,18 @@
     });
   });
 
-  // ── File tree ─────────────────────────────────────────────────────────────
+  // ── File tree ──────────────────────────────────────────────────────────────
+  function getFileIcon(path) {
+    const ext = (path.split('.').pop() || '').toLowerCase();
+    return ({py:'🐍',js:'📜',ts:'📘',jsx:'⚛',tsx:'⚛',html:'🌐',css:'🎨',
+             json:'📋',md:'📝',txt:'📄',sh:'⚙',yml:'⚙',yaml:'⚙',
+             toml:'⚙',env:'🔑',sql:'🗄',log:'📋'})[ext] || '📄';
+  }
+
   function renderFileTree(entries) {
     filetreeList.innerHTML = '';
     if (!entries || !entries.length) {
-      filetreeList.innerHTML = '<div class="filetree-empty" id="filetree-empty">Empty workspace</div>';
+      filetreeList.innerHTML = '<div class="filetree-empty">Empty workspace</div>';
       return;
     }
     entries.forEach(function(entry) {
@@ -543,47 +751,29 @@
     });
   }
 
-  function getFileIcon(path) {
-    const ext = (path.split('.').pop() || '').toLowerCase();
-    const icons = {
-      py: '🐍', js: '📜', ts: '📘', jsx: '⚛', tsx: '⚛',
-      html: '🌐', css: '🎨', json: '📋', md: '📝',
-      txt: '📄', sh: '⚙', yml: '⚙', yaml: '⚙',
-      toml: '⚙', env: '🔑', sql: '🗄',
-    };
-    return icons[ext] || '📄';
-  }
-
   async function refreshFiles() {
     btnRefresh.textContent = '…';
     try {
       const r = await fetch('/api/agent/files');
       const data = await r.json();
       renderFileTree(data.entries || []);
-    } catch(e) {
-      // silently fail on refresh
-    }
+    } catch(e) {}
     btnRefresh.textContent = '↺';
   }
-
   btnRefresh.addEventListener('click', refreshFiles);
 
-  // ── File preview modal ────────────────────────────────────────────────────
+  // ── File preview modal ─────────────────────────────────────────────────────
   function openFilePreview(path, activeItem) {
     document.querySelectorAll('.filetree-item').forEach(function(i) { i.classList.remove('active'); });
     if (activeItem) activeItem.classList.add('active');
     previewTitle.textContent = path;
     previewContent.textContent = 'Loading…';
     previewOverlay.classList.add('open');
-
     fetch('/api/agent/file?path=' + encodeURIComponent(path))
       .then(function(r) { return r.json(); })
-      .then(function(d) {
-        previewContent.textContent = d.content || ('Error: ' + (d.error || d.detail || 'unknown'));
-      })
+      .then(function(d) { previewContent.textContent = d.content || ('Error: ' + (d.error || 'unknown')); })
       .catch(function(e) { previewContent.textContent = 'Error: ' + e.message; });
   }
-
   closePreview.addEventListener('click', function() {
     previewOverlay.classList.remove('open');
     document.querySelectorAll('.filetree-item').forEach(function(i) { i.classList.remove('active'); });
@@ -595,12 +785,102 @@
     }
   });
 
-  // ── SSE stream rendering ──────────────────────────────────────────────────
+  // ── History sidebar ────────────────────────────────────────────────────────
+  async function refreshHistory() {
+    btnRefreshHist.textContent = '…';
+    try {
+      const r = await fetch('/api/agent/sessions?limit=20');
+      const sessions = await r.json();
+      renderHistory(sessions);
+    } catch(e) {}
+    btnRefreshHist.textContent = '↺';
+  }
 
+  function renderHistory(sessions) {
+    historyList.innerHTML = '';
+    if (!sessions || !sessions.length) {
+      historyList.innerHTML = '<div style="color:var(--muted);font-size:0.76rem;padding:0.75rem;text-align:center;">No sessions yet</div>';
+      return;
+    }
+    sessions.forEach(function(s) {
+      const item = document.createElement('div');
+      item.className = 'history-item ' + (s.status || 'running');
+      if (s.id === currentSessId) item.classList.add('active');
+      const date = new Date(s.created_at).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+      const statusIcon = s.status === 'completed' ? '✅' : s.status === 'failed' ? '⚠' : '⏳';
+      const filesArr = JSON.parse(s.files_created || '[]');
+      item.innerHTML =
+        '<div class="history-task" title="' + escapeHtml(s.task) + '">' + statusIcon + ' ' + escapeHtml((s.task||'').slice(0,60)) + '</div>' +
+        '<div class="history-meta">' + date + ' · ' + (s.steps_taken||0) + ' steps' +
+        (filesArr.length ? ' · ' + filesArr.length + ' file(s)' : '') + '</div>';
+      item.addEventListener('click', function() {
+        loadSession(s);
+      });
+      historyList.appendChild(item);
+    });
+  }
+
+  function loadSession(s) {
+    currentSessId = s.id;
+    taskInput.value = '';
+    taskInput.placeholder = 'Follow-up for: ' + (s.task||'').slice(0,50) + '…';
+    followupBanner.classList.add('show');
+    followupBanner.textContent = '📂 Session loaded: "' + (s.task||'').slice(0,60) + '" — type a follow-up below';
+    document.querySelectorAll('.history-item').forEach(function(i) { i.classList.remove('active'); });
+    // find and mark active
+    document.querySelectorAll('.history-item').forEach(function(i) {
+      if (i.querySelector('.history-task') && i.querySelector('.history-task').textContent.includes((s.task||'').slice(0,40).trim())) {
+        i.classList.add('active');
+      }
+    });
+    taskInput.focus();
+  }
+
+  btnRefreshHist.addEventListener('click', refreshHistory);
+
+  // ── File attach ────────────────────────────────────────────────────────────
+  const attachedFiles = [];
+
+  btnAttach.addEventListener('click', function() { attachInput.click(); });
+  attachInput.addEventListener('change', async function() {
+    const files = Array.from(attachInput.files || []);
+    for (const file of files) {
+      const fd = new FormData();
+      fd.append('file', file);
+      try {
+        const r = await fetch('/api/agent/upload-to-workspace', { method: 'POST', body: fd });
+        const d = await r.json();
+        if (d.ok !== false) {
+          attachedFiles.push(d.filename || file.name);
+          renderAttachBadges();
+          appendEntry('file_update', '<span class="stream-label">📎 Uploaded</span> ' + escapeHtml(d.filename || file.name) + ' (' + (d.size||0) + ' bytes) → workspace');
+          await refreshFiles();
+        } else {
+          appendEntry('error', '<span class="stream-label">❌</span> Upload failed: ' + escapeHtml(d.error || 'unknown'));
+        }
+      } catch(e) {
+        appendEntry('error', '<span class="stream-label">❌</span> Upload error: ' + escapeHtml(e.message));
+      }
+    }
+    attachInput.value = '';
+  });
+
+  function renderAttachBadges() {
+    attachBadges.innerHTML = '';
+    attachedFiles.forEach(function(name, i) {
+      const badge = document.createElement('span');
+      badge.className = 'attach-badge';
+      badge.innerHTML = '📎 ' + escapeHtml(name) +
+        '<button title="Remove" onclick="this.closest(\'.attach-badge\').remove()">×</button>';
+      attachBadges.appendChild(badge);
+    });
+  }
+
+  // ── SSE event handlers ─────────────────────────────────────────────────────
   function handleThinking(data) {
     const text = (data.text || '').trim();
     if (!text) return;
-    const stepLabel = data.step > 0 ? '<span class="stream-label">Step ' + data.step + '</span>' : '';
+    const stepLabel = data.step > 0 ? '<span class="stream-label">STEP ' + data.step + '</span> ' : '';
     appendEntry('thinking', stepLabel + escapeHtml(text));
   }
 
@@ -610,9 +890,7 @@
       inner += ' <span class="stream-cmd">$ ' + escapeHtml(data.command) + '</span>';
     } else if (data.path && data.tool === 'write_file') {
       inner += ' <span class="stream-cmd">→ ' + escapeHtml(data.path) + '</span>';
-      if (data.preview) {
-        inner += '<div class="stream-output">' + escapeHtml(data.preview) + (data.preview.length >= 200 ? '…' : '') + '</div>';
-      }
+      if (data.preview) inner += '<div class="stream-output">' + escapeHtml(data.preview) + (data.preview.length >= 200 ? '…' : '') + '</div>';
     } else if (data.path) {
       inner += ' <span class="stream-cmd">' + escapeHtml(data.path) + '</span>';
     } else if (data.package) {
@@ -624,24 +902,17 @@
   function handleObservation(data) {
     const failed = data.exit_code !== undefined && data.exit_code !== 0;
     const result = (data.result || '').trim();
-    let inner = '<span class="stream-label">' + (failed ? '❌ Result' : '✅ Result') + '</span>';
-    if (data.exit_code !== undefined) {
-      inner += ' <span style="font-size:0.75rem;opacity:0.7">exit ' + data.exit_code + '</span>';
-    }
-    if (data.timed_out) {
-      inner += ' <span style="color:var(--warn)"> [TIMED OUT]</span>';
-    }
-    if (result) {
-      inner += '<div class="stream-output">' + escapeHtml(result) + '</div>';
-    }
+    let inner = '<span class="stream-label">' + (failed ? '❌ RESULT' : '✅ RESULT') + '</span>';
+    if (data.exit_code !== undefined) inner += ' <span style="font-size:0.75rem;opacity:0.7">exit ' + data.exit_code + '</span>';
+    if (data.timed_out) inner += ' <span style="color:var(--warn)"> [killed: timeout — expected for web servers]</span>';
+    if (result) inner += '<div class="stream-output">' + escapeHtml(result) + '</div>';
     appendEntry('observation', inner, failed ? 'fail' : '');
   }
 
   function handleFileUpdate(data) {
-    const inner = '<span class="stream-label">📁 File</span> ' +
-      escapeHtml(data.path) + ' <span style="opacity:0.6">(' + escapeHtml(data.action || 'updated') + ')</span>';
-    appendEntry('file_update', inner);
-    // Refresh file tree
+    appendEntry('file_update',
+      '<span class="stream-label">📁 File</span> ' + escapeHtml(data.path) +
+      ' <span style="opacity:0.6">(' + escapeHtml(data.action || 'updated') + ')</span>');
     refreshFiles();
   }
 
@@ -653,27 +924,49 @@
     stepCounter.className = 'step-counter running';
   }
 
+  function handleSession(data) {
+    currentSessId = data.session_id || '';
+    if (data.is_followup) {
+      appendEntry('step_info', '<span class="stream-label">🔗 Session</span> Resuming session ' + escapeHtml(currentSessId));
+    }
+  }
+
+  function handleWebServer(data) {
+    const port = data.port;
+    appendEntry('step_info',
+      '<span class="stream-label">🌐 Web Server</span> Detected on port ' + port +
+      ' — <a href="#" onclick="showWebPreview(' + port + ');return false;">Open Preview ↗</a>');
+    showWebPreview(port);
+  }
+
   function handleFinal(data) {
     const summary = data.summary || 'Task complete.';
     const steps = data.steps_taken || currentStep;
-    const files = (data.files_created || []);
+    const files = data.files_created || [];
     let inner = '<span style="font-size:1rem;">✅ Task Complete</span><br>' +
       escapeHtml(summary) +
       '<div style="font-size:0.78rem;color:var(--muted);margin-top:0.4rem;">' +
       steps + ' steps · ' + files.length + ' file(s)' +
       (data.max_steps_reached ? ' · ⚠ max steps reached' : '') +
+      (data.session_id ? ' · <span style="opacity:0.6">sess ' + escapeHtml(data.session_id) + '</span>' : '') +
       '</div>';
+    if (data.web_port) {
+      inner += '<div style="margin-top:0.4rem;font-size:0.8rem;">🌐 Web app on port ' + data.web_port +
+        ' — <a href="#" onclick="showWebPreview(' + data.web_port + ');return false;" style="color:var(--accent)">Open Preview</a></div>';
+    }
     appendEntry('final', inner);
-    setIdle();
+    if (data.session_id) currentSessId = data.session_id;
+    setIdle(true);
     refreshFiles();
+    refreshHistory();
   }
 
   function handleError(data) {
     appendEntry('error', '<span class="stream-label">❌ Error</span> ' + escapeHtml(data.message || 'Unknown error'));
-    setIdle();
+    setIdle(false);
   }
 
-  // ── Run / stop state ──────────────────────────────────────────────────────
+  // ── Run / stop state ───────────────────────────────────────────────────────
   function setRunning() {
     running = true;
     btnRun.style.display = 'none';
@@ -681,12 +974,13 @@
     btnResetWs.disabled = true;
     taskInput.disabled = true;
     agentSelect.disabled = true;
+    followupBanner.classList.remove('show');
     stepCounter.style.display = '';
     stepCounter.textContent = 'Starting…';
     stepCounter.className = 'step-counter running';
   }
 
-  function setIdle() {
+  function setIdle(showFollowup) {
     running = false;
     btnRun.style.display = '';
     btnStop.style.display = 'none';
@@ -695,25 +989,32 @@
     taskInput.disabled = false;
     agentSelect.disabled = false;
     stepCounter.className = 'step-counter';
-    if (activeSource) {
-      activeSource.close();
-      activeSource = null;
+    if (activeSource) { activeSource.close(); activeSource = null; }
+    if (showFollowup && currentSessId) {
+      followupBanner.textContent = '✅ Task complete — type a follow-up below to improve or extend it (same session)';
+      followupBanner.classList.add('show');
+      taskInput.value = '';
+      taskInput.placeholder = 'Follow-up task… (Ctrl+Enter to run)';
     }
   }
 
-  // ── Run task ──────────────────────────────────────────────────────────────
+  // ── Run task ───────────────────────────────────────────────────────────────
   function runTask() {
     const task = taskInput.value.trim();
     if (!task || running) return;
 
-    // Clear stream
-    streamEl.innerHTML = '';
+    // Only clear stream for new sessions (not follow-ups)
+    if (!currentSessId) {
+      streamEl.innerHTML = '';
+      tabPreview.style.display = 'none';
+      currentWebPort = null;
+      switchTab('terminal');
+    }
     hideEmpty();
     currentStep = 0;
-
     setRunning();
 
-    const agentId  = agentSelect.value || 'c9-jokes';
+    const agentId = agentSelect.value || 'c9-jokes';
     const params = new URLSearchParams({
       task:       task,
       agent_id:   agentId,
@@ -721,62 +1022,56 @@
       work_mode:  activeWorkMode,
       max_steps:  '15',
     });
+    if (currentSessId) params.set('session_id', currentSessId);
 
-    appendEntry('step_info',
-      '<span class="stream-label">🚀 Task</span> ' + escapeHtml(task));
+    appendEntry('step_info', '<span class="stream-label">🚀 Task</span> ' + escapeHtml(task));
 
     const src = new EventSource('/api/agent/run?' + params.toString());
     activeSource = src;
 
+    src.addEventListener('session',     function(e) { handleSession(JSON.parse(e.data)); });
     src.addEventListener('thinking',    function(e) { handleThinking(JSON.parse(e.data)); });
     src.addEventListener('tool_call',   function(e) { handleToolCall(JSON.parse(e.data)); });
     src.addEventListener('observation', function(e) { handleObservation(JSON.parse(e.data)); });
     src.addEventListener('file_update', function(e) { handleFileUpdate(JSON.parse(e.data)); });
     src.addEventListener('step_done',   function(e) { handleStepDone(JSON.parse(e.data)); });
+    src.addEventListener('web_server',  function(e) { handleWebServer(JSON.parse(e.data)); });
     src.addEventListener('final',       function(e) { handleFinal(JSON.parse(e.data)); });
     src.addEventListener('error',       function(e) {
-      // EventSource fires 'error' on connection close too; only show if data present
       if (e.data) {
         try { handleError(JSON.parse(e.data)); } catch(_) { handleError({message: e.data}); }
       } else if (running) {
-        // Connection dropped
         appendEntry('error', '<span class="stream-label">❌ Error</span> Connection to server lost.');
-        setIdle();
+        setIdle(false);
       }
     });
-    src.onopen = function() {};
   }
 
   btnRun.addEventListener('click', runTask);
-
   taskInput.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-      runTask();
-    }
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runTask(); }
   });
 
-  // ── Stop ──────────────────────────────────────────────────────────────────
+  // ── Stop ───────────────────────────────────────────────────────────────────
   btnStop.addEventListener('click', function() {
-    if (activeSource) {
-      activeSource.close();
-      activeSource = null;
-    }
+    if (activeSource) { activeSource.close(); activeSource = null; }
     appendEntry('step_info', '<span class="stream-label">⏹ Stopped</span> Task execution cancelled by user.');
-    setIdle();
+    setIdle(false);
   });
 
-  // ── Reset workspace ───────────────────────────────────────────────────────
+  // ── Reset workspace ────────────────────────────────────────────────────────
   btnResetWs.addEventListener('click', async function() {
     if (running) return;
     if (!confirm('Reset C10 workspace? This will delete all files in /workspace.')) return;
     btnResetWs.textContent = 'Resetting…';
     btnResetWs.disabled = true;
+    currentSessId = '';
+    followupBanner.classList.remove('show');
+    taskInput.placeholder = 'Describe what you want to build… (Ctrl+Enter to run)';
     try {
       const r = await fetch('/api/agent/reset', { method: 'POST' });
       const d = await r.json();
-      appendEntry('step_info',
-        '<span class="stream-label">🗑 Workspace Reset</span> Deleted ' + (d.deleted_count || 0) + ' item(s).');
+      appendEntry('step_info', '<span class="stream-label">🗑 Workspace Reset</span> Deleted ' + (d.deleted_count||0) + ' item(s).');
       await refreshFiles();
     } catch(e) {
       appendEntry('error', '<span class="stream-label">❌</span> Reset failed: ' + escapeHtml(e.message));
@@ -785,7 +1080,7 @@
     btnResetWs.disabled = false;
   });
 
-  // ── Click-outside to close dropdowns ─────────────────────────────────────
+  // ── Close dropdowns on outside click ──────────────────────────────────────
   document.addEventListener('click', function() {
     if (!thinkingMenu.hidden) {
       thinkingMenu.hidden = true;
@@ -793,8 +1088,12 @@
     }
   });
 
-  // ── Initial file tree load ────────────────────────────────────────────────
+  // expose showWebPreview globally for inline onclick
+  window.showWebPreview = showWebPreview;
+
+  // ── Init ───────────────────────────────────────────────────────────────────
   refreshFiles();
+  refreshHistory();
 
 })();
 </script>

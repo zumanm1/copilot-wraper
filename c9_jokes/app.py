@@ -9,6 +9,7 @@ import json
 import os
 import re
 import sqlite3
+import uuid
 
 # #region agent log
 _DEBUG_LOG = os.getenv("DEBUG_LOG_PATH", "/app/.cursor/debug-aa3936.log")
@@ -27,7 +28,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import FastAPI, Request, UploadFile, File
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
@@ -104,6 +105,36 @@ def _ensure_db() -> None:
             conn.execute("ALTER TABLE chat_logs ADD COLUMN source TEXT DEFAULT 'chat'")
     except sqlite3.OperationalError:
         pass  # column already exists
+    # Migrate: create agent_sessions and agent_messages tables if missing
+    try:
+        with sqlite3.connect(DEFAULT_DB) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS agent_sessions (
+                    id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    task TEXT NOT NULL,
+                    agent_id TEXT NOT NULL,
+                    chat_mode TEXT DEFAULT 'auto',
+                    work_mode TEXT DEFAULT 'work',
+                    status TEXT DEFAULT 'running',
+                    steps_taken INTEGER DEFAULT 0,
+                    files_created TEXT DEFAULT '[]',
+                    summary TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS agent_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    turn INTEGER NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES agent_sessions(id)
+                )
+            """)
+    except sqlite3.Error:
+        pass
 
 
 # ── URL helpers ───────────────────────────────────────────────────────────────
@@ -1004,6 +1035,7 @@ async def api_logs(agent: str = "", limit: int = 20, offset: int = 0):
 async def api_agent_run(
     request: Request,
     task: str = "",
+    session_id: str = "",
     agent_id: str = "c9-jokes",
     chat_mode: str = "auto",
     work_mode: str = "work",
@@ -1029,6 +1061,7 @@ async def api_agent_run(
       error       — unrecoverable error
     """
     task = task.strip()
+    session_id = session_id.strip()
     max_steps = max(1, min(20, max_steps))
     c1 = _urls()["c1"]
 
@@ -1036,9 +1069,7 @@ async def api_agent_run(
         return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
     async def generate():
-        if not task:
-            yield _sse("error", {"message": "No task provided."})
-            return
+        nonlocal task, session_id
 
         # Check C10 is reachable
         client = _get_http()
@@ -1051,10 +1082,52 @@ async def api_agent_run(
             yield _sse("error", {"message": f"C10 sandbox unreachable: {exc}. Run: docker compose up c10-sandbox -d"})
             return
 
-        # Build multi-turn conversation history
+        # ── Session management ───────────────────────────────────────────────
+        now = datetime.now(timezone.utc).isoformat()
         history: list[dict] = []
         files_created: list[str] = []
-        commands_run:  list[str] = []   # tracks exec calls so DONE isn't premature
+        commands_run:  list[str] = []
+        is_followup = False
+
+        if session_id:
+            # Resume existing session — load conversation history from DB
+            try:
+                with _db() as conn:
+                    sess = conn.execute(
+                        "SELECT task, agent_id, files_created FROM agent_sessions WHERE id=?",
+                        (session_id,)
+                    ).fetchone()
+                    if sess:
+                        is_followup = True
+                        files_created = json.loads(sess["files_created"] or "[]")
+                        msgs = conn.execute(
+                            "SELECT role, content FROM agent_messages WHERE session_id=? ORDER BY turn, id",
+                            (session_id,)
+                        ).fetchall()
+                        history = [{"role": r["role"], "content": r["content"]} for r in msgs]
+                        if not task:
+                            task = sess["task"]
+            except sqlite3.Error:
+                pass
+
+        if not task:
+            yield _sse("error", {"message": "No task provided."})
+            return
+
+        if not session_id:
+            session_id = "sess_" + uuid.uuid4().hex[:8]
+            # Create new session row
+            try:
+                with _db() as conn:
+                    conn.execute(
+                        "INSERT INTO agent_sessions (id, created_at, updated_at, task, agent_id, chat_mode, work_mode, status) "
+                        "VALUES (?,?,?,?,?,?,?,'running')",
+                        (session_id, now, now, task[:1000], agent_id, chat_mode, work_mode),
+                    )
+            except sqlite3.Error:
+                pass
+
+        yield _sse("session", {"session_id": session_id, "is_followup": is_followup})
 
         # Copilot (C1) does not honour the OpenAI `system` role — it strips it.
         # Fix: fold task first, then format guide — task-first keeps Copilot
@@ -1070,12 +1143,28 @@ async def api_agent_run(
             f"RUN: python3 filename.py\n\n"
             f"Install a package:\n"
             f"INSTALL: pip install flask\n\n"
+            f"IMPORTANT for web servers (Flask/Node.js/Express):\n"
+            f"Start in background so it doesn't block:\n"
+            f"RUN: nohup python3 app.py > server.log 2>&1 &\n"
+            f"Then verify it started:\n"
+            f"RUN: sleep 2 && curl -sf http://localhost:PORT/ && echo SERVER_OK\n"
+            f"Include the port number in your DONE message.\n\n"
             f"When task is complete and output confirmed:\n"
             f"DONE: what was built and validated\n\n"
             f"Start immediately with your first FILE: action."
         )
+        if is_followup and history:
+            # For follow-ups, append the new instruction as a user turn
+            followup_msg = (
+                f"FOLLOW-UP TASK: {task}\n\n"
+                f"Continue from where you left off. The workspace files still exist. "
+                f"Use FILE:/RUN:/INSTALL: actions as before. "
+                f"When done, write DONE: summary."
+            )
+            history.append({"role": "user", "content": followup_msg})
 
         yield _sse("thinking", {"step": 0, "text": f"🚀 Starting agent task: {task[:120]}...", "total_steps": max_steps})
+        turn_counter = len(history)  # track DB turn numbers
 
         for step in range(1, max_steps + 1):
             yield _sse("step_done", {"step": step, "max_steps": max_steps, "status": "running"})
@@ -1132,11 +1221,29 @@ async def api_agent_run(
             # and declaring DONE without actually running anything in C10.
             final_answer = _parse_final_answer(response_text)
             if final_answer and files_created and commands_run:
-                yield _sse("final", {
+                # Detect port in DONE summary for web preview
+                port_m2 = re.search(r'port[= :]?\s*(\d{4,5})', final_answer, re.IGNORECASE)
+                web_port = int(port_m2.group(1)) if port_m2 else None
+                # Save session as completed
+                try:
+                    with _db() as conn:
+                        conn.execute(
+                            "UPDATE agent_sessions SET status='completed', updated_at=?, "
+                            "steps_taken=?, files_created=?, summary=? WHERE id=?",
+                            (datetime.now(timezone.utc).isoformat(), step,
+                             json.dumps(files_created), final_answer[:500], session_id),
+                        )
+                except sqlite3.Error:
+                    pass
+                ev = {
                     "summary": final_answer,
                     "steps_taken": step,
                     "files_created": files_created,
-                })
+                    "session_id": session_id,
+                }
+                if web_port:
+                    ev["web_port"] = web_port
+                yield _sse("final", ev)
                 return
             elif final_answer:
                 # DONE claimed too early (no exec yet) — push back with explicit nudge
@@ -1167,6 +1274,20 @@ async def api_agent_run(
             if not history:
                 history.append({"role": "user", "content": initial_user_msg})
             history.append({"role": "assistant", "content": response_text})
+            # Persist assistant turn to DB
+            turn_counter += 1
+            try:
+                with _db() as conn:
+                    conn.execute(
+                        "INSERT INTO agent_messages (session_id, turn, role, content) VALUES (?,?,?,?)",
+                        (session_id, turn_counter, "assistant", response_text[:4000]),
+                    )
+                    conn.execute(
+                        "UPDATE agent_sessions SET updated_at=?, steps_taken=? WHERE id=?",
+                        (datetime.now(timezone.utc).isoformat(), step, session_id),
+                    )
+            except sqlite3.Error:
+                pass
 
             for tool in tools:
                 # Emit tool_call SSE
@@ -1187,6 +1308,12 @@ async def api_agent_run(
                     cmd = tool.get("command", "")
                     if cmd and cmd not in commands_run:
                         commands_run.append(cmd)
+                    # Detect background web server launch — emit web_server event
+                    if cmd and ("nohup" in cmd or "& " in cmd or cmd.endswith("&")):
+                        port_m = re.search(r'port[= ](\d{4,5})|:(\d{4,5})', cmd + " " + response_text)
+                        detected_port = int(port_m.group(1) or port_m.group(2)) if port_m else None
+                        if detected_port:
+                            yield _sse("web_server", {"port": detected_port})
 
                 if tool["tool"] == "write_file" and meta.get("ok"):
                     path = meta.get("path", "")
@@ -1252,10 +1379,19 @@ async def api_agent_run(
             history.append({"role": "user", "content": next_hint})
 
         # Reached max_steps without final_answer
+        try:
+            with _db() as conn:
+                conn.execute(
+                    "UPDATE agent_sessions SET status='failed', updated_at=?, steps_taken=?, files_created=? WHERE id=?",
+                    (datetime.now(timezone.utc).isoformat(), max_steps, json.dumps(files_created), session_id),
+                )
+        except sqlite3.Error:
+            pass
         yield _sse("final", {
             "summary": f"Reached maximum steps ({max_steps}). Task may be partially complete. Check the file tree for created files.",
             "steps_taken": max_steps,
             "files_created": files_created,
+            "session_id": session_id,
             "max_steps_reached": True,
         })
 
@@ -1287,6 +1423,76 @@ async def api_agent_file(path: str = ""):
         return JSONResponse({"ok": False, "error": "path required"}, status_code=400)
     result = await _c10_read_file(path)
     return JSONResponse(result)
+
+
+@app.get("/api/agent/sessions", name="api_agent_sessions")
+async def api_agent_sessions(limit: int = 20):
+    """Return last N agent sessions for the history sidebar."""
+    limit = max(1, min(50, limit))
+    rows = []
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                "SELECT id, created_at, updated_at, task, agent_id, status, steps_taken, files_created, summary "
+                "FROM agent_sessions ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+    except sqlite3.Error:
+        pass
+    return JSONResponse([dict(r) for r in rows])
+
+
+@app.get("/api/agent/preview", name="api_agent_preview")
+async def api_agent_preview(port: int = 3000, path: str = "/"):
+    """Proxy HTTP requests into C10's running web server on the given port.
+    The sandbox and C9 share copilot-net, so http://c10-sandbox:PORT is reachable."""
+    c10_host = C10_URL.split("://")[-1].split(":")[0]  # e.g. "c10-sandbox"
+    target = f"http://{c10_host}:{port}{path}"
+    client = _get_http()
+    try:
+        r = await client.get(target, timeout=5)
+        content_type = r.headers.get("content-type", "text/html")
+        return Response(
+            content=r.content,
+            media_type=content_type,
+            status_code=r.status_code,
+        )
+    except Exception as exc:
+        return HTMLResponse(
+            f"<html><body style='font-family:system-ui;background:#0f1419;color:#e6edf3;padding:2rem'>"
+            f"<h3>🔌 Preview not available</h3>"
+            f"<p>Could not reach <code>http://c10-sandbox:{port}/</code></p>"
+            f"<p style='color:#8b949e'>{exc}</p>"
+            f"<p>The web server may still be starting. Wait a moment and refresh.</p>"
+            f"</body></html>",
+            status_code=502,
+        )
+
+
+@app.post("/api/agent/upload-to-workspace", name="api_agent_upload_workspace")
+async def api_agent_upload_workspace(file: UploadFile = File(...)):
+    """Write an uploaded file directly into the C10 workspace.
+    Useful for giving the agent reference files, images, or existing code."""
+    raw = await file.read()
+    filename = file.filename or "uploaded_file"
+    # Try to decode as text; fall back to writing raw bytes
+    try:
+        content = raw.decode("utf-8")
+        result = await _c10_write_file(filename, content)
+    except UnicodeDecodeError:
+        # Binary file — write via base64 round-trip won't work for agent context;
+        # store as binary directly using exec + redirect
+        import base64
+        b64 = base64.b64encode(raw).decode()
+        cmd = f"echo '{b64}' | base64 -d > {filename}"
+        result = await _c10_exec(cmd)
+        result["path"] = filename
+    return JSONResponse({
+        "ok": result.get("ok", True),
+        "filename": filename,
+        "size": len(raw),
+        "path": result.get("path", filename),
+    })
 
 
 if __name__ == "__main__":
