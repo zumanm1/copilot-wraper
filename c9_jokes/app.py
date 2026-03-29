@@ -1263,6 +1263,7 @@ async def api_agent_run(
                 "can't chat about this", "can't respond to this",
                 "let's try a different topic", "i can't discuss",
                 "generating response",  # stuck loading page
+                "copilot\ncopilot",     # DOM sender label only, no real content
             )
             if any(p in response_text.lower() for p in _REFUSAL_PHRASES):
                 # Wait before retrying — let C3's page pool fully reset
@@ -1287,6 +1288,9 @@ async def api_agent_run(
                 "please try again later",
                 "please retry",
                 "try again later",
+                "experiencing high demand",
+                "we're experiencing",
+                "high demand",
             )
             if not response_text.strip():
                 # Empty response = auth session expired or Copilot unreachable

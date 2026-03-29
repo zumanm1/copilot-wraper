@@ -1421,7 +1421,17 @@ async def _browser_chat_on_page(
             if not text:
                 await asyncio.sleep(2)  # give React time to finish rendering
                 dom_text = await page.evaluate("""() => {
-                    // Strategy 1: explicit bot-message containers (most precise)
+                    // Helper: strip the M365 Copilot sender label ("Copilot") that
+                    // appears at the top of each [role="article"] turn as a UI label.
+                    // The innerText of the container includes it; we remove it here.
+                    function stripSenderLabel(t) {
+                        // Removes leading "Copilot", "Microsoft Copilot", "Copilot said:"
+                        // and surrounding whitespace/newlines from the raw innerText.
+                        return t.replace(/^(Microsoft\\s+)?Copilot(\\s+said)?\\s*[:\\.]?\\s*\\n?/i, '').trim();
+                    }
+
+                    // Strategy 1: explicit bot-message content containers (most precise)
+                    // These point directly at the message body, not the full turn article.
                     const botSels = [
                         '[data-content="ai-message"]',
                         '[data-is-bot-message="true"]',
@@ -1434,19 +1444,23 @@ async def _browser_chat_on_page(
                         const msgs = document.querySelectorAll(sel);
                         if (msgs.length > 0) {
                             const last = msgs[msgs.length - 1];
-                            const t = (last.innerText || last.textContent || '').trim();
+                            const t = stripSenderLabel((last.innerText || last.textContent || '').trim());
                             if (t) return t;
                         }
                     }
-                    // Strategy 2: role="article" — M365 uses this for each chat turn
-                    // Skip any that look like user messages (short, ends with ?)
+
+                    // Strategy 2: role="article" = each chat turn (includes sender label)
+                    // Iterate in reverse to find the last Copilot turn.
+                    // Skip user messages (heuristic: no multi-line content, very short text).
                     const articles = [...document.querySelectorAll('[role="article"]')];
                     for (let i = articles.length - 1; i >= 0; i--) {
-                        const t = (articles[i].innerText || articles[i].textContent || '').trim();
-                        // Skip the user's own message (heuristic: very short or the user prompt)
-                        if (t && t.length > 20) return t;
+                        const raw = (articles[i].innerText || articles[i].textContent || '').trim();
+                        const t = stripSenderLabel(raw);
+                        // Must have real content (>15 chars) after stripping the sender label
+                        if (t && t.length > 15) return t;
                     }
-                    // Strategy 3: last turn container with paragraph children
+
+                    // Strategy 3: last turn container → extract p/li/pre/code children
                     const turns = document.querySelectorAll('[class*="turn"]');
                     if (turns.length > 1) {
                         const last = turns[turns.length - 1];
@@ -1460,10 +1474,26 @@ async def _browser_chat_on_page(
                     text = dom_text.strip()
                     print(f"[browser_chat] DOM fallback extracted {len(text)} chars")
 
-            # ── Service-error detection: "Something went wrong" ───────────────
-            # Copilot M365 shows this when the service is overloaded.
+            # ── Post-process: strip residual M365 sender label from WS text ───
+            # WS frames sometimes include "Copilot said:" or "Copilot\n" as a
+            # preamble in the message text field — clean it from both sources.
+            if text:
+                import re as _re
+                text = _re.sub(
+                    r'^(Microsoft\s+)?Copilot(\s+said)?\s*[:\.]?\s*\n',
+                    '', text, flags=_re.IGNORECASE
+                ).strip()
+
+            # ── Service-error detection: "Something went wrong" / high demand ──
+            # Copilot M365 shows various service-overload messages.
             # The UI renders a "Try again" button — click it and retry.
-            _SERVICE_PHRASES = ("something went wrong", "please try again later")
+            _SERVICE_PHRASES = (
+                "something went wrong",
+                "please try again later",
+                "experiencing high demand",
+                "try again later",
+                "we're experiencing",
+            )
             _is_service_err = any(p in text.lower() for p in _SERVICE_PHRASES)
 
             if _is_service_err and _attempt < _MAX_CHAT_RETRIES:
@@ -1503,7 +1533,11 @@ async def _browser_chat_on_page(
             break
 
         # ── Final result ──────────────────────────────────────────────────────
-        _service_error_final = any(p in text.lower() for p in ("something went wrong", "please try again later"))
+        _SERVICE_FINAL_PHRASES = (
+            "something went wrong", "please try again later",
+            "experiencing high demand", "we're experiencing",
+        )
+        _service_error_final = any(p in text.lower() for p in _SERVICE_FINAL_PHRASES)
         success = bool(text) and not _service_error_final
         _timings["ws_wait_ms"] = int((time.monotonic() - _t_submit) * 1000)
         _timings["total_ms"] = int((time.monotonic() - _t_start) * 1000)
