@@ -456,12 +456,52 @@ class PagePool:
         return new_page
 
     async def reinitialize(self, context: "BrowserContext | None" = None) -> None:
-        """Reset and re-run pool initialization (e.g. after startup DNS failure)."""
+        """Reset and re-run pool initialization, closing stale free tabs first.
+
+        Tab 1 (the auth/setup tab opened by warm_browser_for_novnc) is NOT in
+        _pool_pages and is never touched here — it stays dedicated to auth only.
+        """
         async with self._init_lock:
             self._initialized = False
             if context is not None:
                 self._context = context
+            # Drain and close old free tabs so reinit doesn't double the pool size.
+            # Agent-assigned tabs (_agent_tabs) are left alive — they're still in use.
+            drained = 0
+            while not self._free_tabs.empty():
+                try:
+                    old_page = self._free_tabs.get_nowait()
+                    _pool_pages.discard(old_page)
+                    try:
+                        await old_page.close()
+                    except Exception:
+                        pass
+                    drained += 1
+                except asyncio.QueueEmpty:
+                    break
+            if drained:
+                print(f"[PagePool] reinitialize: drained {drained} stale free tab(s)")
         await self.initialize(self._context or context)
+
+    async def reload_all_tabs(self) -> int:
+        """Reload every pool tab so fresh session cookies take effect.
+
+        Called automatically after cookie extraction completes.
+        Tab 1 (auth tab, NOT in _pool_pages) is not touched here.
+        Returns number of tabs successfully reloaded.
+        """
+        reloaded = 0
+        pages_to_reload = list(_pool_pages)
+        for page in pages_to_reload:
+            try:
+                if page.is_closed():
+                    continue
+                await page.reload(wait_until="domcontentloaded", timeout=15_000)
+                reloaded += 1
+                print(f"[PagePool] Reloaded pool tab: {page.url[:60]}")
+            except Exception as exc:
+                print(f"[PagePool] Tab reload failed (non-fatal): {exc}")
+        return reloaded
 
     def update_tab(self, agent_id: str, page: Page) -> None:
         """Update the tab reference for an agent (e.g. after page replacement)."""

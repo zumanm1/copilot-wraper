@@ -400,6 +400,23 @@ async def status():
         return {"status": "error", "browser": str(e)}
 
 
+@app.post("/pool-reload")
+async def pool_reload():
+    """Reload all pool chat tabs (e.g. after signing in via noVNC).
+
+    Tab 1 (auth/setup tab) is NOT reloaded — it stays for the user to interact with.
+    Call this after authenticating in the browser to ensure pool tabs have fresh cookies.
+    """
+    try:
+        pool = _ce._page_pool
+        if pool is None or not pool._initialized:
+            return JSONResponse({"status": "skipped", "reason": "pool not initialized"})
+        reloaded = await pool.reload_all_tabs()
+        return {"status": "ok", "reloaded": reloaded}
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
 @app.post("/pool-reset")
 async def pool_reset():
     """Re-initialize the PagePool (e.g. after startup DNS failure left 0 tabs ready)."""
@@ -441,6 +458,17 @@ async def extract():
                 await client.post(f"{API1_URL}/v1/reload-config")
         except Exception as e:
             result["reload_warning"] = f"Could not signal Container 1: {e}"
+
+        # Reload all pool chat tabs so they pick up the fresh session cookies.
+        # Tab 1 (the auth/setup tab, not in _pool_pages) is NOT reloaded here —
+        # it stays on the /setup or M365 login page for the user to interact with.
+        try:
+            pool = _ce._page_pool
+            if pool is not None and pool._initialized:
+                reloaded = await pool.reload_all_tabs()
+                result["pool_tabs_reloaded"] = reloaded
+        except Exception as e:
+            result["pool_reload_warning"] = f"Pool tab reload warning: {e}"
 
     return JSONResponse(content=result)
 

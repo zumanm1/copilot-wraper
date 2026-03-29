@@ -976,6 +976,34 @@
     setIdle(false);
   }
 
+  function handleAuthRequired(data) {
+    // M365 Copilot is not authenticated — show a prominent banner with sign-in link
+    const authUrl = data.auth_url || 'http://localhost:6080/?resize=scale&autoconnect=true';
+    const status  = data.session_status || 'unknown';
+    const reason  = data.reason ? ' (' + escapeHtml(data.reason) + ')' : '';
+    const html = [
+      '<div style="background:#fff3cd;border:2px solid #ffc107;border-radius:8px;padding:14px 18px;margin:6px 0;">',
+      '  <div style="font-size:1.05em;font-weight:700;color:#856404;margin-bottom:6px;">',
+      '    🔐 M365 Copilot authentication required',
+      '  </div>',
+      '  <div style="color:#533f03;font-size:.92em;margin-bottom:10px;">',
+      '    Session status: <strong>' + escapeHtml(status) + '</strong>' + reason + '<br>',
+      '    Sign in to Microsoft 365 in the browser, then come back and run the task.',
+      '  </div>',
+      '  <a href="' + escapeHtml(authUrl) + '" target="_blank" ',
+      '     style="display:inline-block;background:#0078d4;color:#fff;padding:7px 16px;',
+      '            border-radius:6px;text-decoration:none;font-weight:600;font-size:.9em;">',
+      '    🌐 Open noVNC browser to sign in',
+      '  </a>',
+      '  <span style="color:#555;font-size:.82em;margin-left:12px;">',
+      '    After signing in, click Post /extract on the setup page or just run the task again.',
+      '  </span>',
+      '</div>',
+    ].join('');
+    appendEntry('auth', html);
+    setIdle(false);
+  }
+
   // ── Run / stop state ───────────────────────────────────────────────────────
   function setRunning() {
     running = true;
@@ -1054,6 +1082,9 @@
     src.addEventListener('step_done',   function(e) { handleStepDone(JSON.parse(e.data)); });
     src.addEventListener('web_server',  function(e) { handleWebServer(JSON.parse(e.data)); });
     src.addEventListener('final',       function(e) { handleFinal(JSON.parse(e.data)); });
+    src.addEventListener('auth_required', function(e) {
+      try { handleAuthRequired(JSON.parse(e.data)); } catch(_) { handleAuthRequired({}); }
+    });
     src.addEventListener('error',       function(e) {
       if (e.data) {
         try { handleError(JSON.parse(e.data)); } catch(_) { handleError({message: e.data}); }

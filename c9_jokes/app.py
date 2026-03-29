@@ -1105,6 +1105,59 @@ async def api_agent_run(
             yield _sse("error", {"message": f"C10 sandbox unreachable: {exc}. Run: docker compose up c10-sandbox -d"})
             return
 
+        # ── Auth pre-flight: verify M365 session BEFORE sending any task ─────
+        # Checks C3's /session-health, then sends a short "hi" ping to confirm
+        # Copilot is actually reachable and responding (not just authenticated).
+        c3_url = _urls().get("c3", "http://browser-auth:8001")
+        _session_status = "unknown"
+        try:
+            _auth_r = await client.get(f"{c3_url}/session-health", timeout=8)
+            _auth_data = _auth_r.json() if _auth_r.status_code == 200 else {}
+            _session_status = _auth_data.get("session", "unknown")
+        except Exception as _auth_exc:
+            _auth_data = {"reason": str(_auth_exc)}
+
+        if _session_status != "active":
+            _reason = _auth_data.get("reason", "Session not active")
+            yield _sse("auth_required", {
+                "message": (
+                    f"M365 Copilot is not authenticated (status: {_session_status}). "
+                    f"Please sign in via the browser at localhost:6080"
+                ),
+                "session_status": _session_status,
+                "reason": _reason,
+                "auth_url": "http://localhost:6080/?resize=scale&autoconnect=true",
+            })
+            return
+
+        # Session is active — send a quick "hi" to verify Copilot is actually responding
+        yield _sse("thinking", {"step": 0, "text": "🔐 Auth OK — pinging Copilot...", "total_steps": max_steps})
+        _HI_SERVICE_PHRASES = (
+            "something went wrong", "please try again later",
+            "experiencing high demand", "we're experiencing",
+        )
+        try:
+            _hi_r = await client.post(
+                f"{c1}/v1/chat/completions",
+                headers={"Content-Type": "application/json", "X-Agent-ID": f"{agent_id}-preflight"},
+                json={"model": "copilot", "messages": [{"role": "user", "content": "hi"}], "stream": False},
+                timeout=30,
+            )
+            if _hi_r.status_code == 200:
+                _hi_text = (_hi_r.json().get("choices", [{}])[0].get("message", {}).get("content", "") or "").strip()
+                if any(p in _hi_text.lower() for p in _HI_SERVICE_PHRASES):
+                    # Copilot responded but with a service error — warn and continue
+                    yield _sse("thinking", {"step": 0, "text":
+                        f"⚠️ Copilot is under load: \"{_hi_text[:80]}\" — task will retry automatically if needed"})
+                elif _hi_text:
+                    yield _sse("thinking", {"step": 0, "text": f"✅ Copilot OK — starting task..."})
+                else:
+                    yield _sse("thinking", {"step": 0, "text": "⚠️ Copilot ping returned empty — proceeding anyway"})
+            else:
+                yield _sse("thinking", {"step": 0, "text": f"⚠️ Copilot ping HTTP {_hi_r.status_code} — proceeding anyway"})
+        except Exception as _hi_exc:
+            yield _sse("thinking", {"step": 0, "text": f"⚠️ Copilot ping failed ({str(_hi_exc)[:60]}) — may be slow"})
+
         # ── Session management ───────────────────────────────────────────────
         now = datetime.now(timezone.utc).isoformat()
         history: list[dict] = []
