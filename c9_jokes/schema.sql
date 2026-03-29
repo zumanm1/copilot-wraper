@@ -63,3 +63,26 @@ CREATE TABLE IF NOT EXISTS agent_messages (
     content TEXT NOT NULL,
     FOREIGN KEY (session_id) REFERENCES agent_sessions(id)
 );
+
+-- Multi-agent sessions: one row per smux-style parallel workspace run
+CREATE TABLE IF NOT EXISTS multi_agent_sessions (
+    id TEXT PRIMARY KEY,              -- "mas_" + 8-char hex
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    task TEXT NOT NULL,               -- supervisor's original task
+    status TEXT DEFAULT 'running',    -- running | completed | failed
+    roles TEXT DEFAULT '[]',          -- JSON array of active role names
+    summary TEXT                      -- supervisor final summary
+);
+
+-- Per-pane messages for each role-agent in a multi-agent session
+CREATE TABLE IF NOT EXISTS multi_agent_pane_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    pane_id TEXT NOT NULL,            -- "ma-builder", "ma-executor", etc.
+    role TEXT NOT NULL,               -- builder | executor | tester | debugger | ui | supervisor
+    turn INTEGER NOT NULL,            -- 1-based within this pane
+    role_type TEXT NOT NULL,          -- 'user' | 'assistant'
+    content TEXT NOT NULL,
+    FOREIGN KEY (session_id) REFERENCES multi_agent_sessions(id)
+);

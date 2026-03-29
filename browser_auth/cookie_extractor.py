@@ -503,6 +503,51 @@ class PagePool:
                 print(f"[PagePool] Tab reload failed (non-fatal): {exc}")
         return reloaded
 
+    async def expand_to(self, context: "BrowserContext", target_size: int) -> int:
+        """Add tabs until free + agent-assigned tabs total >= target_size.
+
+        Never shrinks the pool — safe to call even if already at target.
+        Called by C9 before 'Run all parallel' to pre-warm 12 tabs.
+        Returns the number of new tabs actually created.
+        """
+        current_total = self._free_tabs.qsize() + len(self._agent_tabs)
+        needed = max(0, target_size - current_total)
+        if needed == 0:
+            print(f"[PagePool] expand_to({target_size}): already at {current_total} tabs, no-op")
+            return 0
+        print(f"[PagePool] expand_to({target_size}): adding {needed} tab(s) (current={current_total})")
+        sem = asyncio.Semaphore(self._CREATE_CONCURRENCY)
+
+        async def _add_one(idx: int) -> "Page | None":
+            async with sem:
+                try:
+                    page = await context.new_page()
+                    _pool_pages.add(page)
+                    await page.goto(
+                        self._M365_CHAT_URL,
+                        wait_until="domcontentloaded",
+                        timeout=30_000,
+                    )
+                    try:
+                        await page.wait_for_selector(
+                            self._COMPOSER_SEL, state="visible", timeout=25_000,
+                        )
+                    except Exception:
+                        pass
+                    await self._free_tabs.put(page)
+                    print(f"[PagePool] Expansion tab {idx + 1}/{needed} ready: {page.url[:60]}")
+                    return page
+                except Exception as exc:
+                    print(f"[PagePool] Expansion tab {idx + 1} failed (skipped): {exc}")
+                    return None
+
+        results = await asyncio.gather(*[_add_one(i) for i in range(needed)])
+        added = sum(1 for r in results if r is not None)
+        if target_size > self._size:
+            self._size = target_size  # update declared pool size
+        print(f"[PagePool] expand_to({target_size}): added {added}/{needed} tabs, pool now {self._free_tabs.qsize()} free")
+        return added
+
     def update_tab(self, agent_id: str, page: Page) -> None:
         """Update the tab reference for an agent (e.g. after page replacement)."""
         if not agent_id:
@@ -1686,3 +1731,93 @@ async def check_session_health(env_path: str = "/app/.env") -> dict:
         }
     except Exception as exc:
         return {"session": "unknown", "profile": "unknown", "reason": str(exc), "checked_at": now}
+
+
+async def validate_tab1_with_hello(timeout_ms: int = 45_000) -> dict:
+    """Validate Tab 1 (the auth/setup tab) is truly authenticated by sending 'Hello'
+    on the M365 Copilot chat interface and waiting for a real reply.
+
+    Tab 1 = the non-pool page opened by warm_browser_for_novnc() at the /setup URL.
+    It is NOT in _pool_pages and is never used by agents — it's the dedicated auth tab.
+
+    Strategy:
+      1. Get Tab 1 via _get_or_create_page(context)  (returns non-pool page)
+      2. If not already on M365 chat, navigate there
+      3. Send 'Hello' via _browser_chat_on_page
+      4. If a real reply arrives → session confirmed active → pool tabs safe to reload
+      5. Tab 1 stays on the chat page after validation (no need to return to /setup)
+
+    Returns:
+        {
+          "validated": bool,
+          "reply": str | None,       # first few chars of Copilot's reply
+          "elapsed_ms": int,
+          "tab1_url": str,
+          "error": str | None
+        }
+    """
+    import datetime
+    import time as _time
+    _t0 = _time.monotonic()
+    checked_at = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        context = await _get_context()
+        # _get_or_create_page returns a non-pool page = Tab 1
+        tab1 = await _get_or_create_page(context)
+        tab1_url = tab1.url or ""
+        print(f"[validate_tab1] Tab 1 URL before validation: {tab1_url[:80]}")
+
+        # Navigate to M365 chat if not already there
+        m365_chat = "https://m365.cloud.microsoft/chat"
+        if "m365.cloud.microsoft/chat" not in tab1_url and "copilot.microsoft.com" not in tab1_url:
+            print(f"[validate_tab1] Navigating Tab 1 to {m365_chat}")
+            try:
+                await tab1.goto(m365_chat, wait_until="domcontentloaded", timeout=25_000)
+                await asyncio.sleep(2)
+                tab1_url = tab1.url or ""
+                print(f"[validate_tab1] Tab 1 now at: {tab1_url[:80]}")
+            except Exception as nav_exc:
+                return {
+                    "validated": False,
+                    "reply": None,
+                    "elapsed_ms": int((_time.monotonic() - _t0) * 1000),
+                    "tab1_url": tab1_url,
+                    "error": f"navigation failed: {nav_exc}",
+                    "checked_at": checked_at,
+                }
+
+        # Send "Hello" using the full browser chat automation (same as pool tabs)
+        print("[validate_tab1] Sending 'Hello' on Tab 1 for auth validation…")
+        result, tab1 = await _browser_chat_on_page(
+            tab1, context, "Hello", mode="chat", timeout_ms=timeout_ms
+        )
+        elapsed_ms = int((_time.monotonic() - _t0) * 1000)
+
+        reply_text = (result.get("text") or "").strip()
+        success = result.get("success", False) and bool(reply_text)
+
+        _SERVICE_ERR = ("something went wrong", "please try again", "experiencing high demand", "we're experiencing")
+        if success and any(p in reply_text.lower() for p in _SERVICE_ERR):
+            success = False
+
+        print(
+            f"[validate_tab1] Result: validated={success}, "
+            f"reply_len={len(reply_text)}, elapsed={elapsed_ms}ms"
+        )
+        return {
+            "validated": success,
+            "reply": reply_text[:120] if reply_text else None,
+            "elapsed_ms": elapsed_ms,
+            "tab1_url": tab1.url or "",
+            "error": result.get("error") if not success else None,
+            "checked_at": checked_at,
+        }
+    except Exception as exc:
+        return {
+            "validated": False,
+            "reply": None,
+            "elapsed_ms": int((_time.monotonic() - _t0) * 1000),
+            "tab1_url": "",
+            "error": str(exc),
+            "checked_at": checked_at,
+        }

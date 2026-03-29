@@ -4,12 +4,16 @@ browser_auth/server.py
 FastAPI server for Container 3.
 
 Endpoints:
-  GET  /health         — liveness check
-  GET  /status         — browser + cookie status
-  GET  /setup          — HTML form: portal profile + optional URL overrides
-  POST /setup          — persist settings to mounted .env, reload C1 config
-  POST /extract        — trigger cookie extraction (blocks until done)
-  POST /navigate       — navigate browser to a URL (for manual login flows)
+  GET  /health          — liveness check
+  GET  /status          — browser + cookie status
+  GET  /setup           — HTML form: portal profile + optional URL overrides
+  POST /setup           — persist settings to mounted .env, reload C1 config
+  POST /extract         — trigger cookie extraction; validates Tab 1 with 'Hello' before reloading pool tabs
+  POST /navigate        — navigate browser to a URL (for manual login flows)
+  POST /validate-auth   — validate Tab 1 auth by sending 'Hello' and getting real Copilot reply; reloads pool tabs on success
+  POST /pool-expand     — expand pool to target_size tabs without closing existing ones
+  POST /pool-reload     — reload all pool tabs (Tab 1 excluded)
+  POST /pool-reset      — re-initialize PagePool from scratch
 """
 from __future__ import annotations
 import asyncio
@@ -33,6 +37,7 @@ from cookie_extractor import (
     get_context,
     patch_env_variable,
     portal_settings_from_env_file,
+    validate_tab1_with_hello,
     warm_browser_for_novnc,
 )
 import cookie_extractor as _ce
@@ -400,6 +405,37 @@ async def status():
         return {"status": "error", "browser": str(e)}
 
 
+@app.post("/validate-auth")
+async def validate_auth():
+    """Validate Tab 1 authentication by sending 'Hello' and getting a real Copilot reply.
+
+    Tab 1 = the auth/setup tab (NOT a pool tab). This confirms:
+      - The M365 session cookies are valid
+      - Copilot chat is responding (not just 'session active' cookie check)
+      - The system is truly online and ready for agent tasks
+
+    On success: automatically reloads all pool tabs so they inherit the validated session.
+    On failure: returns validated=false with error — pool tabs are NOT reloaded.
+
+    This is a deeper auth check than /session-health (which only reads cookies).
+    Call after /extract to confirm the session is live before running agents.
+    """
+    try:
+        result = await validate_tab1_with_hello(timeout_ms=60_000)
+        # Only reload pool tabs if Tab 1 validation passed — ensures all pool
+        # tabs inherit the same authenticated session that just responded.
+        pool_tabs_reloaded = 0
+        if result.get("validated"):
+            pool = _ce._page_pool
+            if pool is not None and pool._initialized:
+                pool_tabs_reloaded = await pool.reload_all_tabs()
+                print(f"[validate-auth] Reloaded {pool_tabs_reloaded} pool tab(s) after Tab 1 confirmed OK")
+        result["pool_tabs_reloaded"] = pool_tabs_reloaded
+        return result
+    except Exception as e:
+        return JSONResponse({"validated": False, "error": str(e)}, status_code=500)
+
+
 @app.post("/pool-reload")
 async def pool_reload():
     """Reload all pool chat tabs (e.g. after signing in via noVNC).
@@ -417,9 +453,14 @@ async def pool_reload():
         return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
 
 
-@app.post("/pool-reset")
-async def pool_reset():
-    """Re-initialize the PagePool (e.g. after startup DNS failure left 0 tabs ready)."""
+@app.post("/pool-expand")
+async def pool_expand(target_size: int = 12):
+    """Expand pool to target_size tabs without closing existing ones.
+
+    Safe to call while agents are running — only adds new free tabs.
+    Does NOT shrink the pool if already larger than target_size.
+    Called by C9 before 'Run all parallel' to pre-warm 12 tabs for 8+ concurrent agents.
+    """
     try:
         context = await get_context()
         pool = _ce._page_pool
@@ -427,6 +468,50 @@ async def pool_reset():
             pool_size = max(1, int(os.getenv("C3_CHAT_TAB_POOL_SIZE", "6")))
             _ce._page_pool = _ce.PagePool(pool_size)
             pool = _ce._page_pool
+        if not pool._initialized:
+            await pool.initialize(context)
+        added = await pool.expand_to(context, target_size)
+        return {
+            "status": "ok",
+            "added": added,
+            "target": target_size,
+            "pool_size": pool.size,
+            "pool_available": pool.available,
+            "pool_initialized": pool._initialized,
+        }
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
+@app.post("/pool-reset")
+async def pool_reset():
+    """Re-initialize the PagePool back to the default C3_CHAT_TAB_POOL_SIZE (6) tabs.
+
+    Always resets to the base pool size from env — discards any previous expansion.
+    Closes all orphaned pool pages from previous expansions to free Chromium memory.
+    Use /pool-expand to grow the pool for parallel runs after reset.
+    """
+    try:
+        context = await get_context()
+        # Close all pages currently tracked in _pool_pages (includes any tabs
+        # added by a previous /pool-expand) before creating the new pool.
+        # This prevents Chromium from accumulating orphaned tabs across resets.
+        orphaned = list(_ce._pool_pages)
+        if orphaned:
+            print(f"[pool-reset] Closing {len(orphaned)} orphaned pool page(s)…")
+            for _p in orphaned:
+                try:
+                    if not _p.is_closed():
+                        await _p.close()
+                except Exception:
+                    pass
+            _ce._pool_pages.clear()
+
+        # Always create a fresh PagePool at the default size so /pool-reset
+        # correctly collapses a previously expanded (e.g. 12-tab) pool back to 6.
+        pool_size = max(1, int(os.getenv("C3_CHAT_TAB_POOL_SIZE", "6")))
+        _ce._page_pool = _ce.PagePool(pool_size)
+        pool = _ce._page_pool
         await pool.reinitialize(context)
         return {
             "status": "ok",
@@ -459,16 +544,43 @@ async def extract():
         except Exception as e:
             result["reload_warning"] = f"Could not signal Container 1: {e}"
 
-        # Reload all pool chat tabs so they pick up the fresh session cookies.
-        # Tab 1 (the auth/setup tab, not in _pool_pages) is NOT reloaded here —
-        # it stays on the /setup or M365 login page for the user to interact with.
+        # Validate Tab 1 auth by sending 'Hello' and waiting for a real Copilot reply.
+        # Tab 1 = the non-pool auth tab (opened by warm_browser_for_novnc at /setup).
+        # Only reload pool tabs if Tab 1 confirms the session is truly live.
+        # This is deeper than a cookie check — it proves Copilot is responding.
         try:
-            pool = _ce._page_pool
-            if pool is not None and pool._initialized:
-                reloaded = await pool.reload_all_tabs()
-                result["pool_tabs_reloaded"] = reloaded
+            tab1_check = await validate_tab1_with_hello(timeout_ms=60_000)
+            result["tab1_validated"] = tab1_check.get("validated", False)
+            result["tab1_reply_preview"] = tab1_check.get("reply")
+            result["tab1_elapsed_ms"] = tab1_check.get("elapsed_ms")
+            if tab1_check.get("error"):
+                result["tab1_warning"] = tab1_check["error"]
+
+            if tab1_check.get("validated"):
+                # Tab 1 replied — session confirmed live; reload pool tabs now.
+                # Tab 1 is NOT reloaded (it stays on the chat page after validation).
+                pool = _ce._page_pool
+                if pool is not None and pool._initialized:
+                    reloaded = await pool.reload_all_tabs()
+                    result["pool_tabs_reloaded"] = reloaded
+                    print(f"[extract] Tab 1 validated OK — reloaded {reloaded} pool tab(s)")
+            else:
+                result["pool_tabs_reloaded"] = 0
+                result["pool_reload_skipped"] = (
+                    "Tab 1 Hello validation failed — pool tabs NOT reloaded. "
+                    "Check auth via noVNC at :6080."
+                )
+                print(f"[extract] Tab 1 validation FAILED: {tab1_check.get('error')} — pool tabs NOT reloaded")
         except Exception as e:
-            result["pool_reload_warning"] = f"Pool tab reload warning: {e}"
+            result["tab1_warning"] = f"Tab 1 validation error: {e}"
+            # Fall back: reload pool tabs even if validation check itself errored
+            try:
+                pool = _ce._page_pool
+                if pool is not None and pool._initialized:
+                    reloaded = await pool.reload_all_tabs()
+                    result["pool_tabs_reloaded"] = reloaded
+            except Exception as re:
+                result["pool_reload_warning"] = f"Pool tab reload warning: {re}"
 
     return JSONResponse(content=result)
 

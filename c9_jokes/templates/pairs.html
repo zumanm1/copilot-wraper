@@ -122,6 +122,16 @@
     <button type="button" id="run-parallel" class="btn-parallel">Run All Parallel ⚡</button>
     <button type="button" id="load-history" class="btn-secondary">Load history</button>
     <button type="button" id="reset-all" class="btn-reset">Reset All</button>
+    <!-- Pool status badge -->
+    <span id="pool-badge" title="C3 browser tab pool status"
+          style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:0.78rem;border:1px solid var(--border,#444);background:var(--surface2,#2a2a2a);color:var(--muted,#888);cursor:default;">
+      <span id="pool-dot" style="width:7px;height:7px;border-radius:50%;background:#666;display:inline-block;"></span>
+      <span id="pool-label">Pool: —</span>
+    </span>
+  </div>
+  <!-- Parallel expansion status line (hidden until parallel run starts) -->
+  <div id="pool-expand-notice" style="display:none;margin-top:6px;padding:4px 10px;border-radius:6px;background:#1a2a1a;border:1px solid #2a4a2a;color:#6dbf6d;font-size:0.8rem;">
+    ⏳ Expanding browser pool to 13 tabs for parallel run…
   </div>
 </div>
 
@@ -429,12 +439,54 @@ python3 tests/validate_all_agents.py --parallel</pre>
     }
   }
 
+  // ── Pool status badge ─────────────────────────────────────────────
+  const poolBadge   = document.getElementById('pool-badge');
+  const poolDot     = document.getElementById('pool-dot');
+  const poolLabel   = document.getElementById('pool-label');
+  const poolNotice  = document.getElementById('pool-expand-notice');
+
+  function updatePoolBadge(data) {
+    if (!data || data.status === 'error') {
+      poolDot.style.background = '#666';
+      poolLabel.textContent = 'Pool: offline';
+      return;
+    }
+    const avail = data.pool_available;
+    const total = data.pool_size;
+    const init  = data.pool_initialized;
+    const color = !init ? '#666' : avail === 0 ? '#c0392b' : avail < 4 ? '#e67e22' : '#27ae60';
+    poolDot.style.background = color;
+    poolLabel.textContent = init
+      ? 'Pool: ' + avail + '/' + total + ' tabs ready'
+      : 'Pool: initializing…';
+  }
+
+  async function refreshPool() {
+    try {
+      const r = await fetch('http://localhost:8001/status');
+      if (r.ok) updatePoolBadge(await r.json());
+    } catch(_) {
+      updatePoolBadge(null);
+    }
+  }
+  refreshPool();
+  setInterval(refreshPool, 5000);
+  // ──────────────────────────────────────────────────────────────────
+
   async function doRun(useParallel) {
     if (busy) return;
     setBusy(true);
     summaryEl.innerHTML = '';
+    poolNotice.style.display = 'none';
     const prompt = document.getElementById('val-prompt').value.trim() || 'Tell me a joke';
     agents.forEach(a => setRowRunning(a.id));
+
+    // Show expansion notice for parallel runs
+    if (useParallel) {
+      poolNotice.style.display = '';
+      poolNotice.textContent = '⏳ Expanding browser pool to 13 tabs for parallel run…';
+    }
+
     try {
       const r = await fetch('/api/validate', {
         method: 'POST',
@@ -457,7 +509,9 @@ python3 tests/validate_all_agents.py --parallel</pre>
       agents.forEach(a => setRowPending(a.id));
       summaryEl.innerHTML = '<span style="color:var(--fail)">Error: ' + escapeHtml(e.message) + '</span>';
     }
+    poolNotice.style.display = 'none';
     setBusy(false);
+    refreshPool();  // update badge after run completes
   }
 
   // Run all sequential

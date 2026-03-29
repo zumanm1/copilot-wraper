@@ -482,7 +482,9 @@ services:
       - ENV_PATH=/app/.env
       - API1_URL=http://app:8000
       - VNC_RESOLUTION=1280x1024x24
-      - C3_CHAT_TAB_POOL_SIZE=6
+      - C3_CHAT_TAB_POOL_SIZE=6        # default pool (normal mode: 1 auth + 6 pool = 7 tabs)
+      - C3_POOL_SIZE_PARALLEL=12      # expanded pool (parallel mode: 1 auth + 12 pool = 13 tabs)
+      - C3_CHAT_MAX_CONCURRENT=12     # semaphore: allow up to 12 concurrent Playwright operations
     volumes:
       # Share .env with Container 1 so extracted cookies persist
       - ./.env:/app/.env

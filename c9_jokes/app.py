@@ -135,6 +135,34 @@ def _ensure_db() -> None:
             """)
     except sqlite3.Error:
         pass
+    # Migrate: create multi_agent_sessions and multi_agent_pane_messages if missing
+    try:
+        with sqlite3.connect(DEFAULT_DB) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS multi_agent_sessions (
+                    id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    task TEXT NOT NULL,
+                    status TEXT DEFAULT 'running',
+                    roles TEXT DEFAULT '[]',
+                    summary TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS multi_agent_pane_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    pane_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    turn INTEGER NOT NULL,
+                    role_type TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES multi_agent_sessions(id)
+                )
+            """)
+    except sqlite3.Error:
+        pass
 
 
 # ── URL helpers ───────────────────────────────────────────────────────────────
@@ -902,6 +930,23 @@ async def api_validate(request: Request):
 
     parallel = payload.get("parallel", True)
     mode = "parallel" if parallel else "sequential"
+
+    # Pre-warm C3 pool to 12 tabs before parallel run so all agents get pre-created tabs.
+    # Non-fatal — on-demand tab creation is the fallback if this fails.
+    if parallel and len(agents_to_run) > 1:
+        c3 = _urls().get("c3", "http://browser-auth:8001")
+        parallel_pool_size = max(1, int(os.environ.get("C3_POOL_SIZE_PARALLEL", "12")))
+        try:
+            _expand_r = await _get_http().post(
+                f"{c3}/pool-expand",
+                params={"target_size": parallel_pool_size},
+                timeout=90,
+            )
+            _expand_data = _expand_r.json() if _expand_r.status_code == 200 else {}
+            print(f"[validate] pool-expand → {_expand_data}")
+        except Exception as _expand_exc:
+            print(f"[validate] pool-expand non-fatal: {_expand_exc}")
+
     started_at = datetime.now(timezone.utc).isoformat()
     wall_t0 = time.monotonic()
     run_id = None
@@ -1762,6 +1807,457 @@ async def api_agent_upload_workspace(file: UploadFile = File(...)):
         "size": len(raw),
         "path": result.get("path", filename),
     })
+
+
+# ── Multi-Agent (smux-style) Workspace ───────────────────────────────────────
+
+# Role definitions: id, label, emoji, system prompt focus
+_MA_ROLES = {
+    "supervisor": {
+        "label": "Supervisor",
+        "emoji": "🧭",
+        "desc": "Breaks the overall task into sub-tasks and assigns them to specialist roles.",
+    },
+    "builder": {
+        "label": "Builder",
+        "emoji": "🔨",
+        "desc": "Writes source files, installs dependencies, structures the project.",
+    },
+    "ui": {
+        "label": "UI Agent",
+        "emoji": "🎨",
+        "desc": "Implements HTML/CSS/JS, templates, and visual front-end components.",
+    },
+    "executor": {
+        "label": "Executor",
+        "emoji": "⚡",
+        "desc": "Runs code, starts servers, verifies processes are alive with curl.",
+    },
+    "tester": {
+        "label": "Tester",
+        "emoji": "🧪",
+        "desc": "Validates output, runs test scripts, compares expected vs actual results.",
+    },
+    "debugger": {
+        "label": "Debugger",
+        "emoji": "🐛",
+        "desc": "Reads logs, patches broken files, re-runs commands to fix errors.",
+    },
+}
+
+# Default roles to activate when none specified
+_MA_DEFAULT_ROLES = ["builder", "executor", "tester"]
+
+
+def _ma_role_system_prompt(role: str, task: str, assignment: str) -> str:
+    """Build a focused system prompt for a specific multi-agent role."""
+    info = _MA_ROLES.get(role, {"desc": "complete your assigned task"})
+    return (
+        f"You are the {info['label']} agent in a multi-agent workspace.\n"
+        f"Your specialty: {info['desc']}\n\n"
+        f"OVERALL TASK: {task}\n\n"
+        f"YOUR SPECIFIC ASSIGNMENT: {assignment}\n\n"
+        f"Sandbox: Python 3.11, Node.js 20, bash.\n"
+        f"Reply with ONE action per message using the protocol:\n"
+        f"  FILE: filename.py\n```\n...content...\n```\n"
+        f"  RUN: command\n"
+        f"  INSTALL: package\n"
+        f"  DONE: summary of what you accomplished\n\n"
+        f"Focus only on your assignment. Be concise and execute immediately."
+    )
+
+
+async def _ma_role_loop(
+    pane_id: str,
+    role: str,
+    assignment: str,
+    overall_task: str,
+    session_id: str,
+    c1: str,
+    agent_id: str,
+    chat_mode: str,
+    work_mode: str,
+    max_steps: int,
+    queue: asyncio.Queue,
+) -> dict:
+    """Run a single role-agent's ReAct loop and push SSE events to queue.
+
+    Returns a summary dict with {role, pane_id, done, summary, files, steps}.
+    """
+    def _q(event: str, data: dict) -> None:
+        data["pane_id"] = pane_id
+        data["role"] = role
+        queue.put_nowait(f"event: {event}\ndata: {json.dumps(data)}\n\n")
+
+    client = _get_http()
+    files_created: list[str] = []
+    commands_run: list[str] = []
+    history: list[dict] = []
+    service_error_retries = 0
+    turn_counter = 0
+
+    initial_msg = _ma_role_system_prompt(role, overall_task, assignment)
+    _q("pane_thinking", {"step": 0, "text": f"📋 Assignment: {assignment[:150]}"})
+
+    for step in range(1, max_steps + 1):
+        if not history:
+            messages = [{"role": "user", "content": initial_msg}]
+        else:
+            _hist = list(history)
+            if len(_hist) > 6:
+                _hist = [_hist[0]] + _hist[-5:]
+            messages = _hist
+
+        headers = {
+            "Content-Type": "application/json",
+            "X-Agent-ID": agent_id,
+        }
+        if chat_mode:
+            headers["X-Chat-Mode"] = chat_mode
+        if work_mode in ("work", "web"):
+            headers["X-Work-Mode"] = work_mode
+
+        try:
+            llm_r = await client.post(
+                f"{c1}/v1/chat/completions",
+                headers=headers,
+                json={"model": "copilot", "messages": messages, "stream": False},
+                timeout=180,
+            )
+            if llm_r.status_code != 200:
+                _q("pane_error", {"message": f"C1 HTTP {llm_r.status_code}: {llm_r.text[:200]}"})
+                return {"role": role, "pane_id": pane_id, "done": False, "summary": "C1 error", "files": files_created, "steps": step}
+            response_text: str = llm_r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+        except Exception as exc:
+            service_error_retries += 1
+            if service_error_retries <= 2:
+                wait_s = service_error_retries * 12
+                _q("pane_thinking", {"step": step, "text": f"⚠️ Copilot unreachable — retrying in {wait_s}s..."})
+                await asyncio.sleep(wait_s)
+                continue
+            _q("pane_error", {"message": f"Copilot unreachable after retries: {exc}"})
+            return {"role": role, "pane_id": pane_id, "done": False, "summary": str(exc), "files": files_created, "steps": step}
+
+        _SERVICE_PHRASES = ("something went wrong", "please try again", "experiencing high demand", "we're experiencing")
+        if not response_text.strip():
+            _q("pane_error", {"message": "Empty response from Copilot — auth may be expired."})
+            return {"role": role, "pane_id": pane_id, "done": False, "summary": "empty response", "files": files_created, "steps": step}
+
+        if any(p in response_text.lower() for p in _SERVICE_PHRASES):
+            service_error_retries += 1
+            if service_error_retries <= 2:
+                wait_s = service_error_retries * 12
+                _q("pane_thinking", {"step": step, "text": f"⚠️ Service error — retrying in {wait_s}s..."})
+                await asyncio.sleep(wait_s)
+                continue
+            _q("pane_error", {"message": "Copilot service error after retries."})
+            return {"role": role, "pane_id": pane_id, "done": False, "summary": "service error", "files": files_created, "steps": step}
+
+        service_error_retries = 0
+        await asyncio.sleep(4)  # settle delay
+
+        # Emit thinking text
+        thinking = _strip_tool_xml(response_text)
+        if thinking:
+            _q("pane_thinking", {"step": step, "text": thinking[:400]})
+
+        # Check for DONE
+        final = _parse_final_answer(response_text)
+        if final:
+            _q("pane_done", {"step": step, "summary": final[:300], "files": files_created})
+            # Persist to DB
+            try:
+                with _db() as conn:
+                    conn.execute(
+                        "INSERT INTO multi_agent_pane_messages (session_id, pane_id, role, turn, role_type, content) VALUES (?,?,?,?,?,?)",
+                        (session_id, pane_id, role, turn_counter + 1, "assistant", response_text[:2000]),
+                    )
+            except sqlite3.Error:
+                pass
+            return {"role": role, "pane_id": pane_id, "done": True, "summary": final, "files": files_created, "steps": step}
+
+        # Parse and execute tool
+        tool = _parse_next_tool(response_text)
+        if tool:
+            _q("pane_tool", {"step": step, "type": tool.get("tool"), "content": str(tool)[:200]})
+            obs, meta = await _execute_tool(tool)
+            _q("pane_obs", {"step": step, "stdout": obs[:500], "exit_code": meta.get("exit_code")})
+
+            if tool.get("tool") == "write_file":
+                fname = tool.get("path", "")
+                if fname and fname not in files_created:
+                    files_created.append(fname)
+                    _q("pane_file", {"step": step, "path": fname, "action": "created"})
+            elif tool.get("tool") == "exec":
+                commands_run.append(tool.get("command", ""))
+
+            turn_content = response_text
+            obs_msg = f"<observation>{obs}</observation>"
+            turn_counter += 1
+            if not history:
+                history = [
+                    {"role": "user", "content": initial_msg},
+                    {"role": "assistant", "content": turn_content},
+                    {"role": "user", "content": obs_msg},
+                ]
+            else:
+                history.append({"role": "assistant", "content": turn_content})
+                history.append({"role": "user", "content": obs_msg})
+
+            # Persist
+            try:
+                with _db() as conn:
+                    conn.execute(
+                        "INSERT INTO multi_agent_pane_messages (session_id, pane_id, role, turn, role_type, content) VALUES (?,?,?,?,?,?)",
+                        (session_id, pane_id, role, turn_counter, "assistant", turn_content[:2000]),
+                    )
+            except sqlite3.Error:
+                pass
+        else:
+            # No tool and no DONE — push back asking for explicit action
+            history.append({"role": "assistant", "content": response_text})
+            history.append({"role": "user", "content": "Please use FILE:, RUN:, INSTALL:, or DONE: to take an action."})
+
+    _q("pane_done", {"step": max_steps, "summary": f"Reached {max_steps} step limit.", "files": files_created})
+    return {"role": role, "pane_id": pane_id, "done": False, "summary": "step limit reached", "files": files_created, "steps": max_steps}
+
+
+@app.get("/multi-agent", response_class=HTMLResponse, name="page_multi_agent")
+async def page_multi_agent(request: Request):
+    """Multi-agent workspace — smux-style pane layout with parallel role agents."""
+    return templates.TemplateResponse("multi_agent.html", {
+        "request": request,
+        "agents": AGENTS,
+        "ma_roles": _MA_ROLES,
+    })
+
+
+@app.get("/api/multi-agent/run", name="api_multi_agent_run")
+async def api_multi_agent_run(
+    request: Request,
+    task: str = "",
+    session_id: str = "",
+    roles: str = "",
+    max_steps: int = 8,
+    chat_mode: str = "auto",
+    work_mode: str = "work",
+):
+    """SSE stream for multi-agent parallel execution.
+
+    Supervisor decomposes the task into role assignments, then all assigned
+    role-agents run concurrently in their own panes, sharing the C10 workspace.
+
+    Query params:
+      task       — overall task description
+      session_id — for session persistence (auto-generated if empty)
+      roles      — comma-separated role names (default: builder,executor,tester)
+      max_steps  — max ReAct steps per role-agent (default 8, max 12)
+      chat_mode  — auto | quick | deep
+      work_mode  — work | web
+
+    SSE events (all include pane_id + role fields):
+      pane_init     — {pane_id, role, label, emoji}   pane registered
+      pane_thinking — {pane_id, role, step, text}     LLM reasoning
+      pane_tool     — {pane_id, role, step, type, content}
+      pane_obs      — {pane_id, role, step, stdout, exit_code}
+      pane_file     — {pane_id, role, step, path, action}
+      pane_done     — {pane_id, role, step, summary, files}
+      pane_error    — {pane_id, role, message}
+      supervisor    — {step, text, assignments}        supervisor output
+      final         — {summary, results, session_id}  all panes done
+    """
+    task = task.strip()
+    max_steps = max(1, min(12, max_steps))
+    c1 = _urls()["c1"]
+
+    def _sse(event: str, data: dict) -> str:
+        return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+    async def generate():
+        nonlocal task, session_id
+
+        if not task:
+            yield _sse("error", {"message": "No task provided."})
+            return
+
+        client = _get_http()
+
+        # ── Auth check ─────────────────────────────────────────────────────────
+        c3_url = _urls().get("c3", "http://browser-auth:8001")
+        try:
+            _auth_r = await client.get(f"{c3_url}/session-health", timeout=8)
+            _auth_data = _auth_r.json() if _auth_r.status_code == 200 else {}
+            _session_status = _auth_data.get("session", "unknown")
+        except Exception:
+            _session_status = "unknown"
+
+        if _session_status != "active":
+            yield _sse("error", {"message": "M365 not authenticated. Open :6080 to sign in.",
+                                 "auth_url": "http://localhost:6080/?resize=scale&autoconnect=true"})
+            return
+
+        # Expand C3 pool for parallel run
+        active_roles = [r.strip() for r in roles.split(",") if r.strip() in _MA_ROLES] if roles else _MA_DEFAULT_ROLES
+        active_roles = [r for r in active_roles if r != "supervisor"]  # supervisor is implicit
+
+        if len(active_roles) > 1:
+            pool_size = max(1, int(os.environ.get("C3_POOL_SIZE_PARALLEL", "12")))
+            try:
+                await client.post(f"{c3_url}/pool-expand", params={"target_size": pool_size}, timeout=90)
+            except Exception:
+                pass
+
+        # ── Create session record ──────────────────────────────────────────────
+        now = datetime.now(timezone.utc).isoformat()
+        if not session_id:
+            session_id = "mas_" + uuid.uuid4().hex[:8]
+        try:
+            with _db() as conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO multi_agent_sessions (id, created_at, updated_at, task, status, roles) VALUES (?,?,?,?,?,?)",
+                    (session_id, now, now, task[:1000], "running", json.dumps(active_roles)),
+                )
+        except sqlite3.Error:
+            pass
+
+        yield _sse("session", {"session_id": session_id, "roles": active_roles})
+
+        # ── Supervisor: decompose task into role assignments ────────────────────
+        yield _sse("supervisor", {"step": 0, "text": f"🧭 Supervisor decomposing task: {task[:100]}..."})
+
+        supervisor_prompt = (
+            f"You are the Supervisor in a multi-agent coding workspace.\n"
+            f"Break the following task into specific assignments for these specialist agents:\n"
+            + "\n".join(f"  - {r}: {_MA_ROLES[r]['desc']}" for r in active_roles)
+            + f"\n\nTASK: {task}\n\n"
+            f"Output ONLY an assignment block like:\n"
+            + "\n".join(f"ASSIGN {r}: [specific sub-task for this role]" for r in active_roles)
+            + "\n\nBe concise and concrete. Each assignment should be actionable in 1-3 steps."
+        )
+        try:
+            sup_r = await client.post(
+                f"{c1}/v1/chat/completions",
+                headers={"Content-Type": "application/json", "X-Agent-ID": "ma-supervisor"},
+                json={"model": "copilot", "messages": [{"role": "user", "content": supervisor_prompt}], "stream": False},
+                timeout=60,
+            )
+            sup_text = sup_r.json().get("choices", [{}])[0].get("message", {}).get("content", "") if sup_r.status_code == 200 else ""
+        except Exception as exc:
+            sup_text = ""
+            yield _sse("supervisor", {"step": 0, "text": f"⚠️ Supervisor failed: {exc} — using default assignments"})
+
+        # Parse ASSIGN lines from supervisor response
+        assignments: dict[str, str] = {}
+        for line in sup_text.splitlines():
+            m = re.match(r"ASSIGN\s+(\w+)\s*:\s*(.+)", line.strip(), re.IGNORECASE)
+            if m and m.group(1).lower() in active_roles:
+                assignments[m.group(1).lower()] = m.group(2).strip()
+
+        # Fall back to generic assignments for any missing roles
+        for r in active_roles:
+            if r not in assignments:
+                assignments[r] = f"Complete your part of: {task}"
+
+        yield _sse("supervisor", {
+            "step": 1,
+            "text": sup_text[:600] if sup_text else "Using default assignments.",
+            "assignments": assignments,
+        })
+
+        # ── Announce panes ─────────────────────────────────────────────────────
+        for r in active_roles:
+            info = _MA_ROLES.get(r, {"label": r, "emoji": "🤖"})
+            yield _sse("pane_init", {
+                "pane_id": f"ma-{r}",
+                "role": r,
+                "label": info["label"],
+                "emoji": info["emoji"],
+                "assignment": assignments.get(r, ""),
+            })
+
+        # ── Launch role agents in parallel ─────────────────────────────────────
+        queue: asyncio.Queue[str] = asyncio.Queue()
+        active_panes = set(f"ma-{r}" for r in active_roles)
+        pane_results: dict[str, dict] = {}
+
+        async def run_role(r: str) -> None:
+            result = await _ma_role_loop(
+                pane_id=f"ma-{r}",
+                role=r,
+                assignment=assignments.get(r, task),
+                overall_task=task,
+                session_id=session_id,
+                c1=c1,
+                agent_id=f"ma-{r}",
+                chat_mode=chat_mode,
+                work_mode=work_mode,
+                max_steps=max_steps,
+                queue=queue,
+            )
+            pane_results[r] = result
+            active_panes.discard(f"ma-{r}")
+            queue.put_nowait("__pane_done__")
+
+        tasks = [asyncio.create_task(run_role(r)) for r in active_roles]
+
+        # Stream queue events until all panes finish
+        panes_done = 0
+        total_panes = len(active_roles)
+        while panes_done < total_panes:
+            if await request.is_disconnected():
+                for t in tasks:
+                    t.cancel()
+                return
+            try:
+                item = await asyncio.wait_for(queue.get(), timeout=1.0)
+            except asyncio.TimeoutError:
+                continue
+            if item == "__pane_done__":
+                panes_done += 1
+            else:
+                yield item
+
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+        # ── Final summary ──────────────────────────────────────────────────────
+        done_roles = [r for r, res in pane_results.items() if res.get("done")]
+        all_files = list({f for res in pane_results.values() for f in (res.get("files") or [])})
+        summary = f"{len(done_roles)}/{total_panes} roles completed. Files: {', '.join(all_files) or 'none'}."
+
+        try:
+            with _db() as conn:
+                conn.execute(
+                    "UPDATE multi_agent_sessions SET status=?, updated_at=?, summary=? WHERE id=?",
+                    ("completed", datetime.now(timezone.utc).isoformat(), summary[:500], session_id),
+                )
+        except sqlite3.Error:
+            pass
+
+        yield _sse("final", {
+            "summary": summary,
+            "session_id": session_id,
+            "results": {r: {"done": res.get("done"), "summary": res.get("summary", ""), "files": res.get("files", [])}
+                        for r, res in pane_results.items()},
+        })
+
+    return StreamingResponse(generate(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+    })
+
+
+@app.get("/api/multi-agent/sessions", name="api_multi_agent_sessions")
+async def api_multi_agent_sessions(limit: int = 10):
+    """List recent multi-agent sessions."""
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                "SELECT id, created_at, task, status, roles, summary FROM multi_agent_sessions ORDER BY created_at DESC LIMIT ?",
+                (limit,)
+            ).fetchall()
+        return JSONResponse([dict(r) for r in rows])
+    except sqlite3.Error as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 if __name__ == "__main__":

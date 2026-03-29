@@ -494,6 +494,12 @@
       <button type="button" id="mode-work" class="mode-btn active" data-mode="work">Work</button>
       <button type="button" id="mode-web"  class="mode-btn"        data-mode="web">Web</button>
     </div>
+    <!-- Pool status indicator -->
+    <span id="pool-indicator" title="C3 browser tab pool"
+          style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;font-size:0.75rem;border:1px solid var(--border,#444);background:var(--surface2,#2a2a2a);color:var(--muted,#888);cursor:default;white-space:nowrap;">
+      <span id="pool-indicator-dot" style="width:6px;height:6px;border-radius:50%;background:#666;display:inline-block;flex-shrink:0;"></span>
+      <span id="pool-indicator-label">Pool</span>
+    </span>
     <!-- Agent selector -->
     <select id="agent-select" class="agent-select" title="Agent session ID used with C1">
       {% for agent in agents %}
@@ -640,6 +646,32 @@
   let currentStep   = 0;
   let maxSteps      = 15;
   let currentSessId = '';   // session_id for follow-ups
+
+  // ── Pool status indicator ─────────────────────────────────────────────────
+  const poolDot   = document.getElementById('pool-indicator-dot');
+  const poolLbl   = document.getElementById('pool-indicator-label');
+  async function refreshPoolIndicator() {
+    try {
+      const r = await fetch('http://localhost:8001/status');
+      if (!r.ok) throw new Error('no-ok');
+      const d = await r.json();
+      const avail = d.pool_available;
+      const total = d.pool_size;
+      const init  = d.pool_initialized;
+      const color = !init ? '#666' : avail === 0 ? '#c0392b' : avail < 3 ? '#e67e22' : '#27ae60';
+      poolDot.style.background = color;
+      poolLbl.textContent = init ? avail + '/' + total : 'init…';
+      if (avail === 0 && init) {
+        poolDot.title = '⚠️ No free tabs — agent will create one on demand';
+      }
+    } catch(_) {
+      poolDot.style.background = '#666';
+      poolLbl.textContent = 'Pool';
+    }
+  }
+  refreshPoolIndicator();
+  setInterval(refreshPoolIndicator, 8000);
+  // ──────────────────────────────────────────────────────────────────────────
   let activeTab     = 'terminal';
   let currentWebPort= null;
 
