@@ -64,6 +64,16 @@ CREATE TABLE IF NOT EXISTS agent_messages (
     FOREIGN KEY (session_id) REFERENCES agent_sessions(id)
 );
 
+-- Workspace projects: named subdirectories created by the user
+CREATE TABLE IF NOT EXISTS workspace_projects (
+    id TEXT PRIMARY KEY,              -- "proj_" + 6-char hex
+    created_at TEXT NOT NULL,
+    name TEXT NOT NULL UNIQUE,        -- folder slug (lowercase, hyphens only)
+    display_name TEXT,                -- human-readable label
+    description TEXT,
+    status TEXT DEFAULT 'active'
+);
+
 -- Multi-agent sessions: one row per smux-style parallel workspace run
 CREATE TABLE IF NOT EXISTS multi_agent_sessions (
     id TEXT PRIMARY KEY,              -- "mas_" + 8-char hex

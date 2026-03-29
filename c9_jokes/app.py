@@ -163,6 +163,21 @@ def _ensure_db() -> None:
             """)
     except sqlite3.Error:
         pass
+    # Migrate: create workspace_projects table if missing
+    try:
+        with sqlite3.connect(DEFAULT_DB) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS workspace_projects (
+                    id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    name TEXT NOT NULL UNIQUE,
+                    display_name TEXT,
+                    description TEXT,
+                    status TEXT DEFAULT 'active'
+                )
+            """)
+    except sqlite3.Error:
+        pass
 
 
 # ── URL helpers ───────────────────────────────────────────────────────────────
@@ -236,6 +251,30 @@ async def _c10_reset() -> dict:
         return r.json()
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
+
+
+async def _c10_delete(path: str) -> dict:
+    """Delete a single file or directory from C10 workspace."""
+    client = _get_http()
+    try:
+        r = await client.request(
+            "DELETE", f"{C10_URL}/file/delete",
+            json={"path": path}, timeout=15,
+        )
+        return r.json() if r.status_code == 200 else {"ok": False, "error": r.text[:200]}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+async def _c10_mkdir(path: str) -> dict:
+    """Create a directory (mkdir -p) in the C10 workspace."""
+    # Strip shell metacharacters before passing to exec
+    safe = re.sub(r'[;&|`$\\]', '', path).strip().strip("/")
+    if not safe:
+        return {"ok": False, "error": "invalid path"}
+    result = await _c10_exec(f'mkdir -p "{safe}"', timeout=10)
+    return {"ok": result.get("exit_code", 1) == 0, "path": safe,
+            "error": result.get("stderr", "") if result.get("exit_code", 1) != 0 else None}
 
 
 # ── Agentic loop — system prompt ──────────────────────────────────────────────
@@ -1718,8 +1757,14 @@ async def api_agent_run(
 
 @app.post("/api/agent/reset", name="api_agent_reset")
 async def api_agent_reset():
-    """Reset (wipe) the C10 workspace. Returns {ok, deleted_count}."""
+    """Reset (wipe) the C10 workspace. Also clears workspace_projects DB rows."""
     result = await _c10_reset()
+    # Keep projects DB in sync with filesystem
+    try:
+        with _db() as conn:
+            conn.execute("DELETE FROM workspace_projects")
+    except sqlite3.Error:
+        pass
     return JSONResponse(result)
 
 
@@ -1737,6 +1782,85 @@ async def api_agent_file(path: str = ""):
         return JSONResponse({"ok": False, "error": "path required"}, status_code=400)
     result = await _c10_read_file(path)
     return JSONResponse(result)
+
+
+@app.delete("/api/agent/file", name="api_agent_file_delete")
+async def api_agent_file_delete(path: str = ""):
+    """Delete a single file or directory from the C10 workspace. Query param: path="""
+    if not path:
+        return JSONResponse({"ok": False, "error": "path required"}, status_code=400)
+    result = await _c10_delete(path)
+    return JSONResponse(result)
+
+
+@app.post("/api/agent/mkdir", name="api_agent_mkdir")
+async def api_agent_mkdir(body: dict):
+    """Create a directory in the C10 workspace. Body: {path: str}"""
+    path = (body.get("path") or "").strip().strip("/")
+    if not path:
+        return JSONResponse({"ok": False, "error": "path required"}, status_code=400)
+    result = await _c10_mkdir(path)
+    return JSONResponse(result)
+
+
+@app.get("/api/agent/projects", name="api_agent_projects")
+async def api_agent_projects():
+    """Return all workspace projects from DB."""
+    rows = []
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                "SELECT id, created_at, name, display_name, description, status "
+                "FROM workspace_projects ORDER BY created_at DESC"
+            ).fetchall()
+    except sqlite3.Error:
+        pass
+    return JSONResponse([dict(r) for r in rows])
+
+
+@app.post("/api/agent/project", name="api_agent_project_create")
+async def api_agent_project_create(body: dict):
+    """Create a named project (subdirectory) in the C10 workspace.
+    Body: {name: str, display_name?: str, description?: str}"""
+    raw_name = (body.get("name") or "").strip()
+    display   = (body.get("display_name") or raw_name).strip()
+    desc      = (body.get("description") or "").strip()
+    if not raw_name:
+        return JSONResponse({"ok": False, "error": "name required"}, status_code=400)
+    # Slugify: lowercase, spaces→hyphens, strip non-alphanumeric/hyphens/underscores
+    slug = re.sub(r"[^a-z0-9_\-]", "", raw_name.lower().replace(" ", "-"))
+    if not slug:
+        return JSONResponse({"ok": False, "error": "invalid name — use letters, numbers, hyphens"}, status_code=400)
+    mkdir_r = await _c10_mkdir(slug)
+    if not mkdir_r.get("ok"):
+        return JSONResponse({"ok": False, "error": "mkdir failed: " + (mkdir_r.get("error") or "unknown")}, status_code=500)
+    proj_id = "proj_" + uuid.uuid4().hex[:6]
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        with _db() as conn:
+            conn.execute(
+                "INSERT INTO workspace_projects (id, created_at, name, display_name, description) VALUES (?,?,?,?,?)",
+                (proj_id, now, slug, display or slug, desc),
+            )
+    except sqlite3.IntegrityError:
+        return JSONResponse({"ok": False, "error": f"Project '{slug}' already exists"}, status_code=409)
+    except sqlite3.Error as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "id": proj_id, "name": slug, "display_name": display or slug})
+
+
+@app.delete("/api/agent/project", name="api_agent_project_delete")
+async def api_agent_project_delete(name: str = ""):
+    """Delete a project directory and its DB record. Query param: name="""
+    if not name:
+        return JSONResponse({"ok": False, "error": "name required"}, status_code=400)
+    c10_r = await _c10_delete(name)
+    try:
+        with _db() as conn:
+            conn.execute("DELETE FROM workspace_projects WHERE name=?", (name,))
+    except sqlite3.Error:
+        pass
+    return JSONResponse({"ok": c10_r.get("ok", False), "name": name})
 
 
 @app.get("/api/agent/sessions", name="api_agent_sessions")

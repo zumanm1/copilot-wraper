@@ -224,6 +224,62 @@
 .filetree-item.active { background: rgba(88,166,255,0.12); color: var(--accent); }
 .filetree-item.dir { color: var(--warn); cursor: default; }
 .filetree-icon { font-size: 0.9rem; flex-shrink: 0; }
+/* Delete button inside each file/dir row — shown on hover */
+.filetree-item .filetree-del {
+  display: none;
+  margin-left: auto;
+  padding: 0 0.3rem;
+  color: var(--muted);
+  border-radius: 3px;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  cursor: pointer;
+  flex-shrink: 0;
+  user-select: none;
+}
+.filetree-item:hover .filetree-del { display: inline-flex; align-items: center; }
+.filetree-item .filetree-del:hover { color: #f85149; background: rgba(248,81,73,0.12); }
+/* Project section header */
+.filetree-project-header {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.3rem 0.75rem 0.2rem;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--accent);
+  border-top: 1px solid var(--border);
+  margin-top: 0.3rem;
+  user-select: none;
+}
+.filetree-project-header:first-child { border-top: none; margin-top: 0; }
+.filetree-project-header .filetree-proj-del {
+  display: none;
+  margin-left: auto;
+  padding: 0 0.25rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+  border-radius: 3px;
+  cursor: pointer;
+  line-height: 1.4;
+  flex-shrink: 0;
+}
+.filetree-project-header:hover .filetree-proj-del { display: inline-flex; align-items: center; }
+.filetree-project-header .filetree-proj-del:hover { color: #f85149; background: rgba(248,81,73,0.12); }
+/* Loose-files section separator */
+.filetree-section-label {
+  padding: 0.3rem 0.75rem 0.1rem;
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  margin-top: 0.3rem;
+}
+.filetree-section-label:first-child { border-top: none; margin-top: 0; }
 
 /* ── File preview modal ──────────────────────────────────────────────────── */
 .file-preview-overlay {
@@ -512,7 +568,10 @@
   <div class="agent-filetree">
     <div class="filetree-header">
       <span>📁 Workspace</span>
-      <button type="button" class="btn-sm" id="refresh-files" title="Refresh file tree">↺</button>
+      <div style="display:flex;gap:0.2rem;align-items:center;">
+        <button type="button" class="btn-sm" id="btn-new-project" title="New project folder">📁+</button>
+        <button type="button" class="btn-sm" id="refresh-files" title="Refresh file tree">↺</button>
+      </div>
     </div>
     <div class="filetree-list" id="filetree-list">
       <div class="filetree-empty" id="filetree-empty">Empty workspace</div>
@@ -605,6 +664,34 @@
   </div>
 </div>
 
+<!-- ── New Project Modal ────────────────────────────────────────────────── -->
+<div class="file-preview-overlay" id="new-project-overlay">
+  <div class="file-preview-modal" style="max-width:400px;">
+    <div class="file-preview-header">
+      <span>📁 New Project</span>
+      <button type="button" class="btn-sm" id="close-new-project">✕ Close</button>
+    </div>
+    <div class="file-preview-body" style="padding:1.25rem;display:flex;flex-direction:column;gap:0.65rem;">
+      <label style="font-size:0.8rem;color:var(--muted);font-weight:600;">Project name <span style="font-weight:400;">(becomes the folder name)</span></label>
+      <input id="new-project-name" type="text" placeholder="my-project" autocomplete="off"
+        style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;
+               padding:0.5rem 0.75rem;color:var(--fg);font-size:0.9rem;outline:none;width:100%;box-sizing:border-box;">
+      <label style="font-size:0.8rem;color:var(--muted);font-weight:600;">Description <span style="font-weight:400;">(optional)</span></label>
+      <input id="new-project-desc" type="text" placeholder="What is this project for?"
+        style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;
+               padding:0.5rem 0.75rem;color:var(--fg);font-size:0.82rem;outline:none;width:100%;box-sizing:border-box;">
+      <div id="new-project-error"
+        style="color:#f85149;font-size:0.78rem;display:none;padding:0.35rem 0.5rem;
+               background:rgba(248,81,73,0.07);border-radius:4px;"></div>
+      <button type="button" id="btn-create-project"
+        style="background:var(--accent,#0078d4);color:#fff;border:none;border-radius:6px;
+               padding:0.55rem 1rem;cursor:pointer;font-size:0.88rem;font-weight:600;margin-top:0.2rem;">
+        ✅ Create Project
+      </button>
+    </div>
+  </div>
+</div>
+
 <script>
 (function() {
   'use strict';
@@ -626,6 +713,13 @@
   const previewTitle     = document.getElementById('file-preview-title');
   const previewContent   = document.getElementById('file-preview-content');
   const closePreview     = document.getElementById('close-preview');
+  const btnNewProject    = document.getElementById('btn-new-project');
+  const newProjectOverlay= document.getElementById('new-project-overlay');
+  const newProjectName   = document.getElementById('new-project-name');
+  const newProjectDesc   = document.getElementById('new-project-desc');
+  const newProjectError  = document.getElementById('new-project-error');
+  const btnCreateProject = document.getElementById('btn-create-project');
+  const closeNewProject  = document.getElementById('close-new-project');
   const historyList      = document.getElementById('history-list');
   const btnRefreshHist   = document.getElementById('refresh-history');
   const followupBanner   = document.getElementById('followup-banner');
@@ -772,37 +866,246 @@
              toml:'⚙',env:'🔑',sql:'🗄',log:'📋'})[ext] || '📄';
   }
 
-  function renderFileTree(entries) {
+  // ── Project-aware file tree ────────────────────────────────────────────────
+  let _knownProjects = [];  // [{id, name, display_name, ...}]
+
+  function _makeDelBtn(attrs) {
+    // attrs = { 'data-path': '...', 'data-type': 'file' } or { 'data-project': '...' }
+    const span = document.createElement('span');
+    span.className = attrs['data-project'] ? 'filetree-proj-del' : 'filetree-del';
+    span.textContent = '✕';
+    span.title = 'Delete';
+    Object.keys(attrs).forEach(function(k) { span.setAttribute(k, attrs[k]); });
+    return span;
+  }
+
+  function _makeFileItem(entry, extraPad) {
+    const item = document.createElement('div');
+    const depth = (entry.path.match(/\//g) || []).length;
+    const isDir = entry.type === 'dir';
+    item.className = 'filetree-item' + (isDir ? ' dir' : '');
+    item.style.paddingLeft = ((extraPad || 0.75) + depth * 0.8) + 'rem';
+    const icon = isDir ? '📁' : getFileIcon(entry.path);
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'filetree-icon';
+    nameSpan.textContent = icon;
+    item.appendChild(nameSpan);
+    const label = document.createTextNode(entry.path.split('/').pop());
+    item.appendChild(label);
+    item.title = entry.path;
+    if (!isDir) {
+      item.addEventListener('click', function(e) {
+        if (e.target.classList.contains('filetree-del')) return;
+        openFilePreview(entry.path, item);
+      });
+    }
+    item.appendChild(_makeDelBtn({'data-path': entry.path, 'data-type': entry.type}));
+    return item;
+  }
+
+  function renderFileTree(entries, projects) {
     filetreeList.innerHTML = '';
+    _knownProjects = projects || [];
     if (!entries || !entries.length) {
       filetreeList.innerHTML = '<div class="filetree-empty">Empty workspace</div>';
       return;
     }
-    entries.forEach(function(entry) {
-      const item = document.createElement('div');
-      item.className = 'filetree-item' + (entry.type === 'dir' ? ' dir' : '');
-      const depth = (entry.path.match(/\//g) || []).length;
-      item.style.paddingLeft = (0.75 + depth * 0.8) + 'rem';
-      const icon = entry.type === 'dir' ? '📁' : getFileIcon(entry.path);
-      item.innerHTML = '<span class="filetree-icon">' + icon + '</span>' + escapeHtml(entry.path.split('/').pop());
-      item.title = entry.path;
-      if (entry.type === 'file') {
-        item.addEventListener('click', function() { openFilePreview(entry.path, item); });
-      }
-      filetreeList.appendChild(item);
+
+    // Build lookup: top-level dir slug → project record
+    const projBySlug = {};
+    (_knownProjects || []).forEach(function(p) { projBySlug[p.name] = p; });
+
+    // Sort entries: dirs first then files, alpha within each group
+    const sorted = entries.slice().sort(function(a, b) {
+      if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+      return a.path.localeCompare(b.path);
     });
+
+    // Group: project-dir entries vs loose entries
+    const projectEntries = {};   // slug → [{entry}]
+    const looseEntries   = [];
+    sorted.forEach(function(entry) {
+      const topDir = entry.path.split('/')[0];
+      if (projBySlug[topDir] && entry.path !== topDir) {
+        if (!projectEntries[topDir]) projectEntries[topDir] = [];
+        projectEntries[topDir].push(entry);
+      } else if (projBySlug[entry.path]) {
+        // The project root dir itself — skip, we render a header instead
+      } else {
+        looseEntries.push(entry);
+      }
+    });
+
+    let hasContent = false;
+
+    // ── Render project sections ──────────────────────────────────────────────
+    (_knownProjects || []).forEach(function(proj) {
+      hasContent = true;
+      const header = document.createElement('div');
+      header.className = 'filetree-project-header';
+      header.innerHTML = '<span style="flex-shrink:0;">📂</span>'
+        + '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;" title="' + escapeHtml(proj.name) + '">'
+        + escapeHtml(proj.display_name || proj.name) + '</span>';
+      header.appendChild(_makeDelBtn({'data-project': proj.name}));
+      filetreeList.appendChild(header);
+
+      const children = projectEntries[proj.name] || [];
+      if (!children.length) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'padding:0.2rem 0.75rem 0.2rem 1.55rem;font-size:0.75rem;color:var(--muted);';
+        empty.textContent = 'empty project';
+        filetreeList.appendChild(empty);
+      } else {
+        children.forEach(function(entry) {
+          filetreeList.appendChild(_makeFileItem(entry));
+        });
+      }
+    });
+
+    // ── Render loose files/dirs ──────────────────────────────────────────────
+    if (looseEntries.length) {
+      if (hasContent) {
+        const sep = document.createElement('div');
+        sep.className = 'filetree-section-label';
+        sep.textContent = 'Workspace files';
+        filetreeList.appendChild(sep);
+      }
+      looseEntries.forEach(function(entry) {
+        hasContent = true;
+        filetreeList.appendChild(_makeFileItem(entry));
+      });
+    }
+
+    if (!hasContent) {
+      filetreeList.innerHTML = '<div class="filetree-empty">Empty workspace</div>';
+    }
   }
 
+  // ── Delete a file or directory ─────────────────────────────────────────────
+  async function deleteWorkspaceItem(path, type) {
+    const label = type === 'dir' ? 'folder' : 'file';
+    if (!confirm('Delete ' + label + ' "' + path + '"?\nThis cannot be undone.')) return;
+    try {
+      const r = await fetch('/api/agent/file?path=' + encodeURIComponent(path), { method: 'DELETE' });
+      const d = await r.json();
+      if (d.ok || d.message === 'already absent') {
+        appendEntry('step_info', '<span class="stream-label">🗑 Deleted</span> ' + escapeHtml(path));
+        await refreshFiles();
+      } else {
+        appendEntry('error', '<span class="stream-label">❌</span> Delete failed: ' + escapeHtml(d.error || JSON.stringify(d)));
+      }
+    } catch(e) {
+      appendEntry('error', '<span class="stream-label">❌</span> Delete error: ' + escapeHtml(e.message));
+    }
+  }
+
+  // ── Delete a project (entire directory + DB record) ───────────────────────
+  async function deleteProject(name) {
+    if (!confirm('Delete project "' + name + '" and ALL its files?\nThis cannot be undone.')) return;
+    try {
+      const r = await fetch('/api/agent/project?name=' + encodeURIComponent(name), { method: 'DELETE' });
+      const d = await r.json();
+      if (d.ok) {
+        appendEntry('step_info', '<span class="stream-label">🗑 Project Deleted</span> ' + escapeHtml(name));
+        await refreshFiles();
+      } else {
+        appendEntry('error', '<span class="stream-label">❌</span> Project delete failed: ' + escapeHtml(d.error || JSON.stringify(d)));
+      }
+    } catch(e) {
+      appendEntry('error', '<span class="stream-label">❌</span> Delete error: ' + escapeHtml(e.message));
+    }
+  }
+
+  // ── Event delegation — delete buttons in file tree ─────────────────────────
+  filetreeList.addEventListener('click', function(e) {
+    const el = e.target;
+    if (el.classList.contains('filetree-del')) {
+      e.stopPropagation();
+      const path = el.getAttribute('data-path');
+      const type = el.getAttribute('data-type') || 'file';
+      if (path) deleteWorkspaceItem(path, type);
+    } else if (el.classList.contains('filetree-proj-del')) {
+      e.stopPropagation();
+      const projName = el.getAttribute('data-project');
+      if (projName) deleteProject(projName);
+    }
+  });
+
+  // ── Refresh: fetch files + projects, then render ───────────────────────────
   async function refreshFiles() {
     btnRefresh.textContent = '…';
     try {
-      const r = await fetch('/api/agent/files');
-      const data = await r.json();
-      renderFileTree(data.entries || []);
+      const [filesResp, projResp] = await Promise.all([
+        fetch('/api/agent/files'),
+        fetch('/api/agent/projects'),
+      ]);
+      const filesData = await filesResp.json();
+      const projData  = await projResp.json();
+      renderFileTree(filesData.entries || [], Array.isArray(projData) ? projData : []);
     } catch(e) {}
     btnRefresh.textContent = '↺';
   }
   btnRefresh.addEventListener('click', refreshFiles);
+
+  // ── New Project modal ──────────────────────────────────────────────────────
+  function openNewProjectModal() {
+    newProjectName.value = '';
+    newProjectDesc.value = '';
+    newProjectError.style.display = 'none';
+    newProjectOverlay.classList.add('open');
+    setTimeout(function() { newProjectName.focus(); }, 80);
+  }
+  function closeNewProjectModal() {
+    newProjectOverlay.classList.remove('open');
+  }
+
+  btnNewProject.addEventListener('click', openNewProjectModal);
+  closeNewProject.addEventListener('click', closeNewProjectModal);
+  newProjectOverlay.addEventListener('click', function(e) {
+    if (e.target === newProjectOverlay) closeNewProjectModal();
+  });
+  newProjectName.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); btnCreateProject.click(); }
+    if (e.key === 'Escape') closeNewProjectModal();
+  });
+
+  btnCreateProject.addEventListener('click', async function() {
+    const name = newProjectName.value.trim();
+    const desc = newProjectDesc.value.trim();
+    newProjectError.style.display = 'none';
+    if (!name) {
+      newProjectError.textContent = 'Project name is required.';
+      newProjectError.style.display = 'block';
+      newProjectName.focus();
+      return;
+    }
+    btnCreateProject.disabled = true;
+    btnCreateProject.textContent = 'Creating…';
+    try {
+      const r = await fetch('/api/agent/project', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name, description: desc }),
+      });
+      const d = await r.json();
+      if (d.ok) {
+        closeNewProjectModal();
+        appendEntry('step_info',
+          '<span class="stream-label">📁 Project Created</span> '
+          + escapeHtml(d.display_name || d.name)
+          + ' <span style="opacity:0.6">(' + escapeHtml(d.name) + '/)</span>');
+        await refreshFiles();
+      } else {
+        newProjectError.textContent = d.error || 'Failed to create project.';
+        newProjectError.style.display = 'block';
+      }
+    } catch(e) {
+      newProjectError.textContent = 'Network error: ' + e.message;
+      newProjectError.style.display = 'block';
+    }
+    btnCreateProject.disabled = false;
+    btnCreateProject.textContent = '✅ Create Project';
+  });
 
   // ── File preview modal ─────────────────────────────────────────────────────
   function openFilePreview(path, activeItem) {
