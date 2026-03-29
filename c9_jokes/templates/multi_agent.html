@@ -1,0 +1,704 @@
+{% extends "base.html" %}
+{% block title %}Multi-Agent Workspace{% endblock %}
+{% block content %}
+
+<style>
+/* ── Multi-Agent Workspace ────────────────────────────────────────────────── */
+.ma-workspace {
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  gap: 0;
+  height: calc(100vh - 120px);
+  min-height: 600px;
+  margin: -1.25rem;
+  overflow: hidden;
+}
+
+/* ── Top bar: supervisor input ───────────────────────────────────────────── */
+.ma-topbar {
+  grid-row: 1;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.ma-topbar h2 {
+  margin: 0;
+  font-size: 1rem;
+  white-space: nowrap;
+  color: var(--fg);
+}
+.ma-task-input {
+  flex: 1;
+  min-width: 260px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  font-size: 0.9rem;
+  padding: 0.4rem 0.75rem;
+  resize: none;
+  font-family: inherit;
+  line-height: 1.4;
+  min-height: 38px;
+  max-height: 80px;
+}
+.ma-task-input:focus { outline: none; border-color: var(--accent); }
+.ma-launch-btn {
+  background: var(--accent);
+  color: #0d1117;
+  border: none;
+  border-radius: 6px;
+  padding: 0.45rem 1.1rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: opacity 0.15s;
+}
+.ma-launch-btn:hover { opacity: 0.85; }
+.ma-launch-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.ma-stop-btn {
+  background: var(--fail);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: none;
+}
+.ma-stop-btn.visible { display: inline-flex; }
+
+/* Role selector */
+.ma-role-selector {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.ma-role-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.76rem;
+  cursor: pointer;
+  user-select: none;
+  transition: background 0.1s, border-color 0.1s;
+  color: var(--muted);
+}
+.ma-role-chip.active {
+  background: rgba(88,166,255,0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Options row */
+.ma-opts-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+.ma-opts-row select, .ma-opts-row input[type=number] {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 0.8rem;
+  padding: 0.2rem 0.4rem;
+}
+.pool-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+.pool-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--muted);
+  flex-shrink: 0;
+}
+.pool-dot.ok { background: var(--ok); }
+.pool-dot.warn { background: #e3b341; }
+.pool-dot.low { background: var(--fail); }
+
+/* ── Supervisor log bar ───────────────────────────────────────────────────── */
+.ma-supervisor-bar {
+  grid-row: 2;
+  padding: 0.4rem 1rem;
+  background: rgba(88,166,255,0.04);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.8rem;
+  color: var(--muted);
+  min-height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  overflow: hidden;
+}
+.supervisor-label {
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+#supervisor-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Pane grid ────────────────────────────────────────────────────────────── */
+.ma-pane-grid {
+  grid-row: 3;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 0;
+  overflow: hidden;
+  height: 100%;
+}
+
+/* ── Single pane ─────────────────────────────────────────────────────────── */
+.ma-pane {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  overflow: hidden;
+  min-height: 0;
+  background: var(--bg);
+}
+.ma-pane:last-child { border-right: none; }
+
+.pane-header {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.65rem;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.78rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.pane-emoji { font-size: 0.95rem; }
+.pane-role-label { color: var(--fg); }
+.pane-status {
+  margin-left: auto;
+  padding: 0.1rem 0.4rem;
+  border-radius: 10px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  background: var(--surface2);
+  color: var(--muted);
+}
+.pane-status.running { background: rgba(88,166,255,0.15); color: var(--accent); }
+.pane-status.done    { background: rgba(63,185,80,0.15);  color: var(--ok); }
+.pane-status.error   { background: rgba(248,81,73,0.15);  color: var(--fail); }
+.pane-step { font-size: 0.7rem; color: var(--muted); }
+
+.pane-assignment {
+  padding: 0.3rem 0.65rem;
+  background: rgba(88,166,255,0.05);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.74rem;
+  color: var(--muted);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+
+.pane-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem 0.65rem;
+  font-size: 0.78rem;
+  font-family: 'Courier New', Courier, monospace;
+  line-height: 1.5;
+  min-height: 0;
+  scroll-behavior: smooth;
+}
+
+/* Pane entry types */
+.pe { margin-bottom: 0.3rem; word-break: break-word; }
+.pe-thinking { color: var(--fg); }
+.pe-tool     { color: #e3b341; }
+.pe-obs      { color: var(--muted); font-size: 0.75rem; }
+.pe-file     { color: var(--ok); }
+.pe-done     { color: var(--ok); font-weight: 600; }
+.pe-error    { color: var(--fail); }
+
+.pe-obs pre {
+  margin: 0;
+  padding: 0.25rem 0.4rem;
+  background: var(--surface2);
+  border-radius: 4px;
+  white-space: pre-wrap;
+  font-size: 0.72rem;
+}
+
+/* Step badge */
+.step-badge {
+  display: inline-block;
+  background: var(--surface2);
+  color: var(--muted);
+  border-radius: 3px;
+  padding: 0 0.3rem;
+  font-size: 0.68rem;
+  margin-right: 0.35rem;
+  font-family: monospace;
+}
+
+/* ── No panes placeholder ─────────────────────────────────────────────────── */
+.ma-empty {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+  gap: 0.5rem;
+}
+.ma-empty-icon { font-size: 2.5rem; }
+
+/* ── Summary bar at bottom ───────────────────────────────────────────────── */
+.ma-summary-bar {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0; right: 0;
+  background: rgba(63,185,80,0.12);
+  border-top: 2px solid var(--ok);
+  padding: 0.5rem 1.25rem;
+  font-size: 0.82rem;
+  color: var(--ok);
+  z-index: 100;
+}
+.ma-summary-bar.show { display: flex; align-items: center; gap: 0.75rem; }
+.ma-summary-bar a { color: var(--accent); text-decoration: none; }
+
+/* ── Sessions drawer (bottom right) ─────────────────────────────────────── */
+.ma-sessions-btn {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+}
+.ma-sessions-btn:hover { color: var(--fg); }
+</style>
+
+<div class="ma-workspace">
+
+  <!-- ── Top bar ─────────────────────────────────────────────────────────── -->
+  <div class="ma-topbar">
+    <div style="display:flex;align-items:center;gap:0.5rem;flex-shrink:0;">
+      <span style="font-size:1.4rem;">🤖</span>
+      <h2>Multi-Agent Workspace</h2>
+    </div>
+
+    <textarea id="ma-task" class="ma-task-input" rows="1"
+      placeholder="Describe the task for the agent team… (e.g. write a Python web server with a /hello endpoint and test it)"></textarea>
+
+    <div style="display:flex;gap:0.5rem;align-items:center;">
+      <button id="ma-launch" class="ma-launch-btn">🚀 Launch Team</button>
+      <button id="ma-stop" class="ma-stop-btn">⏹ Stop</button>
+    </div>
+
+    <!-- Role chips -->
+    <div class="ma-role-selector" id="role-chips">
+      <span style="font-size:0.78rem;color:var(--muted);white-space:nowrap;">Roles:</span>
+      {% for role_id, info in ma_roles.items() %}
+        {% if role_id != 'supervisor' %}
+        <span class="ma-role-chip {% if role_id in ['builder','executor','tester'] %}active{% endif %}"
+              data-role="{{ role_id }}">{{ info.emoji }} {{ info.label }}</span>
+        {% endif %}
+      {% endfor %}
+    </div>
+
+    <!-- Options -->
+    <div class="ma-opts-row">
+      <label>Mode:
+        <select id="ma-chat-mode">
+          <option value="auto" selected>Auto</option>
+          <option value="quick">Quick</option>
+          <option value="deep">Deep</option>
+        </select>
+      </label>
+      <label>Max steps:
+        <input type="number" id="ma-max-steps" value="8" min="2" max="12" style="width:50px;">
+      </label>
+      <div class="pool-pill" id="pool-pill" title="C3 browser pool status">
+        <div class="pool-dot" id="pool-dot"></div>
+        <span id="pool-label">Pool: …</span>
+      </div>
+      <button class="ma-sessions-btn" onclick="loadSessions()">📋 Past sessions</button>
+    </div>
+  </div>
+
+  <!-- ── Supervisor log bar ────────────────────────────────────────────── -->
+  <div class="ma-supervisor-bar">
+    <span class="supervisor-label">🧭 Supervisor</span>
+    <span id="supervisor-text">Ready — enter a task and launch the team.</span>
+  </div>
+
+  <!-- ── Pane grid ─────────────────────────────────────────────────────── -->
+  <div class="ma-pane-grid" id="pane-grid">
+    <div class="ma-empty" id="pane-empty">
+      <span class="ma-empty-icon">🤖</span>
+      <span>Active agent panes will appear here when you launch a task.</span>
+      <span style="font-size:0.78rem;">Builder · UI · Executor · Tester · Debugger run in parallel — each with their own Copilot browser tab.</span>
+    </div>
+  </div>
+</div>
+
+<!-- ── Summary bar ─────────────────────────────────────────────────────── -->
+<div class="ma-summary-bar" id="ma-summary-bar">
+  <span>✅</span>
+  <span id="ma-summary-text"></span>
+  <a href="/multi-agent" onclick="location.reload();return false;">New task</a>
+  <button onclick="document.getElementById('ma-summary-bar').classList.remove('show')"
+    style="background:none;border:none;color:var(--muted);cursor:pointer;margin-left:auto;">✕</button>
+</div>
+
+<!-- ── Sessions modal ─────────────────────────────────────────────────────── -->
+<div id="sessions-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:200;align-items:center;justify-content:center;">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1.25rem;max-width:560px;width:90%;max-height:70vh;display:flex;flex-direction:column;gap:0.75rem;">
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <strong style="font-size:0.9rem;">Past Multi-Agent Sessions</strong>
+      <button onclick="document.getElementById('sessions-modal').style.display='none'"
+        style="background:none;border:none;color:var(--muted);font-size:1.1rem;cursor:pointer;">✕</button>
+    </div>
+    <div id="sessions-list" style="overflow-y:auto;flex:1;font-size:0.8rem;color:var(--muted);">Loading…</div>
+  </div>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  // ── State ─────────────────────────────────────────────────────────────
+  var _src = null;
+  var _running = false;
+  var _panes = {};          // pane_id → {el, bodyEl, statusEl, stepEl}
+  var _sessionId = '';
+
+  // ── Elements ──────────────────────────────────────────────────────────
+  var taskEl      = document.getElementById('ma-task');
+  var launchBtn   = document.getElementById('ma-launch');
+  var stopBtn     = document.getElementById('ma-stop');
+  var paneGrid    = document.getElementById('pane-grid');
+  var paneEmpty   = document.getElementById('pane-empty');
+  var supText     = document.getElementById('supervisor-text');
+  var summaryBar  = document.getElementById('ma-summary-bar');
+  var summaryText = document.getElementById('ma-summary-text');
+
+  // ── Role chips ─────────────────────────────────────────────────────
+  document.querySelectorAll('.ma-role-chip').forEach(function(chip) {
+    chip.addEventListener('click', function() {
+      chip.classList.toggle('active');
+    });
+  });
+
+  function activeRoles() {
+    return Array.from(document.querySelectorAll('.ma-role-chip.active'))
+      .map(function(c) { return c.dataset.role; });
+  }
+
+  // ── Pool status poll ───────────────────────────────────────────────
+  function updatePool() {
+    fetch('/api/session-health').then(function(r) { return r.json(); })
+      .then(function(d) {
+        var poolAvail = d.pool_available != null ? d.pool_available : '?';
+        var poolSize  = d.pool_size != null ? d.pool_size : '?';
+        var dot = document.getElementById('pool-dot');
+        var lbl = document.getElementById('pool-label');
+        lbl.textContent = 'Pool: ' + poolAvail + '/' + poolSize + ' tabs';
+        dot.className = 'pool-dot';
+        if (typeof poolAvail === 'number') {
+          if (poolAvail >= 6)       dot.classList.add('ok');
+          else if (poolAvail >= 2)  dot.classList.add('warn');
+          else                      dot.classList.add('low');
+        }
+      }).catch(function() {
+        document.getElementById('pool-label').textContent = 'Pool: ?';
+      });
+  }
+  updatePool();
+  setInterval(updatePool, 8000);
+
+  // ── Create pane element ────────────────────────────────────────────
+  function createPane(paneId, role, label, emoji, assignment) {
+    if (_panes[paneId]) return;
+
+    // Hide empty placeholder
+    if (paneEmpty) paneEmpty.style.display = 'none';
+
+    var pane = document.createElement('div');
+    pane.className = 'ma-pane';
+    pane.id = 'pane-' + paneId;
+
+    var header = document.createElement('div');
+    header.className = 'pane-header';
+    header.innerHTML =
+      '<span class="pane-emoji">' + emoji + '</span>' +
+      '<span class="pane-role-label">' + escHtml(label) + '</span>' +
+      '<span class="pane-step" id="step-' + paneId + '">step 0</span>' +
+      '<span class="pane-status running" id="status-' + paneId + '">running</span>';
+
+    var assignRow = document.createElement('div');
+    assignRow.className = 'pane-assignment';
+    assignRow.textContent = assignment || '';
+
+    var body = document.createElement('div');
+    body.className = 'pane-body';
+    body.id = 'body-' + paneId;
+
+    pane.appendChild(header);
+    pane.appendChild(assignRow);
+    pane.appendChild(body);
+    paneGrid.appendChild(pane);
+
+    _panes[paneId] = {
+      el: pane,
+      bodyEl: body,
+      statusEl: document.getElementById('status-' + paneId),
+      stepEl: document.getElementById('step-' + paneId),
+    };
+  }
+
+  // ── Append entry to pane body ──────────────────────────────────────
+  function appendPane(paneId, cls, html) {
+    var p = _panes[paneId];
+    if (!p) return;
+    var div = document.createElement('div');
+    div.className = 'pe ' + cls;
+    div.innerHTML = html;
+    p.bodyEl.appendChild(div);
+    p.bodyEl.scrollTop = p.bodyEl.scrollHeight;
+  }
+
+  function stepBadge(step) {
+    if (!step && step !== 0) return '';
+    return '<span class="step-badge">s' + step + '</span>';
+  }
+
+  function escHtml(t) {
+    return String(t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  function updatePaneStatus(paneId, status, stepNum) {
+    var p = _panes[paneId];
+    if (!p) return;
+    p.statusEl.className = 'pane-status ' + status;
+    p.statusEl.textContent = status;
+    if (stepNum != null) p.stepEl.textContent = 'step ' + stepNum;
+  }
+
+  // ── SSE event handlers ─────────────────────────────────────────────
+  function handleEvent(type, data) {
+    var paneId = data.pane_id;
+
+    switch (type) {
+
+      case 'session':
+        _sessionId = data.session_id || '';
+        break;
+
+      case 'supervisor':
+        var txt = (data.text || '').slice(0, 300);
+        supText.textContent = txt;
+        if (data.assignments) {
+          var lines = Object.entries(data.assignments)
+            .map(function(kv) { return '→ ' + kv[0] + ': ' + kv[1]; })
+            .join(' | ');
+          supText.textContent = lines.slice(0, 400);
+        }
+        break;
+
+      case 'pane_init':
+        createPane(paneId, data.role, data.label, data.emoji || '🤖', data.assignment || '');
+        break;
+
+      case 'pane_thinking':
+        updatePaneStatus(paneId, 'running', data.step);
+        appendPane(paneId, 'pe-thinking',
+          stepBadge(data.step) + escHtml((data.text || '').slice(0, 500)));
+        break;
+
+      case 'pane_tool':
+        appendPane(paneId, 'pe-tool',
+          stepBadge(data.step) + '⚙ ' + escHtml((data.type || '') + ': ' + (data.content || '').slice(0, 200)));
+        break;
+
+      case 'pane_obs':
+        var stdout = (data.stdout || '').slice(0, 400);
+        var ec = data.exit_code != null ? ' [exit ' + data.exit_code + ']' : '';
+        appendPane(paneId, 'pe-obs',
+          stepBadge(data.step) + '<pre>' + escHtml(stdout) + escHtml(ec) + '</pre>');
+        break;
+
+      case 'pane_file':
+        appendPane(paneId, 'pe-file',
+          stepBadge(data.step) + '📄 ' + escHtml(data.path || '') + ' (' + (data.action || 'created') + ')');
+        break;
+
+      case 'pane_done':
+        updatePaneStatus(paneId, 'done', data.step);
+        appendPane(paneId, 'pe-done',
+          '✅ ' + escHtml((data.summary || '').slice(0, 300)));
+        break;
+
+      case 'pane_error':
+        updatePaneStatus(paneId, 'error', null);
+        appendPane(paneId, 'pe-error', '❌ ' + escHtml((data.message || '').slice(0, 300)));
+        break;
+
+      case 'final':
+        setIdle();
+        var results = data.results || {};
+        var doneCount = Object.values(results).filter(function(r) { return r.done; }).length;
+        summaryText.textContent = data.summary || (doneCount + ' agents completed.');
+        summaryBar.classList.add('show');
+        updatePool();
+        break;
+
+      case 'error':
+        setIdle();
+        if (data.auth_url) {
+          supText.innerHTML = '🔐 Not authenticated — <a href="' + data.auth_url + '" target="_blank" style="color:var(--accent)">Open noVNC :6080</a>';
+        } else {
+          supText.textContent = '❌ ' + (data.message || 'Error');
+        }
+        break;
+    }
+  }
+
+  // ── Launch / stop ──────────────────────────────────────────────────
+  function launch() {
+    var task = taskEl.value.trim();
+    if (!task) { taskEl.focus(); return; }
+
+    var roles = activeRoles();
+    if (roles.length === 0) {
+      alert('Select at least one role to activate.');
+      return;
+    }
+
+    var chatMode = document.getElementById('ma-chat-mode').value;
+    var maxSteps = parseInt(document.getElementById('ma-max-steps').value, 10) || 8;
+
+    // Clear previous panes
+    _panes = {};
+    var oldPanes = paneGrid.querySelectorAll('.ma-pane');
+    oldPanes.forEach(function(p) { p.remove(); });
+    if (paneEmpty) paneEmpty.style.display = '';
+    summaryBar.classList.remove('show');
+    supText.textContent = '🧭 Supervisor analysing task…';
+
+    if (_src) { _src.close(); _src = null; }
+
+    var params = new URLSearchParams({
+      task: task,
+      roles: roles.join(','),
+      chat_mode: chatMode,
+      max_steps: maxSteps,
+    });
+    if (_sessionId) params.set('session_id', _sessionId);
+
+    var url = '/api/multi-agent/run?' + params.toString();
+    _src = new EventSource(url);
+    _running = true;
+    launchBtn.disabled = true;
+    stopBtn.classList.add('visible');
+
+    var events = ['session','supervisor','pane_init','pane_thinking','pane_tool',
+                  'pane_obs','pane_file','pane_done','pane_error','final','error'];
+    events.forEach(function(ev) {
+      _src.addEventListener(ev, function(e) {
+        try { handleEvent(ev, JSON.parse(e.data)); } catch(_) {}
+      });
+    });
+
+    _src.onerror = function() {
+      if (_running) {
+        supText.textContent = '⚠️ SSE connection lost.';
+        setIdle();
+      }
+    };
+  }
+
+  function setIdle() {
+    _running = false;
+    launchBtn.disabled = false;
+    stopBtn.classList.remove('visible');
+    if (_src) { _src.close(); _src = null; }
+    updatePool();
+  }
+
+  launchBtn.addEventListener('click', launch);
+  stopBtn.addEventListener('click', function() {
+    if (_src) _src.close();
+    setIdle();
+    supText.textContent = 'Stopped by user.';
+  });
+
+  // Enter key in task input (Shift+Enter = newline)
+  taskEl.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); launch(); }
+  });
+
+  // ── Past sessions ──────────────────────────────────────────────────
+  window.loadSessions = function() {
+    var modal = document.getElementById('sessions-modal');
+    var list  = document.getElementById('sessions-list');
+    modal.style.display = 'flex';
+    list.innerHTML = 'Loading…';
+    fetch('/api/multi-agent/sessions?limit=15')
+      .then(function(r) { return r.json(); })
+      .then(function(rows) {
+        if (!rows.length) { list.innerHTML = '<em>No sessions yet.</em>'; return; }
+        list.innerHTML = rows.map(function(r) {
+          var roles = '';
+          try { roles = JSON.parse(r.roles || '[]').join(', '); } catch(_) {}
+          return '<div style="padding:0.4rem 0;border-bottom:1px solid var(--border);">' +
+            '<div style="color:var(--fg);">' + escHtml((r.task || '').slice(0, 80)) + '</div>' +
+            '<div style="margin-top:2px;">' +
+              '<span style="color:var(--muted);">' + (r.created_at || '').slice(0,19) + '</span>' +
+              ' · <span style="' + (r.status==='completed'?'color:var(--ok)':'color:var(--muted)') + '">' + (r.status||'?') + '</span>' +
+              (roles ? ' · ' + escHtml(roles) : '') +
+            '</div>' +
+            (r.summary ? '<div style="color:var(--muted);font-size:0.74rem;margin-top:2px;">' + escHtml(r.summary.slice(0,120)) + '</div>' : '') +
+            '</div>';
+        }).join('');
+      }).catch(function() { list.innerHTML = '<em>Failed to load sessions.</em>'; });
+  };
+
+  // Close modal on backdrop click
+  document.getElementById('sessions-modal').addEventListener('click', function(e) {
+    if (e.target === this) this.style.display = 'none';
+  });
+
+})();
+</script>
+
+{% endblock %}

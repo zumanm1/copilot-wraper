@@ -2025,8 +2025,7 @@ async def _ma_role_loop(
 @app.get("/multi-agent", response_class=HTMLResponse, name="page_multi_agent")
 async def page_multi_agent(request: Request):
     """Multi-agent workspace — smux-style pane layout with parallel role agents."""
-    return templates.TemplateResponse("multi_agent.html", {
-        "request": request,
+    return templates.TemplateResponse(request, "multi_agent.html", {
         "agents": AGENTS,
         "ma_roles": _MA_ROLES,
     })
