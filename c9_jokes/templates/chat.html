@@ -119,6 +119,8 @@
       accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.docx,.xlsx,.xls,.pptx" multiple>
     <textarea id="prompt" rows="2" placeholder="Type a message… (Enter to send, Shift+Enter for newline)"></textarea>
     <button type="submit" id="send">Send</button>
+    <button type="button" id="send-ma" title="Send to Multi-Agent workspace"
+      style="background:rgba(227,179,65,0.15);border:1px solid #e3b341;color:#e3b341;border-radius:6px;padding:0.35rem 0.65rem;font-size:0.9rem;cursor:pointer;flex-shrink:0;">🤖</button>
   </div>
 </form>
 <style>
@@ -217,8 +219,14 @@
   const promptEl   = document.getElementById('prompt');
   const agentEl    = document.getElementById('agent_id');
   const sendBtn    = document.getElementById('send');
+  const sendMaBtn  = document.getElementById('send-ma');
   const clearBtn   = document.getElementById('clear-chat');
   let busy = false;
+
+  sendMaBtn.addEventListener('click', function() {
+    const task = promptEl.value.trim();
+    window.location.href = '/multi-agent' + (task ? '?task=' + encodeURIComponent(task) : '');
+  });
 
   // ── Thinking-mode dropdown ─────────────────────────────────────────
   const THINKING_LABELS = { auto: 'Auto', quick: 'Quick Response', deep: 'Think Deeper' };

@@ -110,7 +110,7 @@
   font-size: 0.8rem;
   color: var(--muted);
 }
-.ma-opts-row select, .ma-opts-row input[type=number] {
+.ma-opts-row input[type=number] {
   background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -118,6 +118,45 @@
   font-size: 0.8rem;
   padding: 0.2rem 0.4rem;
 }
+
+/* Thinking mode pill */
+.ma-thinking-dropdown { position: relative; display: inline-block; }
+.ma-thinking-pill {
+  display: inline-flex; align-items: center; gap: 2px;
+  background: var(--surface2); border: 1px solid var(--border);
+  color: var(--fg); border-radius: 999px; padding: 3px 10px;
+  font-size: 0.78rem; cursor: pointer; white-space: nowrap;
+}
+.ma-thinking-pill:hover { background: var(--card); }
+.ma-thinking-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 300;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 8px; padding: 4px; min-width: 200px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+}
+.ma-thinking-opt {
+  display: flex; flex-direction: column; align-items: flex-start;
+  padding: 6px 10px; border-radius: 6px; cursor: pointer;
+  background: none; border: none; width: 100%; text-align: left; color: var(--fg);
+}
+.ma-thinking-opt:hover, .ma-thinking-opt.selected { background: rgba(88,166,255,0.12); }
+.ma-thinking-opt-name { font-size: 0.82rem; font-weight: 500; }
+.ma-thinking-opt-desc { font-size: 0.72rem; color: var(--muted); }
+
+/* Work/Web toggle */
+.ma-mode-btn {
+  padding: 0.2rem 0.65rem;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  background: transparent;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+.ma-mode-btn:first-of-type { border-radius: 4px 0 0 4px; }
+.ma-mode-btn:last-of-type  { border-left: none; border-radius: 0 4px 4px 0; }
+.ma-mode-btn.active { background: var(--accent); color: #0d1117; font-weight: 600; }
+
+/* Pool pill */
 .pool-pill {
   display: inline-flex;
   align-items: center;
@@ -159,7 +198,42 @@
   white-space: nowrap;
   flex-shrink: 0;
 }
-#supervisor-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#supervisor-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+#ma-overall-progress {
+  white-space: nowrap;
+  flex-shrink: 0;
+  color: var(--ok);
+  font-size: 0.75rem;
+  font-weight: 600;
+  display: none;
+}
+
+/* Output button */
+.ma-output-btn {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  font-size: 0.78rem;
+  padding: 0.25rem 0.55rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  position: relative;
+  display: none;
+}
+.ma-output-btn:hover { color: var(--fg); }
+.ma-output-btn.show { display: inline-flex; align-items: center; gap: 0.3rem; }
+.ma-output-badge {
+  display: none;
+  background: var(--ok);
+  color: #0d1117;
+  border-radius: 999px;
+  padding: 0 5px;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1.4;
+}
+.ma-output-badge.show { display: inline-block; }
 
 /* ── Pane grid ────────────────────────────────────────────────────────────── */
 .ma-pane-grid {
@@ -196,6 +270,22 @@
 }
 .pane-emoji { font-size: 0.95rem; }
 .pane-role-label { color: var(--fg); }
+.pane-elapsed {
+  font-size: 0.68rem;
+  color: var(--muted);
+  font-family: monospace;
+  font-weight: 400;
+}
+.pane-model-badge {
+  font-size: 0.63rem;
+  color: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  font-weight: 400;
+  flex-shrink: 0;
+}
 .pane-status {
   margin-left: auto;
   padding: 0.1rem 0.4rem;
@@ -209,6 +299,21 @@
 .pane-status.done    { background: rgba(63,185,80,0.15);  color: var(--ok); }
 .pane-status.error   { background: rgba(248,81,73,0.15);  color: var(--fail); }
 .pane-step { font-size: 0.7rem; color: var(--muted); }
+
+/* Per-pane progress bar */
+.pane-progress {
+  height: 2px;
+  background: var(--surface2);
+  flex-shrink: 0;
+}
+.pane-progress-bar {
+  height: 100%;
+  width: 0%;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}
+.pane-progress-bar.done  { background: var(--ok); width: 100% !important; }
+.pane-progress-bar.error { background: var(--fail); width: 100% !important; }
 
 .pane-assignment {
   padding: 0.3rem 0.65rem;
@@ -305,6 +410,37 @@
   cursor: pointer;
 }
 .ma-sessions-btn:hover { color: var(--fg); }
+
+/* ── Output panel ────────────────────────────────────────────────────────── */
+.ma-output-panel {
+  display: none;
+  position: fixed;
+  top: 120px; right: 0; bottom: 0;
+  width: 280px;
+  background: var(--card);
+  border-left: 1px solid var(--border);
+  z-index: 150;
+  flex-direction: column;
+  overflow: hidden;
+}
+.ma-output-panel.open { display: flex; }
+.ma-output-panel-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.6rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.82rem; font-weight: 600;
+}
+.ma-output-panel-body {
+  flex: 1; overflow-y: auto; padding: 0.5rem 0.75rem;
+  font-size: 0.78rem;
+}
+.ma-out-file {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.25rem 0.3rem; border-radius: 4px;
+  cursor: pointer; color: var(--fg);
+}
+.ma-out-file:hover { background: var(--surface2); }
+.ma-out-file-icon { color: var(--muted); flex-shrink: 0; }
 </style>
 
 <div class="ma-workspace">
@@ -337,14 +473,33 @@
 
     <!-- Options -->
     <div class="ma-opts-row">
-      <label>Mode:
-        <select id="ma-chat-mode">
-          <option value="auto" selected>Auto</option>
-          <option value="quick">Quick</option>
-          <option value="deep">Deep</option>
-        </select>
-      </label>
-      <label>Max steps:
+      <!-- Thinking mode pill -->
+      <div class="ma-thinking-dropdown" id="ma-thinking-dropdown">
+        <button type="button" class="ma-thinking-pill" id="ma-thinking-pill" aria-haspopup="true" aria-expanded="false">
+          <span id="ma-thinking-label">Auto</span>
+          <svg width="9" height="5" viewBox="0 0 10 6" fill="none" style="margin-left:3px"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="ma-thinking-menu" id="ma-thinking-menu" hidden>
+          <button type="button" class="ma-thinking-opt" data-mode="auto">
+            <span class="ma-thinking-opt-name">Auto</span>
+            <span class="ma-thinking-opt-desc">Decides how long to think</span>
+          </button>
+          <button type="button" class="ma-thinking-opt" data-mode="quick">
+            <span class="ma-thinking-opt-name">Quick Response</span>
+            <span class="ma-thinking-opt-desc">Faster, less reasoning</span>
+          </button>
+          <button type="button" class="ma-thinking-opt" data-mode="deep">
+            <span class="ma-thinking-opt-name">Think Deeper</span>
+            <span class="ma-thinking-opt-desc">Extended thinking budget</span>
+          </button>
+        </div>
+      </div>
+      <!-- Work/Web toggle -->
+      <div style="display:flex;align-items:center;gap:0;">
+        <button type="button" id="ma-mode-work" class="ma-mode-btn active" data-mode="work">Work</button>
+        <button type="button" id="ma-mode-web"  class="ma-mode-btn"        data-mode="web">Web</button>
+      </div>
+      <label style="display:flex;align-items:center;gap:0.3rem;">Max steps:
         <input type="number" id="ma-max-steps" value="8" min="2" max="12" style="width:50px;">
       </label>
       <div class="pool-pill" id="pool-pill" title="C3 browser pool status">
@@ -359,6 +514,8 @@
   <div class="ma-supervisor-bar">
     <span class="supervisor-label">🧭 Supervisor</span>
     <span id="supervisor-text">Ready — enter a task and launch the team.</span>
+    <span id="ma-overall-progress"></span>
+    <button class="ma-output-btn" id="ma-output-btn" onclick="toggleOutputPanel()">📁 Output <span class="ma-output-badge" id="ma-output-badge"></span></button>
   </div>
 
   <!-- ── Pane grid ─────────────────────────────────────────────────────── -->
@@ -380,6 +537,29 @@
     style="background:none;border:none;color:var(--muted);cursor:pointer;margin-left:auto;">✕</button>
 </div>
 
+<!-- ── Output panel ────────────────────────────────────────────────────── -->
+<div class="ma-output-panel" id="ma-output-panel">
+  <div class="ma-output-panel-header">
+    <span>📁 Workspace Output</span>
+    <button onclick="toggleOutputPanel()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:1rem;">✕</button>
+  </div>
+  <div class="ma-output-panel-body" id="ma-output-panel-body">
+    <div style="color:var(--muted);font-size:0.78rem;padding:0.5rem 0;">Files created by agents will appear here after completion.</div>
+  </div>
+</div>
+
+<!-- ── File preview modal ──────────────────────────────────────────────── -->
+<div id="ma-file-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:400;align-items:center;justify-content:center;">
+  <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1.25rem;max-width:700px;width:92%;max-height:80vh;display:flex;flex-direction:column;gap:0.75rem;">
+    <div style="display:flex;align-items:center;justify-content:space-between;">
+      <strong id="ma-file-title" style="font-size:0.88rem;font-family:monospace;"></strong>
+      <button onclick="document.getElementById('ma-file-overlay').style.display='none'"
+        style="background:none;border:none;color:var(--muted);font-size:1.1rem;cursor:pointer;">✕</button>
+    </div>
+    <pre id="ma-file-content" style="overflow:auto;flex:1;background:var(--surface2);border-radius:6px;padding:0.75rem;font-size:0.78rem;margin:0;max-height:60vh;white-space:pre-wrap;word-break:break-all;"></pre>
+  </div>
+</div>
+
 <!-- ── Sessions modal ─────────────────────────────────────────────────────── -->
 <div id="sessions-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:200;align-items:center;justify-content:center;">
   <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1.25rem;max-width:560px;width:90%;max-height:70vh;display:flex;flex-direction:column;gap:0.75rem;">
@@ -399,18 +579,37 @@
   // ── State ─────────────────────────────────────────────────────────────
   var _src = null;
   var _running = false;
-  var _panes = {};          // pane_id → {el, bodyEl, statusEl, stepEl}
+  var _panes = {};          // pane_id → {el, bodyEl, statusEl, stepEl, progressEl, elapsedEl, badgeEl}
   var _sessionId = '';
+  var _paneDone = 0;
+  var _paneTotal = 0;
+  var _paneStart = {};      // pane_id → timestamp
+  var _paneTimers = {};     // pane_id → setInterval handle
+  var _maxSteps = 8;
+  var _reconnectAttempts = 0;
+  var _workMode = 'work';
+  var _thinkingMode = localStorage.getItem('maThinkingMode') || 'auto';
 
   // ── Elements ──────────────────────────────────────────────────────────
-  var taskEl      = document.getElementById('ma-task');
-  var launchBtn   = document.getElementById('ma-launch');
-  var stopBtn     = document.getElementById('ma-stop');
-  var paneGrid    = document.getElementById('pane-grid');
-  var paneEmpty   = document.getElementById('pane-empty');
-  var supText     = document.getElementById('supervisor-text');
-  var summaryBar  = document.getElementById('ma-summary-bar');
-  var summaryText = document.getElementById('ma-summary-text');
+  var taskEl         = document.getElementById('ma-task');
+  var launchBtn      = document.getElementById('ma-launch');
+  var stopBtn        = document.getElementById('ma-stop');
+  var paneGrid       = document.getElementById('pane-grid');
+  var paneEmpty      = document.getElementById('pane-empty');
+  var supText        = document.getElementById('supervisor-text');
+  var overallProg    = document.getElementById('ma-overall-progress');
+  var summaryBar     = document.getElementById('ma-summary-bar');
+  var summaryText    = document.getElementById('ma-summary-text');
+  var outputBtn      = document.getElementById('ma-output-btn');
+  var outputBadge    = document.getElementById('ma-output-badge');
+  var outputPanel    = document.getElementById('ma-output-panel');
+  var outputBody     = document.getElementById('ma-output-panel-body');
+
+  // ── URL param: pre-fill task ──────────────────────────────────────────
+  (function() {
+    var urlTask = new URLSearchParams(window.location.search).get('task');
+    if (urlTask) { taskEl.value = urlTask; }
+  })();
 
   // ── Role chips ─────────────────────────────────────────────────────
   document.querySelectorAll('.ma-role-chip').forEach(function(chip) {
@@ -424,9 +623,48 @@
       .map(function(c) { return c.dataset.role; });
   }
 
+  // ── Thinking mode ─────────────────────────────────────────────────────
+  var THINKING_LABELS = { auto: 'Auto', quick: 'Quick', deep: 'Deep Think' };
+  var thinkingPill  = document.getElementById('ma-thinking-pill');
+  var thinkingMenu  = document.getElementById('ma-thinking-menu');
+  var thinkingLabel = document.getElementById('ma-thinking-label');
+
+  function applyThinkingMode(mode) {
+    _thinkingMode = mode;
+    thinkingLabel.textContent = THINKING_LABELS[mode] || 'Auto';
+    localStorage.setItem('maThinkingMode', mode);
+    document.querySelectorAll('.ma-thinking-opt').forEach(function(btn) {
+      btn.classList.toggle('selected', btn.dataset.mode === mode);
+    });
+    thinkingMenu.hidden = true;
+    thinkingPill.setAttribute('aria-expanded', 'false');
+  }
+  applyThinkingMode(_thinkingMode);
+
+  thinkingPill.addEventListener('click', function(e) {
+    e.stopPropagation();
+    var open = !thinkingMenu.hidden;
+    thinkingMenu.hidden = open;
+    thinkingPill.setAttribute('aria-expanded', String(!open));
+  });
+  document.querySelectorAll('.ma-thinking-opt').forEach(function(btn) {
+    btn.addEventListener('click', function() { applyThinkingMode(btn.dataset.mode); });
+  });
+  document.addEventListener('click', function() { thinkingMenu.hidden = true; });
+
+  // ── Work/Web mode ─────────────────────────────────────────────────────
+  document.querySelectorAll('.ma-mode-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      _workMode = btn.dataset.mode;
+      document.querySelectorAll('.ma-mode-btn').forEach(function(b) {
+        b.classList.toggle('active', b.dataset.mode === _workMode);
+      });
+    });
+  });
+
   // ── Pool status poll ───────────────────────────────────────────────
   function updatePool() {
-    fetch('/api/session-health').then(function(r) { return r.json(); })
+    fetch('http://localhost:8001/status').then(function(r) { return r.json(); })
       .then(function(d) {
         var poolAvail = d.pool_available != null ? d.pool_available : '?';
         var poolSize  = d.pool_size != null ? d.pool_size : '?';
@@ -440,17 +678,41 @@
           else                      dot.classList.add('low');
         }
       }).catch(function() {
-        document.getElementById('pool-label').textContent = 'Pool: ?';
+        document.getElementById('pool-label').textContent = 'Pool: offline';
       });
   }
   updatePool();
   setInterval(updatePool, 8000);
 
+  // ── Elapsed time helpers ───────────────────────────────────────────
+  function fmtElapsed(ms) {
+    var s = Math.floor(ms / 1000);
+    if (s < 60) return s + 's';
+    return Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+  }
+
+  function startPaneTimer(paneId) {
+    _paneStart[paneId] = Date.now();
+    var p = _panes[paneId];
+    if (!p) return;
+    _paneTimers[paneId] = setInterval(function() {
+      if (p.elapsedEl) {
+        p.elapsedEl.textContent = fmtElapsed(Date.now() - _paneStart[paneId]);
+      }
+    }, 1000);
+  }
+
+  function stopPaneTimer(paneId) {
+    if (_paneTimers[paneId]) {
+      clearInterval(_paneTimers[paneId]);
+      delete _paneTimers[paneId];
+    }
+  }
+
   // ── Create pane element ────────────────────────────────────────────
   function createPane(paneId, role, label, emoji, assignment) {
     if (_panes[paneId]) return;
 
-    // Hide empty placeholder
     if (paneEmpty) paneEmpty.style.display = 'none';
 
     var pane = document.createElement('div');
@@ -459,14 +721,53 @@
 
     var header = document.createElement('div');
     header.className = 'pane-header';
-    header.innerHTML =
-      '<span class="pane-emoji">' + emoji + '</span>' +
-      '<span class="pane-role-label">' + escHtml(label) + '</span>' +
-      '<span class="pane-step" id="step-' + paneId + '">step 0</span>' +
-      '<span class="pane-status running" id="status-' + paneId + '">running</span>';
+
+    var emojiSpan = document.createElement('span');
+    emojiSpan.className = 'pane-emoji';
+    emojiSpan.textContent = emoji;
+
+    var labelSpan = document.createElement('span');
+    labelSpan.className = 'pane-role-label';
+    labelSpan.textContent = label;
+
+    var stepSpan = document.createElement('span');
+    stepSpan.className = 'pane-step';
+    stepSpan.id = 'step-' + paneId;
+    stepSpan.textContent = 'step 0';
+
+    var elapsedSpan = document.createElement('span');
+    elapsedSpan.className = 'pane-elapsed';
+    elapsedSpan.id = 'elapsed-' + paneId;
+    elapsedSpan.textContent = '0s';
+
+    var modeBadge = document.createElement('span');
+    modeBadge.className = 'pane-model-badge';
+    modeBadge.id = 'badge-' + paneId;
+    modeBadge.textContent = 'Copilot · ' + _thinkingMode;
+
+    var statusSpan = document.createElement('span');
+    statusSpan.className = 'pane-status running';
+    statusSpan.id = 'status-' + paneId;
+    statusSpan.textContent = 'running';
+
+    header.appendChild(emojiSpan);
+    header.appendChild(labelSpan);
+    header.appendChild(stepSpan);
+    header.appendChild(elapsedSpan);
+    header.appendChild(modeBadge);
+    header.appendChild(statusSpan);
+
+    // Progress bar
+    var progressWrap = document.createElement('div');
+    progressWrap.className = 'pane-progress';
+    var progressBar = document.createElement('div');
+    progressBar.className = 'pane-progress-bar';
+    progressBar.id = 'progress-' + paneId;
+    progressWrap.appendChild(progressBar);
 
     var assignRow = document.createElement('div');
     assignRow.className = 'pane-assignment';
+    assignRow.id = 'assign-' + paneId;
     assignRow.textContent = assignment || '';
 
     var body = document.createElement('div');
@@ -474,6 +775,7 @@
     body.id = 'body-' + paneId;
 
     pane.appendChild(header);
+    pane.appendChild(progressWrap);
     pane.appendChild(assignRow);
     pane.appendChild(body);
     paneGrid.appendChild(pane);
@@ -481,9 +783,22 @@
     _panes[paneId] = {
       el: pane,
       bodyEl: body,
-      statusEl: document.getElementById('status-' + paneId),
-      stepEl: document.getElementById('step-' + paneId),
+      statusEl: statusSpan,
+      stepEl: stepSpan,
+      progressEl: progressBar,
+      elapsedEl: elapsedSpan,
+      badgeEl: modeBadge,
     };
+
+    startPaneTimer(paneId);
+  }
+
+  // ── Update pane progress bar ───────────────────────────────────────
+  function updateProgress(paneId, step) {
+    var p = _panes[paneId];
+    if (!p || !p.progressEl) return;
+    var pct = Math.min(Math.round(step / _maxSteps * 95), 95);
+    p.progressEl.style.width = pct + '%';
   }
 
   // ── Append entry to pane body ──────────────────────────────────────
@@ -514,6 +829,14 @@
     if (stepNum != null) p.stepEl.textContent = 'step ' + stepNum;
   }
 
+  // ── Overall progress ───────────────────────────────────────────────
+  function refreshOverallProgress() {
+    if (_paneTotal === 0) { overallProg.style.display = 'none'; return; }
+    var pct = Math.round(_paneDone / _paneTotal * 100);
+    overallProg.style.display = '';
+    overallProg.textContent = _paneDone + '/' + _paneTotal + ' agents done (' + pct + '%)';
+  }
+
   // ── SSE event handlers ─────────────────────────────────────────────
   function handleEvent(type, data) {
     var paneId = data.pane_id;
@@ -522,6 +845,7 @@
 
       case 'session':
         _sessionId = data.session_id || '';
+        _reconnectAttempts = 0;
         break;
 
       case 'supervisor':
@@ -536,16 +860,20 @@
         break;
 
       case 'pane_init':
+        _paneTotal++;
         createPane(paneId, data.role, data.label, data.emoji || '🤖', data.assignment || '');
+        refreshOverallProgress();
         break;
 
       case 'pane_thinking':
         updatePaneStatus(paneId, 'running', data.step);
+        updateProgress(paneId, data.step || 0);
         appendPane(paneId, 'pe-thinking',
           stepBadge(data.step) + escHtml((data.text || '').slice(0, 500)));
         break;
 
       case 'pane_tool':
+        updateProgress(paneId, data.step || 0);
         appendPane(paneId, 'pe-tool',
           stepBadge(data.step) + '⚙ ' + escHtml((data.type || '') + ': ' + (data.content || '').slice(0, 200)));
         break;
@@ -563,13 +891,21 @@
         break;
 
       case 'pane_done':
+        stopPaneTimer(paneId);
+        _paneDone++;
         updatePaneStatus(paneId, 'done', data.step);
+        var pb = _panes[paneId];
+        if (pb && pb.progressEl) pb.progressEl.className = 'pane-progress-bar done';
         appendPane(paneId, 'pe-done',
           '✅ ' + escHtml((data.summary || '').slice(0, 300)));
+        refreshOverallProgress();
         break;
 
       case 'pane_error':
+        stopPaneTimer(paneId);
         updatePaneStatus(paneId, 'error', null);
+        var pe = _panes[paneId];
+        if (pe && pe.progressEl) pe.progressEl.className = 'pane-progress-bar error';
         appendPane(paneId, 'pe-error', '❌ ' + escHtml((data.message || '').slice(0, 300)));
         break;
 
@@ -579,6 +915,8 @@
         var doneCount = Object.values(results).filter(function(r) { return r.done; }).length;
         summaryText.textContent = data.summary || (doneCount + ' agents completed.');
         summaryBar.classList.add('show');
+        // Load output files
+        loadOutputFiles();
         updatePool();
         break;
 
@@ -604,15 +942,25 @@
       return;
     }
 
-    var chatMode = document.getElementById('ma-chat-mode').value;
-    var maxSteps = parseInt(document.getElementById('ma-max-steps').value, 10) || 8;
+    _maxSteps = parseInt(document.getElementById('ma-max-steps').value, 10) || 8;
 
     // Clear previous panes
     _panes = {};
+    _paneDone = 0;
+    _paneTotal = 0;
+    _paneStart = {};
+    Object.keys(_paneTimers).forEach(function(id) { clearInterval(_paneTimers[id]); });
+    _paneTimers = {};
+    _reconnectAttempts = 0;
+
     var oldPanes = paneGrid.querySelectorAll('.ma-pane');
     oldPanes.forEach(function(p) { p.remove(); });
     if (paneEmpty) paneEmpty.style.display = '';
     summaryBar.classList.remove('show');
+    overallProg.style.display = 'none';
+    outputBtn.classList.remove('show');
+    outputBadge.classList.remove('show');
+    outputPanel.classList.remove('open');
     supText.textContent = '🧭 Supervisor analysing task…';
 
     if (_src) { _src.close(); _src = null; }
@@ -620,8 +968,9 @@
     var params = new URLSearchParams({
       task: task,
       roles: roles.join(','),
-      chat_mode: chatMode,
-      max_steps: maxSteps,
+      chat_mode: _thinkingMode,
+      work_mode: _workMode,
+      max_steps: _maxSteps,
     });
     if (_sessionId) params.set('session_id', _sessionId);
 
@@ -640,8 +989,12 @@
     });
 
     _src.onerror = function() {
-      if (_running) {
-        supText.textContent = '⚠️ SSE connection lost.';
+      if (!_running) return;
+      _reconnectAttempts++;
+      if (_reconnectAttempts <= 3) {
+        supText.textContent = '⚠️ SSE reconnecting… (' + _reconnectAttempts + '/3)';
+      } else {
+        supText.textContent = '❌ SSE connection failed after 3 attempts.';
         setIdle();
       }
     };
@@ -652,6 +1005,8 @@
     launchBtn.disabled = false;
     stopBtn.classList.remove('visible');
     if (_src) { _src.close(); _src = null; }
+    // Stop any running timers
+    Object.keys(_paneTimers).forEach(function(id) { clearInterval(_paneTimers[id]); });
     updatePool();
   }
 
@@ -662,9 +1017,70 @@
     supText.textContent = 'Stopped by user.';
   });
 
-  // Enter key in task input (Shift+Enter = newline)
   taskEl.addEventListener('keydown', function(e) {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); launch(); }
+  });
+
+  // ── Output panel ───────────────────────────────────────────────────
+  window.toggleOutputPanel = function() {
+    outputPanel.classList.toggle('open');
+  };
+
+  function getFileIcon(path) {
+    var ext = (path.split('.').pop() || '').toLowerCase();
+    return ({py:'🐍',js:'📜',ts:'📘',jsx:'⚛',tsx:'⚛',html:'🌐',css:'🎨',
+             json:'📋',md:'📝',txt:'📄',sh:'⚙',yml:'⚙',yaml:'⚙',
+             toml:'⚙',env:'🔑',sql:'🗄',log:'📋'})[ext] || '📄';
+  }
+
+  function loadOutputFiles() {
+    fetch('/api/agent/files')
+      .then(function(r) { return r.json(); })
+      .then(function(files) {
+        if (!files || !files.length) return;
+        outputBody.innerHTML = '';
+        var count = 0;
+        files.forEach(function(f) {
+          if (f.type === 'file') {
+            count++;
+            var row = document.createElement('div');
+            row.className = 'ma-out-file';
+            row.innerHTML = '<span class="ma-out-file-icon">' + getFileIcon(f.path) + '</span>' +
+                            '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escHtml(f.path) + '">' + escHtml(f.path) + '</span>';
+            row.addEventListener('click', function() { openFilePreview(f.path); });
+            outputBody.appendChild(row);
+          }
+        });
+        if (count > 0) {
+          outputBtn.classList.add('show');
+          outputBadge.textContent = count;
+          outputBadge.classList.add('show');
+          outputPanel.classList.add('open');
+        }
+      }).catch(function() {});
+  }
+
+  function openFilePreview(path) {
+    document.getElementById('ma-file-title').textContent = path;
+    document.getElementById('ma-file-content').textContent = 'Loading…';
+    var overlay = document.getElementById('ma-file-overlay');
+    overlay.style.display = 'flex';
+    fetch('/api/agent/file?path=' + encodeURIComponent(path))
+      .then(function(r) { return r.text(); })
+      .then(function(t) {
+        try {
+          var obj = JSON.parse(t);
+          document.getElementById('ma-file-content').textContent = obj.content || obj.text || t;
+        } catch(_) {
+          document.getElementById('ma-file-content').textContent = t;
+        }
+      }).catch(function() {
+        document.getElementById('ma-file-content').textContent = '(failed to load)';
+      });
+  }
+
+  document.getElementById('ma-file-overlay').addEventListener('click', function(e) {
+    if (e.target === this) this.style.display = 'none';
   });
 
   // ── Past sessions ──────────────────────────────────────────────────
@@ -693,7 +1109,6 @@
       }).catch(function() { list.innerHTML = '<em>Failed to load sessions.</em>'; });
   };
 
-  // Close modal on backdrop click
   document.getElementById('sessions-modal').addEventListener('click', function(e) {
     if (e.target === this) this.style.display = 'none';
   });

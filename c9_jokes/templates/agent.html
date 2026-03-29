@@ -638,6 +638,7 @@
         <div style="display:flex;flex-direction:column;gap:0.4rem;align-items:center;">
           <button type="button" class="btn-run" id="btn-run">▶ Run</button>
           <button type="button" class="btn-stop" id="btn-stop" style="display:none">◼ Stop</button>
+          <button type="button" class="btn-sm" id="btn-run-ma" title="Run as multi-agent team" style="background:rgba(227,179,65,0.15);border-color:#e3b341;color:#e3b341;">🤖</button>
           <button type="button" class="btn-sm" id="btn-attach" title="Attach file to workspace">📎</button>
         </div>
       </div>
@@ -704,6 +705,7 @@
   const filetreeList     = document.getElementById('filetree-list');
   const taskInput        = document.getElementById('task-input');
   const btnRun           = document.getElementById('btn-run');
+  const btnRunMa         = document.getElementById('btn-run-ma');
   const btnStop          = document.getElementById('btn-stop');
   const btnResetWs       = document.getElementById('btn-reset-ws');
   const btnRefresh       = document.getElementById('refresh-files');
@@ -1431,6 +1433,11 @@
   }
 
   btnRun.addEventListener('click', runTask);
+  btnRunMa.addEventListener('click', function() {
+    var task = taskInput.value.trim();
+    if (!task) { taskInput.focus(); return; }
+    window.location.href = '/multi-agent?task=' + encodeURIComponent(task);
+  });
   taskInput.addEventListener('keydown', function(e) {
     if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runTask(); }
   });

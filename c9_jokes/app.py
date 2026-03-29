@@ -1967,6 +1967,11 @@ _MA_ROLES = {
         "emoji": "🐛",
         "desc": "Reads logs, patches broken files, re-runs commands to fix errors.",
     },
+    "reporter": {
+        "label": "Reporter",
+        "emoji": "📊",
+        "desc": "Monitors agent progress and produces a structured status report: % complete, what's done, what's pending, any blockers.",
+    },
 }
 
 # Default roles to activate when none specified

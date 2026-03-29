@@ -120,6 +120,7 @@
   <div style="display:flex;gap:0.5rem;margin-top:0.5rem;flex-wrap:wrap;align-items:center;">
     <button type="button" id="run-all">Run all agents</button>
     <button type="button" id="run-parallel" class="btn-parallel">Run All Parallel ⚡</button>
+    <button type="button" id="run-ma" style="background:rgba(227,179,65,0.15);border:1px solid #e3b341;color:#e3b341;border-radius:6px;padding:0.35rem 0.8rem;font-size:0.82rem;cursor:pointer;">🤖 Multi-Agent</button>
     <button type="button" id="load-history" class="btn-secondary">Load history</button>
     <button type="button" id="reset-all" class="btn-reset">Reset All</button>
     <!-- Pool status badge -->
@@ -184,6 +185,7 @@ python3 tests/validate_all_agents.py --parallel</pre>
   const agents = {{ agents | tojson }};
   const runBtn      = document.getElementById('run-all');
   const parallelBtn = document.getElementById('run-parallel');
+  const runMaBtn    = document.getElementById('run-ma');
   const histBtn     = document.getElementById('load-history');
   const resetBtn    = document.getElementById('reset-all');
   const summaryEl   = document.getElementById('summary');
@@ -519,6 +521,13 @@ python3 tests/validate_all_agents.py --parallel</pre>
 
   // Run all parallel
   parallelBtn.addEventListener('click', function() { doRun(true); });
+
+  // Launch as multi-agent team — use first active pair's prompt as task
+  runMaBtn.addEventListener('click', function() {
+    const promptEl = document.querySelector('.pair-prompt');
+    const task = promptEl ? promptEl.value.trim() : '';
+    window.location.href = '/multi-agent' + (task ? '?task=' + encodeURIComponent(task) : '');
+  });
 
   // Reset All — client-side only, no server call
   resetBtn.addEventListener('click', function() {
