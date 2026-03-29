@@ -1369,54 +1369,161 @@ async def _browser_chat_on_page(
                 }""", send_sel)
                 print(f"[browser_chat] Tier3: dispatchEvent on send button")
 
-        # Wait for the done event or timeout
+        # ── Wait for response — with smart retry on Copilot service errors ──────
+        # Three possible outcomes from each attempt:
+        #   (a) Good WS response → done_event set, collected_text has data
+        #   (b) "Something went wrong" → detect it, click "Try again", retry up to 3x
+        #   (c) Timeout → check spinner (still generating?) → extend wait → DOM fallback
         timeout_s = timeout_ms / 1000.0
-        try:
-            await asyncio.wait_for(done_event.wait(), timeout=timeout_s)
-        except asyncio.TimeoutError:
-            print(f"[browser_chat] WS timeout after {timeout_s}s — trying DOM fallback")
+        _MAX_CHAT_RETRIES = 3
+        text = ""
 
-        text = "".join(collected_text)
+        for _attempt in range(_MAX_CHAT_RETRIES + 1):
+            # ── Wait for WS completion signal ──────────────────────────────────
+            try:
+                await asyncio.wait_for(done_event.wait(), timeout=timeout_s)
+                print(f"[browser_chat] WS done_event received (attempt {_attempt + 1})")
+                # After WS signals done, Copilot may still be rendering the final DOM.
+                # Wait briefly so we capture the complete response text.
+                await asyncio.sleep(1.5)
+            except asyncio.TimeoutError:
+                # Before giving up, check if Copilot is still actively generating.
+                # The "Stop generating" button or a spinner = response still in progress.
+                still_gen = await page.evaluate("""() => {
+                    for (const b of document.querySelectorAll('button,[role="button"]')) {
+                        const txt = ((b.textContent || '') +
+                                     (b.getAttribute('aria-label') || '')).toLowerCase();
+                        if (txt.includes('stop generating') ||
+                            txt.includes('stop responding')) return 'stop_btn';
+                    }
+                    const spinners = document.querySelectorAll(
+                        '[data-testid*="typing"], [class*="typing-indicator"], ' +
+                        '[class*="TypingIndicator"], [class*="spinner"], ' +
+                        '[aria-label*="generating"], [aria-label*="loading"]'
+                    );
+                    return spinners.length > 0 ? 'spinner' : null;
+                }""")
+                if still_gen:
+                    print(f"[browser_chat] Copilot still generating ({still_gen}) — extending wait 60s")
+                    try:
+                        await asyncio.wait_for(done_event.wait(), timeout=60)
+                        await asyncio.sleep(1.5)  # settle after extended wait too
+                    except asyncio.TimeoutError:
+                        print("[browser_chat] Extended wait expired — proceeding with DOM fallback")
+                else:
+                    print(f"[browser_chat] WS timeout after {timeout_s:.0f}s — trying DOM fallback")
 
-        # ── DOM fallback: extract response text from the page if WS gave nothing ──
-        if not text:
-            await asyncio.sleep(2)  # Give the UI a moment to finish rendering
-            dom_text = await page.evaluate("""() => {
-                // M365 Copilot renders responses in message containers
-                // Look for the LAST assistant/bot message on the page
-                const allMsgs = document.querySelectorAll(
-                    '[data-content="ai-message"], [data-is-bot-message="true"], ' +
-                    '.ac-textBlock, [class*="assistantMessage"], [class*="botMessage"], ' +
-                    '[data-testid*="message"][data-testid*="bot"], ' +
-                    '[role="article"]'
-                );
-                if (allMsgs.length > 0) {
-                    const last = allMsgs[allMsgs.length - 1];
-                    return last.innerText || last.textContent || '';
-                }
-                // Broader fallback: look for the last turn-container with paragraphs
-                const turns = document.querySelectorAll('[class*="turn"]');
-                if (turns.length > 1) {
-                    const last = turns[turns.length - 1];
-                    const ps = last.querySelectorAll('p, span, div');
-                    const parts = [];
-                    ps.forEach(p => { if (p.innerText.trim()) parts.push(p.innerText.trim()); });
-                    return parts.join('\\n');
-                }
-                return '';
-            }""")
-            if dom_text and dom_text.strip():
-                text = dom_text.strip()
-                print(f"[browser_chat] DOM fallback extracted {len(text)} chars")
+            # ── Collect what WS delivered ──────────────────────────────────────
+            text = "".join(collected_text)
 
-        success = len(text) > 0
+            # ── DOM fallback: extract response if WS gave nothing ─────────────
+            # Also used to confirm the final rendered text after WS done.
+            if not text:
+                await asyncio.sleep(2)  # give React time to finish rendering
+                dom_text = await page.evaluate("""() => {
+                    // Strategy 1: explicit bot-message containers (most precise)
+                    const botSels = [
+                        '[data-content="ai-message"]',
+                        '[data-is-bot-message="true"]',
+                        '.ac-textBlock',
+                        '[class*="assistantMessage"]',
+                        '[class*="botMessage"]',
+                        '[data-testid*="bot"][data-testid*="message"]',
+                    ];
+                    for (const sel of botSels) {
+                        const msgs = document.querySelectorAll(sel);
+                        if (msgs.length > 0) {
+                            const last = msgs[msgs.length - 1];
+                            const t = (last.innerText || last.textContent || '').trim();
+                            if (t) return t;
+                        }
+                    }
+                    // Strategy 2: role="article" — M365 uses this for each chat turn
+                    // Skip any that look like user messages (short, ends with ?)
+                    const articles = [...document.querySelectorAll('[role="article"]')];
+                    for (let i = articles.length - 1; i >= 0; i--) {
+                        const t = (articles[i].innerText || articles[i].textContent || '').trim();
+                        // Skip the user's own message (heuristic: very short or the user prompt)
+                        if (t && t.length > 20) return t;
+                    }
+                    // Strategy 3: last turn container with paragraph children
+                    const turns = document.querySelectorAll('[class*="turn"]');
+                    if (turns.length > 1) {
+                        const last = turns[turns.length - 1];
+                        const ps = [...last.querySelectorAll('p, li, pre, code')];
+                        const parts = ps.map(p => (p.innerText || '').trim()).filter(Boolean);
+                        if (parts.length) return parts.join('\\n');
+                    }
+                    return '';
+                }""")
+                if dom_text and dom_text.strip():
+                    text = dom_text.strip()
+                    print(f"[browser_chat] DOM fallback extracted {len(text)} chars")
+
+            # ── Service-error detection: "Something went wrong" ───────────────
+            # Copilot M365 shows this when the service is overloaded.
+            # The UI renders a "Try again" button — click it and retry.
+            _SERVICE_PHRASES = ("something went wrong", "please try again later")
+            _is_service_err = any(p in text.lower() for p in _SERVICE_PHRASES)
+
+            if _is_service_err and _attempt < _MAX_CHAT_RETRIES:
+                _clicked_retry = await page.evaluate("""() => {
+                    // Find the "Try again" / "Retry" button Copilot shows after errors
+                    const allBtns = [...document.querySelectorAll('button,[role="button"]')];
+                    for (const b of allBtns) {
+                        const t = ((b.textContent || '') +
+                                   (b.getAttribute('aria-label') || '')).toLowerCase().trim();
+                        if (t === 'try again' || t.startsWith('try again') ||
+                            t === 'retry') {
+                            b.dispatchEvent(new MouseEvent('click', {
+                                bubbles: true, cancelable: true, view: window
+                            }));
+                            return true;
+                        }
+                    }
+                    return false;
+                }""")
+
+                # Clear state BEFORE sleeping so new WS events during backoff are captured
+                done_event.clear()
+                collected_text.clear()
+                text = ""
+
+                _wait_s = (_attempt + 1) * 12  # 12s → 24s → 36s backoff
+                if _clicked_retry:
+                    print(f"[browser_chat] ⚠️ Service error — clicked 'Try again', "
+                          f"waiting {_wait_s}s (attempt {_attempt + 1}/{_MAX_CHAT_RETRIES})")
+                else:
+                    print(f"[browser_chat] ⚠️ Service error — 'Try again' not found, "
+                          f"waiting {_wait_s}s anyway (attempt {_attempt + 1}/{_MAX_CHAT_RETRIES})")
+                await asyncio.sleep(_wait_s)
+                continue  # back to top of retry loop
+
+            # Good response or out of retries — exit loop
+            break
+
+        # ── Final result ──────────────────────────────────────────────────────
+        _service_error_final = any(p in text.lower() for p in ("something went wrong", "please try again later"))
+        success = bool(text) and not _service_error_final
         _timings["ws_wait_ms"] = int((time.monotonic() - _t_submit) * 1000)
         _timings["total_ms"] = int((time.monotonic() - _t_start) * 1000)
         _timings["text_len"] = len(text)
         _timings["success"] = success
+        _timings["attempts"] = _attempt + 1
         print(f"[browser_chat] PERF: {_timings}")
-        print(f"[browser_chat] success={success}, recv={events_recv[:10]}, sent={events_sent[:10]}, ws_urls={[u[:60] for u in ws_urls]}, text_len={len(text)}")
-        return {"success": success, "events": events_recv, "events_sent": events_sent, "ws_urls": ws_urls, "text": text, "perf": _timings}, page
+        print(f"[browser_chat] success={success}, recv={events_recv[:10]}, sent={events_sent[:10]}, "
+              f"ws_urls={[u[:60] for u in ws_urls]}, text_len={len(text)}")
+        result = {
+            "success": success,
+            "events": events_recv,
+            "events_sent": events_sent,
+            "ws_urls": ws_urls,
+            "text": text,
+            "perf": _timings,
+        }
+        if _service_error_final:
+            result["service_error"] = True
+        return result, page
 
     except Exception as e:
         print(f"[browser_chat] error: {e}")

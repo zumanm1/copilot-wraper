@@ -297,12 +297,26 @@ def _parse_tool_call(text: str) -> dict | None:
     lines = text.strip().splitlines()
 
     def _clean_path(p: str) -> str:
-        """Strip surrounding backticks, quotes, and whitespace from a file path."""
-        return p.strip().strip("`").strip("'\"").strip()
+        """Strip surrounding backticks, quotes, markdown bold markers, and whitespace."""
+        cleaned = p.strip().strip("`").strip("'\"").strip("*").strip()
+        # Remove markdown citation refs like \ue200cite\ue202...\ue201
+        cleaned = re.sub(r'[\ue200-\ue2ff][^\s]*', '', cleaned).strip()
+        # If result is not a valid filename (no extension or invalid chars), return empty
+        if not cleaned or cleaned in ("**", "*", "file", "filename"):
+            return ""
+        return cleaned
 
     def _clean_cmd(c: str) -> str:
         """Strip surrounding backticks and whitespace from a shell command."""
-        return c.strip().strip("`").strip()
+        cleaned = c.strip().strip("`").strip()
+        # Reject template placeholders from prompt examples
+        _placeholder_cmds = (
+            "command", "<command>", "shell command", "<shell command>",
+            "cmd", "<cmd>", "your command here",
+        )
+        if cleaned.lower() in _placeholder_cmds:
+            return ""
+        return cleaned
 
     # ── FILE: path ───────────────────────────────────────────────────────────
     # Matches:  FILE: calc.py\n```[lang]\n...content...\n```
@@ -312,41 +326,49 @@ def _parse_tool_call(text: str) -> dict | None:
         text, re.DOTALL | re.IGNORECASE,
     )
     if file_m:
-        return {
-            "tool": "write_file",
-            "path": _clean_path(file_m.group(1)),
-            "content": file_m.group(2),
-        }
+        _fp = _clean_path(file_m.group(1))
+        if _fp:  # only write if path is valid
+            return {"tool": "write_file", "path": _fp, "content": file_m.group(2)}
 
     # Also handle FILE without fenced block (bare content, may have blank lines)
     # Use .* (not .+) so empty lines inside file content are captured too
     file_m2 = re.search(r"FILE:\s*`?([^`\n]+?)`?\s*\n((?:(?!FILE:|RUN:|INSTALL:|READ:|DONE:).*\n)+)", text, re.IGNORECASE)
     if file_m2 and len(file_m2.group(2).strip()) > 10:
-        return {
-            "tool": "write_file",
-            "path": _clean_path(file_m2.group(1)),
-            "content": file_m2.group(2),
-        }
+        _fp2 = _clean_path(file_m2.group(1))
+        if _fp2:
+            return {"tool": "write_file", "path": _fp2, "content": file_m2.group(2)}
 
     # ── RUN: command ─────────────────────────────────────────────────────────
     run_m = re.search(r"^RUN:\s*`?(.+?)`?\s*$", text, re.MULTILINE | re.IGNORECASE)
     if run_m:
-        return {"tool": "exec", "command": _clean_cmd(run_m.group(1))}
+        _cmd = _clean_cmd(run_m.group(1))
+        if _cmd:
+            return {"tool": "exec", "command": _cmd}
 
     # ── INSTALL: pip install X  or  npm install X ────────────────────────────
     inst_m = re.search(r"^INSTALL:\s*(.+)$", text, re.MULTILINE | re.IGNORECASE)
     if inst_m:
         raw = inst_m.group(1).strip()
-        # Normalise: "pip install flask" → package=flask, manager=pip
-        #            "npm install express" → package=express, manager=npm
-        pip_m  = re.match(r"pip\s+install\s+(.+)", raw, re.IGNORECASE)
-        npm_m  = re.match(r"npm\s+install\s+(.+)", raw, re.IGNORECASE)
-        if pip_m:
-            return {"tool": "install", "package": pip_m.group(1).strip(), "manager": "pip"}
-        if npm_m:
-            return {"tool": "install", "package": npm_m.group(1).strip(), "manager": "npm"}
-        # bare package name — default pip
-        return {"tool": "install", "package": raw, "manager": "pip"}
+        # Filter out placeholder/invalid INSTALL values from prompt examples
+        # e.g. INSTALL: <package>, INSTALL: (none), INSTALL: package
+        _invalid_install = (
+            raw.startswith("<") or raw.startswith("(") or
+            raw in ("package", "none", "X", "pip install X", "npm install X") or
+            not raw
+        )
+        if _invalid_install:
+            pass  # skip — it's a template placeholder, not a real package
+        else:
+            # Normalise: "pip install flask" → package=flask, manager=pip
+            #            "npm install express" → package=express, manager=npm
+            pip_m  = re.match(r"pip\s+install\s+(.+)", raw, re.IGNORECASE)
+            npm_m  = re.match(r"npm\s+install\s+(.+)", raw, re.IGNORECASE)
+            if pip_m:
+                return {"tool": "install", "package": pip_m.group(1).strip(), "manager": "pip"}
+            if npm_m:
+                return {"tool": "install", "package": npm_m.group(1).strip(), "manager": "npm"}
+            # bare package name — default pip
+            return {"tool": "install", "package": raw, "manager": "pip"}
 
     # ── READ: path ───────────────────────────────────────────────────────────
     read_m = re.search(r"^READ:\s*(\S+)", text, re.MULTILINE | re.IGNORECASE)
@@ -1133,19 +1155,28 @@ async def api_agent_run(
         # Copilot (C1) does not honour the OpenAI `system` role — it strips it.
         # Fix: fold task first, then format guide — task-first keeps Copilot
         # focused on executing rather than acknowledging protocol rules.
+        # Extract filename hint from task for the opening example
+        _fn_hint = "script.py"
+        _fn_m = re.search(r'\b(\w+\.(?:py|js|sh|ts|rb|go))\b', task)
+        if _fn_m:
+            _fn_hint = _fn_m.group(1)
         initial_user_msg = (
             f"TASK: {task}\n\n"
-            f"You control a Linux sandbox (Python 3.11, Node.js 20, bash).\n"
-            f"Reply with ONE of these keywords per message:\n\n"
-            f"FILE: <filename>     — followed by the complete file content on the next lines\n"
-            f"RUN: <shell command> — execute a command\n"
-            f"INSTALL: <package>   — install a package\n"
-            f"DONE: <summary>      — when task is verified complete\n\n"
-            f"For web servers always use background launch:\n"
-            f"  RUN: nohup python3 app.py > server.log 2>&1 &\n"
-            f"  Then: RUN: sleep 2 && curl -sf http://localhost:<PORT>/ && echo OK\n"
-            f"  Include port number in DONE message.\n\n"
-            f"Write your first FILE: now."
+            f"Sandbox: Python 3.11, Node.js 20, bash.\n"
+            f"Reply with ONE action per message in order: write file first, then run it.\n\n"
+            f"Step 1 — write the file:\n"
+            f"FILE: {_fn_hint}\n"
+            f"[complete file content on the following lines]\n\n"
+            f"Step 2 — run it after writing:\n"
+            f"RUN: python3 {_fn_hint}\n\n"
+            f"Step 3 — install packages if needed:\n"
+            f"INSTALL: flask\n\n"
+            f"Step 4 — confirm done:\n"
+            f"DONE: description of what ran and output\n\n"
+            f"For web servers: RUN: nohup python3 app.py > server.log 2>&1 &\n"
+            f"Then verify: RUN: sleep 2 && curl -sf http://localhost:5001/ && echo OK\n"
+            f"Include port in DONE.\n\n"
+            f"Begin with Step 1 now: FILE: {_fn_hint}"
         )
         if is_followup and history:
             # For follow-ups, append the new instruction as a user turn
@@ -1159,17 +1190,23 @@ async def api_agent_run(
 
         yield _sse("thinking", {"step": 0, "text": f"🚀 Starting agent task: {task[:120]}...", "total_steps": max_steps})
         turn_counter = len(history)  # track DB turn numbers
+        service_error_retries = 0    # consecutive "Something went wrong" retries
 
         for step in range(1, max_steps + 1):
             yield _sse("step_done", {"step": step, "max_steps": max_steps, "status": "running"})
 
             # Build messages for C1 — no system role (Copilot strips it).
             # Step 1: send initial_user_msg which has system prompt + task baked in.
-            # Subsequent steps: replay full conversation history.
+            # Subsequent steps: replay conversation history (max 6 turns to avoid
+            # bloated context with [Assistant]: prefixes confusing Copilot).
             if not history:
                 messages: list[dict] = [{"role": "user", "content": initial_user_msg}]
             else:
-                messages = list(history)
+                # Keep initial user message + last 5 turns to limit context size
+                _hist = list(history)
+                if len(_hist) > 6:
+                    _hist = [_hist[0]] + _hist[-5:]  # always keep initial prompt
+                messages = _hist
 
             # Call C1 (Copilot LLM)
             headers = {
@@ -1202,8 +1239,86 @@ async def api_agent_run(
                 response_text: str = llm_data.get("choices", [{}])[0].get("message", {}).get("content", "")
             except Exception as exc:
                 err_detail = str(exc) or type(exc).__name__
-                yield _sse("error", {"message": f"LLM call failed: {err_detail}"})
+                # Transient errors (ReadTimeout, ConnectError, etc.) — retry up to 3 times
+                service_error_retries += 1
+                if service_error_retries <= 3:
+                    wait_s = service_error_retries * 15  # 15s, 30s, 45s back-off
+                    yield _sse("thinking", {"step": step, "text":
+                        f"⚠️ M365 Copilot unreachable ({err_detail[:80]}) — "
+                        f"retrying in {wait_s}s (attempt {service_error_retries}/3)..."})
+                    await asyncio.sleep(wait_s)
+                    continue
+                yield _sse("error", {"message":
+                    f"M365 Copilot is not reachable after 3 retries. "
+                    f"Check the browser session at :6080 or verify internet/auth. "
+                    f"Last error: {err_detail[:200]}"})
                 return
+
+            # ── Content-filter detection ────────────────────────────────────────────
+            # Copilot M365 sometimes refuses with "Sorry, I can't chat about this."
+            # This response must NOT be added to history — it corrupts context because
+            # server.py flattens history as "[Assistant]: Sorry..." in the next prompt,
+            # which triggers further refusals. Instead, restart with a fresh prompt.
+            _REFUSAL_PHRASES = (
+                "can't chat about this", "can't respond to this",
+                "let's try a different topic", "i can't discuss",
+                "generating response",  # stuck loading page
+            )
+            if any(p in response_text.lower() for p in _REFUSAL_PHRASES):
+                # Wait before retrying — let C3's page pool fully reset
+                await asyncio.sleep(4)
+                # Reset history to just the initial prompt (drops the bad context)
+                history = [{"role": "user", "content": initial_user_msg}]
+                yield _sse("thinking", {"step": step, "text":
+                    "⚠️ Copilot content filter — retrying with fresh context..."})
+                continue
+
+            # ── M365 service-error detection ────────────────────────────────────────
+            # Copilot M365 browser UI shows "Something went wrong. Please try again
+            # later." when the service is overloaded or has a transient fault.
+            # C3 extracts this as the response text, which is NOT a real answer.
+            # We must NOT add it to history. Instead: wait, then retry same step.
+            # Three states handled:
+            #   1) Valid response         → normal flow below
+            #   2) "Something went wrong" → wait + retry (up to 3 times)
+            #   3) Empty response         → auth down / no internet → abort
+            _SERVICE_ERROR_PHRASES = (
+                "something went wrong",
+                "please try again later",
+                "please retry",
+                "try again later",
+            )
+            if not response_text.strip():
+                # Empty response = auth session expired or Copilot unreachable
+                yield _sse("error", {"message":
+                    "M365 Copilot returned an empty response. "
+                    "Auth may be expired or internet is down. "
+                    "Check the browser session at :6080."})
+                return
+
+            if any(p in response_text.lower() for p in _SERVICE_ERROR_PHRASES):
+                service_error_retries += 1
+                if service_error_retries > 3:
+                    yield _sse("error", {"message":
+                        "M365 Copilot is unavailable (service error) after 3 retries. "
+                        "Check the browser session at :6080 or wait and try again."})
+                    return
+                wait_s = service_error_retries * 15  # 15s, 30s, 45s
+                yield _sse("thinking", {"step": step, "text":
+                    f"⚠️ M365 Copilot service error — waiting {wait_s}s then retrying "
+                    f"(attempt {service_error_retries}/3)..."})
+                await asyncio.sleep(wait_s)
+                # Do NOT advance history — retry the exact same step
+                continue
+
+            # Good response received — reset service error counter
+            service_error_retries = 0
+
+            # ── Inter-step delay ────────────────────────────────────────────────────
+            # Give Copilot's browser page 6 seconds to finish rendering before the
+            # next API call types a new message into the still-active chat box.
+            # Copilot "Coding and executing" responses need extra time to complete.
+            await asyncio.sleep(6)
 
             # Emit thinking text (stripped of XML)
             thinking_text = _strip_tool_xml(response_text)
@@ -1246,41 +1361,71 @@ async def api_agent_run(
             # ── Detect Copilot's built-in code-executor responses ─────────────────
             # Copilot M365 may execute code itself and return results in two formats:
             # 1) JSON: {"executedCode":"...","status":"...","stdout":"...","outputFiles":[...]}
-            # 2) Markdown: "✅ **Commands executed successfully**\n**RUN: `cmd`**\n```\nout\n```"
-            # Detect both and redirect to our FILE:/RUN: protocol.
+            # 2) Markdown with "Coding and executing" banner or "**RUN: cmd**" blocks
+            # For JSON: download any outputFiles and write to C10, then continue.
+            # For Markdown: only redirect if NO standard FILE:/RUN: keywords present.
             stripped_resp = response_text.strip()
             _is_copilot_exec = False
+            _exec_data: dict = {}
             if stripped_resp.startswith('{') and '"executedCode"' in stripped_resp:
                 try:
-                    exec_data = json.loads(stripped_resp)
-                    _is_copilot_exec = bool(exec_data.get("executedCode"))
+                    _exec_data = json.loads(stripped_resp)
+                    _is_copilot_exec = bool(_exec_data.get("executedCode"))
                 except json.JSONDecodeError:
                     pass
-            # Markdown code-executor pattern: Copilot shows "**RUN:" or "Commands executed"
-            # without FILE:/RUN:/INSTALL:/DONE: at the start of a line
-            elif ("**RUN:" in response_text or "Commands executed" in response_text
-                  or "Your script ran" in response_text
-                  or "already installed" in response_text and "**INSTALL:" in response_text):
-                # Only treat as copilot-exec if NO standard protocol keywords found
+            elif ("Coding and executing" in response_text
+                  or ("**RUN:" in response_text and "Commands executed" in response_text)):
                 has_protocol = bool(re.search(r"^(FILE|RUN|INSTALL|DONE):", response_text, re.MULTILINE))
                 if not has_protocol:
                     _is_copilot_exec = True
             if _is_copilot_exec:
-                yield _sse("thinking", {"step": step, "text":
-                    f"⚠️ Copilot ran code in its own environment. Requesting FILE: action..."
-                })
-                if not history:
-                    history.append({"role": "user", "content": initial_user_msg})
-                history.append({"role": "assistant", "content": response_text})
-                history.append({
-                    "role": "user",
-                    "content": (
-                        "Please write the files to the workspace using the FILE: keyword, "
-                        "then RUN: to execute them. Use FILE: filename on one line, "
-                        "then the complete file content on the following lines."
-                    ),
-                })
-                continue
+                # Try to download outputFiles from Copilot's AMS storage to C10
+                _downloaded: list[str] = []
+                if _exec_data.get("outputFiles"):
+                    for of in _exec_data["outputFiles"]:
+                        furl = of.get("codeResultFileUrl", "")
+                        fname = of.get("fileName", "")
+                        if furl and fname and not fname.startswith("."):
+                            try:
+                                dl = await client.get(furl, timeout=15,
+                                    headers={"User-Agent": "Mozilla/5.0"})
+                                if dl.status_code == 200:
+                                    wr = await _c10_write_file(fname, dl.text)
+                                    if wr.get("ok"):
+                                        _downloaded.append(fname)
+                                        if fname not in files_created:
+                                            files_created.append(fname)
+                                        yield _sse("file_update",
+                                            {"path": fname, "action": "created", "source": "copilot-exec"})
+                            except Exception:
+                                pass
+                exec_stdout = _exec_data.get("stdout", "")
+                exec_status = _exec_data.get("status", "")
+                if _downloaded:
+                    # Files downloaded — treat as a successful file write + run
+                    commands_run.append("(copilot-exec)")
+                    _dl_list = ", ".join(_downloaded)
+                    yield _sse("thinking", {"step": step, "text":
+                        f"📥 Downloaded from Copilot executor: {_dl_list}\nstdout: {exec_stdout[:300]}"})
+                    next_obs = f"Files written: {_dl_list}. Exec output: {exec_stdout[:400]}"
+                    if not history:
+                        history.append({"role": "user", "content": initial_user_msg})
+                    history.append({"role": "assistant", "content": response_text})
+                    history.append({"role": "user", "content":
+                        f"Files saved. Output: {exec_stdout[:300]}\n"
+                        f"Now RUN: python3 {_downloaded[0]} to verify, or DONE: summary."})
+                    continue
+                else:
+                    # No files to download — redirect to FILE: protocol
+                    yield _sse("thinking", {"step": step, "text":
+                        "⚠️ Copilot ran code in its own environment. Requesting FILE: action..."})
+                    if not history:
+                        history.append({"role": "user", "content": initial_user_msg})
+                    history.append({"role": "assistant", "content": response_text})
+                    history.append({"role": "user", "content":
+                        "Write the file using FILE: filename then the content below. "
+                        "Then RUN: command to execute it."})
+                    continue
 
             # Parse ALL actions from this response (LLM often writes FILE: + RUN: together)
             tools = _parse_all_actions(response_text)
@@ -1413,33 +1558,35 @@ async def api_agent_run(
                 yield _sse("observation", obs_event)
                 observations.append(observation)
 
-            # Build combined feedback from all observations
-            combined_obs = "\n---\n".join(observations)
+            # Build combined feedback — sanitize paths to avoid content filter triggers
+            def _sanitize_obs(text: str) -> str:
+                """Remove absolute paths like /workspace/ from shell output."""
+                return re.sub(r'/workspace/', '', text)
+            combined_obs = _sanitize_obs("\n---\n".join(observations))
             if last_tool_name == "exec":
                 ec = last_meta.get("exit_code", 0)
                 is_bg = last_meta.get("background", False)
                 if is_bg or ec == 0:
                     next_hint = (
-                        f"Output:\n```\n{combined_obs}\n```\n\n"
+                        f"Output: {combined_obs[:600]}\n\n"
                         + (
-                            f"Server started in background. Now verify: RUN: sleep 2 && curl -sf http://localhost:{detected_port or 5001}/ && echo SERVER_OK\n"
+                            f"Server started. Verify: RUN: sleep 2 && curl -sf http://localhost:{detected_port or 5001}/ && echo OK\n"
                             if is_bg else
-                            f"If output is correct, write: DONE: what was built and validated.\n"
-                            f"Otherwise fix the issue."
+                            f"Output looks correct. Write DONE: summary, or fix issues."
                         )
                     )
                 else:
+                    _err_path = tools[-1].get('path', _fn_hint) if tools else _fn_hint
                     next_hint = (
-                        f"Error (exit {ec}):\n```\n{combined_obs}\n```\n\n"
-                        f"Fix the bug using FILE: {tools[-1].get('path','script.py')} with corrected content on the following lines."
+                        f"Error: {combined_obs[:500]}\n\n"
+                        f"Fix it: FILE: {_err_path}\n[corrected file content]"
                     )
             elif last_tool_name == "install":
-                next_hint = f"Package installed. Now write the code: FILE: filename.py"
+                next_hint = f"Installed. Now FILE: {_fn_hint}\n[file content]"
             else:
                 next_hint = (
-                    f"Result:\n```\n{combined_obs}\n```\n\n"
-                    f"Next: FILE: filename (content below), or RUN: cmd, or INSTALL: pkg, or DONE: summary.\n"
-                f"ONE action only. No code blocks."
+                    f"Result: {combined_obs[:500]}\n\n"
+                    f"Next action: FILE: filename, RUN: command, INSTALL: package, or DONE: summary."
                 )
             history.append({"role": "user", "content": next_hint})
 
