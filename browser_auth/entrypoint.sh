@@ -55,22 +55,13 @@ fi
 sleep 0.5
 echo "[browser-auth] openbox window manager started"
 
-# 1c. Start clipboard synchronization daemon so x11vnc and noVNC can sync copy/paste with the host.
-# Needs two instances: one for X11 selection buffer and one for clipboard.
-if command -v autocutsel >/dev/null 2>&1; then
-    autocutsel -fork
-    autocutsel -selection PRIMARY -fork
-    echo "[browser-auth] autocutsel started (clipboard sync enabled)"
-else
-    echo "[browser-auth] WARNING: autocutsel not found, clipboard syncing disabled"
-fi
-
 # 2. Start VNC server (x11vnc, no password for local-only use)
 # Note: x11vnc uses -rfbport (not -port) to set the listening port.
 # Do NOT use -bg: wait until the RFB port accepts connections before websockify starts.
 # Use 127.0.0.1 (not "localhost") so IPv6 ::1 cannot bypass a v4-only listener.
+# -clip both: forward RFB cut-text (clipboard) in both directions (host ↔ guest).
 x11vnc -display :${DISPLAY_NUM} -nopw -rfbport ${VNC_PORT} \
-       -xkb -forever -shared -noxrecord -o /tmp/x11vnc.log \
+       -xkb -forever -shared -noxrecord -clip both -o /tmp/x11vnc.log \
        2>/tmp/x11vnc.stderr.log &
 X11VNC_PID=$!
 echo "[browser-auth] x11vnc pid ${X11VNC_PID}"
@@ -97,6 +88,18 @@ wait_rfb() {
 }
 wait_rfb
 echo "[browser-auth] x11vnc listening on 127.0.0.1:${VNC_PORT}"
+
+# 2b. Start clipboard synchronization daemon AFTER x11vnc is confirmed up.
+# autocutsel syncs X11 PRIMARY selection ↔ CLIPBOARD so Ctrl+C in Chrome propagates
+# to the RFB cut-text buffer that x11vnc -clip both forwards to the noVNC client.
+# Must run after x11vnc so the XFIXES extension event source exists.
+if command -v autocutsel >/dev/null 2>&1; then
+    DISPLAY=:${DISPLAY_NUM} autocutsel &
+    DISPLAY=:${DISPLAY_NUM} autocutsel -selection PRIMARY &
+    echo "[browser-auth] autocutsel started (clipboard sync enabled)"
+else
+    echo "[browser-auth] WARNING: autocutsel not found — install it in Dockerfile.browser for clipboard sync"
+fi
 
 # 3. Start noVNC (find the correct web root path)
 NOVNC_WEB=""
@@ -130,22 +133,102 @@ if [ -n "$NOVNC_WEB" ]; then
 from pathlib import Path
 p = Path("/tmp/novnc-web/index.html")
 text = p.read_text(encoding="utf-8")
-if "<head>" not in text:
-    raise SystemExit("noVNC index.html: missing <head>")
-inject = (
-    "<head>\n"
-    "  <script>\n"
-    "  (function(){\n"
-    '    if (!window.location.search) {\n'
-    '      window.location.replace(window.location.pathname + "?resize=scale&autoconnect=true");\n'
-    "    }\n"
-    "  })();\n"
-    "  </script>"
-)
-text = text.replace("<head>", inject, 1)
-p.write_text(text, encoding="utf-8")
+# Idempotent: skip if already injected (sentinel = autoconnect script present)
+SENTINEL = "autoconnect=true"
+if SENTINEL not in text:
+    if "<head>" not in text:
+        print("[browser-auth] WARNING: noVNC index.html missing <head> — skipping inject")
+    else:
+        inject = (
+            "<head>\n"
+            "  <script>\n"
+            "  (function(){\n"
+            '    if (!window.location.search) {\n'
+            '      window.location.replace(window.location.pathname + "?resize=scale&autoconnect=true");\n'
+            "    }\n"
+            "  })();\n"
+            "  </script>"
+        )
+        text = text.replace("<head>", inject, 1)
+        p.write_text(text, encoding="utf-8")
+        print("[browser-auth] noVNC autoconnect inject applied")
+else:
+    print("[browser-auth] noVNC autoconnect inject already present — skipping")
 PY
     fi
+    # Ensure index.html exists (Ubuntu 22.04 novnc has vnc.html but not vnc_auto.html/index.html).
+    if [ ! -f "$NOVNC_SERVE/index.html" ] && [ -f "$NOVNC_SERVE/vnc.html" ]; then
+        cp "$NOVNC_SERVE/vnc.html" "$NOVNC_SERVE/index.html"
+        echo "[browser-auth] Created index.html from vnc.html (vnc_auto.html not present)"
+    fi
+    # Patch app/ui.js for seamless clipboard sync (both directions):
+    #   VNC→host: clipboardReceive writes to navigator.clipboard automatically
+    #   host→VNC: focus event + paste event push host clipboard to VNC session
+    python3 <<'CLIPPY'
+from pathlib import Path
+ui = Path("/tmp/novnc-web/app/ui.js")
+if ui.exists():
+    text = ui.read_text(encoding="utf-8")
+    SENTINEL = "AUTO-SYNC-CLIPBOARD"
+    if SENTINEL not in text:
+        # Patch 1: VNC → host clipboard (in clipboardReceive)
+        old1 = "        document.getElementById('noVNC_clipboard_text').value = e.detail.text;"
+        new1 = (
+            "        document.getElementById('noVNC_clipboard_text').value = e.detail.text;\n"
+            "        // AUTO-SYNC-CLIPBOARD: push VNC clipboard to host browser clipboard\n"
+            "        if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.writeText) {\n"
+            "            navigator.clipboard.writeText(e.detail.text).catch(function() {});\n"
+            "        }"
+        )
+        # Patch 2: host → VNC (focus + paste event listeners in addClipboardHandlers)
+        old2 = (
+            "        document.getElementById(\"noVNC_clipboard_clear_button\")\n"
+            "            .addEventListener('click', UI.clipboardClear);\n"
+            "    },"
+        )
+        new2 = (
+            "        document.getElementById(\"noVNC_clipboard_clear_button\")\n"
+            "            .addEventListener('click', UI.clipboardClear);\n"
+            "        // AUTO-SYNC-CLIPBOARD: host browser clipboard → VNC on window focus\n"
+            "        window.addEventListener('focus', function() {\n"
+            "            if (!UI.rfb) return;\n"
+            "            if (typeof navigator !== 'undefined' && navigator.clipboard && navigator.clipboard.readText) {\n"
+            "                navigator.clipboard.readText().then(function(text) {\n"
+            "                    if (text) {\n"
+            "                        document.getElementById('noVNC_clipboard_text').value = text;\n"
+            "                        UI.rfb.clipboardPasteFrom(text);\n"
+            "                    }\n"
+            "                }).catch(function() {});\n"
+            "            }\n"
+            "        });\n"
+            "        // AUTO-SYNC-CLIPBOARD: paste event from host browser → VNC\n"
+            "        document.addEventListener('paste', function(e) {\n"
+            "            if (!UI.rfb) return;\n"
+            "            var cbd = e.clipboardData || window.clipboardData;\n"
+            "            var txt = cbd ? cbd.getData('text') : '';\n"
+            "            if (txt) {\n"
+            "                document.getElementById('noVNC_clipboard_text').value = txt;\n"
+            "                UI.rfb.clipboardPasteFrom(txt);\n"
+            "            }\n"
+            "        });\n"
+            "    },"
+        )
+        p1 = old1 in text
+        p2 = old2 in text
+        if p1:
+            text = text.replace(old1, new1, 1)
+        if p2:
+            text = text.replace(old2, new2, 1)
+        if p1 or p2:
+            ui.write_text(text, encoding="utf-8")
+            print(f"[browser-auth] noVNC clipboard auto-sync patched (VNC→host={p1}, host→VNC={p2})")
+        else:
+            print("[browser-auth] WARNING: clipboard patch anchors not found in ui.js — skipping")
+    else:
+        print("[browser-auth] noVNC clipboard auto-sync already patched — skipping")
+else:
+    print("[browser-auth] WARNING: /tmp/novnc-web/app/ui.js not found — clipboard patch skipped")
+CLIPPY
     "${WEBSOCKIFY_BIN}" --web "$NOVNC_SERVE" ${NOVNC_PORT} 127.0.0.1:${VNC_PORT} &
     echo "[browser-auth] noVNC web UI at http://localhost:${NOVNC_PORT}/ (same client as vnc_auto; / adds query once if needed)"
 else
@@ -167,14 +250,37 @@ wait_novnc() {
         i=$((i + 1))
         sleep 0.25
     done
-    echo "[browser-auth] ERROR: websockify did not become ready on port ${NOVNC_PORT}"
-    exit 1
+    echo "[browser-auth] WARNING: websockify not ready on port ${NOVNC_PORT} after timeout — continuing anyway"
+    return 0
 }
 wait_novnc
 
 # 4. Start FastAPI cookie extractor server
+# IMPORTANT: Do NOT use 'exec' here. If uvicorn is exec'd as PID 1, a hot-reload
+# (triggered by __pycache__ writes or .log file changes in the bind-mounted /browser-auth)
+# will SIGTERM the process, which kills the entire container — taking x11vnc and
+# websockify with it and causing noVNC "connection closed" errors.
+# Run uvicorn in the background and use a wait loop so the container stays alive.
 echo "[browser-auth] Starting cookie extractor API on port ${API_PORT}..."
 echo "[browser-auth] Portal setup: http://localhost:${API_PORT}/setup"
 echo "[browser-auth] Open http://localhost:${NOVNC_PORT}/ (or vnc_auto.html) to see the browser"
 echo "[browser-auth] Trigger: curl -X POST http://localhost:${API_PORT}/extract"
-exec uvicorn server:app --host 0.0.0.0 --port ${API_PORT} --log-level info --reload --reload-dir /browser-auth
+uvicorn server:app --host 0.0.0.0 --port ${API_PORT} --log-level info --reload --reload-dir /browser-auth &
+UVICORN_PID=$!
+echo "[browser-auth] uvicorn pid ${UVICORN_PID}"
+
+# Keep the container alive; if any critical process exits, log it and exit cleanly.
+wait_procs() {
+    while true; do
+        if ! kill -0 "$XVFB_PID" 2>/dev/null; then
+            echo "[browser-auth] ERROR: Xvfb (pid $XVFB_PID) exited — restarting container"
+            exit 1
+        fi
+        if ! kill -0 "$X11VNC_PID" 2>/dev/null; then
+            echo "[browser-auth] ERROR: x11vnc (pid $X11VNC_PID) exited — restarting container"
+            exit 1
+        fi
+        sleep 5
+    done
+}
+wait_procs
