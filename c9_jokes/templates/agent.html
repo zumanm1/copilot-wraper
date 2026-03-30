@@ -442,6 +442,87 @@
 }
 .btn-reset-ws:hover { border-color: var(--fail); color: var(--fail); }
 
+/* ── Compare mode ────────────────────────────────────────────────────────── */
+.btn-compare {
+  width: auto; padding: 0.5rem 1rem;
+  background: rgba(188,140,255,0.15); color: #bc8cff;
+  border: 1px solid rgba(188,140,255,0.4); border-radius: 6px;
+  font-weight: 700; font-size: 0.85rem; cursor: pointer; white-space: nowrap; margin-top: 0;
+}
+.btn-compare:hover { background: rgba(188,140,255,0.28); }
+.btn-compare.active { background: rgba(188,140,255,0.35); }
+.compare-count-select {
+  font-size: 0.82rem; padding: 0.25rem 0.5rem; border-radius: 5px;
+  border: 1px solid rgba(188,140,255,0.4); background: var(--surface2); color: #bc8cff;
+  cursor: pointer; margin-top: 0; width: auto; display: none;
+}
+.compare-count-select.show { display: inline-block; }
+#compare-container { display: none; flex: 1; overflow: hidden; min-height: 0; }
+#compare-container.active { display: flex; flex-direction: column; }
+.compare-toolbar {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.3rem 0.75rem; background: var(--card); border-bottom: 1px solid var(--border);
+  font-size: 0.78rem; flex-shrink: 0;
+}
+.compare-grid { flex: 1; display: grid; overflow: hidden; min-height: 0; }
+.compare-pane {
+  display: flex; flex-direction: column;
+  border-right: 1px solid var(--border); overflow: hidden; min-height: 0;
+}
+.compare-pane:last-child { border-right: none; }
+.compare-pane-header {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.3rem 0.65rem; background: var(--card);
+  border-bottom: 1px solid var(--border); font-size: 0.78rem; font-weight: 600; flex-shrink: 0;
+}
+.compare-pane-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compare-pane-status {
+  font-size: 0.7rem; padding: 1px 5px; border-radius: 3px;
+  background: rgba(88,166,255,0.12); color: var(--accent);
+}
+.compare-pane-status.done { background: rgba(63,185,80,0.12); color: var(--ok); }
+.compare-pane-status.error { background: rgba(248,81,73,0.12); color: var(--fail); }
+.compare-pane-elapsed { font-size: 0.7rem; color: var(--muted); flex-shrink: 0; }
+.compare-progress { height: 2px; background: var(--surface2); flex-shrink: 0; }
+.compare-progress-bar { height: 100%; width: 0; background: var(--accent); transition: width 0.4s; }
+.compare-progress-bar.done { background: var(--ok); width: 100% !important; }
+.compare-progress-bar.error { background: var(--fail); width: 100% !important; }
+.compare-pane-body {
+  flex: 1; overflow-y: auto; padding: 0.5rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem; line-height: 1.5; min-height: 0; background: #010409;
+}
+.compare-entry { margin-bottom: 0.4rem; padding: 0.3rem 0.5rem; border-radius: 4px; }
+.compare-entry.thinking   { color: #c9d1d9; background: rgba(255,255,255,0.03); }
+.compare-entry.tool_call  { color: var(--accent); background: rgba(88,166,255,0.07); border-left: 2px solid var(--accent); }
+.compare-entry.observation { color: var(--ok); background: rgba(63,185,80,0.05); border-left: 2px solid var(--ok); }
+.compare-entry.observation.fail { color: var(--fail); background: rgba(248,81,73,0.05); border-left-color: var(--fail); }
+.compare-entry.file_update { color: var(--warn); background: rgba(210,153,34,0.07); }
+.compare-entry.final      { color: var(--ok); background: rgba(63,185,80,0.1); border: 1px solid rgba(63,185,80,0.3); }
+.compare-entry.error      { color: var(--fail); background: rgba(248,81,73,0.07); border-left: 2px solid var(--fail); }
+.compare-entry.step_info  { color: var(--muted); font-size: 0.72rem; }
+.compare-exit-btn {
+  padding: 0.2rem 0.6rem; background: transparent; border: 1px solid var(--border);
+  border-radius: 4px; color: var(--muted); font-size: 0.75rem; cursor: pointer;
+  flex-shrink: 0; margin-top: 0;
+}
+.compare-exit-btn:hover { color: var(--fail); border-color: var(--fail); }
+
+/* ── Collapsible observation ─────────────────────────────────────────────── */
+.obs-toggle {
+  background: none; border: none; color: var(--accent);
+  font-size: 0.72rem; cursor: pointer; padding: 2px 0; display: block; margin-top: 0;
+}
+.obs-full { white-space: pre-wrap; word-break: break-word; font-size: 0.8rem; }
+
+/* ── Copy button on code blocks ─────────────────────────────────────────── */
+.copy-btn {
+  background: none; border: 1px solid var(--border); border-radius: 4px;
+  color: var(--muted); font-size: 0.68rem; cursor: pointer; padding: 1px 6px;
+  margin-left: 0.4rem; float: right; margin-top: 0;
+}
+.copy-btn:hover { color: var(--fg); }
+
 /* ── Thinking dropdown (reuse pairs.html pattern) ────────────────────────── */
 .thinking-dropdown { position: relative; display: inline-block; }
 .thinking-pill {
@@ -621,6 +702,15 @@
       </div>
     </div>
 
+    <!-- Compare container (shown in compare mode) -->
+    <div id="compare-container">
+      <div class="compare-toolbar">
+        <span style="color:#bc8cff;font-weight:600;">⚡ Compare Mode</span>
+        <span id="compare-summary" style="color:var(--muted);font-size:0.75rem;"></span>
+      </div>
+      <div class="compare-grid" id="compare-grid"></div>
+    </div>
+
     <!-- Input bar -->
     <div class="agent-input-bar">
       <!-- Follow-up banner (shown after task completes) -->
@@ -637,12 +727,22 @@
         ></textarea>
         <div style="display:flex;flex-direction:column;gap:0.4rem;align-items:center;">
           <button type="button" class="btn-run" id="btn-run">▶ Run</button>
+          <button type="button" class="btn-compare" id="btn-compare">⚡ Compare</button>
           <button type="button" class="btn-stop" id="btn-stop" style="display:none">◼ Stop</button>
           <button type="button" class="btn-sm" id="btn-run-ma" title="Run as multi-agent team" style="background:rgba(227,179,65,0.15);border-color:#e3b341;color:#e3b341;">🤖</button>
           <button type="button" class="btn-sm" id="btn-attach" title="Attach file to workspace">📎</button>
         </div>
       </div>
       <input type="file" id="attach-input" style="display:none" multiple>
+      <div id="compare-controls" style="display:none;align-items:center;gap:0.4rem;">
+        <span style="font-size:0.78rem;color:#bc8cff;">Compare:</span>
+        <select id="compare-count" class="compare-count-select show">
+          <option value="2">2 agents</option>
+          <option value="3">3 agents</option>
+          <option value="4">4 agents</option>
+        </select>
+        <button type="button" class="compare-exit-btn" id="btn-exit-compare">✕ Exit Compare</button>
+      </div>
       <div class="agent-input-controls">
         <button type="button" class="btn-reset-ws" id="btn-reset-ws">🗑 Reset Workspace</button>
         <span class="muted" style="font-size:0.76rem;">C10 sandbox · non-root · 512 MB · 0.5 CPU</span>
@@ -742,6 +842,25 @@
   let currentStep   = 0;
   let maxSteps      = 15;
   let currentSessId = '';   // session_id for follow-ups
+
+  // ── Compare mode state ─────────────────────────────────────────────────────
+  let _compareMode    = false;
+  let _comparePanes   = {};  // agentId → {el, bodyEl, progressBar, statusEl, elapsedEl, src, timer, steps}
+  let _compareDone    = 0;
+  let _compareTotal   = 0;
+
+  // ── Live file refresh interval ─────────────────────────────────────────────
+  let _fileRefreshInterval = null;
+
+  // ── Compare DOM refs ───────────────────────────────────────────────────────
+  const compareContainer  = document.getElementById('compare-container');
+  const compareGrid       = document.getElementById('compare-grid');
+  const compareSummary    = document.getElementById('compare-summary');
+  const compareControls   = document.getElementById('compare-controls');
+  const compareCount      = document.getElementById('compare-count');
+  const btnCompare        = document.getElementById('btn-compare');
+  const btnExitCompare    = document.getElementById('btn-exit-compare');
+  const outputTabs        = document.querySelector('.output-tabs');
 
   // ── Pool status indicator ─────────────────────────────────────────────────
   const poolDot   = document.getElementById('pool-indicator-dot');
@@ -1231,12 +1350,20 @@
     appendEntry('thinking', stepLabel + escapeHtml(text));
   }
 
+  function makeCopyBtn(text) {
+    const escaped = JSON.stringify(text);
+    return '<button class="copy-btn" onclick="(function(btn){navigator.clipboard.writeText(' + escaped + ').then(function(){btn.textContent=\'✓ Copied\';setTimeout(function(){btn.textContent=\'Copy\'},1500)});})(this)">Copy</button>';
+  }
+
   function handleToolCall(data) {
     let inner = '<span class="stream-label">🔧 ' + escapeHtml(data.tool) + '</span>';
+    let copyText = '';
     if (data.command) {
-      inner += ' <span class="stream-cmd">$ ' + escapeHtml(data.command) + '</span>';
+      copyText = data.command;
+      inner += makeCopyBtn(copyText) + ' <span class="stream-cmd">$ ' + escapeHtml(data.command) + '</span>';
     } else if (data.path && data.tool === 'write_file') {
-      inner += ' <span class="stream-cmd">→ ' + escapeHtml(data.path) + '</span>';
+      copyText = data.preview || data.path;
+      inner += makeCopyBtn(copyText) + ' <span class="stream-cmd">→ ' + escapeHtml(data.path) + '</span>';
       if (data.preview) inner += '<div class="stream-output">' + escapeHtml(data.preview) + (data.preview.length >= 200 ? '…' : '') + '</div>';
     } else if (data.path) {
       inner += ' <span class="stream-cmd">' + escapeHtml(data.path) + '</span>';
@@ -1246,13 +1373,28 @@
     appendEntry('tool_call', inner);
   }
 
+  function makeObsHtml(result) {
+    const COLLAPSE_THRESHOLD = 8;
+    const lines = result.split('\n');
+    if (lines.length <= COLLAPSE_THRESHOLD) {
+      return '<div class="stream-output">' + escapeHtml(result) + '</div>';
+    }
+    const id = 'obs-' + Date.now() + '-' + Math.random().toString(36).slice(2,6);
+    const preview = escapeHtml(lines.slice(0, 3).join('\n'));
+    const full = escapeHtml(result);
+    return '<div class="obs-preview stream-output">' + preview +
+      '\n<em style="color:var(--muted)">[' + lines.length + ' lines total]</em></div>' +
+      '<div class="obs-full" id="' + id + '" style="display:none">' + full + '</div>' +
+      '<button class="obs-toggle" onclick="window._toggleObs(\'' + id + '\',this)">▶ Expand (' + lines.length + ' lines)</button>';
+  }
+
   function handleObservation(data) {
     const failed = data.exit_code !== undefined && data.exit_code !== 0;
     const result = (data.result || '').trim();
     let inner = '<span class="stream-label">' + (failed ? '❌ RESULT' : '✅ RESULT') + '</span>';
     if (data.exit_code !== undefined) inner += ' <span style="font-size:0.75rem;opacity:0.7">exit ' + data.exit_code + '</span>';
     if (data.timed_out) inner += ' <span style="color:var(--warn)"> [killed: timeout — expected for web servers]</span>';
-    if (result) inner += '<div class="stream-output">' + escapeHtml(result) + '</div>';
+    if (result) inner += makeObsHtml(result);
     appendEntry('observation', inner, failed ? 'fail' : '');
   }
 
@@ -1353,6 +1495,9 @@
     stepCounter.style.display = '';
     stepCounter.textContent = 'Starting…';
     stepCounter.className = 'step-counter running';
+    // Live file tree polling during run
+    if (_fileRefreshInterval) clearInterval(_fileRefreshInterval);
+    _fileRefreshInterval = setInterval(refreshFiles, 5000);
   }
 
   function setIdle(showFollowup) {
@@ -1365,12 +1510,209 @@
     agentSelect.disabled = false;
     stepCounter.className = 'step-counter';
     if (activeSource) { activeSource.close(); activeSource = null; }
+    // Stop live file polling
+    if (_fileRefreshInterval) { clearInterval(_fileRefreshInterval); _fileRefreshInterval = null; }
+    refreshFiles(); // final refresh
     if (showFollowup && currentSessId) {
       followupBanner.textContent = '✅ Task complete — type a follow-up below to improve or extend it (same session)';
       followupBanner.classList.add('show');
       taskInput.value = '';
       taskInput.placeholder = 'Follow-up task… (Ctrl+Enter to run)';
     }
+  }
+
+  // ── Compare mode ───────────────────────────────────────────────────────────
+  function enterCompareMode() {
+    _compareMode = true;
+    compareContainer.classList.add('active');
+    compareControls.style.display = 'flex';
+    outputTabs.style.display = 'none';
+    panelTerminal.classList.remove('active');
+    panelPreview.classList.remove('active');
+    btnCompare.classList.add('active');
+    btnCompare.textContent = '⚡ Compare ✓';
+  }
+
+  function exitCompareMode() {
+    _compareMode = false;
+    // Close any open SSE streams
+    Object.values(_comparePanes).forEach(function(p) {
+      if (p.src) { p.src.close(); p.src = null; }
+      if (p.timer) { clearInterval(p.timer); p.timer = null; }
+    });
+    _comparePanes = {};
+    compareGrid.innerHTML = '';
+    compareContainer.classList.remove('active');
+    compareControls.style.display = 'none';
+    outputTabs.style.display = '';
+    panelTerminal.classList.add('active');
+    btnCompare.classList.remove('active');
+    btnCompare.textContent = '⚡ Compare';
+    compareSummary.textContent = '';
+  }
+
+  function createComparePane(agentId, agentLabel, count) {
+    compareGrid.style.gridTemplateColumns = 'repeat(' + count + ', 1fr)';
+
+    const pane = document.createElement('div');
+    pane.className = 'compare-pane';
+    pane.id = 'cpane-' + agentId;
+
+    const header = document.createElement('div');
+    header.className = 'compare-pane-header';
+    header.innerHTML =
+      '<span class="compare-pane-label">🤖 ' + escapeHtml(agentLabel) + '</span>' +
+      '<span class="compare-pane-elapsed" id="celapsed-' + agentId + '">0s</span>' +
+      '<span class="compare-pane-status" id="cstatus-' + agentId + '">Starting…</span>';
+
+    const progress = document.createElement('div');
+    progress.className = 'compare-progress';
+    const bar = document.createElement('div');
+    bar.className = 'compare-progress-bar';
+    bar.id = 'cbar-' + agentId;
+    progress.appendChild(bar);
+
+    const body = document.createElement('div');
+    body.className = 'compare-pane-body';
+    body.id = 'cbody-' + agentId;
+
+    pane.appendChild(header);
+    pane.appendChild(progress);
+    pane.appendChild(body);
+    compareGrid.appendChild(pane);
+
+    return { el: pane, bodyEl: body, progressBar: bar,
+             statusEl: document.getElementById('cstatus-' + agentId),
+             elapsedEl: document.getElementById('celapsed-' + agentId),
+             src: null, timer: null, steps: 0, startTime: Date.now() };
+  }
+
+  function cAppendEntry(bodyEl, type, html) {
+    const div = document.createElement('div');
+    div.className = 'compare-entry ' + type;
+    div.innerHTML = html;
+    bodyEl.appendChild(div);
+    bodyEl.scrollTop = bodyEl.scrollHeight;
+  }
+
+  function launchCompare() {
+    const task = taskInput.value.trim();
+    if (!task) { taskInput.focus(); return; }
+    if (running) return;
+
+    const count = parseInt(compareCount.value, 10) || 2;
+    const selectedAgents = agents.slice(0, count);
+    if (!selectedAgents.length) return;
+
+    enterCompareMode();
+    compareGrid.innerHTML = '';
+    _comparePanes = {};
+    _compareDone = 0;
+    _compareTotal = selectedAgents.length;
+    compareSummary.textContent = '0/' + _compareTotal + ' done · running…';
+
+    // Start live file polling during compare run
+    if (_fileRefreshInterval) clearInterval(_fileRefreshInterval);
+    _fileRefreshInterval = setInterval(refreshFiles, 5000);
+
+    selectedAgents.forEach(function(agent) {
+      const pane = createComparePane(agent.id, agent.label, count);
+      _comparePanes[agent.id] = pane;
+
+      const startTs = Date.now();
+      pane.startTime = startTs;
+      pane.timer = setInterval(function() {
+        const secs = Math.floor((Date.now() - startTs) / 1000);
+        pane.elapsedEl.textContent = secs + 's';
+      }, 1000);
+
+      const params = new URLSearchParams({
+        task: task, agent_id: agent.id,
+        chat_mode: thinkingMode, work_mode: activeWorkMode, max_steps: '15',
+      });
+      const src = new EventSource('/api/agent/run?' + params.toString());
+      pane.src = src;
+
+      function cHandle(type, data) {
+        switch(type) {
+          case 'thinking':
+            if ((data.text||'').trim())
+              cAppendEntry(pane.bodyEl, 'thinking',
+                (data.step > 0 ? '<span class="stream-label">STEP '+data.step+'</span> ' : '') +
+                escapeHtml(data.text));
+            break;
+          case 'tool_call': {
+            let inner = '<span class="stream-label">🔧 ' + escapeHtml(data.tool) + '</span>';
+            if (data.command) inner += ' <span>$ ' + escapeHtml(data.command) + '</span>';
+            else if (data.path && data.tool === 'write_file') inner += ' <span>→ ' + escapeHtml(data.path) + '</span>';
+            else if (data.path) inner += ' <span>' + escapeHtml(data.path) + '</span>';
+            else if (data.package) inner += ' <span>' + escapeHtml(data.package) + '</span>';
+            cAppendEntry(pane.bodyEl, 'tool_call', inner);
+            break;
+          }
+          case 'observation': {
+            const failed = data.exit_code !== undefined && data.exit_code !== 0;
+            const result = (data.result || '').trim();
+            let inner = '<span class="stream-label">' + (failed ? '❌' : '✅') + ' RESULT</span>';
+            if (data.exit_code !== undefined) inner += ' <span style="font-size:0.72rem;opacity:0.7">exit ' + data.exit_code + '</span>';
+            if (result) inner += makeObsHtml(result);
+            cAppendEntry(pane.bodyEl, 'observation' + (failed ? ' fail' : ''), inner);
+            break;
+          }
+          case 'file_update':
+            cAppendEntry(pane.bodyEl, 'file_update',
+              '<span class="stream-label">📁</span> ' + escapeHtml(data.path));
+            break;
+          case 'step_done':
+            pane.steps = data.step;
+            pane.statusEl.textContent = 'Step ' + data.step + '/' + (data.max_steps||15);
+            var pct = Math.min(95, Math.round((data.step / (data.max_steps||15)) * 100));
+            pane.progressBar.style.width = pct + '%';
+            break;
+          case 'final': {
+            if (pane.timer) { clearInterval(pane.timer); pane.timer = null; }
+            pane.progressBar.classList.add('done');
+            pane.statusEl.textContent = '✅ Done';
+            pane.statusEl.className = 'compare-pane-status done';
+            const steps = data.steps_taken || pane.steps;
+            const files = (data.files_created || []).length;
+            cAppendEntry(pane.bodyEl, 'final',
+              '✅ ' + escapeHtml(data.summary || 'Complete') +
+              '<div style="font-size:0.72rem;color:var(--muted);margin-top:2px;">' + steps + ' steps · ' + files + ' file(s)</div>');
+            _compareDone++;
+            compareSummary.textContent = _compareDone + '/' + _compareTotal + ' done';
+            if (_compareDone >= _compareTotal) {
+              compareSummary.textContent = '✅ All ' + _compareTotal + ' agents done';
+              if (_fileRefreshInterval) { clearInterval(_fileRefreshInterval); _fileRefreshInterval = null; }
+              refreshFiles();
+            }
+            break;
+          }
+          case 'error':
+            if (pane.timer) { clearInterval(pane.timer); pane.timer = null; }
+            pane.progressBar.classList.add('error');
+            pane.statusEl.textContent = '❌ Error';
+            pane.statusEl.className = 'compare-pane-status error';
+            cAppendEntry(pane.bodyEl, 'error',
+              '<span class="stream-label">❌</span> ' + escapeHtml(data.message || 'Error'));
+            _compareDone++;
+            if (_compareDone >= _compareTotal) {
+              if (_fileRefreshInterval) { clearInterval(_fileRefreshInterval); _fileRefreshInterval = null; }
+            }
+            break;
+        }
+      }
+
+      ['thinking','tool_call','observation','file_update','step_done','web_server','final'].forEach(function(ev) {
+        src.addEventListener(ev, function(e) {
+          try { cHandle(ev, JSON.parse(e.data)); } catch(_) {}
+        });
+      });
+      src.addEventListener('error', function(e) {
+        if (e.data) { try { cHandle('error', JSON.parse(e.data)); } catch(_) {} }
+        else { cHandle('error', {message: 'Connection lost'}); }
+      });
+    });
   }
 
   // ── Run task ───────────────────────────────────────────────────────────────
@@ -1433,6 +1775,11 @@
   }
 
   btnRun.addEventListener('click', runTask);
+  btnCompare.addEventListener('click', function() {
+    if (_compareMode) { exitCompareMode(); return; }
+    launchCompare();
+  });
+  btnExitCompare.addEventListener('click', exitCompareMode);
   btnRunMa.addEventListener('click', function() {
     var task = taskInput.value.trim();
     if (!task) { taskInput.focus(); return; }
@@ -1478,8 +1825,17 @@
     }
   });
 
-  // expose showWebPreview globally for inline onclick
+  // expose globals for inline onclick handlers
   window.showWebPreview = showWebPreview;
+  window._toggleObs = function(id, btn) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    var hidden = el.style.display === 'none';
+    el.style.display = hidden ? '' : 'none';
+    var prev = el.previousElementSibling;
+    if (prev) prev.style.display = hidden ? 'none' : '';
+    btn.textContent = hidden ? '▼ Collapse' : '▶ Expand (' + (el.textContent.split('\n').length) + ' lines)';
+  };
 
   // ── Init ───────────────────────────────────────────────────────────────────
   refreshFiles();

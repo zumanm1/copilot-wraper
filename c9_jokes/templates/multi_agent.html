@@ -14,7 +14,7 @@
   overflow: hidden;
 }
 
-/* ── Top bar: supervisor input ───────────────────────────────────────────── */
+/* ── Top bar ─────────────────────────────────────────────────────────────── */
 .ma-topbar {
   grid-row: 1;
   display: flex;
@@ -25,101 +25,53 @@
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
 }
-.ma-topbar h2 {
-  margin: 0;
-  font-size: 1rem;
-  white-space: nowrap;
-  color: var(--fg);
-}
+.ma-topbar h2 { margin: 0; font-size: 1rem; white-space: nowrap; color: var(--fg); }
 .ma-task-input {
-  flex: 1;
-  min-width: 260px;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--fg);
-  font-size: 0.9rem;
-  padding: 0.4rem 0.75rem;
-  resize: none;
-  font-family: inherit;
-  line-height: 1.4;
-  min-height: 38px;
-  max-height: 80px;
+  flex: 1; min-width: 260px;
+  background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--fg); font-size: 0.9rem; padding: 0.4rem 0.75rem;
+  resize: none; font-family: inherit; line-height: 1.4; min-height: 38px; max-height: 80px;
 }
 .ma-task-input:focus { outline: none; border-color: var(--accent); }
 .ma-launch-btn {
-  background: var(--accent);
-  color: #0d1117;
-  border: none;
-  border-radius: 6px;
-  padding: 0.45rem 1.1rem;
-  font-size: 0.88rem;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-  transition: opacity 0.15s;
+  background: var(--accent); color: #0d1117; border: none; border-radius: 6px;
+  padding: 0.45rem 1.1rem; font-size: 0.88rem; font-weight: 600;
+  cursor: pointer; white-space: nowrap; transition: opacity 0.15s;
 }
 .ma-launch-btn:hover { opacity: 0.85; }
 .ma-launch-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.ma-stop-btn {
-  background: var(--fail);
-  color: #fff;
-  border: none;
-  border-radius: 6px;
-  padding: 0.45rem 0.9rem;
-  font-size: 0.88rem;
-  font-weight: 600;
-  cursor: pointer;
-  display: none;
+.ma-stop-btn, .ma-pause-btn {
+  border: none; border-radius: 6px; padding: 0.45rem 0.9rem;
+  font-size: 0.88rem; font-weight: 600; cursor: pointer; display: none;
 }
-.ma-stop-btn.visible { display: inline-flex; }
+.ma-stop-btn  { background: var(--fail); color: #fff; }
+.ma-pause-btn { background: rgba(227,179,65,0.2); color: #e3b341; border: 1px solid #e3b341; }
+.ma-stop-btn.visible, .ma-pause-btn.visible { display: inline-flex; }
 
-/* Role selector */
-.ma-role-selector {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  flex-wrap: wrap;
-}
+/* Role chips */
+.ma-role-selector { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; }
 .ma-role-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.25rem;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 0.2rem 0.55rem;
-  font-size: 0.76rem;
-  cursor: pointer;
-  user-select: none;
+  display: inline-flex; align-items: center; gap: 0.25rem;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 12px; padding: 0.2rem 0.55rem; font-size: 0.76rem;
+  cursor: pointer; user-select: none; color: var(--muted);
   transition: background 0.1s, border-color 0.1s;
-  color: var(--muted);
 }
 .ma-role-chip.active {
-  background: rgba(88,166,255,0.15);
-  border-color: var(--accent);
-  color: var(--accent);
+  background: rgba(88,166,255,0.15); border-color: var(--accent); color: var(--accent);
 }
 
 /* Options row */
 .ma-opts-row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-  font-size: 0.8rem;
-  color: var(--muted);
+  display: flex; align-items: center; gap: 0.75rem;
+  flex-wrap: wrap; font-size: 0.8rem; color: var(--muted);
 }
 .ma-opts-row input[type=number] {
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  color: var(--fg);
-  font-size: 0.8rem;
-  padding: 0.2rem 0.4rem;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 4px; color: var(--fg); font-size: 0.8rem; padding: 0.2rem 0.4rem;
 }
 
-/* Thinking mode pill */
+/* Thinking mode */
 .ma-thinking-dropdown { position: relative; display: inline-block; }
 .ma-thinking-pill {
   display: inline-flex; align-items: center; gap: 2px;
@@ -145,12 +97,8 @@
 
 /* Work/Web toggle */
 .ma-mode-btn {
-  padding: 0.2rem 0.65rem;
-  border: 1px solid var(--border);
-  cursor: pointer;
-  background: transparent;
-  color: var(--muted);
-  font-size: 0.78rem;
+  padding: 0.2rem 0.65rem; border: 1px solid var(--border);
+  cursor: pointer; background: transparent; color: var(--muted); font-size: 0.78rem;
 }
 .ma-mode-btn:first-of-type { border-radius: 4px 0 0 4px; }
 .ma-mode-btn:last-of-type  { border-left: none; border-radius: 0 4px 4px 0; }
@@ -158,289 +106,235 @@
 
 /* Pool pill */
 .pool-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 0.15rem 0.5rem;
-  font-size: 0.75rem;
-  color: var(--muted);
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 10px; padding: 0.15rem 0.5rem; font-size: 0.75rem; color: var(--muted);
 }
-.pool-dot {
-  width: 7px; height: 7px;
-  border-radius: 50%;
-  background: var(--muted);
-  flex-shrink: 0;
-}
-.pool-dot.ok { background: var(--ok); }
+.pool-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex-shrink: 0; }
+.pool-dot.ok   { background: var(--ok); }
 .pool-dot.warn { background: #e3b341; }
-.pool-dot.low { background: var(--fail); }
+.pool-dot.low  { background: var(--fail); }
 
-/* ── Supervisor log bar ───────────────────────────────────────────────────── */
+/* ── Supervisor bar ───────────────────────────────────────────────────────── */
 .ma-supervisor-bar {
   grid-row: 2;
   padding: 0.4rem 1rem;
   background: rgba(88,166,255,0.04);
   border-bottom: 1px solid var(--border);
-  font-size: 0.8rem;
-  color: var(--muted);
-  min-height: 28px;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  overflow: hidden;
+  font-size: 0.8rem; color: var(--muted);
+  min-height: 28px; display: flex; align-items: center; gap: 0.5rem; overflow: hidden;
 }
-.supervisor-label {
-  font-weight: 600;
-  color: var(--accent);
-  white-space: nowrap;
-  flex-shrink: 0;
-}
-#supervisor-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
-#ma-overall-progress {
-  white-space: nowrap;
-  flex-shrink: 0;
-  color: var(--ok);
-  font-size: 0.75rem;
-  font-weight: 600;
-  display: none;
-}
-
-/* Output button */
+.supervisor-label { font-weight: 600; color: var(--accent); white-space: nowrap; flex-shrink: 0; }
+#supervisor-text  { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+#ma-overall-progress { white-space: nowrap; flex-shrink: 0; color: var(--ok); font-size: 0.75rem; font-weight: 600; display: none; }
 .ma-output-btn {
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--muted);
-  font-size: 0.78rem;
-  padding: 0.25rem 0.55rem;
-  cursor: pointer;
-  flex-shrink: 0;
-  position: relative;
-  display: none;
+  background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--muted); font-size: 0.78rem; padding: 0.25rem 0.55rem;
+  cursor: pointer; flex-shrink: 0; display: none; align-items: center; gap: 0.3rem;
 }
 .ma-output-btn:hover { color: var(--fg); }
-.ma-output-btn.show { display: inline-flex; align-items: center; gap: 0.3rem; }
-.ma-output-badge {
-  display: none;
-  background: var(--ok);
-  color: #0d1117;
-  border-radius: 999px;
-  padding: 0 5px;
-  font-size: 0.65rem;
-  font-weight: 700;
-  line-height: 1.4;
-}
+.ma-output-btn.show { display: inline-flex; }
+.ma-output-badge { display: none; background: var(--ok); color: #0d1117; border-radius: 999px; padding: 0 5px; font-size: 0.65rem; font-weight: 700; line-height: 1.4; }
 .ma-output-badge.show { display: inline-block; }
+
+/* Follow-up bar */
+#ma-followup-bar {
+  display: none; align-items: center; gap: 0.5rem;
+  padding: 0.4rem 1rem;
+  background: rgba(227,179,65,0.06); border-top: 1px solid #e3b341;
+  flex-shrink: 0;
+}
+#ma-followup-bar.show { display: flex; }
+#ma-followup-input {
+  flex: 1; background: var(--surface2); border: 1px solid #e3b341;
+  border-radius: 4px; color: var(--fg); padding: 0.3rem 0.5rem; font-size: 0.85rem;
+}
+#ma-followup-btn {
+  background: #e3b341; color: #0d1117; border: none; border-radius: 4px;
+  padding: 0.3rem 0.75rem; font-size: 0.82rem; font-weight: 600; cursor: pointer;
+}
 
 /* ── Pane grid ────────────────────────────────────────────────────────────── */
 .ma-pane-grid {
-  grid-row: 3;
-  display: grid;
+  grid-row: 3; display: grid;
   grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 0;
-  overflow: hidden;
-  height: 100%;
+  gap: 0; overflow: hidden; height: 100%;
 }
 
 /* ── Single pane ─────────────────────────────────────────────────────────── */
 .ma-pane {
-  display: flex;
-  flex-direction: column;
-  border-right: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-  overflow: hidden;
-  min-height: 0;
-  background: var(--bg);
+  display: flex; flex-direction: column;
+  border-right: 1px solid var(--border); border-bottom: 1px solid var(--border);
+  overflow: hidden; min-height: 0; background: var(--bg);
 }
 .ma-pane:last-child { border-right: none; }
 
+/* Role color accents */
+.ma-pane[data-role="builder"]  > .pane-header { border-left: 3px solid #58a6ff; }
+.ma-pane[data-role="executor"] > .pane-header { border-left: 3px solid #3fb950; }
+.ma-pane[data-role="tester"]   > .pane-header { border-left: 3px solid #bc8cff; }
+.ma-pane[data-role="debugger"] > .pane-header { border-left: 3px solid #f78166; }
+.ma-pane[data-role="ui"]       > .pane-header { border-left: 3px solid #f0883e; }
+.ma-pane[data-role="reporter"] > .pane-header { border-left: 3px solid #e3b341; }
+
 .pane-header {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.35rem 0.65rem;
-  background: var(--card);
-  border-bottom: 1px solid var(--border);
-  font-size: 0.78rem;
-  font-weight: 600;
-  flex-shrink: 0;
+  display: flex; align-items: center; gap: 0.35rem;
+  padding: 0.3rem 0.6rem;
+  background: var(--card); border-bottom: 1px solid var(--border);
+  font-size: 0.78rem; font-weight: 600; flex-shrink: 0;
 }
-.pane-emoji { font-size: 0.95rem; }
-.pane-role-label { color: var(--fg); }
-.pane-elapsed {
-  font-size: 0.68rem;
-  color: var(--muted);
-  font-family: monospace;
-  font-weight: 400;
-}
+.pane-emoji { font-size: 0.92rem; flex-shrink: 0; }
+.pane-role-label { color: var(--fg); flex-shrink: 0; }
+.pane-step   { font-size: 0.68rem; color: var(--muted); flex-shrink: 0; }
+.pane-elapsed { font-size: 0.66rem; color: var(--muted); font-family: monospace; font-weight: 400; flex-shrink: 0; }
 .pane-model-badge {
-  font-size: 0.63rem;
-  color: var(--muted);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 1px 5px;
-  white-space: nowrap;
-  font-weight: 400;
-  flex-shrink: 0;
+  font-size: 0.62rem; color: var(--muted); border: 1px solid var(--border);
+  border-radius: 10px; padding: 1px 5px; white-space: nowrap; font-weight: 400; flex-shrink: 0;
 }
 .pane-status {
-  margin-left: auto;
-  padding: 0.1rem 0.4rem;
-  border-radius: 10px;
-  font-size: 0.7rem;
-  font-weight: 600;
-  background: var(--surface2);
-  color: var(--muted);
+  margin-left: auto; padding: 0.1rem 0.4rem; border-radius: 10px;
+  font-size: 0.7rem; font-weight: 600; background: var(--surface2); color: var(--muted); flex-shrink: 0;
 }
 .pane-status.running { background: rgba(88,166,255,0.15); color: var(--accent); }
 .pane-status.done    { background: rgba(63,185,80,0.15);  color: var(--ok); }
 .pane-status.error   { background: rgba(248,81,73,0.15);  color: var(--fail); }
-.pane-step { font-size: 0.7rem; color: var(--muted); }
 
-/* Per-pane progress bar */
-.pane-progress {
-  height: 2px;
-  background: var(--surface2);
-  flex-shrink: 0;
+/* Pane control buttons */
+.pane-ctrl-btn {
+  background: none; border: none; color: var(--muted);
+  font-size: 0.72rem; cursor: pointer; padding: 0 3px; flex-shrink: 0; line-height: 1;
 }
-.pane-progress-bar {
-  height: 100%;
-  width: 0%;
-  background: var(--accent);
-  transition: width 0.4s ease;
+.pane-ctrl-btn:hover { color: var(--fg); }
+.pane-retry-btn {
+  background: rgba(248,81,73,0.12); border: 1px solid var(--fail);
+  color: var(--fail); border-radius: 4px; font-size: 0.66rem;
+  padding: 1px 5px; cursor: pointer; flex-shrink: 0;
 }
-.pane-progress-bar.done  { background: var(--ok); width: 100% !important; }
+.pane-retry-btn:hover { background: rgba(248,81,73,0.25); }
+.pane-preview-btn {
+  background: rgba(88,166,255,0.12); border: 1px solid var(--accent);
+  color: var(--accent); border-radius: 4px; font-size: 0.66rem;
+  padding: 1px 5px; cursor: pointer; flex-shrink: 0;
+}
+
+/* Progress bar */
+.pane-progress { height: 2px; background: var(--surface2); flex-shrink: 0; }
+.pane-progress-bar { height: 100%; width: 0%; background: var(--accent); transition: width 0.4s ease; }
+.pane-progress-bar.done  { background: var(--ok);  width: 100% !important; }
 .pane-progress-bar.error { background: var(--fail); width: 100% !important; }
 
 .pane-assignment {
   padding: 0.3rem 0.65rem;
-  background: rgba(88,166,255,0.05);
-  border-bottom: 1px solid var(--border);
-  font-size: 0.74rem;
-  color: var(--muted);
-  font-style: italic;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  flex-shrink: 0;
+  background: rgba(88,166,255,0.04); border-bottom: 1px solid var(--border);
+  font-size: 0.73rem; color: var(--muted); font-style: italic;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex-shrink: 0;
 }
 
+/* Collapsed pane: hide body and assignment */
+.ma-pane.collapsed .pane-body,
+.ma-pane.collapsed .pane-assignment,
+.ma-pane.collapsed .pane-progress,
+.ma-pane.collapsed .pane-inject-row { display: none !important; }
+
+/* Focused pane: takes over full view */
+.ma-pane.focused {
+  position: fixed; inset: 120px 0 0 0; z-index: 180;
+  background: var(--bg); border: none; overflow: auto;
+}
+.ma-pane.focused .pane-body { max-height: none; }
+
 .pane-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 0.5rem 0.65rem;
-  font-size: 0.78rem;
-  font-family: 'Courier New', Courier, monospace;
-  line-height: 1.5;
-  min-height: 0;
-  scroll-behavior: smooth;
+  flex: 1; overflow-y: auto; padding: 0.5rem 0.65rem;
+  font-size: 0.78rem; font-family: 'Courier New', Courier, monospace;
+  line-height: 1.5; min-height: 0; scroll-behavior: smooth;
+}
+
+/* Pane inject row */
+.pane-inject-row {
+  display: none; align-items: center; gap: 4px;
+  padding: 4px 8px; border-top: 1px solid var(--border); flex-shrink: 0;
+}
+.pane-inject-row.active { display: flex; }
+.pane-inject-input {
+  flex: 1; background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 4px; color: var(--fg); font-size: 0.73rem; padding: 2px 6px;
+}
+.pane-inject-btn {
+  background: var(--accent); color: #0d1117; border: none; border-radius: 4px;
+  padding: 2px 8px; font-size: 0.75rem; cursor: pointer;
 }
 
 /* Pane entry types */
 .pe { margin-bottom: 0.3rem; word-break: break-word; }
 .pe-thinking { color: var(--fg); }
 .pe-tool     { color: #e3b341; }
-.pe-obs      { color: var(--muted); font-size: 0.75rem; }
+.pe-obs      { color: var(--muted); font-size: 0.74rem; }
 .pe-file     { color: var(--ok); }
 .pe-done     { color: var(--ok); font-weight: 600; }
 .pe-error    { color: var(--fail); }
-
+.pe-inject   { color: #e3b341; font-style: italic; }
 .pe-obs pre {
-  margin: 0;
-  padding: 0.25rem 0.4rem;
-  background: var(--surface2);
-  border-radius: 4px;
-  white-space: pre-wrap;
-  font-size: 0.72rem;
+  margin: 0; padding: 0.25rem 0.4rem;
+  background: var(--surface2); border-radius: 4px;
+  white-space: pre-wrap; font-size: 0.71rem;
+}
+/* Collapsible observation */
+.obs-toggle {
+  background: none; border: none; color: var(--accent);
+  font-size: 0.7rem; cursor: pointer; padding: 2px 0; display: block;
 }
 
-/* Step badge */
 .step-badge {
-  display: inline-block;
-  background: var(--surface2);
-  color: var(--muted);
-  border-radius: 3px;
-  padding: 0 0.3rem;
-  font-size: 0.68rem;
-  margin-right: 0.35rem;
-  font-family: monospace;
+  display: inline-block; background: var(--surface2); color: var(--muted);
+  border-radius: 3px; padding: 0 0.3rem; font-size: 0.66rem;
+  margin-right: 0.3rem; font-family: monospace;
 }
 
-/* ── No panes placeholder ─────────────────────────────────────────────────── */
+/* ── Empty placeholder ────────────────────────────────────────────────────── */
 .ma-empty {
-  grid-column: 1 / -1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 3rem;
-  color: var(--muted);
-  font-size: 0.9rem;
-  gap: 0.5rem;
+  grid-column: 1 / -1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; padding: 3rem;
+  color: var(--muted); font-size: 0.9rem; gap: 0.5rem;
 }
 .ma-empty-icon { font-size: 2.5rem; }
 
-/* ── Summary bar at bottom ───────────────────────────────────────────────── */
+/* ── Summary bar ──────────────────────────────────────────────────────────── */
 .ma-summary-bar {
-  display: none;
-  position: fixed;
-  bottom: 0;
-  left: 0; right: 0;
-  background: rgba(63,185,80,0.12);
-  border-top: 2px solid var(--ok);
-  padding: 0.5rem 1.25rem;
-  font-size: 0.82rem;
-  color: var(--ok);
-  z-index: 100;
+  display: none; position: fixed; bottom: 0; left: 0; right: 0;
+  background: rgba(63,185,80,0.12); border-top: 2px solid var(--ok);
+  padding: 0.5rem 1.25rem; font-size: 0.82rem; color: var(--ok); z-index: 100;
 }
 .ma-summary-bar.show { display: flex; align-items: center; gap: 0.75rem; }
 .ma-summary-bar a { color: var(--accent); text-decoration: none; }
 
-/* ── Sessions drawer (bottom right) ─────────────────────────────────────── */
+/* ── Sessions button ──────────────────────────────────────────────────────── */
 .ma-sessions-btn {
-  background: var(--surface2);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--muted);
-  font-size: 0.78rem;
-  padding: 0.3rem 0.6rem;
-  cursor: pointer;
+  background: var(--surface2); border: 1px solid var(--border); border-radius: 6px;
+  color: var(--muted); font-size: 0.78rem; padding: 0.3rem 0.6rem; cursor: pointer;
 }
 .ma-sessions-btn:hover { color: var(--fg); }
 
-/* ── Output panel ────────────────────────────────────────────────────────── */
+/* ── Output panel ─────────────────────────────────────────────────────────── */
 .ma-output-panel {
-  display: none;
-  position: fixed;
-  top: 120px; right: 0; bottom: 0;
-  width: 280px;
-  background: var(--card);
-  border-left: 1px solid var(--border);
-  z-index: 150;
-  flex-direction: column;
-  overflow: hidden;
+  display: none; position: fixed; top: 120px; right: 0; bottom: 0;
+  width: 280px; background: var(--card); border-left: 1px solid var(--border);
+  z-index: 150; flex-direction: column; overflow: hidden;
 }
 .ma-output-panel.open { display: flex; }
 .ma-output-panel-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 0.6rem 0.75rem;
-  border-bottom: 1px solid var(--border);
+  padding: 0.6rem 0.75rem; border-bottom: 1px solid var(--border);
   font-size: 0.82rem; font-weight: 600;
 }
-.ma-output-panel-body {
-  flex: 1; overflow-y: auto; padding: 0.5rem 0.75rem;
-  font-size: 0.78rem;
-}
+.ma-output-panel-body { flex: 1; overflow-y: auto; padding: 0.5rem 0.75rem; font-size: 0.78rem; }
 .ma-out-file {
   display: flex; align-items: center; gap: 0.4rem;
-  padding: 0.25rem 0.3rem; border-radius: 4px;
-  cursor: pointer; color: var(--fg);
+  padding: 0.25rem 0.3rem; border-radius: 4px; cursor: pointer; color: var(--fg);
 }
 .ma-out-file:hover { background: var(--surface2); }
-.ma-out-file-icon { color: var(--muted); flex-shrink: 0; }
+.ma-out-timeline { margin-top: 0.75rem; border-top: 1px solid var(--border); padding-top: 0.5rem; }
+.ma-out-timeline-title { font-size: 0.7rem; color: var(--muted); margin-bottom: 0.3rem; }
+.ma-out-timeline-row { font-size: 0.7rem; color: var(--muted); padding: 1px 0; }
 </style>
 
 <div class="ma-workspace">
@@ -453,11 +347,12 @@
     </div>
 
     <textarea id="ma-task" class="ma-task-input" rows="1"
-      placeholder="Describe the task for the agent team… (e.g. write a Python web server with a /hello endpoint and test it)"></textarea>
+      placeholder="Describe the task for the agent team… (Shift+Enter for newline, Enter to launch)"></textarea>
 
-    <div style="display:flex;gap:0.5rem;align-items:center;">
+    <div style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;">
       <button id="ma-launch" class="ma-launch-btn">🚀 Launch Team</button>
-      <button id="ma-stop" class="ma-stop-btn">⏹ Stop</button>
+      <button id="ma-pause"  class="ma-pause-btn">⏸ Pause</button>
+      <button id="ma-stop"   class="ma-stop-btn">⏹ Stop</button>
     </div>
 
     <!-- Role chips -->
@@ -473,7 +368,6 @@
 
     <!-- Options -->
     <div class="ma-opts-row">
-      <!-- Thinking mode pill -->
       <div class="ma-thinking-dropdown" id="ma-thinking-dropdown">
         <button type="button" class="ma-thinking-pill" id="ma-thinking-pill" aria-haspopup="true" aria-expanded="false">
           <span id="ma-thinking-label">Auto</span>
@@ -485,37 +379,47 @@
             <span class="ma-thinking-opt-desc">Decides how long to think</span>
           </button>
           <button type="button" class="ma-thinking-opt" data-mode="quick">
-            <span class="ma-thinking-opt-name">Quick Response</span>
+            <span class="ma-thinking-opt-name">Quick</span>
             <span class="ma-thinking-opt-desc">Faster, less reasoning</span>
           </button>
           <button type="button" class="ma-thinking-opt" data-mode="deep">
-            <span class="ma-thinking-opt-name">Think Deeper</span>
+            <span class="ma-thinking-opt-name">Deep Think</span>
             <span class="ma-thinking-opt-desc">Extended thinking budget</span>
           </button>
         </div>
       </div>
-      <!-- Work/Web toggle -->
       <div style="display:flex;align-items:center;gap:0;">
         <button type="button" id="ma-mode-work" class="ma-mode-btn active" data-mode="work">Work</button>
         <button type="button" id="ma-mode-web"  class="ma-mode-btn"        data-mode="web">Web</button>
       </div>
-      <label style="display:flex;align-items:center;gap:0.3rem;">Max steps:
-        <input type="number" id="ma-max-steps" value="8" min="2" max="12" style="width:50px;">
+      <label style="display:flex;align-items:center;gap:0.3rem;">Steps:
+        <input type="number" id="ma-max-steps" value="8" min="2" max="12" style="width:46px;">
       </label>
       <div class="pool-pill" id="pool-pill" title="C3 browser pool status">
         <div class="pool-dot" id="pool-dot"></div>
         <span id="pool-label">Pool: …</span>
       </div>
-      <button class="ma-sessions-btn" onclick="loadSessions()">📋 Past sessions</button>
+      <button class="ma-sessions-btn" onclick="loadSessions()">📋 Sessions</button>
     </div>
   </div>
 
-  <!-- ── Supervisor log bar ────────────────────────────────────────────── -->
+  <!-- ── Supervisor bar ────────────────────────────────────────────────── -->
   <div class="ma-supervisor-bar">
     <span class="supervisor-label">🧭 Supervisor</span>
     <span id="supervisor-text">Ready — enter a task and launch the team.</span>
     <span id="ma-overall-progress"></span>
-    <button class="ma-output-btn" id="ma-output-btn" onclick="toggleOutputPanel()">📁 Output <span class="ma-output-badge" id="ma-output-badge"></span></button>
+    <button class="ma-output-btn" id="ma-output-btn" onclick="toggleOutputPanel()">
+      📁 Output <span class="ma-output-badge" id="ma-output-badge"></span>
+    </button>
+  </div>
+
+  <!-- ── Follow-up bar ─────────────────────────────────────────────────── -->
+  <div id="ma-followup-bar">
+    <span style="font-size:0.8rem;color:#e3b341;flex-shrink:0;">↩ Follow-up:</span>
+    <input id="ma-followup-input" placeholder="Continue this task with the same agents…">
+    <button id="ma-followup-btn">▶ Run</button>
+    <button onclick="document.getElementById('ma-followup-bar').classList.remove('show')"
+      style="background:none;border:none;color:var(--muted);cursor:pointer;margin-left:auto;">✕</button>
   </div>
 
   <!-- ── Pane grid ─────────────────────────────────────────────────────── -->
@@ -523,7 +427,7 @@
     <div class="ma-empty" id="pane-empty">
       <span class="ma-empty-icon">🤖</span>
       <span>Active agent panes will appear here when you launch a task.</span>
-      <span style="font-size:0.78rem;">Builder · UI · Executor · Tester · Debugger run in parallel — each with their own Copilot browser tab.</span>
+      <span style="font-size:0.78rem;">Builder · Executor · Tester run in parallel, each in its own Copilot browser tab.</span>
     </div>
   </div>
 </div>
@@ -544,7 +448,7 @@
     <button onclick="toggleOutputPanel()" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:1rem;">✕</button>
   </div>
   <div class="ma-output-panel-body" id="ma-output-panel-body">
-    <div style="color:var(--muted);font-size:0.78rem;padding:0.5rem 0;">Files created by agents will appear here after completion.</div>
+    <div style="color:var(--muted);font-size:0.78rem;padding:0.5rem 0;">Files created by agents appear here after completion.</div>
   </div>
 </div>
 
@@ -560,7 +464,20 @@
   </div>
 </div>
 
-<!-- ── Sessions modal ─────────────────────────────────────────────────────── -->
+<!-- ── Web preview modal ───────────────────────────────────────────────── -->
+<div id="ma-preview-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:500;align-items:center;justify-content:center;">
+  <div style="width:85vw;height:80vh;background:var(--card);border-radius:10px;overflow:hidden;display:flex;flex-direction:column;">
+    <div style="display:flex;align-items:center;padding:0.5rem 1rem;border-bottom:1px solid var(--border);gap:0.5rem;">
+      <span id="ma-preview-url" style="flex:1;font-family:monospace;font-size:0.8rem;color:var(--muted);"></span>
+      <button id="ma-preview-reload" style="background:none;border:1px solid var(--border);border-radius:4px;color:var(--muted);cursor:pointer;padding:2px 8px;font-size:0.78rem;">↺</button>
+      <button onclick="document.getElementById('ma-preview-overlay').style.display='none'"
+        style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:1.1rem;">✕</button>
+    </div>
+    <iframe id="ma-preview-iframe" style="flex:1;border:none;" sandbox="allow-scripts allow-same-origin allow-forms"></iframe>
+  </div>
+</div>
+
+<!-- ── Sessions modal ─────────────────────────────────────────────────── -->
 <div id="sessions-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:200;align-items:center;justify-content:center;">
   <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:1.25rem;max-width:560px;width:90%;max-height:70vh;display:flex;flex-direction:column;gap:0.75rem;">
     <div style="display:flex;align-items:center;justify-content:space-between;">
@@ -576,54 +493,56 @@
 (function() {
   'use strict';
 
-  // ── State ─────────────────────────────────────────────────────────────
+  // ── State ─────────────────────────────────────────────────────────────────
   var _src = null;
   var _running = false;
-  var _panes = {};          // pane_id → {el, bodyEl, statusEl, stepEl, progressEl, elapsedEl, badgeEl}
+  var _panes = {};           // pane_id → {el, bodyEl, statusEl, stepEl, progressEl, elapsedEl, badgeEl, injectRowEl, previewPort}
   var _sessionId = '';
   var _paneDone = 0;
   var _paneTotal = 0;
-  var _paneStart = {};      // pane_id → timestamp
-  var _paneTimers = {};     // pane_id → setInterval handle
+  var _paneStart = {};
+  var _paneTimers = {};
+  var _paneFileLogs = [];    // [{pane_id, path, action}]
   var _maxSteps = 8;
   var _reconnectAttempts = 0;
   var _workMode = 'work';
+  var _paused = false;
   var _thinkingMode = localStorage.getItem('maThinkingMode') || 'auto';
+  var _lastTask = '';
 
-  // ── Elements ──────────────────────────────────────────────────────────
-  var taskEl         = document.getElementById('ma-task');
-  var launchBtn      = document.getElementById('ma-launch');
-  var stopBtn        = document.getElementById('ma-stop');
-  var paneGrid       = document.getElementById('pane-grid');
-  var paneEmpty      = document.getElementById('pane-empty');
-  var supText        = document.getElementById('supervisor-text');
-  var overallProg    = document.getElementById('ma-overall-progress');
-  var summaryBar     = document.getElementById('ma-summary-bar');
-  var summaryText    = document.getElementById('ma-summary-text');
-  var outputBtn      = document.getElementById('ma-output-btn');
-  var outputBadge    = document.getElementById('ma-output-badge');
-  var outputPanel    = document.getElementById('ma-output-panel');
-  var outputBody     = document.getElementById('ma-output-panel-body');
+  // ── DOM refs ──────────────────────────────────────────────────────────────
+  var taskEl      = document.getElementById('ma-task');
+  var launchBtn   = document.getElementById('ma-launch');
+  var pauseBtn    = document.getElementById('ma-pause');
+  var stopBtn     = document.getElementById('ma-stop');
+  var paneGrid    = document.getElementById('pane-grid');
+  var paneEmpty   = document.getElementById('pane-empty');
+  var supText     = document.getElementById('supervisor-text');
+  var overallProg = document.getElementById('ma-overall-progress');
+  var summaryBar  = document.getElementById('ma-summary-bar');
+  var summaryText = document.getElementById('ma-summary-text');
+  var outputBtn   = document.getElementById('ma-output-btn');
+  var outputBadge = document.getElementById('ma-output-badge');
+  var outputPanel = document.getElementById('ma-output-panel');
+  var outputBody  = document.getElementById('ma-output-panel-body');
+  var followupBar = document.getElementById('ma-followup-bar');
 
-  // ── URL param: pre-fill task ──────────────────────────────────────────
+  // ── URL param: pre-fill task ───────────────────────────────────────────────
   (function() {
     var urlTask = new URLSearchParams(window.location.search).get('task');
     if (urlTask) { taskEl.value = urlTask; }
   })();
 
-  // ── Role chips ─────────────────────────────────────────────────────
+  // ── Role chips ────────────────────────────────────────────────────────────
   document.querySelectorAll('.ma-role-chip').forEach(function(chip) {
-    chip.addEventListener('click', function() {
-      chip.classList.toggle('active');
-    });
+    chip.addEventListener('click', function() { chip.classList.toggle('active'); });
   });
-
   function activeRoles() {
     return Array.from(document.querySelectorAll('.ma-role-chip.active'))
       .map(function(c) { return c.dataset.role; });
   }
 
-  // ── Thinking mode ─────────────────────────────────────────────────────
+  // ── Thinking mode ─────────────────────────────────────────────────────────
   var THINKING_LABELS = { auto: 'Auto', quick: 'Quick', deep: 'Deep Think' };
   var thinkingPill  = document.getElementById('ma-thinking-pill');
   var thinkingMenu  = document.getElementById('ma-thinking-menu');
@@ -652,7 +571,7 @@
   });
   document.addEventListener('click', function() { thinkingMenu.hidden = true; });
 
-  // ── Work/Web mode ─────────────────────────────────────────────────────
+  // ── Work/Web mode ──────────────────────────────────────────────────────────
   document.querySelectorAll('.ma-mode-btn').forEach(function(btn) {
     btn.addEventListener('click', function() {
       _workMode = btn.dataset.mode;
@@ -662,20 +581,20 @@
     });
   });
 
-  // ── Pool status poll ───────────────────────────────────────────────
+  // ── Pool status ────────────────────────────────────────────────────────────
   function updatePool() {
     fetch('http://localhost:8001/status').then(function(r) { return r.json(); })
       .then(function(d) {
-        var poolAvail = d.pool_available != null ? d.pool_available : '?';
-        var poolSize  = d.pool_size != null ? d.pool_size : '?';
+        var avail = d.pool_available != null ? d.pool_available : '?';
+        var size  = d.pool_size != null ? d.pool_size : '?';
         var dot = document.getElementById('pool-dot');
         var lbl = document.getElementById('pool-label');
-        lbl.textContent = 'Pool: ' + poolAvail + '/' + poolSize + ' tabs';
+        lbl.textContent = 'Pool: ' + avail + '/' + size + ' tabs';
         dot.className = 'pool-dot';
-        if (typeof poolAvail === 'number') {
-          if (poolAvail >= 6)       dot.classList.add('ok');
-          else if (poolAvail >= 2)  dot.classList.add('warn');
-          else                      dot.classList.add('low');
+        if (typeof avail === 'number') {
+          if (avail >= 6)      dot.classList.add('ok');
+          else if (avail >= 2) dot.classList.add('warn');
+          else                 dot.classList.add('low');
         }
       }).catch(function() {
         document.getElementById('pool-label').textContent = 'Pool: offline';
@@ -684,77 +603,106 @@
   updatePool();
   setInterval(updatePool, 8000);
 
-  // ── Elapsed time helpers ───────────────────────────────────────────
-  function fmtElapsed(ms) {
-    var s = Math.floor(ms / 1000);
-    if (s < 60) return s + 's';
-    return Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+  // ── Live file tree during run ───────────────────────────────────────────────
+  var _liveFileInterval = null;
+  function startLiveFiles() {
+    _liveFileInterval = setInterval(function() {
+      if (!_running) return;
+      fetch('/api/agent/files').then(function(r) { return r.json(); })
+        .then(function(files) {
+          var count = files.filter(function(f) { return f.type === 'file'; }).length;
+          if (count > 0) {
+            outputBtn.classList.add('show');
+            outputBadge.textContent = count;
+            outputBadge.classList.add('show');
+          }
+        }).catch(function() {});
+    }, 5000);
+  }
+  function stopLiveFiles() {
+    if (_liveFileInterval) { clearInterval(_liveFileInterval); _liveFileInterval = null; }
   }
 
+  // ── Elapsed time ───────────────────────────────────────────────────────────
+  function fmtElapsed(ms) {
+    var s = Math.floor(ms / 1000);
+    return s < 60 ? s + 's' : Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+  }
   function startPaneTimer(paneId) {
     _paneStart[paneId] = Date.now();
     var p = _panes[paneId];
     if (!p) return;
     _paneTimers[paneId] = setInterval(function() {
-      if (p.elapsedEl) {
-        p.elapsedEl.textContent = fmtElapsed(Date.now() - _paneStart[paneId]);
-      }
+      if (p.elapsedEl) p.elapsedEl.textContent = fmtElapsed(Date.now() - _paneStart[paneId]);
     }, 1000);
   }
-
   function stopPaneTimer(paneId) {
-    if (_paneTimers[paneId]) {
-      clearInterval(_paneTimers[paneId]);
-      delete _paneTimers[paneId];
-    }
+    if (_paneTimers[paneId]) { clearInterval(_paneTimers[paneId]); delete _paneTimers[paneId]; }
+  }
+  function clearAllTimers() {
+    Object.keys(_paneTimers).forEach(function(id) { clearInterval(_paneTimers[id]); });
+    _paneTimers = {};
   }
 
-  // ── Create pane element ────────────────────────────────────────────
+  // ── Create pane ────────────────────────────────────────────────────────────
   function createPane(paneId, role, label, emoji, assignment) {
     if (_panes[paneId]) return;
-
     if (paneEmpty) paneEmpty.style.display = 'none';
 
     var pane = document.createElement('div');
     pane.className = 'ma-pane';
     pane.id = 'pane-' + paneId;
+    pane.setAttribute('data-role', role);
 
+    // Header
     var header = document.createElement('div');
     header.className = 'pane-header';
 
+    var collapseBtn = document.createElement('button');
+    collapseBtn.className = 'pane-ctrl-btn';
+    collapseBtn.textContent = '▼';
+    collapseBtn.title = 'Collapse/expand pane';
+    collapseBtn.onclick = function() { toggleCollapsePane(paneId, collapseBtn); };
+
+    var focusBtn = document.createElement('button');
+    focusBtn.className = 'pane-ctrl-btn';
+    focusBtn.textContent = '⤢';
+    focusBtn.title = 'Focus / full screen (ESC to exit)';
+    focusBtn.onclick = function() { toggleFocusPane(paneId); };
+
+    var exportBtn = document.createElement('button');
+    exportBtn.className = 'pane-ctrl-btn';
+    exportBtn.textContent = '⬇';
+    exportBtn.title = 'Export pane log';
+    exportBtn.onclick = function() { exportPaneLog(paneId, role); };
+
     var emojiSpan = document.createElement('span');
-    emojiSpan.className = 'pane-emoji';
-    emojiSpan.textContent = emoji;
+    emojiSpan.className = 'pane-emoji'; emojiSpan.textContent = emoji;
 
     var labelSpan = document.createElement('span');
-    labelSpan.className = 'pane-role-label';
-    labelSpan.textContent = label;
+    labelSpan.className = 'pane-role-label'; labelSpan.textContent = label;
 
     var stepSpan = document.createElement('span');
-    stepSpan.className = 'pane-step';
-    stepSpan.id = 'step-' + paneId;
-    stepSpan.textContent = 'step 0';
+    stepSpan.className = 'pane-step'; stepSpan.textContent = 'step 0';
 
     var elapsedSpan = document.createElement('span');
-    elapsedSpan.className = 'pane-elapsed';
-    elapsedSpan.id = 'elapsed-' + paneId;
-    elapsedSpan.textContent = '0s';
+    elapsedSpan.className = 'pane-elapsed'; elapsedSpan.textContent = '0s';
 
-    var modeBadge = document.createElement('span');
-    modeBadge.className = 'pane-model-badge';
-    modeBadge.id = 'badge-' + paneId;
-    modeBadge.textContent = 'Copilot · ' + _thinkingMode;
+    var badgeSpan = document.createElement('span');
+    badgeSpan.className = 'pane-model-badge';
+    badgeSpan.textContent = 'Copilot · ' + _thinkingMode;
 
     var statusSpan = document.createElement('span');
-    statusSpan.className = 'pane-status running';
-    statusSpan.id = 'status-' + paneId;
-    statusSpan.textContent = 'running';
+    statusSpan.className = 'pane-status running'; statusSpan.textContent = 'running';
 
+    header.appendChild(collapseBtn);
+    header.appendChild(focusBtn);
+    header.appendChild(exportBtn);
     header.appendChild(emojiSpan);
     header.appendChild(labelSpan);
     header.appendChild(stepSpan);
     header.appendChild(elapsedSpan);
-    header.appendChild(modeBadge);
+    header.appendChild(badgeSpan);
     header.appendChild(statusSpan);
 
     // Progress bar
@@ -762,46 +710,92 @@
     progressWrap.className = 'pane-progress';
     var progressBar = document.createElement('div');
     progressBar.className = 'pane-progress-bar';
-    progressBar.id = 'progress-' + paneId;
     progressWrap.appendChild(progressBar);
 
+    // Assignment
     var assignRow = document.createElement('div');
     assignRow.className = 'pane-assignment';
-    assignRow.id = 'assign-' + paneId;
     assignRow.textContent = assignment || '';
 
+    // Body
     var body = document.createElement('div');
     body.className = 'pane-body';
-    body.id = 'body-' + paneId;
+
+    // Inject row
+    var injectRow = document.createElement('div');
+    injectRow.className = 'pane-inject-row';
+    var injectInput = document.createElement('input');
+    injectInput.className = 'pane-inject-input';
+    injectInput.placeholder = 'Inject message to this agent…';
+    var injectBtn = document.createElement('button');
+    injectBtn.className = 'pane-inject-btn';
+    injectBtn.textContent = '→';
+    injectBtn.onclick = function() {
+      var msg = injectInput.value.trim();
+      if (!msg || !_sessionId) return;
+      fetch('/api/multi-agent/inject/' + _sessionId + '/' + paneId, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({message: msg}),
+      }).then(function() { injectInput.value = ''; });
+    };
+    injectInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') { e.preventDefault(); injectBtn.click(); }
+    });
+    injectRow.appendChild(injectInput);
+    injectRow.appendChild(injectBtn);
 
     pane.appendChild(header);
     pane.appendChild(progressWrap);
     pane.appendChild(assignRow);
     pane.appendChild(body);
+    pane.appendChild(injectRow);
     paneGrid.appendChild(pane);
 
     _panes[paneId] = {
-      el: pane,
-      bodyEl: body,
-      statusEl: statusSpan,
-      stepEl: stepSpan,
-      progressEl: progressBar,
-      elapsedEl: elapsedSpan,
-      badgeEl: modeBadge,
+      el: pane, bodyEl: body, statusEl: statusSpan,
+      stepEl: stepSpan, progressEl: progressBar,
+      elapsedEl: elapsedSpan, badgeEl: badgeSpan,
+      injectRowEl: injectRow, previewPort: null,
+      collapseBtn: collapseBtn,
     };
-
     startPaneTimer(paneId);
   }
 
-  // ── Update pane progress bar ───────────────────────────────────────
+  // ── Pane collapse/expand ───────────────────────────────────────────────────
+  function toggleCollapsePane(paneId, btn) {
+    var p = _panes[paneId];
+    if (!p) return;
+    var collapsed = p.el.classList.toggle('collapsed');
+    if (btn) btn.textContent = collapsed ? '▶' : '▼';
+  }
+
+  // ── Pane focus/zoom ────────────────────────────────────────────────────────
+  var _focusedPane = null;
+  function toggleFocusPane(paneId) {
+    if (_focusedPane && _focusedPane !== paneId) {
+      var old = _panes[_focusedPane];
+      if (old) old.el.classList.remove('focused');
+    }
+    var p = _panes[paneId];
+    if (!p) return;
+    var focused = p.el.classList.toggle('focused');
+    _focusedPane = focused ? paneId : null;
+    if (focused) document.addEventListener('keydown', _focusEsc);
+    else document.removeEventListener('keydown', _focusEsc);
+  }
+  function _focusEsc(e) {
+    if (e.key === 'Escape' && _focusedPane) toggleFocusPane(_focusedPane);
+  }
+
+  // ── Pane progress ──────────────────────────────────────────────────────────
   function updateProgress(paneId, step) {
     var p = _panes[paneId];
     if (!p || !p.progressEl) return;
-    var pct = Math.min(Math.round(step / _maxSteps * 95), 95);
-    p.progressEl.style.width = pct + '%';
+    p.progressEl.style.width = Math.min(Math.round(step / _maxSteps * 95), 95) + '%';
   }
 
-  // ── Append entry to pane body ──────────────────────────────────────
+  // ── Append to pane ─────────────────────────────────────────────────────────
   function appendPane(paneId, cls, html) {
     var p = _panes[paneId];
     if (!p) return;
@@ -829,15 +823,119 @@
     if (stepNum != null) p.stepEl.textContent = 'step ' + stepNum;
   }
 
-  // ── Overall progress ───────────────────────────────────────────────
+  // ── Collapsible observation ────────────────────────────────────────────────
+  var _obsCounter = 0;
+  function makeObsHtml(stdout, step, exitCode) {
+    var ec = exitCode != null ? ' [exit ' + exitCode + ']' : '';
+    var lines = (stdout + ec).split('\n');
+    var THRESH = 8;
+    if (lines.length <= THRESH) {
+      return stepBadge(step) + '<pre>' + escHtml(stdout + ec) + '</pre>';
+    }
+    var id = 'obs-' + (++_obsCounter);
+    var preview = escHtml(lines.slice(0, 3).join('\n'));
+    var full    = escHtml(stdout + ec);
+    return stepBadge(step) +
+      '<pre style="margin:0">' + preview + '\n<em style="color:var(--muted)">[' + lines.length + ' lines total]</em></pre>' +
+      '<div id="' + id + '" hidden><pre>' + full + '</pre></div>' +
+      '<button class="obs-toggle" onclick="var d=document.getElementById(\'' + id + '\');d.hidden=!d.hidden;this.textContent=d.hidden?\'▶ Expand\':\'▼ Collapse\'">▶ Expand</button>';
+  }
+
+  // ── Overall progress ───────────────────────────────────────────────────────
   function refreshOverallProgress() {
     if (_paneTotal === 0) { overallProg.style.display = 'none'; return; }
     var pct = Math.round(_paneDone / _paneTotal * 100);
     overallProg.style.display = '';
-    overallProg.textContent = _paneDone + '/' + _paneTotal + ' agents done (' + pct + '%)';
+    overallProg.textContent = _paneDone + '/' + _paneTotal + ' done (' + pct + '%)';
   }
 
-  // ── SSE event handlers ─────────────────────────────────────────────
+  // ── Web preview (port detected in pane stdout) ─────────────────────────────
+  var _PORT_RE = /(?:running on|port|:)\s*(\d{4,5})/i;
+  function checkPortInStdout(paneId, stdout) {
+    var p = _panes[paneId];
+    if (!p || p.previewPort) return;
+    var m = stdout.match(_PORT_RE);
+    if (!m) return;
+    var port = m[1];
+    p.previewPort = port;
+    var btn = document.createElement('button');
+    btn.className = 'pane-preview-btn';
+    btn.textContent = '🌐 :' + port;
+    btn.title = 'Open web preview on port ' + port;
+    btn.onclick = function() { openWebPreviewModal(port); };
+    p.statusEl.parentNode.insertBefore(btn, p.statusEl);
+  }
+
+  function openWebPreviewModal(port) {
+    document.getElementById('ma-preview-url').textContent = 'http://localhost:' + port + '/ (proxied via C9)';
+    var iframe = document.getElementById('ma-preview-iframe');
+    iframe.src = '/api/agent/preview?port=' + port;
+    document.getElementById('ma-preview-reload').onclick = function() {
+      iframe.src = '/api/agent/preview?port=' + port + '&_=' + Date.now();
+    };
+    document.getElementById('ma-preview-overlay').style.display = 'flex';
+  }
+  document.getElementById('ma-preview-overlay').addEventListener('click', function(e) {
+    if (e.target === this) this.style.display = 'none';
+  });
+
+  // ── Per-pane retry ─────────────────────────────────────────────────────────
+  function retryPane(paneId, role, assignment) {
+    var p = _panes[paneId];
+    if (!p) return;
+    // Reset pane
+    p.bodyEl.innerHTML = '';
+    p.statusEl.className = 'pane-status running';
+    p.statusEl.textContent = 'running';
+    p.progressEl.className = 'pane-progress-bar';
+    p.progressEl.style.width = '0%';
+    p.previewPort = null;
+    // Remove old retry btn if any
+    p.el.querySelectorAll('.pane-retry-btn').forEach(function(b) { b.remove(); });
+    startPaneTimer(paneId);
+
+    var params = new URLSearchParams({
+      task: _lastTask,
+      roles: role,
+      chat_mode: _thinkingMode,
+      work_mode: _workMode,
+      max_steps: _maxSteps,
+    });
+    if (_sessionId) params.set('session_id', _sessionId);
+
+    var retrySrc = new EventSource('/api/multi-agent/run?' + params.toString());
+    var events = ['pane_thinking','pane_tool','pane_obs','pane_file','pane_done','pane_error','session','supervisor','final','error'];
+    events.forEach(function(ev) {
+      retrySrc.addEventListener(ev, function(e) {
+        try {
+          var data = JSON.parse(e.data);
+          if (data.pane_id && data.pane_id !== paneId) return; // only handle our pane
+          handleEvent(ev, data);
+        } catch(_) {}
+      });
+    });
+    retrySrc.onerror = function() { retrySrc.close(); };
+    // Track source so stop button closes it too (best-effort)
+    p._retrySrc = retrySrc;
+  }
+
+  // ── Export pane log ────────────────────────────────────────────────────────
+  function exportPaneLog(paneId, role) {
+    var p = _panes[paneId];
+    if (!p) return;
+    var text = p.bodyEl.innerText || p.bodyEl.textContent;
+    var blob = new Blob([text], {type: 'text/plain'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'agent-' + role + '-' + Date.now() + '.txt';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  // ── SSE event handler ──────────────────────────────────────────────────────
   function handleEvent(type, data) {
     var paneId = data.pane_id;
 
@@ -849,27 +947,28 @@
         break;
 
       case 'supervisor':
-        var txt = (data.text || '').slice(0, 300);
-        supText.textContent = txt;
+        var txt = (data.text || '').slice(0, 400);
         if (data.assignments) {
-          var lines = Object.entries(data.assignments)
+          txt = Object.entries(data.assignments)
             .map(function(kv) { return '→ ' + kv[0] + ': ' + kv[1]; })
-            .join(' | ');
-          supText.textContent = lines.slice(0, 400);
+            .join(' | ').slice(0, 500);
         }
+        supText.textContent = txt;
         break;
 
       case 'pane_init':
         _paneTotal++;
         createPane(paneId, data.role, data.label, data.emoji || '🤖', data.assignment || '');
+        // Show inject row while running
+        var pi = _panes[paneId];
+        if (pi && pi.injectRowEl) pi.injectRowEl.classList.add('active');
         refreshOverallProgress();
         break;
 
       case 'pane_thinking':
         updatePaneStatus(paneId, 'running', data.step);
         updateProgress(paneId, data.step || 0);
-        appendPane(paneId, 'pe-thinking',
-          stepBadge(data.step) + escHtml((data.text || '').slice(0, 500)));
+        appendPane(paneId, 'pe-thinking', stepBadge(data.step) + escHtml((data.text || '').slice(0, 500)));
         break;
 
       case 'pane_tool':
@@ -879,13 +978,13 @@
         break;
 
       case 'pane_obs':
-        var stdout = (data.stdout || '').slice(0, 400);
-        var ec = data.exit_code != null ? ' [exit ' + data.exit_code + ']' : '';
-        appendPane(paneId, 'pe-obs',
-          stepBadge(data.step) + '<pre>' + escHtml(stdout) + escHtml(ec) + '</pre>');
+        var stdout = (data.stdout || '').slice(0, 800);
+        appendPane(paneId, 'pe-obs', makeObsHtml(stdout, data.step, data.exit_code));
+        checkPortInStdout(paneId, stdout);
         break;
 
       case 'pane_file':
+        _paneFileLogs.push({pane_id: paneId, path: data.path, action: data.action || 'created'});
         appendPane(paneId, 'pe-file',
           stepBadge(data.step) + '📄 ' + escHtml(data.path || '') + ' (' + (data.action || 'created') + ')');
         break;
@@ -894,10 +993,12 @@
         stopPaneTimer(paneId);
         _paneDone++;
         updatePaneStatus(paneId, 'done', data.step);
-        var pb = _panes[paneId];
-        if (pb && pb.progressEl) pb.progressEl.className = 'pane-progress-bar done';
-        appendPane(paneId, 'pe-done',
-          '✅ ' + escHtml((data.summary || '').slice(0, 300)));
+        var pd = _panes[paneId];
+        if (pd) {
+          pd.progressEl.className = 'pane-progress-bar done';
+          if (pd.injectRowEl) pd.injectRowEl.classList.remove('active');
+        }
+        appendPane(paneId, 'pe-done', '✅ ' + escHtml((data.summary || '').slice(0, 400)));
         refreshOverallProgress();
         break;
 
@@ -905,7 +1006,22 @@
         stopPaneTimer(paneId);
         updatePaneStatus(paneId, 'error', null);
         var pe = _panes[paneId];
-        if (pe && pe.progressEl) pe.progressEl.className = 'pane-progress-bar error';
+        if (pe) {
+          pe.progressEl.className = 'pane-progress-bar error';
+          if (pe.injectRowEl) pe.injectRowEl.classList.remove('active');
+          // Add retry button to header
+          var retryBtn = document.createElement('button');
+          retryBtn.className = 'pane-retry-btn';
+          retryBtn.textContent = '↻ Retry';
+          retryBtn.title = 'Restart this agent';
+          (function(pid, rl, assign) {
+            retryBtn.onclick = function() {
+              retryBtn.remove();
+              retryPane(pid, rl, assign);
+            };
+          })(paneId, data.role, '');
+          pe.statusEl.parentNode.insertBefore(retryBtn, pe.statusEl.nextSibling);
+        }
         appendPane(paneId, 'pe-error', '❌ ' + escHtml((data.message || '').slice(0, 300)));
         break;
 
@@ -915,8 +1031,8 @@
         var doneCount = Object.values(results).filter(function(r) { return r.done; }).length;
         summaryText.textContent = data.summary || (doneCount + ' agents completed.');
         summaryBar.classList.add('show');
-        // Load output files
         loadOutputFiles();
+        showFollowupBar();
         updatePool();
         break;
 
@@ -931,32 +1047,26 @@
     }
   }
 
-  // ── Launch / stop ──────────────────────────────────────────────────
+  // ── Launch ─────────────────────────────────────────────────────────────────
   function launch() {
     var task = taskEl.value.trim();
     if (!task) { taskEl.focus(); return; }
 
     var roles = activeRoles();
-    if (roles.length === 0) {
-      alert('Select at least one role to activate.');
-      return;
-    }
+    if (roles.length === 0) { alert('Select at least one role to activate.'); return; }
 
     _maxSteps = parseInt(document.getElementById('ma-max-steps').value, 10) || 8;
-
-    // Clear previous panes
-    _panes = {};
-    _paneDone = 0;
-    _paneTotal = 0;
-    _paneStart = {};
-    Object.keys(_paneTimers).forEach(function(id) { clearInterval(_paneTimers[id]); });
-    _paneTimers = {};
+    _lastTask = task;
+    _panes = {}; _paneDone = 0; _paneTotal = 0;
+    _paneStart = {}; _paneFileLogs = [];
+    clearAllTimers();
     _reconnectAttempts = 0;
+    _paused = false;
 
-    var oldPanes = paneGrid.querySelectorAll('.ma-pane');
-    oldPanes.forEach(function(p) { p.remove(); });
+    paneGrid.querySelectorAll('.ma-pane').forEach(function(p) { p.remove(); });
     if (paneEmpty) paneEmpty.style.display = '';
     summaryBar.classList.remove('show');
+    followupBar.classList.remove('show');
     overallProg.style.display = 'none';
     outputBtn.classList.remove('show');
     outputBadge.classList.remove('show');
@@ -974,11 +1084,13 @@
     });
     if (_sessionId) params.set('session_id', _sessionId);
 
-    var url = '/api/multi-agent/run?' + params.toString();
-    _src = new EventSource(url);
+    _src = new EventSource('/api/multi-agent/run?' + params.toString());
     _running = true;
     launchBtn.disabled = true;
     stopBtn.classList.add('visible');
+    pauseBtn.classList.add('visible');
+    pauseBtn.textContent = '⏸ Pause';
+    startLiveFiles();
 
     var events = ['session','supervisor','pane_init','pane_thinking','pane_tool',
                   'pane_obs','pane_file','pane_done','pane_error','final','error'];
@@ -1002,13 +1114,36 @@
 
   function setIdle() {
     _running = false;
+    _paused = false;
     launchBtn.disabled = false;
     stopBtn.classList.remove('visible');
+    pauseBtn.classList.remove('visible');
     if (_src) { _src.close(); _src = null; }
-    // Stop any running timers
-    Object.keys(_paneTimers).forEach(function(id) { clearInterval(_paneTimers[id]); });
+    clearAllTimers();
+    stopLiveFiles();
     updatePool();
   }
+
+  // ── Pause/resume ───────────────────────────────────────────────────────────
+  pauseBtn.addEventListener('click', function() {
+    if (!_sessionId || !_running) return;
+    _paused = !_paused;
+    var endpoint = (_paused ? '/api/multi-agent/pause/' : '/api/multi-agent/resume/') + _sessionId;
+    fetch(endpoint, {method: 'POST'}).then(function() {
+      pauseBtn.textContent = _paused ? '▶ Resume' : '⏸ Pause';
+      if (_paused) {
+        supText.textContent = '⏸ PAUSED — click ▶ Resume to continue';
+        pauseBtn.style.background = 'rgba(63,185,80,0.2)';
+        pauseBtn.style.color = 'var(--ok)';
+        pauseBtn.style.borderColor = 'var(--ok)';
+      } else {
+        supText.textContent = '🧭 Resuming…';
+        pauseBtn.style.background = '';
+        pauseBtn.style.color = '';
+        pauseBtn.style.borderColor = '';
+      }
+    });
+  });
 
   launchBtn.addEventListener('click', launch);
   stopBtn.addEventListener('click', function() {
@@ -1021,10 +1156,25 @@
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); launch(); }
   });
 
-  // ── Output panel ───────────────────────────────────────────────────
-  window.toggleOutputPanel = function() {
-    outputPanel.classList.toggle('open');
-  };
+  // ── Follow-up ──────────────────────────────────────────────────────────────
+  function showFollowupBar() {
+    followupBar.classList.add('show');
+    document.getElementById('ma-followup-input').value = '';
+  }
+
+  document.getElementById('ma-followup-btn').addEventListener('click', function() {
+    var followTask = document.getElementById('ma-followup-input').value.trim();
+    if (!followTask) return;
+    taskEl.value = followTask;
+    followupBar.classList.remove('show');
+    launch();
+  });
+  document.getElementById('ma-followup-input').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); document.getElementById('ma-followup-btn').click(); }
+  });
+
+  // ── Output panel ───────────────────────────────────────────────────────────
+  window.toggleOutputPanel = function() { outputPanel.classList.toggle('open'); };
 
   function getFileIcon(path) {
     var ext = (path.split('.').pop() || '').toLowerCase();
@@ -1034,37 +1184,44 @@
   }
 
   function loadOutputFiles() {
-    fetch('/api/agent/files')
-      .then(function(r) { return r.json(); })
+    fetch('/api/agent/files').then(function(r) { return r.json(); })
       .then(function(files) {
-        if (!files || !files.length) return;
+        var fileEntries = files.filter(function(f) { return f.type === 'file'; });
+        if (!fileEntries.length) return;
         outputBody.innerHTML = '';
-        var count = 0;
-        files.forEach(function(f) {
-          if (f.type === 'file') {
-            count++;
-            var row = document.createElement('div');
-            row.className = 'ma-out-file';
-            row.innerHTML = '<span class="ma-out-file-icon">' + getFileIcon(f.path) + '</span>' +
-                            '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escHtml(f.path) + '">' + escHtml(f.path) + '</span>';
-            row.addEventListener('click', function() { openFilePreview(f.path); });
-            outputBody.appendChild(row);
-          }
+        fileEntries.forEach(function(f) {
+          var row = document.createElement('div');
+          row.className = 'ma-out-file';
+          row.innerHTML = '<span>' + getFileIcon(f.path) + '</span>' +
+            '<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="' + escHtml(f.path) + '">' + escHtml(f.path) + '</span>';
+          row.addEventListener('click', function() { openFilePreview(f.path); });
+          outputBody.appendChild(row);
         });
-        if (count > 0) {
-          outputBtn.classList.add('show');
-          outputBadge.textContent = count;
-          outputBadge.classList.add('show');
-          outputPanel.classList.add('open');
+        // Activity timeline
+        if (_paneFileLogs.length > 0) {
+          var tlDiv = document.createElement('div');
+          tlDiv.className = 'ma-out-timeline';
+          tlDiv.innerHTML = '<div class="ma-out-timeline-title">📋 Activity Timeline</div>';
+          _paneFileLogs.forEach(function(entry) {
+            var row2 = document.createElement('div');
+            row2.className = 'ma-out-timeline-row';
+            row2.textContent = entry.pane_id.replace('ma-','') + ' → ' + entry.action + ' ' + entry.path;
+            tlDiv.appendChild(row2);
+          });
+          outputBody.appendChild(tlDiv);
         }
+        var count = fileEntries.length;
+        outputBtn.classList.add('show');
+        outputBadge.textContent = count;
+        outputBadge.classList.add('show');
+        outputPanel.classList.add('open');
       }).catch(function() {});
   }
 
   function openFilePreview(path) {
     document.getElementById('ma-file-title').textContent = path;
     document.getElementById('ma-file-content').textContent = 'Loading…';
-    var overlay = document.getElementById('ma-file-overlay');
-    overlay.style.display = 'flex';
+    document.getElementById('ma-file-overlay').style.display = 'flex';
     fetch('/api/agent/file?path=' + encodeURIComponent(path))
       .then(function(r) { return r.text(); })
       .then(function(t) {
@@ -1083,7 +1240,7 @@
     if (e.target === this) this.style.display = 'none';
   });
 
-  // ── Past sessions ──────────────────────────────────────────────────
+  // ── Sessions modal ─────────────────────────────────────────────────────────
   window.loadSessions = function() {
     var modal = document.getElementById('sessions-modal');
     var list  = document.getElementById('sessions-list');

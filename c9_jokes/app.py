@@ -27,7 +27,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import httpx
-from fastapi import FastAPI, Request, UploadFile, File
+from fastapi import Body, FastAPI, Request, UploadFile, File
 from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
@@ -1977,6 +1977,10 @@ _MA_ROLES = {
 # Default roles to activate when none specified
 _MA_DEFAULT_ROLES = ["builder", "executor", "tester"]
 
+# In-memory per-session control: pause events and injection queues
+_ma_pause_flags: dict[str, asyncio.Event] = {}       # session_id → Event (set=running, clear=paused)
+_ma_inject_queues: dict[str, asyncio.Queue] = {}     # "{session_id}/{pane_id}" → Queue[str]
+
 
 def _ma_role_system_prompt(role: str, task: str, assignment: str) -> str:
     """Build a focused system prompt for a specific multi-agent role."""
@@ -2008,6 +2012,8 @@ async def _ma_role_loop(
     work_mode: str,
     max_steps: int,
     queue: asyncio.Queue,
+    pause_event: asyncio.Event | None = None,
+    inject_queue: asyncio.Queue | None = None,
 ) -> dict:
     """Run a single role-agent's ReAct loop and push SSE events to queue.
 
@@ -2105,23 +2111,41 @@ async def _ma_role_loop(
                 pass
             return {"role": role, "pane_id": pane_id, "done": True, "summary": final, "files": files_created, "steps": step}
 
-        # Parse and execute tool
-        tool = _parse_next_tool(response_text)
-        if tool:
-            _q("pane_tool", {"step": step, "type": tool.get("tool"), "content": str(tool)[:200]})
-            obs, meta = await _execute_tool(tool)
-            _q("pane_obs", {"step": step, "stdout": obs[:500], "exit_code": meta.get("exit_code")})
+        # Check for injected user message between steps
+        if inject_queue is not None:
+            try:
+                injected = inject_queue.get_nowait()
+                if injected:
+                    history.append({"role": "assistant", "content": response_text})
+                    history.append({"role": "user", "content": f"[USER OVERRIDE]: {injected}"})
+                    _q("pane_thinking", {"step": step, "text": f"💬 [Injected]: {injected[:200]}"})
+            except asyncio.QueueEmpty:
+                pass
 
-            if tool.get("tool") == "write_file":
-                fname = tool.get("path", "")
-                if fname and fname not in files_created:
-                    files_created.append(fname)
-                    _q("pane_file", {"step": step, "path": fname, "action": "created"})
-            elif tool.get("tool") == "exec":
-                commands_run.append(tool.get("command", ""))
+        # Pause check between steps (asyncio.Event: set=running, clear=paused)
+        if pause_event is not None:
+            await pause_event.wait()
+
+        # Parse and execute ALL tools from this response (not just the first)
+        tools = _parse_all_actions(response_text)
+        if tools:
+            obs_parts: list[str] = []
+            for tool in tools:
+                _q("pane_tool", {"step": step, "type": tool.get("tool"), "content": str(tool.get("path") or tool.get("command") or tool.get("package") or "")[:200]})
+                obs, meta = await _execute_tool(tool)
+                _q("pane_obs", {"step": step, "stdout": obs[:500], "exit_code": meta.get("exit_code")})
+                obs_parts.append(obs)
+
+                if tool.get("tool") == "write_file":
+                    fname = tool.get("path", "")
+                    if fname and fname not in files_created:
+                        files_created.append(fname)
+                        _q("pane_file", {"step": step, "path": fname, "action": "created"})
+                elif tool.get("tool") == "exec":
+                    commands_run.append(tool.get("command", ""))
 
             turn_content = response_text
-            obs_msg = f"<observation>{obs}</observation>"
+            obs_msg = "<observation>" + "\n".join(obs_parts) + "</observation>"
             turn_counter += 1
             if not history:
                 history = [
@@ -2308,7 +2332,20 @@ async def api_multi_agent_run(
         active_panes = set(f"ma-{r}" for r in active_roles)
         pane_results: dict[str, dict] = {}
 
+        # Create pause event (set = running, clear = paused) and injection queues
+        pause_event = asyncio.Event()
+        pause_event.set()
+        _ma_pause_flags[session_id] = pause_event
+
+        inject_qs: dict[str, asyncio.Queue] = {}
+        for r in active_roles:
+            key = f"{session_id}/ma-{r}"
+            iq: asyncio.Queue = asyncio.Queue()
+            inject_qs[key] = iq
+            _ma_inject_queues[key] = iq
+
         async def run_role(r: str) -> None:
+            inject_key = f"{session_id}/ma-{r}"
             result = await _ma_role_loop(
                 pane_id=f"ma-{r}",
                 role=r,
@@ -2321,6 +2358,8 @@ async def api_multi_agent_run(
                 work_mode=work_mode,
                 max_steps=max_steps,
                 queue=queue,
+                pause_event=pause_event,
+                inject_queue=inject_qs.get(inject_key),
             )
             pane_results[r] = result
             active_panes.discard(f"ma-{r}")
@@ -2347,6 +2386,11 @@ async def api_multi_agent_run(
 
         await asyncio.gather(*tasks, return_exceptions=True)
 
+        # Clean up control structures
+        _ma_pause_flags.pop(session_id, None)
+        for key in list(inject_qs.keys()):
+            _ma_inject_queues.pop(key, None)
+
         # ── Final summary ──────────────────────────────────────────────────────
         done_roles = [r for r, res in pane_results.items() if res.get("done")]
         all_files = list({f for res in pane_results.values() for f in (res.get("files") or [])})
@@ -2372,6 +2416,40 @@ async def api_multi_agent_run(
         "Cache-Control": "no-cache",
         "X-Accel-Buffering": "no",
     })
+
+
+@app.post("/api/multi-agent/pause/{session_id}", name="api_ma_pause")
+async def api_ma_pause(session_id: str):
+    """Pause all role-agents in a running multi-agent session (after their current step)."""
+    evt = _ma_pause_flags.get(session_id)
+    if evt:
+        evt.clear()  # cleared = paused; agents block on await evt.wait()
+        return {"ok": True, "state": "paused"}
+    return {"ok": False, "error": "session not found or already finished"}
+
+
+@app.post("/api/multi-agent/resume/{session_id}", name="api_ma_resume")
+async def api_ma_resume(session_id: str):
+    """Resume a paused multi-agent session."""
+    evt = _ma_pause_flags.get(session_id)
+    if evt:
+        evt.set()  # set = running
+        return {"ok": True, "state": "running"}
+    return {"ok": False, "error": "session not found or already finished"}
+
+
+@app.post("/api/multi-agent/inject/{session_id}/{pane_id}", name="api_ma_inject")
+async def api_ma_inject(session_id: str, pane_id: str, body: dict = Body(...)):
+    """Inject a user message into a specific running pane's context."""
+    key = f"{session_id}/{pane_id}"
+    iq = _ma_inject_queues.get(key)
+    if iq is None:
+        return {"ok": False, "error": "pane not active"}
+    message = str(body.get("message", "")).strip()
+    if not message:
+        return {"ok": False, "error": "empty message"}
+    await iq.put(message)
+    return {"ok": True, "queued": message[:100]}
 
 
 @app.get("/api/multi-agent/sessions", name="api_multi_agent_sessions")
