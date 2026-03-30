@@ -35,8 +35,11 @@ from starlette.templating import Jinja2Templates
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DB = Path(os.environ.get("DATABASE_PATH", "/app/data/c9.db"))
 
-# ── C10 Sandbox URL ───────────────────────────────────────────────────────────
+# ── C10 Sandbox URL (single-agent /agent workspace) ──────────────────────────
 C10_URL = os.environ.get("C10_URL", "http://c10-sandbox:8100").rstrip("/")
+
+# ── C11 Sandbox URL (multi-agent /multi-Agento, session-scoped workspace) ────
+C11_URL = os.environ.get("C11_URL", "http://c11-sandbox:8200").rstrip("/")
 
 # ── Container targets ─────────────────────────────────────────────────────────
 TARGETS = {
@@ -178,6 +181,47 @@ def _ensure_db() -> None:
             """)
     except sqlite3.Error:
         pass
+    # Migrate: create ma_sessions and ma_projects tables for /multi-Agento (C11)
+    try:
+        with sqlite3.connect(DEFAULT_DB) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS ma_sessions (
+                    id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT,
+                    task TEXT NOT NULL,
+                    roles TEXT DEFAULT '[]',
+                    status TEXT DEFAULT 'running',
+                    steps_taken INTEGER DEFAULT 0,
+                    files_created TEXT DEFAULT '[]',
+                    summary TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS ma_projects (
+                    id TEXT PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    display_name TEXT,
+                    description TEXT,
+                    status TEXT DEFAULT 'active',
+                    UNIQUE(session_id, name)
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS ma_pane_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    pane_id TEXT NOT NULL,
+                    role TEXT NOT NULL,
+                    turn INTEGER NOT NULL,
+                    role_type TEXT NOT NULL,
+                    content TEXT NOT NULL
+                )
+            """)
+    except sqlite3.Error:
+        pass
 
 
 # ── URL helpers ───────────────────────────────────────────────────────────────
@@ -268,13 +312,98 @@ async def _c10_delete(path: str) -> dict:
 
 async def _c10_mkdir(path: str) -> dict:
     """Create a directory (mkdir -p) in the C10 workspace."""
-    # Strip shell metacharacters before passing to exec
     safe = re.sub(r'[;&|`$\\]', '', path).strip().strip("/")
     if not safe:
         return {"ok": False, "error": "invalid path"}
     result = await _c10_exec(f'mkdir -p "{safe}"', timeout=10)
     return {"ok": result.get("exit_code", 1) == 0, "path": safe,
             "error": result.get("stderr", "") if result.get("exit_code", 1) != 0 else None}
+
+
+# ── C11 Sandbox helpers (multi-Agento, session-scoped) ───────────────────────
+
+async def _c11_exec(command: str, timeout: int = 30, cwd: str = ".", session_id: str = "") -> dict:
+    try:
+        client = _get_http()
+        r = await client.post(
+            f"{C11_URL}/exec",
+            json={"command": command, "timeout": timeout, "cwd": cwd, "session_id": session_id},
+            timeout=timeout + 10,
+        )
+        return r.json() if r.status_code == 200 else {"ok": False, "error": r.text[:200], "exit_code": -1, "stdout": "", "stderr": r.text[:200]}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc), "exit_code": -1, "stdout": "", "stderr": str(exc)}
+
+
+async def _c11_write_file(path: str, content: str, session_id: str = "") -> dict:
+    try:
+        client = _get_http()
+        r = await client.post(f"{C11_URL}/file/write",
+                              json={"path": path, "content": content, "session_id": session_id}, timeout=15)
+        return r.json() if r.status_code == 200 else {"ok": False, "error": r.text[:200]}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+async def _c11_read_file(path: str, session_id: str = "") -> dict:
+    try:
+        client = _get_http()
+        r = await client.get(f"{C11_URL}/file/read", params={"path": path, "session_id": session_id}, timeout=10)
+        return r.json() if r.status_code in (200, 404) else {"ok": False, "error": r.text[:200]}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+async def _c11_list_files(path: str = ".", session_id: str = "") -> dict:
+    try:
+        client = _get_http()
+        r = await client.post(f"{C11_URL}/file/ls",
+                              json={"path": path, "recursive": True, "session_id": session_id}, timeout=10)
+        return r.json() if r.status_code == 200 else {"ok": False, "entries": [], "error": r.text[:200]}
+    except Exception as exc:
+        return {"ok": False, "entries": [], "error": str(exc)}
+
+
+async def _c11_reset(session_id: str) -> dict:
+    """Reset (wipe) a specific C11 session workspace."""
+    if not session_id:
+        return {"ok": False, "error": "session_id required"}
+    try:
+        client = _get_http()
+        r = await client.post(f"{C11_URL}/session/{session_id}/reset", timeout=15)
+        return r.json() if r.status_code == 200 else {"ok": False, "error": r.text[:200]}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+async def _c11_delete(path: str, session_id: str = "") -> dict:
+    try:
+        client = _get_http()
+        r = await client.request(
+            "DELETE", f"{C11_URL}/file/delete",
+            json={"path": path, "session_id": session_id}, timeout=10,
+        )
+        return r.json() if r.status_code == 200 else {"ok": False, "error": r.text[:200]}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+async def _c11_mkdir(path: str, session_id: str = "") -> dict:
+    safe = re.sub(r'[;&|`$\\]', '', path).strip().strip("/")
+    if not safe:
+        return {"ok": False, "error": "invalid path"}
+    result = await _c11_exec(f'mkdir -p "{safe}"', timeout=10, session_id=session_id)
+    return {"ok": result.get("exit_code", 1) == 0, "path": safe,
+            "error": result.get("stderr", "") if result.get("exit_code", 1) != 0 else None}
+
+
+async def _c11_sessions() -> dict:
+    try:
+        client = _get_http()
+        r = await client.get(f"{C11_URL}/sessions", timeout=10)
+        return r.json() if r.status_code == 200 else {"ok": False, "sessions": [], "error": r.text[:200]}
+    except Exception as exc:
+        return {"ok": False, "sessions": [], "error": str(exc)}
 
 
 # ── Agentic loop — system prompt ──────────────────────────────────────────────
@@ -527,6 +656,77 @@ async def _execute_tool(tool: dict) -> tuple[str, dict]:
         else:
             cmd = f"pip install --quiet {pkg}"
         result = await _c10_exec(cmd, timeout=120)
+        meta["exit_code"] = result.get("exit_code", -1)
+        stdout = result.get("stdout", "")
+        stderr = result.get("stderr", "")
+        obs = f"Install {pkg} ({mgr}):\nSTDOUT: {stdout}\nSTDERR: {stderr}\nEXIT_CODE: {result.get('exit_code', -1)}"
+        return obs, meta
+
+    else:
+        return f"Unknown tool: {name!r}", meta
+
+
+async def _execute_tool_c11(tool: dict, session_id: str) -> tuple[str, dict]:
+    """
+    Dispatch a parsed tool dict to C11 (session-scoped sandbox) and return (observation_text, metadata).
+    Mirrors _execute_tool() but uses C11 helpers with session_id for workspace isolation.
+    """
+    name = tool.get("tool", "")
+    meta: dict = {"tool": name}
+
+    if name == "exec":
+        cmd = tool.get("command", "")
+        meta["command"] = cmd
+        result = await _c11_exec(cmd, timeout=60, session_id=session_id)
+        meta["exit_code"] = result.get("exit_code", -1)
+        meta["timed_out"] = result.get("timed_out", False)
+        stdout = result.get("stdout", "")
+        stderr = result.get("stderr", "")
+        obs = f"STDOUT:\n{stdout}\nSTDERR:\n{stderr}\nEXIT_CODE: {result.get('exit_code', -1)}"
+        if result.get("timed_out"):
+            obs += "\n[TIMED OUT]"
+        return obs, meta
+
+    elif name == "write_file":
+        path = tool.get("path", "file.txt")
+        content = tool.get("content", "")
+        meta["path"] = path
+        result = await _c11_write_file(path, content, session_id=session_id)
+        meta["ok"] = result.get("ok", False)
+        meta["size"] = result.get("size")
+        if result.get("ok"):
+            obs = f"File written: {path} ({result.get('size', 0)} bytes)"
+        else:
+            obs = f"Error writing file: {result.get('error', 'unknown error')}"
+        return obs, meta
+
+    elif name == "read_file":
+        path = tool.get("path", "")
+        meta["path"] = path
+        result = await _c11_read_file(path, session_id=session_id)
+        if result.get("ok"):
+            obs = f"File content of {path}:\n{result.get('content', '')}"
+        else:
+            obs = f"Error reading file: {result.get('error', result.get('detail', 'not found'))}"
+        return obs, meta
+
+    elif name == "list_files":
+        result = await _c11_list_files(session_id=session_id)
+        entries = result.get("entries", [])
+        if entries:
+            lines = [f"  {'[DIR] ' if e['type']=='dir' else '      '}{e['path']}" for e in entries]
+            obs = "Workspace files:\n" + "\n".join(lines)
+        else:
+            obs = "Workspace is empty."
+        return obs, meta
+
+    elif name == "install":
+        pkg = tool.get("package", "")
+        mgr = tool.get("manager", "pip")
+        meta["package"] = pkg
+        meta["manager"] = mgr
+        cmd = f"npm install {pkg}" if mgr == "npm" else f"pip install --quiet {pkg}"
+        result = await _c11_exec(cmd, timeout=120, session_id=session_id)
         meta["exit_code"] = result.get("exit_code", -1)
         stdout = result.get("stdout", "")
         stderr = result.get("stderr", "")
@@ -2464,6 +2664,560 @@ async def api_multi_agent_sessions(limit: int = 10):
         return JSONResponse([dict(r) for r in rows])
     except sqlite3.Error as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ── C11 multi-agent role loop ─────────────────────────────────────────────────
+
+async def _ma_role_loop_c11(
+    pane_id: str,
+    role: str,
+    assignment: str,
+    overall_task: str,
+    session_id: str,
+    c1: str,
+    agent_id: str,
+    chat_mode: str,
+    work_mode: str,
+    max_steps: int,
+    queue: asyncio.Queue,
+    pause_event: asyncio.Event | None = None,
+    inject_queue: asyncio.Queue | None = None,
+) -> dict:
+    """Like _ma_role_loop but uses C11 (session-scoped workspace)."""
+    def _q(event: str, data: dict) -> None:
+        data["pane_id"] = pane_id
+        data["role"] = role
+        queue.put_nowait(f"event: {event}\ndata: {json.dumps(data)}\n\n")
+
+    client = _get_http()
+    files_created: list[str] = []
+    commands_run: list[str] = []
+    history: list[dict] = []
+    service_error_retries = 0
+    turn_counter = 0
+
+    initial_msg = _ma_role_system_prompt(role, overall_task, assignment)
+    _q("pane_thinking", {"step": 0, "text": f"📋 Assignment: {assignment[:150]}"})
+
+    for step in range(1, max_steps + 1):
+        if not history:
+            messages = [{"role": "user", "content": initial_msg}]
+        else:
+            _hist = list(history)
+            if len(_hist) > 6:
+                _hist = [_hist[0]] + _hist[-5:]
+            messages = _hist
+
+        headers = {"Content-Type": "application/json", "X-Agent-ID": agent_id}
+        if chat_mode:
+            headers["X-Chat-Mode"] = chat_mode
+        if work_mode in ("work", "web"):
+            headers["X-Work-Mode"] = work_mode
+
+        try:
+            llm_r = await client.post(
+                f"{c1}/v1/chat/completions",
+                headers=headers,
+                json={"model": "copilot", "messages": messages, "stream": False},
+                timeout=180,
+            )
+            if llm_r.status_code != 200:
+                _q("pane_error", {"message": f"C1 HTTP {llm_r.status_code}: {llm_r.text[:200]}"})
+                return {"role": role, "pane_id": pane_id, "done": False, "summary": "C1 error", "files": files_created, "steps": step}
+            response_text: str = llm_r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+        except Exception as exc:
+            service_error_retries += 1
+            if service_error_retries <= 2:
+                wait_s = service_error_retries * 12
+                _q("pane_thinking", {"step": step, "text": f"⚠️ Copilot unreachable — retrying in {wait_s}s..."})
+                await asyncio.sleep(wait_s)
+                continue
+            _q("pane_error", {"message": f"Copilot unreachable after retries: {exc}"})
+            return {"role": role, "pane_id": pane_id, "done": False, "summary": str(exc), "files": files_created, "steps": step}
+
+        _SERVICE_PHRASES = ("something went wrong", "please try again", "experiencing high demand", "we're experiencing")
+        if not response_text.strip():
+            _q("pane_error", {"message": "Empty response from Copilot — auth may be expired."})
+            return {"role": role, "pane_id": pane_id, "done": False, "summary": "empty response", "files": files_created, "steps": step}
+
+        if any(p in response_text.lower() for p in _SERVICE_PHRASES):
+            service_error_retries += 1
+            if service_error_retries <= 2:
+                wait_s = service_error_retries * 12
+                _q("pane_thinking", {"step": step, "text": f"⚠️ Service error — retrying in {wait_s}s..."})
+                await asyncio.sleep(wait_s)
+                continue
+            _q("pane_error", {"message": "Copilot service error after retries."})
+            return {"role": role, "pane_id": pane_id, "done": False, "summary": "service error", "files": files_created, "steps": step}
+
+        service_error_retries = 0
+        await asyncio.sleep(4)
+
+        thinking = _strip_tool_xml(response_text)
+        if thinking:
+            _q("pane_thinking", {"step": step, "text": thinking[:400]})
+
+        final = _parse_final_answer(response_text)
+        if final:
+            _q("pane_done", {"step": step, "summary": final[:300], "files": files_created})
+            try:
+                with _db() as conn:
+                    conn.execute(
+                        "INSERT INTO ma_pane_messages (session_id, pane_id, role, turn, role_type, content) VALUES (?,?,?,?,?,?)",
+                        (session_id, pane_id, role, turn_counter + 1, "assistant", response_text[:2000]),
+                    )
+            except sqlite3.Error:
+                pass
+            return {"role": role, "pane_id": pane_id, "done": True, "summary": final, "files": files_created, "steps": step}
+
+        if inject_queue is not None:
+            try:
+                injected = inject_queue.get_nowait()
+                if injected:
+                    history.append({"role": "assistant", "content": response_text})
+                    history.append({"role": "user", "content": f"[USER OVERRIDE]: {injected}"})
+                    _q("pane_thinking", {"step": step, "text": f"💬 [Injected]: {injected[:200]}"})
+            except asyncio.QueueEmpty:
+                pass
+
+        if pause_event is not None:
+            await pause_event.wait()
+
+        # Execute all tools via C11 (session-scoped workspace)
+        tools = _parse_all_actions(response_text)
+        if tools:
+            obs_parts: list[str] = []
+            for tool in tools:
+                _q("pane_tool", {"step": step, "type": tool.get("tool"), "content": str(tool.get("path") or tool.get("command") or tool.get("package") or "")[:200]})
+                obs, meta = await _execute_tool_c11(tool, session_id)
+                _q("pane_obs", {"step": step, "stdout": obs[:500], "exit_code": meta.get("exit_code")})
+                obs_parts.append(obs)
+
+                if tool.get("tool") == "write_file":
+                    fname = tool.get("path", "")
+                    if fname and fname not in files_created:
+                        files_created.append(fname)
+                        _q("pane_file", {"step": step, "path": fname, "action": "created"})
+                elif tool.get("tool") == "exec":
+                    commands_run.append(tool.get("command", ""))
+
+            turn_content = response_text
+            obs_msg = "<observation>" + "\n".join(obs_parts) + "</observation>"
+            turn_counter += 1
+            if not history:
+                history = [
+                    {"role": "user", "content": initial_msg},
+                    {"role": "assistant", "content": turn_content},
+                    {"role": "user", "content": obs_msg},
+                ]
+            else:
+                history.append({"role": "assistant", "content": turn_content})
+                history.append({"role": "user", "content": obs_msg})
+
+            try:
+                with _db() as conn:
+                    conn.execute(
+                        "INSERT INTO ma_pane_messages (session_id, pane_id, role, turn, role_type, content) VALUES (?,?,?,?,?,?)",
+                        (session_id, pane_id, role, turn_counter, "assistant", turn_content[:2000]),
+                    )
+            except sqlite3.Error:
+                pass
+        else:
+            history.append({"role": "assistant", "content": response_text})
+            history.append({"role": "user", "content": "Please use FILE:, RUN:, INSTALL:, or DONE: to take an action."})
+
+    _q("pane_done", {"step": max_steps, "summary": f"Reached {max_steps} step limit.", "files": files_created})
+    return {"role": role, "pane_id": pane_id, "done": False, "summary": "step limit reached", "files": files_created, "steps": max_steps}
+
+
+# ── /multi-Agento routes ──────────────────────────────────────────────────────
+
+@app.get("/multi-Agento", response_class=HTMLResponse, name="page_multi_agento")
+async def page_multi_agento(request: Request, task: str = ""):
+    """Full-featured multi-agent IDE with C11 session-scoped workspace."""
+    return templates.TemplateResponse(request, "multi_agento.html", {
+        "agents": AGENTS,
+        "ma_roles": _MA_ROLES,
+        "task": task,
+    })
+
+
+@app.get("/api/ma/run", name="api_ma_run")
+async def api_ma_run(
+    request: Request,
+    task: str = "",
+    session_id: str = "",
+    roles: str = "",
+    max_steps: int = 8,
+    chat_mode: str = "auto",
+    work_mode: str = "work",
+):
+    """SSE stream for /multi-Agento parallel execution using C11 session-scoped workspace."""
+    if not task.strip():
+        return JSONResponse({"error": "task required"}, status_code=400)
+
+    c1 = _urls().get("c1", "http://localhost:8000")
+    agent_id = "c9-jokes"
+    max_steps = max(2, min(12, max_steps))
+
+    if not session_id:
+        session_id = "ma-" + uuid.uuid4().hex[:8]
+
+    active_roles = [r.strip() for r in roles.split(",") if r.strip() in _MA_ROLES] if roles else _MA_DEFAULT_ROLES[:]
+
+    async def generate():
+        def _sse(event: str, data: dict) -> str:
+            return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+        yield _sse("session", {"session_id": session_id, "roles": active_roles})
+
+        # Persist session start
+        now = datetime.now(timezone.utc).isoformat()
+        try:
+            with _db() as conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO ma_sessions (id, created_at, updated_at, task, status, roles) VALUES (?,?,?,?,?,?)",
+                    (session_id, now, now, task, "running", json.dumps(active_roles)),
+                )
+        except sqlite3.Error:
+            pass
+
+        # Set up pause/inject per-session state
+        pause_event = asyncio.Event()
+        pause_event.set()
+        _ma_pause_flags[session_id] = pause_event
+        inject_qs: dict[str, asyncio.Queue] = {}
+        for r in active_roles:
+            key = f"{session_id}/ma-{r}"
+            iq: asyncio.Queue = asyncio.Queue()
+            inject_qs[key] = iq
+            _ma_inject_queues[key] = iq
+
+        # Supervisor decomposition
+        yield _sse("supervisor", {"text": f"🧭 Decomposing task for {len(active_roles)} role(s)…"})
+        assignments: dict[str, str] = {}
+        try:
+            client = _get_http()
+            sup_prompt = (
+                f"You are a supervisor AI coordinating a multi-agent team to complete this task:\n\n"
+                f"TASK: {task}\n\n"
+                f"Active roles: {', '.join(active_roles)}\n\n"
+                f"For each role, write a focused assignment (1-2 sentences max).\n"
+                f"Format: ROLE_NAME: assignment text\n"
+                f"Be specific. Each role has distinct responsibilities."
+            )
+            sup_r = await client.post(
+                f"{c1}/v1/chat/completions",
+                headers={"Content-Type": "application/json", "X-Agent-ID": agent_id},
+                json={"model": "copilot", "messages": [{"role": "user", "content": sup_prompt}], "stream": False},
+                timeout=60,
+            )
+            if sup_r.status_code == 200:
+                sup_text = sup_r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+                for line in sup_text.splitlines():
+                    for r in active_roles:
+                        if line.lower().startswith(r + ":"):
+                            assignments[r] = line[len(r)+1:].strip()
+                            break
+        except Exception as exc:
+            yield _sse("supervisor", {"text": f"⚠️ Supervisor error: {exc} — using default assignments"})
+
+        for r in active_roles:
+            if r not in assignments:
+                assignments[r] = f"Complete the {r} portion of: {task}"
+
+        # Initialize panes
+        for r in active_roles:
+            pane_id = f"ma-{r}"
+            yield _sse("pane_init", {"pane_id": pane_id, "role": r, "assignment": assignments[r],
+                                      "label": _MA_ROLES.get(r, {}).get("label", r.title())})
+
+        # Run all roles concurrently
+        event_queue: asyncio.Queue = asyncio.Queue()
+        all_files: list[str] = []
+
+        async def run_role(r: str) -> dict:
+            pane_id = f"ma-{r}"
+            return await _ma_role_loop_c11(
+                pane_id=pane_id, role=r, assignment=assignments[r],
+                overall_task=task, session_id=session_id,
+                c1=c1, agent_id=agent_id,
+                chat_mode=chat_mode, work_mode=work_mode,
+                max_steps=max_steps, queue=event_queue,
+                pause_event=pause_event,
+                inject_queue=inject_qs.get(f"{session_id}/ma-{r}"),
+            )
+
+        tasks = [asyncio.create_task(run_role(r)) for r in active_roles]
+        done_count = 0
+        total = len(tasks)
+
+        while done_count < total:
+            pending = [t for t in tasks if not t.done()]
+            try:
+                evt_text = event_queue.get_nowait()
+                yield evt_text
+                continue
+            except asyncio.QueueEmpty:
+                pass
+            if not pending:
+                while not event_queue.empty():
+                    yield event_queue.get_nowait()
+                break
+            await asyncio.sleep(0.05)
+            # Drain queue
+            try:
+                while True:
+                    yield event_queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            # Check completed tasks
+            newly_done = [t for t in tasks if t.done() and not getattr(t, "_reported", False)]
+            for t in newly_done:
+                t._reported = True  # type: ignore[attr-defined]
+                done_count += 1
+                try:
+                    res = t.result()
+                    all_files.extend(res.get("files", []))
+                except Exception:
+                    pass
+
+        # Final drain
+        while not event_queue.empty():
+            yield event_queue.get_nowait()
+
+        # Cleanup pause/inject state
+        _ma_pause_flags.pop(session_id, None)
+        for key in list(inject_qs.keys()):
+            _ma_inject_queues.pop(key, None)
+
+        # Gather results
+        results = []
+        for t in tasks:
+            try:
+                results.append(t.result())
+            except Exception:
+                pass
+
+        # Persist session completion
+        summary = " | ".join(r.get("summary", "")[:80] for r in results if r.get("summary"))
+        try:
+            with _db() as conn:
+                conn.execute(
+                    "UPDATE ma_sessions SET status=?, updated_at=?, summary=?, files_created=?, steps_taken=? WHERE id=?",
+                    ("completed", datetime.now(timezone.utc).isoformat(), summary[:500],
+                     json.dumps(list(dict.fromkeys(all_files))),
+                     sum(r.get("steps", 0) for r in results),
+                     session_id),
+                )
+        except sqlite3.Error:
+            pass
+
+        yield _sse("final", {
+            "session_id": session_id,
+            "summary": summary or "All agents completed.",
+            "files_created": list(dict.fromkeys(all_files)),
+            "roles_done": len(results),
+        })
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+# ── /multi-Agento pause, resume, inject (reuse same state dicts) ──────────────
+
+@app.post("/api/ma/pause/{session_id}", name="api_ma_agento_pause")
+async def api_ma_agento_pause(session_id: str):
+    evt = _ma_pause_flags.get(session_id)
+    if evt:
+        evt.clear()
+        return {"ok": True, "state": "paused"}
+    return {"ok": False, "error": "session not found"}
+
+
+@app.post("/api/ma/resume/{session_id}", name="api_ma_agento_resume")
+async def api_ma_agento_resume(session_id: str):
+    evt = _ma_pause_flags.get(session_id)
+    if evt:
+        evt.set()
+        return {"ok": True, "state": "running"}
+    return {"ok": False, "error": "session not found"}
+
+
+@app.post("/api/ma/inject/{session_id}/{pane_id}", name="api_ma_agento_inject")
+async def api_ma_agento_inject(session_id: str, pane_id: str, body: dict = Body(...)):
+    key = f"{session_id}/{pane_id}"
+    iq = _ma_inject_queues.get(key)
+    if iq is None:
+        return {"ok": False, "error": "pane not active"}
+    message = str(body.get("message", "")).strip()
+    if not message:
+        return {"ok": False, "error": "empty message"}
+    await iq.put(message)
+    return {"ok": True, "queued": message[:100]}
+
+
+# ── /multi-Agento file management API (C11) ───────────────────────────────────
+
+@app.get("/api/ma/files", name="api_ma_files")
+async def api_ma_files(session_id: str = ""):
+    result = await _c11_list_files(session_id=session_id)
+    return JSONResponse(result)
+
+
+@app.get("/api/ma/file", name="api_ma_file")
+async def api_ma_file(path: str = "", session_id: str = ""):
+    if not path:
+        return JSONResponse({"ok": False, "error": "path required"}, status_code=400)
+    result = await _c11_read_file(path, session_id=session_id)
+    return JSONResponse(result)
+
+
+@app.delete("/api/ma/file", name="api_ma_file_delete")
+async def api_ma_file_delete(path: str = "", session_id: str = ""):
+    if not path:
+        return JSONResponse({"ok": False, "error": "path required"}, status_code=400)
+    result = await _c11_delete(path, session_id=session_id)
+    return JSONResponse(result)
+
+
+@app.post("/api/ma/reset/{session_id}", name="api_ma_reset")
+async def api_ma_reset(session_id: str):
+    """Reset C11 workspace for a specific session only."""
+    result = await _c11_reset(session_id)
+    # Remove session's projects from DB
+    try:
+        with _db() as conn:
+            conn.execute("DELETE FROM ma_projects WHERE session_id=?", (session_id,))
+    except sqlite3.Error:
+        pass
+    return JSONResponse(result)
+
+
+@app.get("/api/ma/sessions", name="api_ma_sessions")
+async def api_ma_sessions(limit: int = 20):
+    """List recent /multi-Agento sessions with C11 workspace info."""
+    limit = max(1, min(50, limit))
+    rows = []
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                "SELECT id, created_at, updated_at, task, roles, status, steps_taken, files_created, summary "
+                "FROM ma_sessions ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+    except sqlite3.Error:
+        pass
+    return JSONResponse([dict(r) for r in rows])
+
+
+@app.get("/api/ma/projects", name="api_ma_projects")
+async def api_ma_projects(session_id: str = ""):
+    """List projects for a /multi-Agento session."""
+    rows = []
+    try:
+        with _db() as conn:
+            q = "SELECT id, session_id, created_at, name, display_name, description, status FROM ma_projects"
+            params: list = []
+            if session_id:
+                q += " WHERE session_id=?"
+                params.append(session_id)
+            q += " ORDER BY created_at DESC"
+            rows = conn.execute(q, params).fetchall()
+    except sqlite3.Error:
+        pass
+    return JSONResponse([dict(r) for r in rows])
+
+
+@app.post("/api/ma/project", name="api_ma_project_create")
+async def api_ma_project_create(body: dict):
+    """Create a project directory in the C11 session workspace."""
+    raw_name   = (body.get("name") or "").strip()
+    display    = (body.get("display_name") or raw_name).strip()
+    desc       = (body.get("description") or "").strip()
+    session_id = (body.get("session_id") or "").strip()
+    if not raw_name:
+        return JSONResponse({"ok": False, "error": "name required"}, status_code=400)
+    slug = re.sub(r"[^a-z0-9_\-]", "", raw_name.lower().replace(" ", "-"))
+    if not slug:
+        return JSONResponse({"ok": False, "error": "invalid name"}, status_code=400)
+    mkdir_r = await _c11_mkdir(slug, session_id=session_id)
+    if not mkdir_r.get("ok"):
+        return JSONResponse({"ok": False, "error": "mkdir failed: " + (mkdir_r.get("error") or "unknown")}, status_code=500)
+    proj_id = "map_" + uuid.uuid4().hex[:6]
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        with _db() as conn:
+            conn.execute(
+                "INSERT INTO ma_projects (id, session_id, created_at, name, display_name, description) VALUES (?,?,?,?,?,?)",
+                (proj_id, session_id, now, slug, display or slug, desc),
+            )
+    except sqlite3.IntegrityError:
+        return JSONResponse({"ok": False, "error": f"Project '{slug}' already exists in this session"}, status_code=409)
+    except sqlite3.Error as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    return JSONResponse({"ok": True, "id": proj_id, "name": slug, "display_name": display or slug, "session_id": session_id})
+
+
+@app.delete("/api/ma/project", name="api_ma_project_delete")
+async def api_ma_project_delete(name: str = "", session_id: str = ""):
+    if not name:
+        return JSONResponse({"ok": False, "error": "name required"}, status_code=400)
+    c11_r = await _c11_delete(name, session_id=session_id)
+    try:
+        with _db() as conn:
+            conn.execute("DELETE FROM ma_projects WHERE name=? AND session_id=?", (name, session_id))
+    except sqlite3.Error:
+        pass
+    return JSONResponse({"ok": c11_r.get("ok", False), "name": name})
+
+
+@app.get("/api/ma/preview", name="api_ma_preview")
+async def api_ma_preview(port: int = 3000, path: str = "/"):
+    """Proxy to a web server running inside C11 sandbox."""
+    c11_host = C11_URL.split("://")[-1].split(":")[0]  # e.g. "c11-sandbox"
+    target = f"http://{c11_host}:{port}{path}"
+    client = _get_http()
+    try:
+        r = await client.get(target, timeout=5)
+        content_type = r.headers.get("content-type", "text/html")
+        return Response(content=r.content, media_type=content_type, status_code=r.status_code)
+    except Exception as exc:
+        return HTMLResponse(
+            f"<html><body style='font-family:system-ui;background:#0f1419;color:#e6edf3;padding:2rem'>"
+            f"<h3>🔌 Preview not available</h3>"
+            f"<p>Could not reach <code>http://c11-sandbox:{port}/</code></p>"
+            f"<p style='color:#8b949e'>{exc}</p>"
+            f"<p>The web server may still be starting. Wait a moment and refresh.</p>"
+            f"</body></html>",
+            status_code=502,
+        )
+
+
+@app.post("/api/ma/upload", name="api_ma_upload")
+async def api_ma_upload(session_id: str = "", file: UploadFile = File(...)):
+    """Upload a file to C11 session workspace."""
+    raw = await file.read()
+    filename = file.filename or "uploaded_file"
+    try:
+        content = raw.decode("utf-8")
+        result = await _c11_write_file(filename, content, session_id=session_id)
+    except UnicodeDecodeError:
+        import base64
+        b64 = base64.b64encode(raw).decode()
+        cmd = f"echo '{b64}' | base64 -d > {filename}"
+        result = await _c11_exec(cmd, session_id=session_id)
+        result["path"] = filename
+    return JSONResponse({
+        "ok": result.get("ok", True),
+        "filename": filename,
+        "size": len(raw),
+        "path": result.get("path", filename),
+        "session_id": session_id,
+    })
 
 
 if __name__ == "__main__":

@@ -530,6 +530,7 @@ services:
       - C8_URL=http://hermes-agent:8080
       - DATABASE_PATH=/app/data/c9.db
       - C10_URL=http://c10-sandbox:8100
+      - C11_URL=http://c11-sandbox:8200
     volumes:
       - ./c9_jokes:/app/c9_jokes
       - c9-data:/app/data
@@ -558,6 +559,37 @@ services:
   # Resource limits: 512 MB RAM, 0.5 CPU
   # Non-root user: sandbox | Workspace: /workspace (named volume)
   # ──────────────────────────────────────────────────────────
+  # C11: Multi-Agent Session-Scoped Sandbox (internal only — no host port)
+  #
+  # Dedicated execution environment for /multi-Agento workspace.
+  # Each multi-agent session is isolated in /workspace/{session_id}/
+  #
+  # REST API on :8200 (internal Docker network only)
+  # Resource limits: 1g RAM, 1 CPU (larger than C10 for concurrent agent builds)
+  # Non-root user: sandbox | Volume: c11-workspace
+  # ──────────────────────────────────────────────────────────
+  c11-sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile.c11-sandbox
+    image: copilot-c11-sandbox:latest
+    container_name: C11_sandbox
+    mem_limit: 1g
+    cpus: 1.0
+    environment:
+      - WORKSPACE=/workspace
+    volumes:
+      - c11-workspace:/workspace
+    networks:
+      - copilot-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8200/health >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
   c10-sandbox:
     build:
       context: .
@@ -599,3 +631,5 @@ volumes:
   c9-data:
   # C10 agent workspace — persists files between agent runs
   c10-workspace:
+  # C11 multi-agent workspace — per-session isolation, persists between runs
+  c11-workspace:

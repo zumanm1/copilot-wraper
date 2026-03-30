@@ -1,0 +1,626 @@
+{% extends "base.html" %}
+{% block title %}Multi-Agento Workspace{% endblock %}
+{% block content %}
+<style>
+.mao{display:grid;grid-template-columns:190px 1fr 230px;grid-template-rows:auto auto 1fr;height:calc(100vh - 120px);margin:-1.25rem;overflow:hidden;}
+/* left sidebar */
+.mao-left{grid-column:1;grid-row:1/-1;border-right:1px solid var(--border);background:var(--card);display:flex;flex-direction:column;overflow:hidden;}
+.mao-left-hdr{padding:.4rem .7rem;border-bottom:1px solid var(--border);font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);display:flex;align-items:center;justify-content:space-between;flex-shrink:0;}
+.mao-list{flex:1;overflow-y:auto;padding:.25rem 0;}
+.mao-item{padding:.35rem .7rem;font-size:.76rem;cursor:pointer;border-left:2px solid transparent;color:var(--fg);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.mao-item:hover{background:var(--surface2);}
+.mao-item.active{border-left-color:var(--accent);background:rgba(88,166,255,.08);}
+.mao-item.done{border-left-color:var(--ok);}
+.mao-item.failed{border-left-color:var(--fail);}
+.mao-meta{font-size:.68rem;color:var(--muted);margin-top:1px;}
+.mao-section{padding:.3rem .7rem .1rem;font-size:.68rem;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--accent);border-top:1px solid var(--border);margin-top:.2rem;}
+.mao-proj-item{display:flex;align-items:center;gap:.3rem;padding:.25rem .7rem;font-size:.76rem;color:var(--fg);cursor:default;}
+.mao-proj-del{margin-left:auto;background:none;border:none;color:var(--muted);cursor:pointer;font-size:.68rem;padding:0 2px;}
+.mao-proj-del:hover{color:var(--fail);}
+/* top bar */
+.mao-topbar{grid-column:2/4;display:flex;align-items:flex-start;gap:.6rem;padding:.6rem .9rem;background:var(--card);border-bottom:1px solid var(--border);flex-wrap:wrap;}
+.mao-topbar h2{margin:0;font-size:.95rem;white-space:nowrap;}
+.mao-task{flex:1;min-width:220px;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--fg);font-size:.88rem;padding:.35rem .65rem;resize:none;font-family:inherit;line-height:1.4;min-height:36px;max-height:72px;}
+.mao-task:focus{outline:none;border-color:var(--accent);}
+.mao-launch{background:var(--accent);color:#0d1117;border:none;border-radius:6px;padding:.4rem 1rem;font-size:.85rem;font-weight:700;cursor:pointer;white-space:nowrap;}
+.mao-launch:hover{opacity:.85;}
+.mao-launch:disabled{opacity:.4;cursor:not-allowed;}
+.mao-pause,.mao-stop{border:none;border-radius:6px;padding:.4rem .85rem;font-size:.85rem;font-weight:600;cursor:pointer;display:none;}
+.mao-pause{background:rgba(227,179,65,.2);color:#e3b341;border:1px solid #e3b341;}
+.mao-stop{background:var(--fail);color:#fff;}
+.mao-pause.vis,.mao-stop.vis{display:inline-flex;}
+.mao-chips{display:flex;align-items:center;gap:.35rem;flex-wrap:wrap;}
+.mao-chip{display:inline-flex;align-items:center;gap:.2rem;background:var(--surface2);border:1px solid var(--border);border-radius:12px;padding:.15rem .5rem;font-size:.73rem;cursor:pointer;color:var(--muted);}
+.mao-chip.active{background:rgba(88,166,255,.15);border-color:var(--accent);color:var(--accent);}
+.mao-opts{display:flex;align-items:center;gap:.6rem;flex-wrap:wrap;font-size:.78rem;color:var(--muted);}
+.mao-opts input[type=number]{background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-size:.78rem;padding:.15rem .35rem;width:44px;}
+.mao-pill{display:inline-flex;align-items:center;gap:2px;background:var(--surface2);border:1px solid var(--border);color:var(--fg);border-radius:999px;padding:3px 9px;font-size:.75rem;cursor:pointer;}
+.mao-pill:hover{background:var(--card);}
+.mao-menu{position:absolute;top:calc(100%+4px);left:0;z-index:300;background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:4px;min-width:190px;box-shadow:0 4px 12px rgba(0,0,0,.3);}
+.mao-mopt{display:flex;flex-direction:column;align-items:flex-start;padding:5px 9px;border-radius:5px;cursor:pointer;background:none;border:none;width:100%;text-align:left;color:var(--fg);}
+.mao-mopt:hover,.mao-mopt.sel{background:rgba(88,166,255,.12);}
+.mao-mopt-n{font-size:.8rem;font-weight:500;}
+.mao-mopt-d{font-size:.7rem;color:var(--muted);}
+.mao-mbtn{padding:.18rem .6rem;border:1px solid var(--border);cursor:pointer;background:transparent;color:var(--muted);font-size:.76rem;}
+.mao-mbtn:first-of-type{border-radius:4px 0 0 4px;}
+.mao-mbtn:last-of-type{border-left:none;border-radius:0 4px 4px 0;}
+.mao-mbtn.active{background:var(--accent);color:#0d1117;font-weight:600;}
+/* supervisor bar */
+.mao-supbar{grid-column:2;display:flex;align-items:center;gap:.4rem;padding:.35rem .9rem;background:rgba(88,166,255,.04);border-bottom:1px solid var(--border);font-size:.78rem;color:var(--muted);min-height:26px;overflow:hidden;}
+.mao-sup-lbl{font-weight:600;color:var(--accent);white-space:nowrap;flex-shrink:0;}
+#mao-sup-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;}
+#mao-prog{white-space:nowrap;flex-shrink:0;color:var(--ok);font-size:.73rem;font-weight:600;display:none;}
+/* right file ops header */
+.mao-rbar{grid-column:3;display:flex;align-items:center;gap:.35rem;padding:.35rem .65rem;background:var(--card);border-bottom:1px solid var(--border);border-left:1px solid var(--border);font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);flex-shrink:0;}
+/* pane grid */
+.mao-grid{grid-column:2;grid-row:3;display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:0;overflow:hidden;height:100%;}
+/* right panel */
+.mao-right{grid-column:3;grid-row:3;border-left:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;background:var(--card);}
+.mao-rtabs{display:flex;border-bottom:1px solid var(--border);flex-shrink:0;}
+.mao-rtab{flex:1;padding:.35rem 0;background:none;border:none;border-bottom:2px solid transparent;color:var(--muted);font-size:.78rem;cursor:pointer;}
+.mao-rtab.active{color:var(--accent);border-bottom-color:var(--accent);}
+.mao-rpanel{display:none;flex:1;overflow:hidden;flex-direction:column;}
+.mao-rpanel.active{display:flex;}
+/* file tree */
+.mao-ftree{flex:1;overflow-y:auto;padding:.2rem 0;}
+.mao-fitem{display:flex;align-items:center;gap:.35rem;padding:.22rem .65rem;font-size:.78rem;cursor:pointer;color:var(--fg);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.mao-fitem:hover{background:var(--surface2);}
+.mao-fitem.dir{color:var(--warn);cursor:default;}
+.mao-fitem .fdel{display:none;margin-left:auto;background:none;border:none;color:var(--muted);font-size:.68rem;cursor:pointer;padding:0 2px;flex-shrink:0;}
+.mao-fitem:hover .fdel{display:inline;}
+.mao-fitem .fdel:hover{color:var(--fail);}
+.mao-fempty{color:var(--muted);font-size:.8rem;padding:1rem .65rem;text-align:center;}
+/* preview tab */
+.mao-preview-tb{display:flex;align-items:center;gap:.4rem;padding:.35rem .6rem;border-bottom:1px solid var(--border);font-size:.76rem;flex-shrink:0;}
+.mao-preview-url{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:.15rem .45rem;color:var(--muted);font-size:.72rem;font-family:monospace;}
+#mao-preview-iframe{flex:1;border:none;background:#fff;width:100%;height:100%;}
+/* pane (reuse from multi_agent.html) */
+.ma-pane{display:flex;flex-direction:column;border-right:1px solid var(--border);border-bottom:1px solid var(--border);overflow:hidden;min-height:0;background:var(--bg);}
+.ma-pane:last-child{border-right:none;}
+.ma-pane[data-role=builder]>.ph{border-left:3px solid #58a6ff;}
+.ma-pane[data-role=executor]>.ph{border-left:3px solid #3fb950;}
+.ma-pane[data-role=tester]>.ph{border-left:3px solid #bc8cff;}
+.ma-pane[data-role=debugger]>.ph{border-left:3px solid #f78166;}
+.ma-pane[data-role=ui]>.ph{border-left:3px solid #f0883e;}
+.ma-pane[data-role=reporter]>.ph{border-left:3px solid #e3b341;}
+.ph{display:flex;align-items:center;gap:.3rem;padding:.28rem .55rem;background:var(--card);border-bottom:1px solid var(--border);font-size:.76rem;font-weight:600;flex-shrink:0;}
+.ph-ctrl{background:none;border:none;color:var(--muted);font-size:.68rem;cursor:pointer;padding:0 2px;}
+.ph-ctrl:hover{color:var(--fg);}
+.p-status{margin-left:auto;padding:.08rem .38rem;border-radius:10px;font-size:.68rem;font-weight:600;background:var(--surface2);color:var(--muted);}
+.p-status.running{background:rgba(88,166,255,.15);color:var(--accent);}
+.p-status.done{background:rgba(63,185,80,.15);color:var(--ok);}
+.p-status.error{background:rgba(248,81,73,.15);color:var(--fail);}
+.p-prog{height:2px;background:var(--surface2);flex-shrink:0;}
+.p-bar{height:100%;width:0;background:var(--accent);transition:width .4s;}
+.p-bar.done{background:var(--ok);width:100%!important;}
+.p-bar.error{background:var(--fail);width:100%!important;}
+.p-assign{padding:.25rem .6rem;background:rgba(88,166,255,.04);border-bottom:1px solid var(--border);font-size:.7rem;color:var(--muted);font-style:italic;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex-shrink:0;}
+.p-body{flex:1;overflow-y:auto;padding:.45rem .6rem;font-size:.76rem;font-family:'Courier New',monospace;line-height:1.5;min-height:0;scroll-behavior:smooth;}
+.p-inject{display:none;align-items:center;gap:4px;padding:4px 7px;border-top:1px solid var(--border);flex-shrink:0;}
+.p-inject.active{display:flex;}
+.p-inject-inp{flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:4px;color:var(--fg);font-size:.7rem;padding:2px 5px;}
+.p-inject-btn{background:var(--accent);color:#0d1117;border:none;border-radius:4px;padding:2px 7px;font-size:.72rem;cursor:pointer;}
+.ma-pane.collapsed .p-body,.ma-pane.collapsed .p-assign,.ma-pane.collapsed .p-prog,.ma-pane.collapsed .p-inject{display:none!important;}
+.pe{margin-bottom:.25rem;word-break:break-word;}
+.pe-thinking{color:var(--fg);}
+.pe-tool{color:#e3b341;}
+.pe-obs{color:var(--muted);font-size:.72rem;}
+.pe-obs pre{margin:0;padding:.2rem .35rem;background:var(--surface2);border-radius:4px;white-space:pre-wrap;font-size:.69rem;}
+.pe-file{color:var(--ok);}
+.pe-done{color:var(--ok);font-weight:600;}
+.pe-error{color:var(--fail);}
+.obs-tog{background:none;border:none;color:var(--accent);font-size:.68rem;cursor:pointer;padding:1px 0;display:block;}
+.sb{display:inline-block;background:var(--surface2);color:var(--muted);border-radius:3px;padding:0 .28rem;font-size:.64rem;margin-right:.25rem;font-family:monospace;}
+/* empty placeholder */
+.mao-empty{grid-column:1/-1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2.5rem;color:var(--muted);font-size:.88rem;gap:.4rem;}
+/* summary bar */
+.mao-sumbar{display:none;position:fixed;bottom:0;left:0;right:0;background:rgba(63,185,80,.12);border-top:2px solid var(--ok);padding:.45rem 1.2rem;font-size:.8rem;color:var(--ok);z-index:100;align-items:center;gap:.6rem;}
+.mao-sumbar.show{display:flex;}
+.mao-sumbar a{color:var(--accent);text-decoration:none;}
+/* modal */
+.mao-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:400;align-items:center;justify-content:center;}
+.mao-overlay.open{display:flex;}
+.mao-modal{background:var(--card);border:1px solid var(--border);border-radius:10px;width:min(88vw,680px);max-height:80vh;display:flex;flex-direction:column;overflow:hidden;}
+.mao-mhdr{display:flex;align-items:center;justify-content:space-between;padding:.6rem .95rem;border-bottom:1px solid var(--border);font-size:.85rem;font-weight:600;}
+.mao-mbody{flex:1;overflow:auto;padding:.85rem;}
+.mao-mbody pre{margin:0;background:#010409;border-radius:6px;padding:.85rem;font-size:.79rem;max-height:55vh;overflow:auto;white-space:pre-wrap;word-break:break-all;}
+.mao-sm-modal{width:min(88vw,380px);}
+/* thinking dropdown pos */
+.mao-td{position:relative;display:inline-block;}
+</style>
+
+<div class="mao" id="mao">
+
+  <!-- LEFT SIDEBAR -->
+  <div class="mao-left">
+    <div class="mao-left-hdr">
+      <span>🕐 Sessions</span>
+      <button class="btn-sm" onclick="loadSessions()" title="Refresh">↺</button>
+    </div>
+    <div class="mao-list" id="sess-list">
+      <div class="mao-meta" style="padding:.5rem .7rem;">No sessions yet</div>
+    </div>
+    <div class="mao-section">📁 Projects</div>
+    <div class="mao-list" id="proj-list" style="max-height:160px;">
+      <div class="mao-meta" style="padding:.4rem .7rem;">—</div>
+    </div>
+    <div style="padding:.5rem .7rem;border-top:1px solid var(--border);flex-shrink:0;display:flex;flex-direction:column;gap:.3rem;">
+      <button class="btn-sm" id="btn-new-proj" style="width:100%;text-align:left;">📁+ New Project</button>
+      <label class="btn-sm" style="width:100%;text-align:left;cursor:pointer;">
+        📎 Upload File <input type="file" id="upload-input" style="display:none" multiple>
+      </label>
+    </div>
+  </div>
+
+  <!-- TOP BAR (center+right) -->
+  <div class="mao-topbar">
+    <div style="display:flex;align-items:center;gap:.4rem;flex-shrink:0;">
+      <span style="font-size:1.3rem;">🤖</span>
+      <h2>Multi-Agento</h2>
+      <span style="font-size:.72rem;color:var(--muted);">C11 · session-scoped</span>
+    </div>
+    <textarea id="mao-task" class="mao-task" rows="1"
+      placeholder="Describe the task for the agent team… (Enter to launch)">{% if task %}{{ task }}{% endif %}</textarea>
+    <div style="display:flex;gap:.35rem;align-items:center;flex-wrap:wrap;">
+      <button id="mao-launch" class="mao-launch">🚀 Launch</button>
+      <button id="mao-pause"  class="mao-pause">⏸ Pause</button>
+      <button id="mao-stop"   class="mao-stop">⏹ Stop</button>
+    </div>
+    <!-- Role chips -->
+    <div class="mao-chips" id="role-chips">
+      <span style="font-size:.72rem;color:var(--muted);">Roles:</span>
+      {% for role_id, info in ma_roles.items() %}{% if role_id != 'supervisor' %}
+      <span class="mao-chip {% if role_id in ['builder','executor','tester'] %}active{% endif %}" data-role="{{ role_id }}">{{ info.emoji }} {{ info.label }}</span>
+      {% endif %}{% endfor %}
+    </div>
+    <!-- Options -->
+    <div class="mao-opts">
+      <div class="mao-td" id="think-dd">
+        <button type="button" class="mao-pill" id="think-pill" aria-haspopup="true" aria-expanded="false">
+          <span id="think-lbl">Auto</span>
+          <svg width="8" height="5" viewBox="0 0 10 6" fill="none"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="mao-menu" id="think-menu" hidden>
+          <button class="mao-mopt" data-mode="auto"><span class="mao-mopt-n">Auto</span><span class="mao-mopt-d">Decides how long to think</span></button>
+          <button class="mao-mopt" data-mode="quick"><span class="mao-mopt-n">Quick</span><span class="mao-mopt-d">Faster, less reasoning</span></button>
+          <button class="mao-mopt" data-mode="deep"><span class="mao-mopt-n">Deep Think</span><span class="mao-mopt-d">Extended thinking budget</span></button>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:0;">
+        <button type="button" class="mao-mbtn active" data-wm="work">Work</button>
+        <button type="button" class="mao-mbtn"        data-wm="web">Web</button>
+      </div>
+      <label>Steps:<input type="number" id="mao-steps" value="8" min="2" max="12" style="width:42px;margin-left:3px;"></label>
+      <button class="btn-sm" onclick="loadSessions()" style="white-space:nowrap;">📋 History</button>
+    </div>
+  </div>
+
+  <!-- SUPERVISOR BAR -->
+  <div class="mao-supbar">
+    <span class="mao-sup-lbl">🧭 Supervisor</span>
+    <span id="mao-sup-text">Ready — enter a task and launch.</span>
+    <span id="mao-prog"></span>
+  </div>
+
+  <!-- RIGHT SIDEBAR HEADER (same grid row as supbar) -->
+  <div class="mao-rbar">
+    <span style="flex:1;">📁 Workspace</span>
+    <button class="btn-sm" id="btn-new-proj2" title="New project">📁+</button>
+    <button class="btn-sm" id="btn-refresh-files" title="Refresh">↺</button>
+    <button class="btn-sm" id="btn-reset-ws" title="Reset workspace" style="color:var(--fail);" onclick="resetWorkspace()">🗑</button>
+  </div>
+
+  <!-- PANE GRID -->
+  <div class="mao-grid" id="pane-grid">
+    <div class="mao-empty" id="pane-empty">
+      <span style="font-size:2.2rem;">🤖</span>
+      <span>Agent panes appear here when you launch a task.</span>
+      <span style="font-size:.76rem;">Builder · Executor · Tester run in parallel.</span>
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="mao-right">
+    <div class="mao-rtabs">
+      <button class="mao-rtab active" data-tab="files">📁 Files</button>
+      <button class="mao-rtab"        data-tab="preview">🌐 Preview</button>
+    </div>
+    <!-- Files tab -->
+    <div class="mao-rpanel active" id="rpanel-files">
+      <div class="mao-ftree" id="mao-ftree">
+        <div class="mao-fempty" id="mao-fempty">Empty workspace</div>
+      </div>
+    </div>
+    <!-- Preview tab -->
+    <div class="mao-rpanel" id="rpanel-preview">
+      <div class="mao-preview-tb">
+        <input class="mao-preview-url" id="mao-purl" placeholder="port…" style="width:54px;">
+        <button class="btn-sm" id="btn-pload">Load</button>
+        <button class="btn-sm" id="btn-preload">↺</button>
+      </div>
+      <div id="mao-preview-ph" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;background:#010409;color:var(--muted);gap:.5rem;padding:1rem;text-align:center;font-size:.83rem;">
+        <span style="font-size:2rem;">🌐</span>
+        <span>Enter port and click Load to preview a running web server.</span>
+      </div>
+      <iframe id="mao-preview-iframe" style="flex:1;border:none;background:#fff;width:100%;display:none;"></iframe>
+    </div>
+  </div>
+
+</div><!-- end .mao -->
+
+<!-- SUMMARY BAR -->
+<div class="mao-sumbar" id="mao-sumbar">
+  <span>✅</span>
+  <span id="mao-sum-text"></span>
+  <a href="/multi-Agento" onclick="location.reload();return false;">New task</a>
+  <button onclick="document.getElementById('mao-sumbar').classList.remove('show')" style="background:none;border:none;color:var(--muted);cursor:pointer;margin-left:auto;">✕</button>
+</div>
+
+<!-- FILE PREVIEW MODAL -->
+<div class="mao-overlay" id="file-overlay">
+  <div class="mao-modal">
+    <div class="mao-mhdr">
+      <span id="file-title" style="font-family:monospace;"></span>
+      <button onclick="closeModal('file-overlay')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:1rem;">✕</button>
+    </div>
+    <div class="mao-mbody"><pre id="file-content"></pre></div>
+  </div>
+</div>
+
+<!-- NEW PROJECT MODAL -->
+<div class="mao-overlay" id="proj-overlay">
+  <div class="mao-modal mao-sm-modal">
+    <div class="mao-mhdr">
+      <span>📁 New Project</span>
+      <button onclick="closeModal('proj-overlay')" style="background:none;border:none;color:var(--muted);cursor:pointer;">✕</button>
+    </div>
+    <div class="mao-mbody" style="display:flex;flex-direction:column;gap:.55rem;">
+      <label style="font-size:.8rem;color:var(--muted);font-weight:600;">Project name</label>
+      <input id="proj-name" type="text" placeholder="my-project" autocomplete="off"
+        style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:.45rem .7rem;color:var(--fg);font-size:.88rem;outline:none;">
+      <label style="font-size:.8rem;color:var(--muted);font-weight:600;">Description (optional)</label>
+      <input id="proj-desc" type="text" placeholder="What is this project for?"
+        style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:.4rem .7rem;color:var(--fg);font-size:.8rem;outline:none;">
+      <div id="proj-err" style="color:var(--fail);font-size:.76rem;display:none;padding:.3rem .45rem;background:rgba(248,81,73,.07);border-radius:4px;"></div>
+      <button id="btn-create-proj" style="background:var(--accent);color:#0d1117;border:none;border-radius:6px;padding:.5rem 1rem;cursor:pointer;font-size:.85rem;font-weight:600;">✅ Create Project</button>
+    </div>
+  </div>
+</div>
+
+<!-- SESSIONS MODAL -->
+<div class="mao-overlay" id="sess-overlay">
+  <div class="mao-modal" style="max-width:540px;">
+    <div class="mao-mhdr">
+      <span>📋 Past Sessions</span>
+      <button onclick="closeModal('sess-overlay')" style="background:none;border:none;color:var(--muted);cursor:pointer;">✕</button>
+    </div>
+    <div class="mao-mbody" id="sess-modal-list" style="font-size:.8rem;color:var(--muted);">Loading…</div>
+  </div>
+</div>
+
+<script>
+(function(){
+'use strict';
+var _src=null,_run=false,_panes={},_sid='',_pdone=0,_ptotal=0,_pstart={},_ptimers={},_files=[],_maxSteps=8,_wm='work',_paused=false,_think=localStorage.getItem('maoThink')||'auto';
+
+// DOM
+var taskEl=document.getElementById('mao-task');
+var launchBtn=document.getElementById('mao-launch');
+var pauseBtn=document.getElementById('mao-pause');
+var stopBtn=document.getElementById('mao-stop');
+var paneGrid=document.getElementById('pane-grid');
+var paneEmpty=document.getElementById('pane-empty');
+var supText=document.getElementById('mao-sup-text');
+var progEl=document.getElementById('mao-prog');
+var sumBar=document.getElementById('mao-sumbar');
+var sumText=document.getElementById('mao-sum-text');
+var ftree=document.getElementById('mao-ftree');
+
+// URL param pre-fill
+(function(){var t=new URLSearchParams(location.search).get('task');if(t&&!taskEl.value)taskEl.value=t;})();
+
+// Role chips
+document.querySelectorAll('.mao-chip').forEach(function(c){c.addEventListener('click',function(){c.classList.toggle('active');});});
+function activeRoles(){return Array.from(document.querySelectorAll('.mao-chip.active')).map(function(c){return c.dataset.role;});}
+
+// Thinking mode
+var THINKLABELS={auto:'Auto',quick:'Quick',deep:'Deep Think'};
+function applyThink(m){_think=m;document.getElementById('think-lbl').textContent=THINKLABELS[m]||'Auto';localStorage.setItem('maoThink',m);document.querySelectorAll('.mao-mopt').forEach(function(b){b.classList.toggle('sel',b.dataset.mode===m);});document.getElementById('think-menu').hidden=true;}
+applyThink(_think);
+document.getElementById('think-pill').addEventListener('click',function(e){e.stopPropagation();var m=document.getElementById('think-menu');m.hidden=!m.hidden;});
+document.querySelectorAll('.mao-mopt').forEach(function(b){b.addEventListener('click',function(){applyThink(b.dataset.mode);});});
+document.addEventListener('click',function(){document.getElementById('think-menu').hidden=true;});
+
+// Work/Web mode
+document.querySelectorAll('.mao-mbtn').forEach(function(b){b.addEventListener('click',function(){_wm=b.dataset.wm;document.querySelectorAll('.mao-mbtn').forEach(function(x){x.classList.toggle('active',x.dataset.wm===_wm);});});});
+
+// Right tabs
+document.querySelectorAll('.mao-rtab').forEach(function(t){t.addEventListener('click',function(){document.querySelectorAll('.mao-rtab').forEach(function(x){x.classList.remove('active');});document.querySelectorAll('.mao-rpanel').forEach(function(x){x.classList.remove('active');});t.classList.add('active');document.getElementById('rpanel-'+t.dataset.tab).classList.add('active');});});
+
+// Task textarea — Enter to launch
+taskEl.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();if(!_run)launch();}});
+
+// Elapsed helpers
+function fmt(ms){var s=Math.floor(ms/1000);return s<60?s+'s':Math.floor(s/60)+'m '+(s%60)+'s';}
+function startTimer(pid){_pstart[pid]=Date.now();var p=_panes[pid];if(!p)return;_ptimers[pid]=setInterval(function(){if(p.el_el)p.el_el.textContent=fmt(Date.now()-_pstart[pid]);},1000);}
+function stopTimer(pid){if(_ptimers[pid]){clearInterval(_ptimers[pid]);delete _ptimers[pid];}}
+function clearTimers(){Object.keys(_ptimers).forEach(function(id){clearInterval(_ptimers[id]);});_ptimers={};}
+
+// Create pane
+function createPane(pid,role,label,emoji,assignment){
+  if(_panes[pid])return;
+  if(paneEmpty)paneEmpty.style.display='none';
+  var pane=document.createElement('div');pane.className='ma-pane';pane.id='pane-'+pid;pane.setAttribute('data-role',role);
+  var header=document.createElement('div');header.className='ph';
+  function mkBtn(txt,title,fn){var b=document.createElement('button');b.className='ph-ctrl';b.textContent=txt;b.title=title;b.onclick=fn;return b;}
+  var colBtn=mkBtn('▼','Collapse',function(){var c=pane.classList.toggle('collapsed');colBtn.textContent=c?'▶':'▼';});
+  var expBtn=mkBtn('⤢','Focus/expand',function(){pane.classList.toggle('mao-focused');});
+  var expBtn2=mkBtn('⬇','Export log',function(){exportPane(pid,role);});
+  var emojiEl=document.createElement('span');emojiEl.textContent=emoji;emojiEl.style.fontSize='.9rem';
+  var lblEl=document.createElement('span');lblEl.style.fontWeight='600';lblEl.textContent=label;
+  var stepEl=document.createElement('span');stepEl.style.cssText='font-size:.66rem;color:var(--muted);';stepEl.textContent='step 0';
+  var elEl=document.createElement('span');elEl.style.cssText='font-size:.64rem;color:var(--muted);font-family:monospace;';elEl.textContent='0s';
+  var statEl=document.createElement('span');statEl.className='p-status running';statEl.textContent='running';
+  [colBtn,expBtn,expBtn2,emojiEl,lblEl,stepEl,elEl,statEl].forEach(function(x){header.appendChild(x);});
+  var prog=document.createElement('div');prog.className='p-prog';
+  var bar=document.createElement('div');bar.className='p-bar';prog.appendChild(bar);
+  var asgn=document.createElement('div');asgn.className='p-assign';asgn.textContent=assignment||'';
+  var body=document.createElement('div');body.className='p-body';
+  var inj=document.createElement('div');inj.className='p-inject';
+  var injInp=document.createElement('input');injInp.className='p-inject-inp';injInp.placeholder='Inject message…';
+  var injBtn=document.createElement('button');injBtn.className='p-inject-btn';injBtn.textContent='→';
+  injBtn.onclick=function(){var msg=injInp.value.trim();if(!msg||!_sid)return;fetch('/api/ma/inject/'+_sid+'/'+pid,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg})}).then(function(){injInp.value='';});};
+  injInp.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();injBtn.click();}});
+  inj.appendChild(injInp);inj.appendChild(injBtn);
+  pane.appendChild(header);pane.appendChild(prog);pane.appendChild(asgn);pane.appendChild(body);pane.appendChild(inj);
+  paneGrid.appendChild(pane);
+  _panes[pid]={el:pane,body:body,stat:statEl,step:stepEl,el_el:elEl,bar:bar,inj:inj};
+  startTimer(pid);
+}
+
+// Append to pane
+function appendPane(pid,cls,html){
+  var p=_panes[pid];if(!p)return;
+  var d=document.createElement('div');d.className='pe pe-'+cls;d.innerHTML=html;
+  p.body.appendChild(d);p.body.scrollTop=p.body.scrollHeight;
+}
+function setStep(pid,step){var p=_panes[pid];if(!p)return;p.step.textContent='step '+step;if(p.bar)p.bar.style.width=Math.min(Math.round(step/_maxSteps*95),95)+'%';}
+function setPaneStatus(pid,status){var p=_panes[pid];if(!p)return;p.stat.className='p-status '+status;p.stat.textContent=status;if(p.bar){p.bar.className='p-bar '+(status==='done'||status==='error'?status:'');}if(status==='done'||status==='error'){stopTimer(pid);p.inj.classList.remove('active');}}
+
+// Export pane
+function exportPane(pid,role){var p=_panes[pid];if(!p)return;var txt=p.body.innerText;var a=document.createElement('a');a.href='data:text/plain,'+encodeURIComponent(txt);a.download=role+'-log.txt';a.click();}
+
+// Escape HTML
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+// SSE handler
+function handleEvent(type,data){
+  if(type==='session'){_sid=data.session_id;refreshFiles();return;}
+  if(type==='supervisor'){supText.textContent=data.text||'';return;}
+  if(type==='pane_init'){
+    createPane(data.pane_id,data.role,data.label||data.role,{'builder':'🔨','executor':'⚡','tester':'🧪','debugger':'🐛','ui':'🎨','reporter':'📊'}[data.role]||'🤖',data.assignment||'');
+    _ptotal++;return;
+  }
+  var pid=data.pane_id;
+  if(type==='pane_thinking'){setStep(pid,data.step);appendPane(pid,'thinking','<span class="sb">step '+esc(data.step)+'</span>'+esc(data.text||''));}
+  else if(type==='pane_tool'){appendPane(pid,'tool','<span class="sb">'+esc(data.type)+'</span>'+esc(data.content||''));}
+  else if(type==='pane_obs'){
+    var ec=data.exit_code;var txt=data.stdout||'';var ok=ec==null||ec===0;
+    var short=txt.length>200?txt.slice(0,200)+'…':txt;
+    var full=txt.length>200;
+    var html='<div class="pe-obs'+(ok?'':' pe-error')+'">';
+    if(full){html+='<button class="obs-tog" onclick="this.nextElementSibling.hidden=!this.nextElementSibling.hidden;this.textContent=this.textContent===\'▼ Output\'?\'▲ Output\':\'▼ Output\';">▼ Output</button><div hidden><pre>'+esc(txt)+'</pre></div>';}
+    else{html+='<pre>'+esc(txt)+'</pre>';}
+    html+='</div>';
+    appendPane(pid,'obs',html);
+  }
+  else if(type==='pane_file'){appendPane(pid,'file','📄 '+esc(data.path));_files.push(data.path);refreshFiles();}
+  else if(type==='pane_done'){
+    setStep(pid,data.step);appendPane(pid,'done','✅ '+esc(data.summary||'Done'));
+    setPaneStatus(pid,'done');_pdone++;
+    progEl.style.display='';progEl.textContent=_pdone+'/'+_ptotal+' done';
+  }
+  else if(type==='pane_error'){appendPane(pid,'error','❌ '+esc(data.message||'Error'));setPaneStatus(pid,'error');}
+  else if(type==='final'){
+    sumText.textContent=data.summary||('Files: '+(data.files_created||[]).join(', ')||'Complete');
+    sumBar.classList.add('show');
+    setRunning(false);refreshFiles();
+  }
+  else if(type==='error'){supText.textContent='❌ '+esc(data.message||'Error');setRunning(false);}
+}
+
+function setRunning(v){
+  _run=v;
+  launchBtn.disabled=v;
+  pauseBtn.classList.toggle('vis',v);
+  stopBtn.classList.toggle('vis',v);
+  if(!v){clearTimers();stopFileInterval();}
+}
+
+// Launch
+function launch(){
+  var task=taskEl.value.trim();if(!task)return;
+  _maxSteps=parseInt(document.getElementById('mao-steps').value)||8;
+  var roles=activeRoles().join(',');
+  if(_src){try{_src.close();}catch(e){}_src=null;}
+  _panes={};_pdone=0;_ptotal=0;_files=[];_paused=false;_sid='';
+  paneGrid.innerHTML='';paneGrid.appendChild(paneEmpty);paneEmpty.style.display='';
+  sumBar.classList.remove('show');progEl.style.display='none';supText.textContent='🧭 Decomposing task…';
+  var params=new URLSearchParams({task:task,roles:roles,max_steps:_maxSteps,chat_mode:_think,work_mode:_wm});
+  _src=new EventSource('/api/ma/run?'+params.toString());
+  _src.onmessage=function(e){try{handleEvent('message',JSON.parse(e.data));}catch(ex){}};
+  ['session','supervisor','pane_init','pane_thinking','pane_tool','pane_obs','pane_file','pane_done','pane_error','final','error'].forEach(function(ev){
+    _src.addEventListener(ev,function(e){try{handleEvent(ev,JSON.parse(e.data));}catch(ex){}});
+  });
+  _src.onerror=function(){setRunning(false);};
+  setRunning(true);startFileInterval();
+  // Add to session list
+  loadSessions();
+}
+
+launchBtn.addEventListener('click',launch);
+
+pauseBtn.addEventListener('click',function(){
+  if(!_sid)return;
+  if(_paused){
+    fetch('/api/ma/resume/'+_sid,{method:'POST'}).then(function(){_paused=false;pauseBtn.textContent='⏸ Pause';});
+  }else{
+    fetch('/api/ma/pause/'+_sid,{method:'POST'}).then(function(){_paused=true;pauseBtn.textContent='▶ Resume';});
+  }
+});
+stopBtn.addEventListener('click',function(){if(_src){_src.close();_src=null;}setRunning(false);});
+
+// File tree
+var _ftInterval=null;
+function startFileInterval(){_ftInterval=setInterval(function(){if(_run)refreshFiles();},4000);}
+function stopFileInterval(){if(_ftInterval){clearInterval(_ftInterval);_ftInterval=null;}}
+
+function refreshFiles(){
+  var url='/api/ma/files'+(_sid?'?session_id='+encodeURIComponent(_sid):'');
+  fetch(url).then(function(r){return r.json();}).then(function(items){renderFileTree(items);}).catch(function(){});
+}
+
+function renderFileTree(items){
+  if(!items||!items.length){ftree.innerHTML='<div class="mao-fempty" id="mao-fempty">Empty workspace</div>';return;}
+  var html='';
+  // dirs first
+  items.filter(function(x){return x.type==='dir';}).forEach(function(x){
+    html+='<div class="mao-fitem dir">📂 '+esc(x.path)+'<button class="fdel" onclick="delFile(\''+esc(x.path)+'\',event)" title="Delete dir">✕</button></div>';
+  });
+  items.filter(function(x){return x.type==='file';}).forEach(function(x){
+    var icon=x.path.endsWith('.py')?'🐍':x.path.endsWith('.js')?'📜':x.path.endsWith('.html')?'🌐':x.path.endsWith('.md')?'📝':'📄';
+    html+='<div class="mao-fitem" onclick="viewFile(\''+esc(x.path)+'\')">'+icon+' '+esc(x.path)+'<button class="fdel" onclick="delFile(\''+esc(x.path)+'\',event)" title="Delete">✕</button></div>';
+  });
+  ftree.innerHTML=html;
+}
+
+// File view
+function viewFile(path){
+  var url='/api/ma/file?path='+encodeURIComponent(path)+(_sid?'&session_id='+encodeURIComponent(_sid):'');
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    document.getElementById('file-title').textContent=path;
+    document.getElementById('file-content').textContent=d.content||d.error||'(empty)';
+    openModal('file-overlay');
+  });
+}
+// File delete
+function delFile(path,e){
+  e.stopPropagation();
+  if(!confirm('Delete '+path+'?'))return;
+  var url='/api/ma/file?path='+encodeURIComponent(path)+(_sid?'&session_id='+encodeURIComponent(_sid):'');
+  fetch(url,{method:'DELETE'}).then(function(){refreshFiles();});
+}
+
+// Reset workspace
+function resetWorkspace(){
+  if(!_sid){alert('No active session.');return;}
+  if(!confirm('Reset C11 workspace for this session?'))return;
+  fetch('/api/ma/reset/'+_sid,{method:'POST'}).then(function(){refreshFiles();supText.textContent='Workspace reset.';});
+}
+document.getElementById('btn-refresh-files').addEventListener('click',refreshFiles);
+
+// Web preview
+document.getElementById('btn-pload').addEventListener('click',function(){
+  var port=document.getElementById('mao-purl').value.trim();if(!port)return;
+  var iframe=document.getElementById('mao-preview-iframe');
+  iframe.src='/api/ma/preview?port='+encodeURIComponent(port)+'&path=/';
+  iframe.style.display='';document.getElementById('mao-preview-ph').style.display='none';
+});
+document.getElementById('btn-preload').addEventListener('click',function(){
+  var iframe=document.getElementById('mao-preview-iframe');if(iframe.src&&iframe.src!=='about:blank')iframe.src=iframe.src;
+});
+
+// Sessions
+function loadSessions(){
+  fetch('/api/ma/sessions').then(function(r){return r.json();}).then(function(rows){
+    var sl=document.getElementById('sess-list');
+    if(!rows.length){sl.innerHTML='<div class="mao-meta" style="padding:.4rem .7rem;">No sessions yet</div>';return;}
+    sl.innerHTML=rows.map(function(r){
+      var cls=r.status==='completed'?'done':r.status==='failed'?'failed':'';
+      return '<div class="mao-item '+cls+'" onclick="resumeSession(\''+esc(r.id)+'\',\''+esc(r.task||'').replace(/'/g,'\\\'')+'\')" title="'+esc(r.task||'')+'">'
+        +'<div style="font-size:.74rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc((r.task||'—').slice(0,50))+'</div>'
+        +'<div class="mao-meta">'+esc(r.status)+' · '+esc((r.created_at||'').slice(0,10))+'</div>'
+        +'</div>';
+    }).join('');
+    // also populate modal
+    var ml=document.getElementById('sess-modal-list');
+    ml.innerHTML=rows.map(function(r){
+      return '<div style="padding:.4rem .5rem;border-bottom:1px solid var(--border);">'
+        +'<strong style="font-size:.8rem;">'+esc((r.task||'—').slice(0,80))+'</strong>'
+        +'<div class="mao-meta">'+esc(r.status)+' · roles: '+esc(r.roles||'')+'</div>'
+        +'<div class="mao-meta">'+esc((r.summary||'').slice(0,100))+'</div>'
+        +'</div>';
+    }).join('');
+  }).catch(function(){});
+}
+loadSessions();
+
+function resumeSession(sid,task){
+  _sid=sid;
+  taskEl.value=task;
+  refreshFiles();loadProjects();
+}
+
+// Projects
+function loadProjects(){
+  var url='/api/ma/projects'+(_sid?'?session_id='+encodeURIComponent(_sid):'');
+  fetch(url).then(function(r){return r.json();}).then(function(rows){
+    var pl=document.getElementById('proj-list');
+    if(!rows.length){pl.innerHTML='<div class="mao-meta" style="padding:.4rem .7rem;">—</div>';return;}
+    pl.innerHTML=rows.map(function(r){
+      return '<div class="mao-proj-item">📁 '+esc(r.display_name||r.name)
+        +'<button class="mao-proj-del" onclick="delProject(\''+esc(r.name)+'\',event)" title="Delete project">✕</button></div>';
+    }).join('');
+  }).catch(function(){});
+}
+function delProject(name,e){
+  e.stopPropagation();if(!confirm('Delete project '+name+'?'))return;
+  var url='/api/ma/project?name='+encodeURIComponent(name)+(_sid?'&session_id='+encodeURIComponent(_sid):'');
+  fetch(url,{method:'DELETE'}).then(function(){loadProjects();refreshFiles();});
+}
+
+// New project modal
+function openProjModal(){
+  document.getElementById('proj-name').value='';document.getElementById('proj-desc').value='';document.getElementById('proj-err').style.display='none';
+  openModal('proj-overlay');
+}
+document.getElementById('btn-new-proj').addEventListener('click',openProjModal);
+document.getElementById('btn-new-proj2').addEventListener('click',openProjModal);
+document.getElementById('btn-create-proj').addEventListener('click',function(){
+  var name=document.getElementById('proj-name').value.trim();
+  var desc=document.getElementById('proj-desc').value.trim();
+  if(!name){showProjErr('Name required.');return;}
+  fetch('/api/ma/project',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name:name,description:desc,session_id:_sid||''})
+  }).then(function(r){return r.json();}).then(function(d){
+    if(d.ok){closeModal('proj-overlay');loadProjects();refreshFiles();}
+    else{showProjErr(d.error||'Failed');}
+  });
+});
+function showProjErr(msg){var e=document.getElementById('proj-err');e.textContent=msg;e.style.display='';}
+
+// File upload
+document.getElementById('upload-input').addEventListener('change',function(e){
+  var files=e.target.files;if(!files.length)return;
+  Array.from(files).forEach(function(f){
+    var fd=new FormData();fd.append('file',f);
+    var url='/api/ma/upload'+(_sid?'?session_id='+encodeURIComponent(_sid):'');
+    fetch(url,{method:'POST',body:fd}).then(function(){refreshFiles();});
+  });
+  e.target.value='';
+});
+
+// Modal helpers
+function openModal(id){document.getElementById(id).classList.add('open');}
+function closeModal(id){document.getElementById(id).classList.remove('open');}
+document.querySelectorAll('.mao-overlay').forEach(function(ov){
+  ov.addEventListener('click',function(e){if(e.target===ov)ov.classList.remove('open');});
+});
+document.addEventListener('keydown',function(e){if(e.key==='Escape')document.querySelectorAll('.mao-overlay.open').forEach(function(o){o.classList.remove('open');});});
+
+// Sessions modal trigger via "History" btn
+document.querySelector('[onclick="loadSessions()"]')&&(document.querySelector('[onclick="loadSessions()"]').onclick=function(){loadSessions();openModal('sess-overlay');});
+
+})();
+</script>
+{% endblock %}
