@@ -161,6 +161,52 @@ PY
         cp "$NOVNC_SERVE/vnc.html" "$NOVNC_SERVE/index.html"
         echo "[browser-auth] Created index.html from vnc.html (vnc_auto.html not present)"
     fi
+    # Inject bidirectional clipboard sync into the inline RFB module script in index.html.
+    # vnc.html (used as index.html on Ubuntu 22.04) is a minimal client with no ui.js —
+    # clipboard sync must be injected directly after the rfb event listeners are set up.
+    python3 <<'CLIPHTML'
+from pathlib import Path
+p = Path("/tmp/novnc-web/index.html")
+if p.exists():
+    text = p.read_text(encoding="utf-8")
+    SENTINEL = "CLIPBOARD-AUTOSYNC"
+    if SENTINEL not in text:
+        # Anchor: the last rfb property set before the IIFE closes
+        anchor = '            rfb.resizeSession = WebUtil.getConfigVar(\'resize\', false);'
+        inject = (
+            anchor + "\n"
+            "            // CLIPBOARD-AUTOSYNC: VNC→host — when VNC clipboard changes, write to host\n"
+            "            rfb.addEventListener('clipboard', function(e) {\n"
+            "                if (e.detail && e.detail.text && navigator.clipboard) {\n"
+            "                    navigator.clipboard.writeText(e.detail.text).catch(function() {});\n"
+            "                }\n"
+            "            });\n"
+            "            // CLIPBOARD-AUTOSYNC: host→VNC — on window focus, push host clipboard to VNC\n"
+            "            window.addEventListener('focus', function() {\n"
+            "                if (navigator.clipboard && navigator.clipboard.readText) {\n"
+            "                    navigator.clipboard.readText().then(function(t) {\n"
+            "                        if (t) rfb.clipboardPasteFrom(t);\n"
+            "                    }).catch(function() {});\n"
+            "                }\n"
+            "            });\n"
+            "            // CLIPBOARD-AUTOSYNC: host→VNC — intercept paste events\n"
+            "            document.addEventListener('paste', function(e) {\n"
+            "                var cbd = e.clipboardData || window.clipboardData;\n"
+            "                var t = cbd ? cbd.getData('text') : '';\n"
+            "                if (t) rfb.clipboardPasteFrom(t);\n"
+            "            });"
+        )
+        if anchor in text:
+            text = text.replace(anchor, inject, 1)
+            p.write_text(text, encoding="utf-8")
+            print("[browser-auth] noVNC index.html clipboard autosync injected")
+        else:
+            print("[browser-auth] WARNING: rfb.resizeSession anchor not found — clipboard inject skipped")
+    else:
+        print("[browser-auth] noVNC index.html clipboard autosync already present — skipping")
+else:
+    print("[browser-auth] WARNING: index.html not found — clipboard inject skipped")
+CLIPHTML
     # Patch app/ui.js for seamless clipboard sync (both directions):
     #   VNC→host: clipboardReceive writes to navigator.clipboard automatically
     #   host→VNC: focus event + paste event push host clipboard to VNC session
