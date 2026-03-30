@@ -29,58 +29,58 @@
 .thinking-dropdown { position: relative; display: inline-block; }
 .thinking-pill {
   display: inline-flex; align-items: center; gap: 2px;
-  background: var(--surface2, #2a2a2a); border: 1px solid var(--border, #444);
-  color: var(--text, #e0e0e0); border-radius: 999px; padding: 4px 12px;
+  background: var(--surface2, var(--border)); border: 1px solid var(--border, var(--border));
+  color: var(--text, var(--fg)); border-radius: 999px; padding: 4px 12px;
   font-size: 0.82rem; cursor: pointer; white-space: nowrap;
 }
-.thinking-pill:hover { background: var(--surface3, #333); }
+.thinking-pill:hover { background: var(--surface3, var(--border)); }
 .thinking-menu {
   position: absolute; right: 0; top: calc(100% + 6px); z-index: 200;
-  background: var(--surface2, #2a2a2a); border: 1px solid var(--border, #444);
+  background: var(--surface2, var(--border)); border: 1px solid var(--border, var(--border));
   border-radius: 10px; padding: 4px; min-width: 220px;
   box-shadow: 0 4px 16px rgba(0,0,0,0.4);
 }
 .thinking-opt {
   display: flex; flex-direction: column; align-items: flex-start;
   width: 100%; background: none; border: none; border-radius: 8px;
-  color: var(--text, #e0e0e0); padding: 8px 12px; cursor: pointer; text-align: left;
+  color: var(--text, var(--fg)); padding: 8px 12px; cursor: pointer; text-align: left;
 }
-.thinking-opt:hover { background: var(--surface3, #333); }
-.thinking-opt.selected { background: var(--surface3, #3a3a3a); }
+.thinking-opt:hover { background: var(--surface3, var(--border)); }
+.thinking-opt.selected { background: var(--surface3, var(--border)); }
 .thinking-opt-name { font-size: 0.88rem; font-weight: 500; }
-.thinking-opt-desc { font-size: 0.76rem; color: var(--muted, #888); margin-top: 1px; }
+.thinking-opt-desc { font-size: 0.76rem; color: var(--muted, var(--muted)); margin-top: 1px; }
 /* Attachment "+" button */
 .attach-dropdown { position: relative; display: inline-flex; align-items: center; }
 .attach-plus {
-  width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--border, #444);
-  background: var(--surface2, #2a2a2a); color: var(--text, #e0e0e0);
+  width: 28px; height: 28px; border-radius: 50%; border: 1px solid var(--border, var(--border));
+  background: var(--surface2, var(--border)); color: var(--text, var(--fg));
   font-size: 1.2rem; line-height: 1; cursor: pointer; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
 }
-.attach-plus:hover { background: var(--surface3, #333); }
+.attach-plus:hover { background: var(--surface3, var(--border)); }
 .attach-menu {
   position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 200;
-  background: var(--surface2, #2a2a2a); border: 1px solid var(--border, #444);
+  background: var(--surface2, var(--border)); border: 1px solid var(--border, var(--border));
   border-radius: 10px; padding: 4px; min-width: 180px;
   box-shadow: 0 4px 16px rgba(0,0,0,0.4);
 }
 .attach-opt {
   display: flex; align-items: center; gap: 8px;
   width: 100%; background: none; border: none; border-radius: 8px;
-  color: var(--text, #e0e0e0); padding: 8px 12px; cursor: pointer; font-size: 0.88rem;
+  color: var(--text, var(--fg)); padding: 8px 12px; cursor: pointer; font-size: 0.88rem;
 }
-.attach-opt:hover { background: var(--surface3, #333); }
+.attach-opt:hover { background: var(--surface3, var(--border)); }
 .attach-chip {
   display: inline-flex; align-items: center; gap: 4px;
-  background: var(--surface2, #2a2a2a); border: 1px solid var(--border, #444);
-  border-radius: 6px; padding: 2px 8px; font-size: 0.8rem; color: var(--text, #e0e0e0);
+  background: var(--surface2, var(--border)); border: 1px solid var(--border, var(--border));
+  border-radius: 6px; padding: 2px 8px; font-size: 0.8rem; color: var(--text, var(--fg));
 }
-.attach-chip-uploading { border-color: #666; color: #999; }
-.attach-chip-error { border-color: #b00; color: #f66; }
+.attach-chip-uploading { border-color: var(--border); color: var(--muted); }
+.attach-chip-error { border-color: var(--muted); color: var(--muted); }
 .attach-chip-close {
-  background: none; border: none; cursor: pointer; color: #888; font-size: 0.9rem; padding: 0;
+  background: none; border: none; cursor: pointer; color: var(--muted); font-size: 0.9rem; padding: 0;
 }
-.attach-chip-close:hover { color: #ccc; }
+.attach-chip-close:hover { color: var(--fg); }
 </style>
 
 <p class="muted">Tests each AI agent via C1 → Copilot roundtrip. Results are persisted to DB.</p>
@@ -112,21 +112,21 @@
     <label>Work / Web</label>
     <div class="mode-toggle" style="display:flex;gap:0.25rem;">
       <button type="button" id="mode-work" class="mode-btn active" data-mode="work"
-              style="padding:0.25rem 0.75rem;border:1px solid var(--border,#555);border-radius:4px 0 0 4px;background:var(--accent,#0078d4);color:#fff;cursor:pointer;">Work</button>
+              style="padding:0.25rem 0.75rem;border:1px solid var(--border,var(--border));border-radius:4px 0 0 4px;background:var(--accent,var(--accent));color:var(--fg);cursor:pointer;">Work</button>
       <button type="button" id="mode-web"  class="mode-btn"        data-mode="web"
-              style="padding:0.25rem 0.75rem;border:1px solid var(--border,#555);border-left:none;border-radius:0 4px 4px 0;background:transparent;cursor:pointer;">Web</button>
+              style="padding:0.25rem 0.75rem;border:1px solid var(--border,var(--border));border-left:none;border-radius:0 4px 4px 0;background:transparent;cursor:pointer;">Web</button>
     </div>
   </div>
   <div style="display:flex;gap:0.5rem;margin-top:0.5rem;flex-wrap:wrap;align-items:center;">
     <button type="button" id="run-all">Run all agents</button>
     <button type="button" id="run-parallel" class="btn-parallel">Run All Parallel ⚡</button>
-    <button type="button" id="run-ma" style="background:rgba(227,179,65,0.15);border:1px solid #e3b341;color:#e3b341;border-radius:6px;padding:0.35rem 0.8rem;font-size:0.82rem;cursor:pointer;">🤖 Multi-Agent</button>
+    <button type="button" id="run-ma" style="background:rgba(10, 132, 255,0.15);border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:0.35rem 0.8rem;font-size:0.82rem;cursor:pointer;">🤖 Multi-Agent</button>
     <button type="button" id="load-history" class="btn-secondary">Load history</button>
     <button type="button" id="reset-all" class="btn-reset">Reset All</button>
     <!-- Pool status badge -->
     <span id="pool-badge" title="C3 browser tab pool status"
-          style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:0.78rem;border:1px solid var(--border,#444);background:var(--surface2,#2a2a2a);color:var(--muted,#888);cursor:default;">
-      <span id="pool-dot" style="width:7px;height:7px;border-radius:50%;background:#666;display:inline-block;"></span>
+          style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:0.78rem;border:1px solid var(--border,var(--border));background:var(--surface2,var(--border));color:var(--muted,var(--muted));cursor:default;">
+      <span id="pool-dot" style="width:7px;height:7px;border-radius:50%;background:var(--border);display:inline-block;"></span>
       <span id="pool-label">Pool: —</span>
     </span>
   </div>
@@ -238,8 +238,8 @@ python3 tests/validate_all_agents.py --parallel</pre>
       activeWorkMode = btn.dataset.mode;
       document.querySelectorAll('.mode-btn').forEach(function(b) {
         const isActive = b.dataset.mode === activeWorkMode;
-        b.style.background = isActive ? 'var(--accent,#0078d4)' : 'transparent';
-        b.style.color = isActive ? '#fff' : '';
+        b.style.background = isActive ? 'var(--accent,var(--accent))' : 'transparent';
+        b.style.color = isActive ? 'var(--fg)' : '';
         if (isActive) b.classList.add('active'); else b.classList.remove('active');
       });
     });
@@ -449,14 +449,14 @@ python3 tests/validate_all_agents.py --parallel</pre>
 
   function updatePoolBadge(data) {
     if (!data || data.status === 'error') {
-      poolDot.style.background = '#666';
+      poolDot.style.background = 'var(--border)';
       poolLabel.textContent = 'Pool: offline';
       return;
     }
     const avail = data.pool_available;
     const total = data.pool_size;
     const init  = data.pool_initialized;
-    const color = !init ? '#666' : avail === 0 ? '#c0392b' : avail < 4 ? '#e67e22' : '#27ae60';
+    const color = !init ? 'var(--border)' : avail === 0 ? 'var(--muted)' : avail < 4 ? 'var(--accent)' : 'var(--accent)';
     poolDot.style.background = color;
     poolLabel.textContent = init
       ? 'Pool: ' + avail + '/' + total + ' tabs ready'

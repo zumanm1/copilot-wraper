@@ -55,6 +55,16 @@ fi
 sleep 0.5
 echo "[browser-auth] openbox window manager started"
 
+# 1c. Start clipboard synchronization daemon so x11vnc and noVNC can sync copy/paste with the host.
+# Needs two instances: one for X11 selection buffer and one for clipboard.
+if command -v autocutsel >/dev/null 2>&1; then
+    autocutsel -fork
+    autocutsel -selection PRIMARY -fork
+    echo "[browser-auth] autocutsel started (clipboard sync enabled)"
+else
+    echo "[browser-auth] WARNING: autocutsel not found, clipboard syncing disabled"
+fi
+
 # 2. Start VNC server (x11vnc, no password for local-only use)
 # Note: x11vnc uses -rfbport (not -port) to set the listening port.
 # Do NOT use -bg: wait until the RFB port accepts connections before websockify starts.

@@ -32,26 +32,26 @@
 .thinking-dropdown { position: relative; display: inline-block; }
 .thinking-pill {
   display: inline-flex; align-items: center; gap: 2px;
-  background: var(--surface2, #2a2a2a); border: 1px solid var(--border, #444);
-  color: var(--text, #e0e0e0); border-radius: 999px; padding: 4px 12px;
+  background: var(--surface2, var(--border)); border: 1px solid var(--border, var(--border));
+  color: var(--text, var(--fg)); border-radius: 999px; padding: 4px 12px;
   font-size: 0.82rem; cursor: pointer; white-space: nowrap;
 }
-.thinking-pill:hover { background: var(--surface3, #333); }
+.thinking-pill:hover { background: var(--surface3, var(--border)); }
 .thinking-menu {
   position: absolute; right: 0; top: calc(100% + 6px); z-index: 200;
-  background: var(--surface2, #2a2a2a); border: 1px solid var(--border, #444);
+  background: var(--surface2, var(--border)); border: 1px solid var(--border, var(--border));
   border-radius: 10px; padding: 4px; min-width: 220px;
   box-shadow: 0 4px 16px rgba(0,0,0,0.4);
 }
 .thinking-opt {
   display: flex; flex-direction: column; align-items: flex-start;
   width: 100%; background: none; border: none; border-radius: 8px;
-  color: var(--text, #e0e0e0); padding: 8px 12px; cursor: pointer; text-align: left;
+  color: var(--text, var(--fg)); padding: 8px 12px; cursor: pointer; text-align: left;
 }
-.thinking-opt:hover { background: var(--surface3, #333); }
-.thinking-opt.selected { background: var(--surface3, #3a3a3a); }
+.thinking-opt:hover { background: var(--surface3, var(--border)); }
+.thinking-opt.selected { background: var(--surface3, var(--border)); }
 .thinking-opt-name { font-size: 0.88rem; font-weight: 500; }
-.thinking-opt-desc { font-size: 0.76rem; color: var(--muted, #888); margin-top: 1px; }
+.thinking-opt-desc { font-size: 0.76rem; color: var(--muted, var(--muted)); margin-top: 1px; }
 </style>
 
 <div class="chat-controls">
@@ -89,15 +89,15 @@
   <style>
   .work-web-row { padding: 4px 0 2px 4px; }
   .work-web-toggle {
-    display: inline-flex; border: 1px solid var(--border, #444); border-radius: 999px; overflow: hidden;
+    display: inline-flex; border: 1px solid var(--border, var(--border)); border-radius: 999px; overflow: hidden;
   }
   .ww-btn {
     background: none; border: none; padding: 3px 14px; font-size: 0.8rem;
-    color: var(--muted, #888); cursor: pointer; transition: background 0.15s, color 0.15s;
+    color: var(--muted, var(--muted)); cursor: pointer; transition: background 0.15s, color 0.15s;
   }
-  .ww-btn:hover { background: var(--surface3, #333); color: var(--text, #e0e0e0); }
+  .ww-btn:hover { background: var(--surface3, var(--border)); color: var(--text, var(--fg)); }
   .ww-btn.active {
-    background: var(--surface3, #3a3a3a); color: var(--text, #e0e0e0); font-weight: 600;
+    background: var(--surface3, var(--border)); color: var(--text, var(--fg)); font-weight: 600;
   }
   </style>
   <!-- Attachment chips row (shown when files are staged) -->
@@ -120,44 +120,44 @@
     <textarea id="prompt" rows="2" placeholder="Type a message… (Enter to send, Shift+Enter for newline)"></textarea>
     <button type="submit" id="send">Send</button>
     <button type="button" id="send-ma" title="Send to Multi-Agent workspace"
-      style="background:rgba(227,179,65,0.15);border:1px solid #e3b341;color:#e3b341;border-radius:6px;padding:0.35rem 0.65rem;font-size:0.9rem;cursor:pointer;flex-shrink:0;">🤖</button>
+      style="background:rgba(10, 132, 255,0.15);border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:0.35rem 0.65rem;font-size:0.9rem;cursor:pointer;flex-shrink:0;">🤖</button>
   </div>
 </form>
 <style>
 /* Attachment "+" button */
 .attach-dropdown { position: relative; display: flex; align-items: center; }
 .attach-plus {
-  width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--border, #444);
-  background: var(--surface2, #2a2a2a); color: var(--text, #e0e0e0);
+  width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--border, var(--border));
+  background: var(--surface2, var(--border)); color: var(--text, var(--fg));
   font-size: 1.3rem; line-height: 1; cursor: pointer; flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
 }
-.attach-plus:hover { background: var(--surface3, #333); }
+.attach-plus:hover { background: var(--surface3, var(--border)); }
 .attach-menu {
   position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 200;
-  background: var(--surface2, #2a2a2a); border: 1px solid var(--border, #444);
+  background: var(--surface2, var(--border)); border: 1px solid var(--border, var(--border));
   border-radius: 10px; padding: 4px; min-width: 180px;
   box-shadow: 0 4px 16px rgba(0,0,0,0.4);
 }
 .attach-opt {
   display: flex; align-items: center; gap: 8px;
   width: 100%; background: none; border: none; border-radius: 8px;
-  color: var(--text, #e0e0e0); padding: 8px 12px; cursor: pointer; font-size: 0.88rem;
+  color: var(--text, var(--fg)); padding: 8px 12px; cursor: pointer; font-size: 0.88rem;
 }
-.attach-opt:hover { background: var(--surface3, #333); }
+.attach-opt:hover { background: var(--surface3, var(--border)); }
 /* Attachment chips */
 .attach-chip {
   display: inline-flex; align-items: center; gap: 4px;
-  background: var(--surface2, #2a2a2a); border: 1px solid var(--border, #444);
-  border-radius: 6px; padding: 2px 8px; font-size: 0.8rem; color: var(--text, #e0e0e0);
+  background: var(--surface2, var(--border)); border: 1px solid var(--border, var(--border));
+  border-radius: 6px; padding: 2px 8px; font-size: 0.8rem; color: var(--text, var(--fg));
 }
-.attach-chip-uploading { border-color: #666; color: #999; }
-.attach-chip-error { border-color: #b00; color: #f66; }
+.attach-chip-uploading { border-color: var(--border); color: var(--muted); }
+.attach-chip-error { border-color: var(--muted); color: var(--muted); }
 .attach-chip-sent { background: transparent; border: none; font-size: 0.8rem; }
 .attach-chip-close {
-  background: none; border: none; cursor: pointer; color: #888; font-size: 0.9rem; padding: 0;
+  background: none; border: none; cursor: pointer; color: var(--muted); font-size: 0.9rem; padding: 0;
 }
-.attach-chip-close:hover { color: #ccc; }
+.attach-chip-close:hover { color: var(--fg); }
 </style>
 
 <details class="muted" style="margin-top:0.75rem;">

@@ -1,21 +1,26 @@
 :root {
-  --bg: #0f1419;
-  --fg: #e6edf3;
-  --muted: #8b949e;
-  --accent: #58a6ff;
-  --ok: #3fb950;
-  --fail: #f85149;
-  --warn: #d29922;
-  --card: #161b22;
-  --border: #30363d;
-  /* Surface levels for layered UI (thinking dropdown, upload button, toggles) */
-  --surface2: #21262d;
-  --surface3: #30363d;
-  --text: #e6edf3;
+  /* Exactly 5 distinct colors */
+  --bg: #000000;
+  --card: #1c1c1e;
+  --fg: #f5f5f7;
+  --muted: #8e8e93;
+  --accent: #0a84ff;
+
+  /* Alpha derivations of the 5 colors */
+  --border: rgba(245, 245, 247, 0.12);
+  --surface2: rgba(245, 245, 247, 0.04);
+  --surface3: rgba(245, 245, 247, 0.08);
+  --text: var(--fg);
+
+  /* Semantic mapping to enforce 5-color rule */
+  --ok: var(--fg);
+  --fail: var(--muted);
+  --warn: var(--accent);
 }
 * { box-sizing: border-box; }
 body {
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
   background: var(--bg);
   color: var(--fg);
   margin: 0;
@@ -45,7 +50,7 @@ h2 { margin-top: 0; }
   padding: 1rem;
   margin-bottom: 1rem;
 }
-.card.card-down { border-color: rgba(248, 81, 73, 0.35); }
+.card.card-down { border-color: var(--muted); }
 .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; }
 .card-url { margin: 0.15rem 0 0.25rem; }
 .card-meta { font-size: 0.75rem; margin-bottom: 0.35rem; }
@@ -58,9 +63,9 @@ h2 { margin-top: 0; }
 
 /* ── Badges ──────────────────────────────────────────────────────────────── */
 .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.8rem; font-weight: 600; }
-.badge.ok   { background: rgba(63, 185, 80, 0.2);  color: var(--ok); }
-.badge.fail { background: rgba(248, 81, 73, 0.2);  color: var(--fail); }
-.badge.warn { background: rgba(210, 153, 34, 0.2); color: var(--warn); }
+.badge.ok   { background: rgba(245, 245, 247, 0.15); color: var(--fg); }
+.badge.fail { background: rgba(142, 142, 147, 0.15); color: var(--muted); }
+.badge.warn { background: rgba(10, 132, 255, 0.15);  color: var(--accent); }
 
 /* ── Status bar (dashboard) ──────────────────────────────────────────────── */
 .status-bar {
@@ -75,9 +80,9 @@ h2 { margin-top: 0; }
   margin-bottom: 1.1rem;
   font-size: 0.9rem;
 }
-.status-bar.bar-ok   { border-color: rgba(63, 185, 80, 0.4); }
-.status-bar.bar-warn { border-color: rgba(210, 153, 34, 0.4); }
-.status-bar.bar-fail { border-color: rgba(248, 81, 73, 0.4); }
+.status-bar.bar-ok   { border-color: var(--border); }
+.status-bar.bar-warn { border-color: rgba(10, 132, 255, 0.4); }
+.status-bar.bar-fail { border-color: rgba(142, 142, 147, 0.4); }
 .status-ts { color: var(--muted); font-size: 0.82rem; }
 
 /* ── Toolbar ─────────────────────────────────────────────────────────────── */
@@ -163,9 +168,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn-parallel {
   width: auto;
   padding: 0.4rem 0.9rem;
-  background: rgba(63, 185, 80, 0.12);
-  color: var(--ok);
-  border: 1px solid rgba(63, 185, 80, 0.4);
+  background: var(--card);
+  color: var(--fg);
+  border: 1px solid var(--border);
   border-radius: 6px;
   cursor: pointer;
   font-weight: 600;
@@ -174,8 +179,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   margin-top: 0;
 }
 .btn-parallel:hover:not(:disabled) {
-  background: rgba(63, 185, 80, 0.22);
-  border-color: var(--ok);
+  background: var(--surface3);
+  border-color: var(--muted);
 }
 .btn-parallel:disabled { opacity: 0.45; cursor: not-allowed; }
 
@@ -196,7 +201,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* Running badge */
 .badge-running {
-  background: rgba(88, 166, 255, 0.15);
+  background: rgba(10, 132, 255, 0.15);
   color: var(--accent);
   animation: pulse 1.2s ease-in-out infinite;
 }
@@ -228,7 +233,7 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   cursor: pointer;
   margin-top: 0;
 }
-.quick-btns button:hover { background: rgba(88, 166, 255, 0.12); }
+.quick-btns button:hover { background: rgba(10, 132, 255, 0.12); }
 
 /* ── Chat window ─────────────────────────────────────────────────────────── */
 .chat-window {
@@ -252,8 +257,8 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   word-wrap: break-word;
 }
 .bubble.user {
-  background: rgba(88, 166, 255, 0.12);
-  border: 1px solid rgba(88, 166, 255, 0.25);
+  background: rgba(10, 132, 255, 0.12);
+  border: 1px solid rgba(10, 132, 255, 0.25);
   margin-left: auto;
   white-space: pre-wrap;
 }
@@ -262,9 +267,9 @@ button:disabled { opacity: 0.45; cursor: not-allowed; }
   border: 1px solid var(--border);
 }
 .bubble.error {
-  background: rgba(248, 81, 73, 0.08);
-  border: 1px solid rgba(248, 81, 73, 0.3);
-  color: var(--fail);
+  background: rgba(142, 142, 147, 0.08);
+  border: 1px solid rgba(142, 142, 147, 0.3);
+  color: var(--muted);
   white-space: pre-wrap;
 }
 .bubble.loading .bubble-body { color: var(--muted); font-style: italic; }
