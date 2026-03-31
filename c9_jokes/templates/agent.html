@@ -584,6 +584,40 @@
   0%, 100% { opacity: 1; }
   50%       { opacity: 0.55; }
 }
+
+/* ── Token badge ───────────────────────────────────────────── */
+.token-badge-agent {
+  display: inline-flex; align-items: center; gap: 3px;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 999px; padding: 2px 9px; font-size: 0.72rem;
+  color: var(--muted); font-family: monospace; white-space: nowrap;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+.token-badge-agent.warn   { background: rgba(255,160,0,0.12); border-color: #ffa000; color: #ffa000; }
+.token-badge-agent.danger { background: rgba(220,50,50,0.12);  border-color: var(--fail); color: var(--fail); }
+/* Context compress notice */
+.stream-entry.ctx_compressed {
+  color: var(--accent); background: rgba(10,132,255,0.08);
+  border-left: 2px solid var(--accent); font-style: italic;
+}
+.stream-entry.token_warning  { color: #ffa000; background: rgba(255,160,0,0.07); font-size: 0.78rem; }
+.stream-entry.notes_updated  { color: var(--ok);  background: rgba(245,245,247,0.05); font-size: 0.78rem; }
+/* Notes panel inside file tree */
+.notes-panel {
+  border-top: 1px solid var(--border); flex-shrink: 0;
+  display: flex; flex-direction: column; max-height: 180px; overflow: hidden;
+}
+.notes-panel-hdr {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.4rem 0.75rem; font-size: 0.72rem; color: var(--muted);
+  font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; flex-shrink: 0;
+}
+.notes-panel-body {
+  flex: 1; overflow-y: auto; padding: 0.3rem 0.75rem;
+  font-size: 0.74rem; color: var(--fg); font-family: ui-monospace, monospace;
+  white-space: pre-wrap; word-break: break-word; line-height: 1.5;
+  background: var(--bg);
+}
 </style>
 
 <div class="agent-workspace">
@@ -605,6 +639,11 @@
     <span class="muted" style="font-size:0.8rem;">Autonomous task execution via C10 sandbox</span>
     <div class="spacer"></div>
     <span id="step-counter" class="step-counter" style="display:none">Step 0/15</span>
+    <!-- Token usage badge -->
+    <span id="agent-token-badge" class="token-badge-agent" title="Estimated context tokens in current session">0 tokens</span>
+    <!-- New Task button -->
+    <button type="button" id="btn-new-task" class="btn-sm" title="Clear stream and start a new task (resets session)"
+      style="white-space:nowrap;">&#8635; New Task</button>
     <!-- Thinking mode -->
     <div class="thinking-dropdown" id="thinking-dropdown">
       <button type="button" class="thinking-pill" id="thinking-pill" aria-haspopup="true" aria-expanded="false">
@@ -656,6 +695,14 @@
     </div>
     <div class="filetree-list" id="filetree-list">
       <div class="filetree-empty" id="filetree-empty">Empty workspace</div>
+    </div>
+    <!-- NOTES.md persistent memory panel -->
+    <div class="notes-panel" id="notes-panel" style="display:none">
+      <div class="notes-panel-hdr">
+        <span>📝 NOTES.md</span>
+        <button type="button" class="btn-sm" id="btn-notes-refresh" title="Reload NOTES.md">↺</button>
+      </div>
+      <div class="notes-panel-body" id="notes-panel-body">Loading…</div>
     </div>
   </div>
 
@@ -1455,6 +1502,45 @@
     setIdle(false);
   }
 
+  function handleTokenEstimate(data) {
+    const tokens = data.tokens || 0;
+    const badge  = document.getElementById('agent-token-badge');
+    if (!badge) return;
+    const k = Math.round(tokens / 100) / 10;
+    badge.textContent = k + 'k tokens';
+    badge.className = 'token-badge-agent';
+    if (tokens >= 38000)     badge.className = 'token-badge-agent danger';
+    else if (tokens >= 20000) badge.className = 'token-badge-agent warn';
+  }
+
+  function handleTokenWarning(data) {
+    const msg = data.message || ('Context at ' + (data.tokens || '?') + ' tokens — nearing limit.');
+    appendEntry('token_warning', '<span class="stream-label">⚠️ Token</span> ' + escapeHtml(msg));
+    // Also update the badge
+    if (data.tokens) handleTokenEstimate(data);
+  }
+
+  function handleCtxCompressed(data) {
+    const msg = data.summary ? 'History compressed — ' + data.summary : 'History auto-compressed to save context.';
+    appendEntry('ctx_compressed',
+      '<span class="stream-label">♻️ Context</span> ' + escapeHtml(msg));
+    if (data.tokens_after) handleTokenEstimate({ tokens: data.tokens_after });
+  }
+
+  function handleNotesUpdated(data) {
+    const action  = data.action  || 'updated';
+    const preview = data.preview || '';
+    let label = '📝 NOTES.md';
+    if (action === 'created')  label = '📝 NOTES created';
+    if (action === 'appended') label = '📝 NOTES appended';
+    if (action === 'loaded')   label = '📝 NOTES loaded';
+    let html = '<span class="stream-label">' + label + '</span>';
+    if (preview) html += ' <span style="opacity:0.75">' + escapeHtml(preview.slice(0, 100)) + (preview.length > 100 ? '…' : '') + '</span>';
+    appendEntry('notes_updated', html);
+    // Refresh the notes panel
+    refreshNotesPanel();
+  }
+
   function handleAuthRequired(data) {
     // M365 Copilot is not authenticated — show a prominent banner with sign-in link
     const authUrl = data.auth_url || 'http://localhost:6080/?resize=scale&autoconnect=true';
@@ -1760,7 +1846,11 @@
     src.addEventListener('file_update', function(e) { handleFileUpdate(JSON.parse(e.data)); });
     src.addEventListener('step_done',   function(e) { handleStepDone(JSON.parse(e.data)); });
     src.addEventListener('web_server',  function(e) { handleWebServer(JSON.parse(e.data)); });
-    src.addEventListener('final',       function(e) { handleFinal(JSON.parse(e.data)); });
+    src.addEventListener('final',           function(e) { handleFinal(JSON.parse(e.data)); });
+    src.addEventListener('token_estimate',  function(e) { try { handleTokenEstimate(JSON.parse(e.data)); } catch(_) {} });
+    src.addEventListener('token_warning',   function(e) { try { handleTokenWarning(JSON.parse(e.data)); } catch(_) {} });
+    src.addEventListener('context_compressed', function(e) { try { handleCtxCompressed(JSON.parse(e.data)); } catch(_) {} });
+    src.addEventListener('notes_updated',   function(e) { try { handleNotesUpdated(JSON.parse(e.data)); } catch(_) {} });
     src.addEventListener('auth_required', function(e) {
       try { handleAuthRequired(JSON.parse(e.data)); } catch(_) { handleAuthRequired({}); }
     });
@@ -1773,6 +1863,47 @@
       }
     });
   }
+
+  // ── New Task button ─────────────────────────────────────────────────────
+  document.getElementById('btn-new-task').addEventListener('click', function() {
+    if (running) return;
+    if (!confirm('Start a new task? This will clear the current stream and reset the session.')) return;
+    currentSessId = '';
+    currentStep   = 0;
+    streamEl.innerHTML = '';
+    hideEmpty();
+    currentWebPort = null;
+    const placeholder = document.getElementById('preview-placeholder');
+    if (placeholder) placeholder.style.display = '';
+    previewIframe.style.display = 'none';
+    previewIframe.src = 'about:blank';
+    previewUrlBar.textContent = '—';
+    tabPreview.textContent = '🌐 Preview';
+    btnPreviewOpen.style.display = 'none';
+    switchTab('terminal');
+    followupBanner.classList.remove('show');
+    taskInput.placeholder = 'Describe what you want to build… (Ctrl+Enter to run)';
+    taskInput.value = '';
+    const badge = document.getElementById('agent-token-badge');
+    if (badge) { badge.textContent = '0 tokens'; badge.className = 'token-badge-agent'; }
+    appendEntry('step_info', '<span class="stream-label">✨ New Task</span> Session cleared — ready for a new task.');
+    taskInput.focus();
+  });
+
+  // ── Notes panel ──────────────────────────────────────────────────────────
+  async function refreshNotesPanel() {
+    try {
+      const r = await fetch('/api/agent/file?path=NOTES.md');
+      const d = await r.json();
+      const panel = document.getElementById('notes-panel');
+      const body  = document.getElementById('notes-panel-body');
+      if (d.content) {
+        if (panel) panel.style.display = '';
+        if (body)  body.textContent = d.content;
+      }
+    } catch(_) { /* non-fatal */ }
+  }
+  document.getElementById('btn-notes-refresh').addEventListener('click', refreshNotesPanel);
 
   btnRun.addEventListener('click', runTask);
   btnCompare.addEventListener('click', function() {

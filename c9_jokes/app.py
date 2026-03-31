@@ -158,6 +158,39 @@ def _ensure_db() -> None:
             """)
     except sqlite3.Error:
         pass
+    # Migrate: add session_id column to chat_logs
+    try:
+        with _db() as conn:
+            conn.execute("ALTER TABLE chat_logs ADD COLUMN session_id TEXT")
+    except sqlite3.OperationalError:
+        pass  # column already exists
+    # Migrate: create chat_sessions table for persistent /chat history
+    try:
+        with sqlite3.connect(DEFAULT_DB) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS chat_sessions (
+                    id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    agent_id TEXT NOT NULL,
+                    title TEXT,
+                    message_count INTEGER DEFAULT 0,
+                    token_estimate INTEGER DEFAULT 0
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    session_id TEXT NOT NULL,
+                    turn INTEGER NOT NULL,
+                    role TEXT NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY (session_id) REFERENCES chat_sessions(id)
+                )
+            """)
+    except sqlite3.Error:
+        pass
     # Migrate: create workspace_projects table if missing
     try:
         with sqlite3.connect(DEFAULT_DB) as conn:
@@ -778,20 +811,77 @@ async def _probe_all() -> list[dict]:
 
 # ── Chat proxy helper (async) ────────────────────────────────────────────────
 
-async def _chat_one(agent_id: str, prompt: str, c1_url: str, chat_mode: str = "", attachments: list | None = None, work_mode: str = "") -> dict:
-    """Call C1 for a single agent. Returns {ok, http_status, text, elapsed_ms}."""
-    if attachments:
+# ── Token estimation helper ──────────────────────────────────────────────────
+
+TOKEN_BUDGET = 30_000   # warn threshold
+TOKEN_HARD_CAP = 38_000  # auto-compress threshold
+
+
+def _estimate_tokens(messages: list[dict]) -> int:
+    """Rough token estimate: total chars / 4."""
+    return sum(len(str(m.get("content", ""))) for m in messages) // 4
+
+
+async def _summarize_history(messages: list[dict], c1_url: str, agent_id: str) -> str:
+    """Call C1 to summarize a list of messages. Returns summary string."""
+    history_text = "\n".join(
+        f"[{m['role'].upper()}]: {str(m.get('content', ''))[:600]}"
+        for m in messages
+    )
+    summary_prompt = (
+        f"Summarize this conversation history in ≤400 words. "
+        f"Preserve: key decisions, file names created, commands run, current task state, "
+        f"and any errors encountered. Be concise and factual.\n\n"
+        f"{history_text[:6000]}"
+    )
+    client = _get_http()
+    try:
+        r = await client.post(
+            f"{c1_url}/v1/chat/completions",
+            headers={"Content-Type": "application/json", "X-Agent-ID": f"{agent_id}-summarize"},
+            json={"model": "copilot", "messages": [{"role": "user", "content": summary_prompt}], "stream": False},
+            timeout=60,
+        )
+        if r.status_code == 200:
+            return r.json().get("choices", [{}])[0].get("message", {}).get("content", "").strip()
+    except Exception:
+        pass
+    # Fallback: naive truncation summary
+    lines = [f"[{m['role'].upper()}]: {str(m.get('content',''))[:200]}" for m in messages[-6:]]
+    return "[Auto-summary of earlier context]:\n" + "\n".join(lines)
+
+
+async def _chat_one(agent_id: str, prompt: str, c1_url: str, chat_mode: str = "", attachments: list | None = None, work_mode: str = "", messages: list | None = None) -> dict:
+    """Call C1 for a single agent. Returns {ok, http_status, text, elapsed_ms}.
+    If `messages` is provided it is used as the full conversation history (multi-turn).
+    Otherwise falls back to single-turn prompt.
+    """
+    if messages:
+        # Multi-turn: use provided history directly
+        # Inject attachments into the last user message if present
+        if attachments and messages:
+            last = messages[-1]
+            if last.get("role") == "user":
+                content: list = [{"type": "text", "text": str(last.get("content", ""))}]
+                for att in attachments:
+                    if att.get("file_id"):
+                        content.append({"type": "file_ref", "file_id": att["file_id"], "filename": att.get("filename", "")})
+                messages = messages[:-1] + [{"role": "user", "content": content}]
+        body = {"model": "copilot", "messages": messages, "stream": False}
+    elif attachments:
         # Build multi-part content: text + file_ref parts
-        content: list = [{"type": "text", "text": prompt}]
+        content_list: list = [{"type": "text", "text": prompt}]
         for att in attachments:
             if att.get("file_id"):
-                content.append({"type": "file_ref", "file_id": att["file_id"], "filename": att.get("filename", "")})
-        user_msg = {"role": "user", "content": content}
+                content_list.append({"type": "file_ref", "file_id": att["file_id"], "filename": att.get("filename", "")})
+        user_msg = {"role": "user", "content": content_list}
+        body = {"model": "copilot", "messages": [user_msg], "stream": False}
     else:
         user_msg = {"role": "user", "content": prompt}
-    body = {
+        body = {"model": "copilot", "messages": [user_msg], "stream": False,}
+    body_final = {
         "model": "copilot",
-        "messages": [user_msg],
+        "messages": body["messages"],
         "stream": False,
     }
     headers = {"Content-Type": "application/json", "X-Agent-ID": agent_id}
@@ -805,7 +895,7 @@ async def _chat_one(agent_id: str, prompt: str, c1_url: str, chat_mode: str = ""
         r = await client.post(
             f"{c1_url}/v1/chat/completions",
             headers=headers,
-            json=body,
+            json=body_final,
             timeout=360,
         )
         elapsed_ms = int((time.monotonic() - t0) * 1000)
@@ -1105,38 +1195,170 @@ async def api_upload(file: UploadFile = File(...)):
 
 @app.post("/api/chat", name="api_chat")
 async def api_chat(request: Request):
-    """Proxy a single chat to C1. Body: {agent_id, prompt, chat_mode?, attachments?}."""
+    """Proxy a chat turn to C1.
+    Body: {agent_id, prompt, chat_mode?, work_mode?, attachments?,
+           messages?: [{role,content},...],  # full history for multi-turn
+           session_id?: str}                 # persistent session ID
+    """
     c1 = _urls()["c1"]
     try:
         payload_in = await request.json()
     except Exception:
         payload_in = {}
-    agent_id = (payload_in.get("agent_id") or "c9-jokes").strip()
-    prompt = (payload_in.get("prompt") or "").strip()
-    chat_mode = (payload_in.get("chat_mode") or "").strip().lower()
-    work_mode = (payload_in.get("work_mode") or "").strip().lower()
-    attachments = payload_in.get("attachments") or []  # [{file_id, filename}, ...]
-    if not prompt:
-        return JSONResponse({"ok": False, "error": "prompt required"}, status_code=400)
-    result = await _chat_one(agent_id, prompt, c1, chat_mode=chat_mode, attachments=attachments, work_mode=work_mode)
+    agent_id   = (payload_in.get("agent_id") or "c9-jokes").strip()
+    prompt     = (payload_in.get("prompt") or "").strip()
+    chat_mode  = (payload_in.get("chat_mode") or "").strip().lower()
+    work_mode  = (payload_in.get("work_mode") or "").strip().lower()
+    attachments = payload_in.get("attachments") or []
+    messages_in = payload_in.get("messages")  # full history array (optional)
+    session_id  = (payload_in.get("session_id") or "").strip()
+
+    if not prompt and not messages_in:
+        return JSONResponse({"ok": False, "error": "prompt or messages required"}, status_code=400)
+
+    # ── Session persistence ────────────────────────────────────────────────
+    now = datetime.now(timezone.utc).isoformat()
+    if not session_id:
+        session_id = "cs_" + uuid.uuid4().hex[:8]
+
+    # Ensure session row exists
     try:
         with _db() as conn:
             conn.execute(
-                "INSERT INTO chat_logs (created_at, agent_id, prompt_excerpt, response_excerpt, http_status, elapsed_ms, source) "
-                "VALUES (?,?,?,?,?,?,?)",
-                (
-                    datetime.now(timezone.utc).isoformat(),
-                    agent_id,
-                    prompt[:200],
-                    (result.get("text") or result.get("error") or "")[:500],
-                    result.get("http_status"),
-                    result.get("elapsed_ms"),
-                    "chat",
-                ),
+                "INSERT OR IGNORE INTO chat_sessions (id, created_at, updated_at, agent_id, title) VALUES (?,?,?,?,?)",
+                (session_id, now, now, agent_id, (prompt or "Chat")[:80]),
             )
     except sqlite3.Error:
         pass
+
+    # If caller sends full messages[], use it; otherwise build from prompt alone
+    if messages_in and isinstance(messages_in, list) and len(messages_in) > 0:
+        messages = messages_in
+    else:
+        messages = None  # will use prompt-only path in _chat_one
+
+    result = await _chat_one(
+        agent_id, prompt, c1,
+        chat_mode=chat_mode,
+        attachments=attachments,
+        work_mode=work_mode,
+        messages=messages,
+    )
+
+    # ── Persist turn to chat_messages + update session metadata ───────────
+    resp_text = result.get("text") or result.get("error") or ""
+    try:
+        with _db() as conn:
+            # Count existing turns to get next turn number
+            turn_row = conn.execute(
+                "SELECT MAX(turn) FROM chat_messages WHERE session_id=?", (session_id,)
+            ).fetchone()
+            next_turn = (turn_row[0] or 0) + 1
+
+            # Persist user message
+            conn.execute(
+                "INSERT INTO chat_messages (session_id, turn, role, content, created_at) VALUES (?,?,?,?,?)",
+                (session_id, next_turn, "user", prompt[:4000], now),
+            )
+            # Persist assistant reply
+            conn.execute(
+                "INSERT INTO chat_messages (session_id, turn, role, content, created_at) VALUES (?,?,?,?,?)",
+                (session_id, next_turn, "assistant", resp_text[:4000], now),
+            )
+
+            # Compute token estimate from full messages if available
+            token_est = _estimate_tokens(messages) if messages else (len(prompt) + len(resp_text)) // 4
+
+            conn.execute(
+                "UPDATE chat_sessions SET updated_at=?, message_count=message_count+2, token_estimate=? WHERE id=?",
+                (now, token_est, session_id),
+            )
+
+            # Legacy chat_logs
+            conn.execute(
+                "INSERT INTO chat_logs (created_at, agent_id, prompt_excerpt, response_excerpt, http_status, elapsed_ms, source, session_id) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (now, agent_id, prompt[:200], resp_text[:500],
+                 result.get("http_status"), result.get("elapsed_ms"), "chat", session_id),
+            )
+    except sqlite3.Error:
+        pass
+
+    result["session_id"] = session_id
+    result["token_estimate"] = _estimate_tokens(messages) if messages else (len(prompt) + len(resp_text)) // 4
     return JSONResponse(result)
+
+
+@app.get("/api/chat/sessions", name="api_chat_sessions")
+async def api_chat_sessions(limit: int = 30):
+    """Return recent chat sessions for the session picker in /chat."""
+    limit = max(1, min(100, limit))
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                "SELECT id, created_at, updated_at, agent_id, title, message_count, token_estimate "
+                "FROM chat_sessions ORDER BY updated_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return JSONResponse([dict(r) for r in rows])
+    except sqlite3.Error as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.get("/api/chat/session/{session_id}", name="api_chat_session_get")
+async def api_chat_session_get(session_id: str):
+    """Return all messages for a chat session (for history replay)."""
+    try:
+        with _db() as conn:
+            sess = conn.execute(
+                "SELECT id, created_at, updated_at, agent_id, title, message_count, token_estimate "
+                "FROM chat_sessions WHERE id=?", (session_id,)
+            ).fetchone()
+            if not sess:
+                return JSONResponse({"ok": False, "error": "session not found"}, status_code=404)
+            msgs = conn.execute(
+                "SELECT turn, role, content, created_at FROM chat_messages "
+                "WHERE session_id=? ORDER BY id ASC",
+                (session_id,),
+            ).fetchall()
+        return JSONResponse({
+            "ok": True,
+            "session": dict(sess),
+            "messages": [dict(m) for m in msgs],
+        })
+    except sqlite3.Error as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.delete("/api/chat/session/{session_id}", name="api_chat_session_delete")
+async def api_chat_session_delete(session_id: str):
+    """Delete a chat session and all its messages."""
+    try:
+        with _db() as conn:
+            conn.execute("DELETE FROM chat_messages WHERE session_id=?", (session_id,))
+            conn.execute("DELETE FROM chat_sessions WHERE id=?", (session_id,))
+        return JSONResponse({"ok": True, "deleted": session_id})
+    except sqlite3.Error as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/api/chat/summarize", name="api_chat_summarize")
+async def api_chat_summarize(request: Request):
+    """Summarize a list of messages into a single summary string.
+    Body: {messages: [{role, content},...], agent_id?}
+    Returns: {ok, summary}
+    """
+    c1 = _urls()["c1"]
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "invalid JSON"}, status_code=400)
+    messages = body.get("messages") or []
+    agent_id = (body.get("agent_id") or "c9-jokes").strip()
+    if not messages:
+        return JSONResponse({"ok": False, "error": "messages required"}, status_code=400)
+    summary = await _summarize_history(messages, c1, agent_id)
+    return JSONResponse({"ok": True, "summary": summary})
 
 
 @app.post("/api/validate", name="api_validate")
@@ -1324,6 +1546,33 @@ async def api_logs(agent: str = "", limit: int = 20, offset: int = 0):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# NOTES.md helpers — shared persistent memory for agent sessions
+# ─────────────────────────────────────────────────────────────────────────────
+
+NOTES_FILE = "NOTES.md"
+
+
+async def _notes_init(session_id: str, task: str) -> None:
+    """Create NOTES.md in C10 workspace with initial task info."""
+    content = f"# Agent Session Notes\n\n**Task:** {task}\n\n## Progress Log\n\n"
+    await _c10_write_file(NOTES_FILE, content)
+
+
+async def _notes_append(step: int, summary: str) -> None:
+    """Append a one-line step summary to NOTES.md in C10."""
+    existing = await _c10_read_file(NOTES_FILE)
+    current = existing.get("content") or ""
+    line = f"- [step {step}] {summary.strip()[:300]}\n"
+    await _c10_write_file(NOTES_FILE, current + line)
+
+
+async def _notes_read() -> str:
+    """Read NOTES.md from C10. Returns empty string if missing."""
+    r = await _c10_read_file(NOTES_FILE)
+    return r.get("content") or ""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # AGENT WORKSPACE API ROUTES  (/api/agent/*)
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -1478,6 +1727,17 @@ async def api_agent_run(
 
         yield _sse("session", {"session_id": session_id, "is_followup": is_followup})
 
+        # ── NOTES.md: initialise or load existing notes ──────────────────────
+        if not is_followup:
+            await _notes_init(session_id, task)
+            yield _sse("notes_updated", {"action": "created", "path": NOTES_FILE})
+        else:
+            # For follow-ups, prepend existing NOTES.md content so LLM remembers
+            _prior_notes = await _notes_read()
+            if _prior_notes:
+                yield _sse("notes_updated", {"action": "loaded", "path": NOTES_FILE,
+                                              "preview": _prior_notes[:300]})
+
         # Copilot (C1) does not honour the OpenAI `system` role — it strips it.
         # Fix: fold task first, then format guide — task-first keeps Copilot
         # focused on executing rather than acknowledging protocol rules.
@@ -1506,11 +1766,15 @@ async def api_agent_run(
         )
         if is_followup and history:
             # For follow-ups, append the new instruction as a user turn
+            # Seed with NOTES.md content so LLM has persistent memory
+            _prior_notes = await _notes_read()
+            _notes_context = f"\n\n[Session Notes from NOTES.md]:\n{_prior_notes[:800]}" if _prior_notes else ""
             followup_msg = (
                 f"FOLLOW-UP TASK: {task}\n\n"
                 f"Continue from where you left off. The workspace files still exist. "
                 f"Use FILE:/RUN:/INSTALL: actions as before. "
                 f"When done, write DONE: summary."
+                f"{_notes_context}"
             )
             history.append({"role": "user", "content": followup_msg})
 
@@ -1533,6 +1797,35 @@ async def api_agent_run(
                 if len(_hist) > 6:
                     _hist = [_hist[0]] + _hist[-5:]  # always keep initial prompt
                 messages = _hist
+
+            # ── Token budget check ───────────────────────────────────────────
+            _token_est = _estimate_tokens(messages)
+            yield _sse("token_estimate", {"step": step, "tokens": _token_est,
+                                          "budget": TOKEN_BUDGET, "hard_cap": TOKEN_HARD_CAP})
+            if _token_est >= TOKEN_HARD_CAP:
+                # Auto-compress: summarize all but the first message
+                _to_compress = messages[1:] if len(messages) > 1 else messages
+                yield _sse("context_compressed", {
+                    "step": step, "tokens_before": _token_est,
+                    "message": "Context near limit — auto-compressing history..."
+                })
+                _summary_text = await _summarize_history(_to_compress, c1, agent_id)
+                messages = [
+                    messages[0],  # keep initial task message
+                    {"role": "user", "content": f"[Context summary — earlier steps compressed]:\n{_summary_text}"}
+                ]
+                # Rebuild history to match compressed messages
+                history = messages[:]
+                _new_est = _estimate_tokens(messages)
+                yield _sse("context_compressed", {
+                    "step": step, "tokens_after": _new_est,
+                    "message": f"History compressed: ~{_token_est}→~{_new_est} tokens. Continuing..."
+                })
+            elif _token_est >= TOKEN_BUDGET:
+                yield _sse("token_warning", {
+                    "step": step, "tokens": _token_est, "budget": TOKEN_BUDGET,
+                    "message": f"Context nearing limit (~{_token_est:,} tokens). Will auto-compress at {TOKEN_HARD_CAP:,}."
+                })
 
             # Call C1 (Copilot LLM)
             headers = {
@@ -1663,6 +1956,12 @@ async def api_agent_run(
                 # Detect port in DONE summary for web preview
                 port_m2 = re.search(r'port[= :]?\s*(\d{4,5})', final_answer, re.IGNORECASE)
                 web_port = int(port_m2.group(1)) if port_m2 else None
+                # Append DONE summary to NOTES.md for cross-session memory
+                await _notes_append(step, final_answer[:200])
+                yield _sse("notes_updated", {
+                    "action": "appended", "path": NOTES_FILE, "step": step,
+                    "preview": final_answer[:120]
+                })
                 # Save session as completed
                 try:
                     with _db() as conn:

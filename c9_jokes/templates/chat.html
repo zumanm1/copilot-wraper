@@ -3,7 +3,7 @@
 {% block content %}
 <div class="toolbar">
   <h2 style="margin:0">Agent chat <span class="muted" style="font-size:0.7em;">(via C1 → Copilot)</span></h2>
-  <div style="display:flex;gap:0.5rem;align-items:center;">
+  <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
     <!-- Thinking-mode selector (mirrors M365 Copilot Auto/Quick/Deep dropdown) -->
     <div class="thinking-dropdown" id="thinking-dropdown">
       <button type="button" class="thinking-pill" id="thinking-pill" aria-haspopup="true" aria-expanded="false">
@@ -25,7 +25,12 @@
         </button>
       </div>
     </div>
-    <button type="button" id="clear-chat" class="btn-sm">Clear chat</button>
+    <!-- Token counter badge -->
+    <span id="token-badge" class="token-badge" title="Estimated context tokens used">0 / 30k tokens</span>
+    <!-- New Chat button -->
+    <button type="button" id="new-chat-btn" class="btn-sm" title="Start a new chat session">+ New Chat</button>
+    <button type="button" id="sessions-btn" class="btn-sm" title="View past sessions">📋 Sessions</button>
+    <button type="button" id="clear-chat" class="btn-sm">Clear display</button>
   </div>
 </div>
 <style>
@@ -52,6 +57,46 @@
 .thinking-opt.selected { background: var(--surface3, var(--border)); }
 .thinking-opt-name { font-size: 0.88rem; font-weight: 500; }
 .thinking-opt-desc { font-size: 0.76rem; color: var(--muted, var(--muted)); margin-top: 1px; }
+/* Token badge */
+.token-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 999px; padding: 3px 10px; font-size: 0.75rem;
+  color: var(--muted); font-family: monospace; white-space: nowrap;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+.token-badge.warn { background: rgba(255,160,0,0.15); border-color: #ffa000; color: #ffa000; }
+.token-badge.danger { background: rgba(220,50,50,0.15); border-color: var(--fail); color: var(--fail); }
+/* Context overflow banner */
+.ctx-banner {
+  display: none; align-items: center; gap: 8px;
+  padding: 8px 14px; border-radius: 8px; font-size: 0.82rem;
+  margin-bottom: 6px;
+}
+.ctx-banner.warn { display: flex; background: rgba(255,160,0,0.12); border: 1px solid #ffa000; color: #ffa000; }
+.ctx-banner.danger { display: flex; background: rgba(220,50,50,0.12); border: 1px solid var(--fail); color: var(--fail); }
+.ctx-banner button { margin-left: auto; background: currentColor; color: var(--bg);
+  border: none; border-radius: 5px; padding: 2px 10px; font-size: 0.78rem;
+  cursor: pointer; font-weight: 600; opacity: 0.9; }
+.ctx-banner button:hover { opacity: 1; }
+/* Sessions overlay */
+.sess-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.65);
+  z-index:500; align-items:center; justify-content:center; }
+.sess-overlay.open { display:flex; }
+.sess-modal { background:var(--card); border:1px solid var(--border); border-radius:10px;
+  width:min(88vw,560px); max-height:80vh; display:flex; flex-direction:column; overflow:hidden; }
+.sess-modal-hdr { display:flex; align-items:center; justify-content:space-between;
+  padding:.6rem .95rem; border-bottom:1px solid var(--border); font-size:.85rem; font-weight:600; }
+.sess-modal-body { flex:1; overflow:auto; padding:.6rem .8rem; }
+.sess-row { padding:.45rem .5rem; border-bottom:1px solid var(--border); cursor:pointer;
+  border-radius:5px; display:flex; align-items:center; gap:.5rem; }
+.sess-row:hover { background:var(--surface2); }
+.sess-row-title { font-size:.82rem; font-weight:500; flex:1; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; }
+.sess-row-meta { font-size:.72rem; color:var(--muted); white-space:nowrap; }
+.sess-del { background:none; border:none; color:var(--muted); cursor:pointer;
+  font-size:.8rem; padding:0 3px; flex-shrink:0; }
+.sess-del:hover { color:var(--fail); }
 </style>
 
 <div class="chat-controls">
@@ -74,8 +119,25 @@
   </div>
 </div>
 
+<!-- Context overflow warning banner -->
+<div id="ctx-banner" class="ctx-banner">
+  <span id="ctx-banner-text"></span>
+  <button id="ctx-banner-btn" type="button">+ New Chat</button>
+</div>
+
 <div class="chat-window" id="chat-window">
   <div class="chat-empty" id="chat-empty">Select an agent and send a prompt to begin.</div>
+</div>
+
+<!-- Sessions overlay modal -->
+<div class="sess-overlay" id="sess-overlay">
+  <div class="sess-modal">
+    <div class="sess-modal-hdr">
+      <span>📋 Past Chat Sessions</span>
+      <button id="sess-close" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:1rem;">✕</button>
+    </div>
+    <div class="sess-modal-body" id="sess-modal-body">Loading…</div>
+  </div>
 </div>
 
 <form id="chat-form" autocomplete="off">
@@ -174,66 +236,107 @@
 
 <script>
 (function() {
-  /* ── Minimal markdown renderer ───────────────────────────────────────────
-     Handles: **bold**, *italic*, `code`, ```blocks```, # headers,
-     - bullet lists, numbered lists, and line breaks.
-     No external dependency — safe for dark-mode pre blocks.                */
+  'use strict';
+
+  /* ── Constants ────────────────────────────────────────────────────────── */
+  var TOKEN_WARN   = 20000;  // show yellow warning
+  var TOKEN_DANGER = 30000;  // show red danger + auto-summarize prompt
+  var TOKEN_AUTO_COMPRESS = 38000; // trigger background summarize
+  var STORAGE_SESSION_KEY = 'chatSessionId';
+
+  /* ── State ────────────────────────────────────────────────────────────── */
+  var chatHistory = [];   // [{role:'user'|'assistant', content:string}]
+  var currentSessionId = localStorage.getItem(STORAGE_SESSION_KEY) || '';
+  var busy = false;
+  var pendingAttachments = [];
+
+  /* ── DOM refs ─────────────────────────────────────────────────────────── */
+  var chatWindow   = document.getElementById('chat-window');
+  var chatEmpty    = document.getElementById('chat-empty');
+  var form         = document.getElementById('chat-form');
+  var promptEl     = document.getElementById('prompt');
+  var agentEl      = document.getElementById('agent_id');
+  var sendBtn      = document.getElementById('send');
+  var sendMaBtn    = document.getElementById('send-ma');
+  var clearBtn     = document.getElementById('clear-chat');
+  var newChatBtn   = document.getElementById('new-chat-btn');
+  var sessionsBtn  = document.getElementById('sessions-btn');
+  var tokenBadge   = document.getElementById('token-badge');
+  var ctxBanner    = document.getElementById('ctx-banner');
+  var ctxBannerTxt = document.getElementById('ctx-banner-text');
+  var ctxBannerBtn = document.getElementById('ctx-banner-btn');
+  var sessOverlay  = document.getElementById('sess-overlay');
+  var sessClose    = document.getElementById('sess-close');
+  var sessBody     = document.getElementById('sess-modal-body');
+  var attachPlus   = document.getElementById('attach-plus');
+  var attachMenu   = document.getElementById('attach-menu');
+  var attachChips  = document.getElementById('attach-chips');
+  var fileInput    = document.getElementById('file-input');
+
+  /* ── Markdown renderer ───────────────────────────────────────────────── */
   function renderMarkdown(text) {
     if (!text) return '';
-    let html = text
-      // Escape raw HTML first
+    var html = text
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      // Fenced code blocks
       .replace(/```[\w]*\n([\s\S]*?)```/g, function(_, code) {
         return '<pre><code>' + code.trimEnd() + '</code></pre>';
       })
-      // Inline code
       .replace(/`([^`\n]+)`/g, '<code>$1</code>')
-      // Bold
       .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
-      // Italic
       .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>')
-      // H3 / H2 / H1
       .replace(/^### (.+)$/gm, '<h4>$1</h4>')
       .replace(/^## (.+)$/gm, '<h3>$1</h3>')
       .replace(/^# (.+)$/gm, '<h3>$1</h3>')
-      // Unordered list items
       .replace(/^[\-\*] (.+)$/gm, '<li>$1</li>')
-      // Numbered list items
       .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
-      // Wrap consecutive <li> in <ul>
-      .replace(/(<li>[\s\S]+?<\/li>)(?![\s\S]*?<\/ul>)/g, function(m) {
-        return '<ul>' + m + '</ul>';
-      })
-      // Double newline → paragraph break
+      .replace(/(<li>[\s\S]+?<\/li>)(?![\s\S]*?<\/ul>)/g, function(m) { return '<ul>' + m + '</ul>'; })
       .replace(/\n\n+/g, '</p><p>')
-      // Single newline → <br>
       .replace(/\n/g, '<br>');
-
     return '<p>' + html + '</p>';
   }
 
-  const chatWindow = document.getElementById('chat-window');
-  const chatEmpty  = document.getElementById('chat-empty');
-  const form       = document.getElementById('chat-form');
-  const promptEl   = document.getElementById('prompt');
-  const agentEl    = document.getElementById('agent_id');
-  const sendBtn    = document.getElementById('send');
-  const sendMaBtn  = document.getElementById('send-ma');
-  const clearBtn   = document.getElementById('clear-chat');
-  let busy = false;
+  /* ── HTML escape ─────────────────────────────────────────────────────── */
+  function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
 
-  sendMaBtn.addEventListener('click', function() {
-    const task = promptEl.value.trim();
-    window.location.href = '/multi-agent' + (task ? '?task=' + encodeURIComponent(task) : '');
-  });
+  /* ── Token estimation: rough chars/4 ────────────────────────────────── */
+  function estimateTokens(messages) {
+    var total = 0;
+    for (var i = 0; i < messages.length; i++) {
+      total += String(messages[i].content || '').length;
+    }
+    return Math.floor(total / 4);
+  }
 
-  // ── Thinking-mode dropdown ─────────────────────────────────────────
-  const THINKING_LABELS = { auto: 'Auto', quick: 'Quick Response', deep: 'Think Deeper' };
-  let thinkingMode = localStorage.getItem('thinkingMode') || 'auto';
-  const thinkingPill  = document.getElementById('thinking-pill');
-  const thinkingMenu  = document.getElementById('thinking-menu');
-  const thinkingLabel = document.getElementById('thinking-label');
+  /* ── Update token badge + context banner ─────────────────────────────── */
+  function updateTokenUI(tokens) {
+    var budget = TOKEN_WARN;
+    var k = Math.round(tokens / 100) / 10;  // e.g. 12.3k
+    tokenBadge.textContent = k + 'k / 30k tokens';
+    tokenBadge.className = 'token-badge';
+    ctxBanner.className = 'ctx-banner';
+    if (tokens >= TOKEN_AUTO_COMPRESS) {
+      tokenBadge.className = 'token-badge danger';
+      ctxBannerTxt.textContent = '⚠️ Context at limit (~' + k + 'k tokens) — auto-compressing history. Start a new chat to keep full context.';
+      ctxBanner.className = 'ctx-banner danger';
+    } else if (tokens >= TOKEN_DANGER) {
+      tokenBadge.className = 'token-badge danger';
+      ctxBannerTxt.textContent = '⚠️ Context nearly full (~' + k + 'k / 30k tokens). Start a new chat before it overflows.';
+      ctxBanner.className = 'ctx-banner danger';
+    } else if (tokens >= TOKEN_WARN) {
+      tokenBadge.className = 'token-badge warn';
+      ctxBannerTxt.textContent = '💡 Context growing (~' + k + 'k tokens). Consider starting a new chat soon.';
+      ctxBanner.className = 'ctx-banner warn';
+    }
+  }
+
+  /* ── Thinking-mode dropdown ──────────────────────────────────────────── */
+  var THINKING_LABELS = { auto: 'Auto', quick: 'Quick Response', deep: 'Think Deeper' };
+  var thinkingMode = localStorage.getItem('thinkingMode') || 'auto';
+  var thinkingPill  = document.getElementById('thinking-pill');
+  var thinkingMenu  = document.getElementById('thinking-menu');
+  var thinkingLabel = document.getElementById('thinking-label');
 
   function applyThinkingMode(mode) {
     thinkingMode = mode;
@@ -245,27 +348,20 @@
     thinkingMenu.hidden = true;
     thinkingPill.setAttribute('aria-expanded', 'false');
   }
-  applyThinkingMode(thinkingMode);  // restore persisted value
+  applyThinkingMode(thinkingMode);
 
   thinkingPill.addEventListener('click', function(e) {
     e.stopPropagation();
-    const open = !thinkingMenu.hidden;
+    var open = !thinkingMenu.hidden;
     thinkingMenu.hidden = open;
     thinkingPill.setAttribute('aria-expanded', String(!open));
   });
   document.querySelectorAll('.thinking-opt').forEach(function(btn) {
     btn.addEventListener('click', function() { applyThinkingMode(btn.dataset.mode); });
   });
-  document.addEventListener('click', function() {
-    if (!thinkingMenu.hidden) {
-      thinkingMenu.hidden = true;
-      thinkingPill.setAttribute('aria-expanded', 'false');
-    }
-  });
-  // ──────────────────────────────────────────────────────────────────
 
-  // ── Work / Web toggle ─────────────────────────────────────────────
-  let workMode = localStorage.getItem('workMode') || 'work';
+  /* ── Work / Web toggle ───────────────────────────────────────────────── */
+  var workMode = localStorage.getItem('workMode') || 'work';
   function applyWorkMode(mode) {
     workMode = mode;
     localStorage.setItem('workMode', mode);
@@ -277,122 +373,89 @@
   document.querySelectorAll('.ww-btn').forEach(function(btn) {
     btn.addEventListener('click', function() { applyWorkMode(btn.dataset.mode); });
   });
-  // ──────────────────────────────────────────────────────────────────
 
-  // ── File upload ("+" button) ──────────────────────────────────────
-  const attachPlus   = document.getElementById('attach-plus');
-  const attachMenu   = document.getElementById('attach-menu');
-  const attachChips  = document.getElementById('attach-chips');
-  const fileInput    = document.getElementById('file-input');
-  let pendingAttachments = [];  // [{file_id, filename, chipEl}]
-
-  function escapeHtml(s) {
-    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-  }
-
+  /* ── Attachment helpers ──────────────────────────────────────────────── */
   function clearAttachments() {
     pendingAttachments = [];
     attachChips.innerHTML = '';
     attachChips.style.display = 'none';
   }
-
   function removeAttachment(file_id) {
     pendingAttachments = pendingAttachments.filter(function(a) { return a.file_id !== file_id; });
-    const chip = attachChips.querySelector('[data-fid="' + file_id + '"]');
+    var chip = attachChips.querySelector('[data-fid="' + file_id + '"]');
     if (chip) chip.remove();
     if (!pendingAttachments.length) attachChips.style.display = 'none';
   }
-
   function addChip(tempId, filename, state) {
     attachChips.style.display = 'flex';
-    const chip = document.createElement('span');
+    var chip = document.createElement('span');
     chip.className = 'attach-chip' + (state === 'uploading' ? ' attach-chip-uploading' : state === 'error' ? ' attach-chip-error' : '');
     chip.dataset.fid = tempId;
-    chip.innerHTML = '📎 ' + escapeHtml(filename) +
+    chip.innerHTML = '📎 ' + esc(filename) +
       (state !== 'uploading' ? ' <button type="button" class="attach-chip-close" title="Remove">×</button>' : ' ⏳');
-    const closeBtn = chip.querySelector('.attach-chip-close');
+    var closeBtn = chip.querySelector('.attach-chip-close');
     if (closeBtn) closeBtn.addEventListener('click', function() { removeAttachment(tempId); });
     attachChips.appendChild(chip);
     return chip;
   }
-
   async function uploadFiles(files) {
-    for (const file of files) {
-      const tempId = 'tmp_' + Math.random().toString(36).slice(2);
-      const chip = addChip(tempId, file.name, 'uploading');
-      const fd = new FormData();
-      fd.append('file', file);
+    for (var i = 0; i < files.length; i++) {
+      var file = files[i];
+      var tempId = 'tmp_' + Math.random().toString(36).slice(2);
+      var chip = addChip(tempId, file.name, 'uploading');
+      var fd = new FormData(); fd.append('file', file);
       try {
-        const r = await fetch('/api/upload', { method: 'POST', body: fd });
-        const j = await r.json();
-        chip.remove();
+        var r = await fetch('/api/upload', { method: 'POST', body: fd });
+        var j = await r.json(); chip.remove();
         if (j.ok && j.file_id) {
           pendingAttachments.push({ file_id: j.file_id, filename: file.name });
           addChip(j.file_id, file.name + (j.preview ? ' ✓' : ''), 'ready');
         } else {
-          const errChip = addChip(tempId + '_err', file.name + ': ' + (j.error || 'upload failed'), 'error');
-          setTimeout(function() { errChip.remove(); }, 5000);
+          var ec = addChip(tempId+'_err', file.name+': '+(j.error||'upload failed'), 'error');
+          setTimeout(function() { ec.remove(); }, 5000);
         }
       } catch(e) {
         chip.remove();
-        const errChip = addChip(tempId + '_err', file.name + ': network error', 'error');
-        setTimeout(function() { errChip.remove(); }, 5000);
+        var ec2 = addChip(tempId+'_err', file.name+': network error', 'error');
+        setTimeout(function() { ec2.remove(); }, 5000);
       }
     }
-    if (!pendingAttachments.length && attachChips.children.length === 0) {
-      attachChips.style.display = 'none';
-    }
   }
-
   attachPlus.addEventListener('click', function(e) {
     e.stopPropagation();
-    const open = !attachMenu.hidden;
+    var open = !attachMenu.hidden;
     attachMenu.hidden = open;
     attachPlus.setAttribute('aria-expanded', String(!open));
   });
   document.getElementById('opt-upload').addEventListener('click', function() {
-    attachMenu.hidden = true;
-    fileInput.click();
+    attachMenu.hidden = true; fileInput.click();
   });
   document.getElementById('opt-paste').addEventListener('click', function() {
-    attachMenu.hidden = true;
-    promptEl.focus();
+    attachMenu.hidden = true; promptEl.focus();
   });
   fileInput.addEventListener('change', function() {
-    if (fileInput.files.length) {
-      uploadFiles(Array.from(fileInput.files));
-      fileInput.value = '';
-    }
+    if (fileInput.files.length) { uploadFiles(Array.from(fileInput.files)); fileInput.value = ''; }
   });
-  document.addEventListener('click', function() {
-    if (!attachMenu.hidden) {
-      attachMenu.hidden = true;
-      attachPlus.setAttribute('aria-expanded', 'false');
-    }
-  });
-  // ──────────────────────────────────────────────────────────────────
 
+  /* ── Bubble rendering ────────────────────────────────────────────────── */
   function agentLabel() {
     return agentEl.options[agentEl.selectedIndex].text.trim();
   }
-
   function appendBubble(role, htmlContent, meta, isHtml) {
     chatEmpty.style.display = 'none';
-    const bubble = document.createElement('div');
+    var bubble = document.createElement('div');
     bubble.className = 'bubble ' + role;
-    const header = document.createElement('div');
+    var header = document.createElement('div');
     header.className = 'bubble-header';
     header.textContent = role === 'user' ? 'You' : agentLabel();
     bubble.appendChild(header);
-    const body = document.createElement('div');
+    var body = document.createElement('div');
     body.className = 'bubble-body' + (isHtml ? ' md-body' : '');
-    if (isHtml) body.innerHTML = htmlContent;
-    else body.textContent = htmlContent;
+    if (isHtml) body.innerHTML = htmlContent; else body.textContent = htmlContent;
     bubble.appendChild(body);
     if (meta) {
-      const foot = document.createElement('div');
-      foot.className = 'bubble-meta';
-      foot.textContent = meta;
+      var foot = document.createElement('div');
+      foot.className = 'bubble-meta'; foot.textContent = meta;
       bubble.appendChild(foot);
     }
     chatWindow.appendChild(bubble);
@@ -400,25 +463,179 @@
     return bubble;
   }
 
+  /* ── Session management ──────────────────────────────────────────────── */
+  function startNewSession() {
+    currentSessionId = '';
+    localStorage.removeItem(STORAGE_SESSION_KEY);
+    chatHistory = [];
+    updateTokenUI(0);
+  }
+
+  function saveSessionId(id) {
+    currentSessionId = id;
+    localStorage.setItem(STORAGE_SESSION_KEY, id);
+  }
+
+  /* ── New Chat button ─────────────────────────────────────────────────── */
+  function doNewChat(silent) {
+    startNewSession();
+    chatWindow.innerHTML = '';
+    var empty = document.createElement('div');
+    empty.id = 'chat-empty'; empty.className = 'chat-empty';
+    empty.textContent = 'New chat started. Select an agent and send a message.';
+    chatWindow.appendChild(empty);
+    if (!silent) promptEl.focus();
+  }
+
+  newChatBtn.addEventListener('click', function() { doNewChat(false); });
+  ctxBannerBtn.addEventListener('click', function() { doNewChat(false); });
+
+  /* ── Sessions modal ──────────────────────────────────────────────────── */
+  function openSessions() {
+    sessOverlay.classList.add('open');
+    sessBody.textContent = 'Loading…';
+    fetch('/api/chat/sessions?limit=30')
+      .then(function(r) { return r.json(); })
+      .then(function(rows) {
+        if (!rows.length) { sessBody.textContent = 'No saved sessions yet.'; return; }
+        sessBody.innerHTML = rows.map(function(s) {
+          var tok = s.token_estimate ? Math.round(s.token_estimate/100)/10 + 'k tokens · ' : '';
+          var dt  = (s.updated_at || '').slice(0, 16).replace('T', ' ');
+          return '<div class="sess-row" data-sid="' + esc(s.id) + '" data-title="' + esc(s.title||'Chat') + '">'
+            + '<span class="sess-row-title">' + esc(s.title || 'Chat') + '</span>'
+            + '<span class="sess-row-meta">' + esc(tok + s.message_count + ' msgs · ' + dt) + '</span>'
+            + '<button class="sess-del" title="Delete" data-sid="' + esc(s.id) + '">🗑</button>'
+            + '</div>';
+        }).join('');
+        // Attach click handlers
+        sessBody.querySelectorAll('.sess-row').forEach(function(row) {
+          row.addEventListener('click', function(e) {
+            if (e.target.classList.contains('sess-del')) return;
+            resumeSession(row.dataset.sid, row.dataset.title);
+          });
+        });
+        sessBody.querySelectorAll('.sess-del').forEach(function(btn) {
+          btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            if (!confirm('Delete this session?')) return;
+            fetch('/api/chat/session/' + encodeURIComponent(btn.dataset.sid), { method: 'DELETE' })
+              .then(function() { openSessions(); });
+          });
+        });
+      })
+      .catch(function() { sessBody.textContent = 'Failed to load sessions.'; });
+  }
+
+  function resumeSession(sid, title) {
+    sessOverlay.classList.remove('open');
+    sessBody.textContent = 'Loading…';
+    fetch('/api/chat/session/' + encodeURIComponent(sid))
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (!d.ok) { alert('Could not load session: ' + (d.error || 'unknown')); return; }
+        // Reset UI and history
+        doNewChat(true);
+        saveSessionId(sid);
+        // Rebuild chat display and history from stored messages
+        // Messages are stored as pairs (turn N user, turn N assistant)
+        var msgs = d.messages || [];
+        var seen = {};
+        for (var i = 0; i < msgs.length; i++) {
+          var m = msgs[i];
+          var turn = m.turn;
+          if (!seen[turn]) seen[turn] = {};
+          seen[turn][m.role] = m.content;
+        }
+        var turns = Object.keys(seen).map(Number).sort(function(a,b){return a-b;});
+        for (var t = 0; t < turns.length; t++) {
+          var pair = seen[turns[t]];
+          if (pair.user) {
+            chatHistory.push({ role: 'user', content: pair.user });
+            appendBubble('user', esc(pair.user), null, true);
+          }
+          if (pair.assistant) {
+            chatHistory.push({ role: 'assistant', content: pair.assistant });
+            appendBubble('assistant', renderMarkdown(pair.assistant), null, true);
+          }
+        }
+        updateTokenUI(estimateTokens(chatHistory));
+        appendBubble('assistant',
+          '<em style="color:var(--muted)">— Resumed session: ' + esc(title||sid) + ' (' + msgs.length + ' messages loaded) —</em>',
+          null, true);
+        promptEl.focus();
+      })
+      .catch(function() { alert('Network error loading session.'); });
+  }
+
+  sessionsBtn.addEventListener('click', openSessions);
+  sessClose.addEventListener('click', function() { sessOverlay.classList.remove('open'); });
+  sessOverlay.addEventListener('click', function(e) {
+    if (e.target === sessOverlay) sessOverlay.classList.remove('open');
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') sessOverlay.classList.remove('open');
+  });
+  document.addEventListener('click', function() {
+    if (!thinkingMenu.hidden) {
+      thinkingMenu.hidden = true;
+      thinkingPill.setAttribute('aria-expanded', 'false');
+    }
+    if (!attachMenu.hidden) {
+      attachMenu.hidden = true;
+      attachPlus.setAttribute('aria-expanded', 'false');
+    }
+  });
+
+  /* ── Auto-compress context ───────────────────────────────────────────── */
+  async function maybeCompress() {
+    var tokens = estimateTokens(chatHistory);
+    if (tokens < TOKEN_AUTO_COMPRESS) return;
+    // Summarize all but last 2 messages
+    var toSummarize = chatHistory.slice(0, -2);
+    var keep = chatHistory.slice(-2);
+    try {
+      var r = await fetch('/api/chat/summarize', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ messages: toSummarize, agent_id: agentEl.value })
+      });
+      var j = await r.json();
+      if (j.ok && j.summary) {
+        chatHistory = [
+          { role: 'user', content: '[Earlier conversation summary]:\n' + j.summary }
+        ].concat(keep);
+        appendBubble('assistant',
+          '<em style="color:var(--muted)">♻️ Context compressed — earlier messages summarized to save space.</em>',
+          null, true);
+        updateTokenUI(estimateTokens(chatHistory));
+      }
+    } catch(e) { /* non-fatal */ }
+  }
+
+  /* ── Send ────────────────────────────────────────────────────────────── */
   async function send(promptText) {
     if (busy || !promptText) return;
     busy = true;
     sendBtn.disabled = true;
     sendBtn.textContent = 'Sending…';
-    const agent_id = agentEl.value;
+    var agent_id = agentEl.value;
 
-    // Build user bubble label (includes attachment names if any)
-    const attachCopy = [...pendingAttachments];
-    let userHtml = escapeHtml(promptText);
+    // Add user turn to history
+    chatHistory.push({ role: 'user', content: promptText });
+
+    // Show user bubble
+    var attachCopy = pendingAttachments.slice();
+    var userHtml = esc(promptText);
     if (attachCopy.length) {
       userHtml += attachCopy.map(function(a) {
-        return '<span class="attach-chip attach-chip-sent">📎 ' + escapeHtml(a.filename) + '</span>';
+        return '<span class="attach-chip attach-chip-sent">📎 ' + esc(a.filename) + '</span>';
       }).join('');
     }
     appendBubble('user', userHtml, null, true);
     clearAttachments();
 
-    const loader = document.createElement('div');
+    // Loading bubble
+    var loader = document.createElement('div');
     loader.className = 'bubble assistant loading';
     loader.innerHTML = '<div class="bubble-header">' + agentLabel() + '</div>' +
                        '<div class="bubble-body">Thinking…</div>';
@@ -426,29 +643,51 @@
     chatWindow.appendChild(loader);
     chatWindow.scrollTop = chatWindow.scrollHeight;
 
-    const t0 = performance.now();
+    var t0 = performance.now();
     try {
-      const body = { agent_id, prompt: promptText, chat_mode: thinkingMode, work_mode: workMode };
-      if (attachCopy.length) body.attachments = attachCopy.map(function(a) {
+      // Build request — always send full history so C1 has context
+      var reqBody = {
+        agent_id:   agent_id,
+        prompt:     promptText,
+        chat_mode:  thinkingMode,
+        work_mode:  workMode,
+        messages:   chatHistory.slice(),  // full conversation history
+        session_id: currentSessionId
+      };
+      if (attachCopy.length) reqBody.attachments = attachCopy.map(function(a) {
         return { file_id: a.file_id, filename: a.filename };
       });
-      const r = await fetch('/api/chat', {
+
+      var res = await fetch('/api/chat', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(body)
+        body: JSON.stringify(reqBody)
       });
-      const j = await r.json();
-      const elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+      var j = await res.json();
+      var elapsed = ((performance.now() - t0) / 1000).toFixed(1);
       loader.remove();
+
       if (j.ok && j.text) {
+        // Persist session id returned by server
+        if (j.session_id) saveSessionId(j.session_id);
+        // Add assistant reply to history
+        chatHistory.push({ role: 'assistant', content: j.text });
         appendBubble('assistant', renderMarkdown(j.text),
           'HTTP ' + j.http_status + ' · ' + elapsed + 's · ' + agent_id, true);
+        // Update token counter
+        var tok = j.token_estimate || estimateTokens(chatHistory);
+        updateTokenUI(tok);
+        // Auto-compress if needed
+        await maybeCompress();
       } else {
-        const errMsg = j.error || j.raw || JSON.stringify(j);
+        // Remove last user turn from history on error (avoid corrupting context)
+        chatHistory.pop();
+        var errMsg = j.error || j.raw || JSON.stringify(j);
         appendBubble('error', errMsg,
           'HTTP ' + (j.http_status || '?') + ' · ' + elapsed + 's', false);
       }
     } catch(e) {
+      chatHistory.pop();
       loader.remove();
       appendBubble('error', 'Network error: ' + e.message, null, false);
     }
@@ -458,19 +697,25 @@
     promptEl.focus();
   }
 
+  /* ── Clear display (does NOT reset history) ──────────────────────────── */
   clearBtn.addEventListener('click', function() {
     chatWindow.innerHTML = '';
-    const empty = document.createElement('div');
-    empty.id = 'chat-empty';
-    empty.className = 'chat-empty';
-    empty.textContent = 'Select an agent and send a prompt to begin.';
+    var empty = document.createElement('div');
+    empty.id = 'chat-empty'; empty.className = 'chat-empty';
+    empty.textContent = 'Display cleared — history still active. Use "+ New Chat" to start fresh.';
     chatWindow.appendChild(empty);
   });
 
+  /* ── Multi-agent hand-off ────────────────────────────────────────────── */
+  sendMaBtn.addEventListener('click', function() {
+    var task = promptEl.value.trim();
+    window.location.href = '/multi-agent' + (task ? '?task=' + encodeURIComponent(task) : '');
+  });
+
+  /* ── Form submit ─────────────────────────────────────────────────────── */
   form.addEventListener('submit', function(e) {
     e.preventDefault();
-    const p = promptEl.value.trim();
-    // Allow send if there's text OR pending attachments
+    var p = promptEl.value.trim();
     if (p || pendingAttachments.length) {
       promptEl.value = '';
       send(p || 'Please analyze the attached file.');
@@ -487,6 +732,37 @@
       form.dispatchEvent(new Event('submit'));
     }
   });
+
+  /* ── On load: offer to resume last session ───────────────────────────── */
+  (function checkLastSession() {
+    if (!currentSessionId) return;
+    fetch('/api/chat/session/' + encodeURIComponent(currentSessionId))
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (!d.ok || !d.messages || !d.messages.length) {
+          startNewSession(); return;
+        }
+        // Show a resume banner
+        var banner = document.createElement('div');
+        banner.style.cssText = 'background:rgba(10,132,255,0.1);border:1px solid var(--accent);border-radius:8px;padding:8px 14px;font-size:0.82rem;margin-bottom:6px;display:flex;align-items:center;gap:8px;';
+        var title = d.session.title || 'previous chat';
+        var count = d.messages.length;
+        banner.innerHTML = '💬 <strong>Resume last session?</strong> &nbsp;"' + esc(title) + '" · ' + count + ' messages '
+          + '<button id="resume-yes" style="margin-left:8px;background:var(--accent);color:var(--bg);border:none;border-radius:5px;padding:2px 10px;cursor:pointer;font-size:0.78rem;font-weight:600;">Resume</button>'
+          + '<button id="resume-no"  style="margin-left:4px;background:none;border:1px solid var(--border);color:var(--muted);border-radius:5px;padding:2px 10px;cursor:pointer;font-size:0.78rem;">New chat</button>';
+        chatWindow.insertBefore(banner, chatWindow.firstChild);
+        document.getElementById('resume-yes').addEventListener('click', function() {
+          banner.remove();
+          resumeSession(currentSessionId, title);
+        });
+        document.getElementById('resume-no').addEventListener('click', function() {
+          banner.remove();
+          doNewChat(true);
+        });
+      })
+      .catch(function() { startNewSession(); });
+  })();
+
 })();
 </script>
 {% endblock %}
