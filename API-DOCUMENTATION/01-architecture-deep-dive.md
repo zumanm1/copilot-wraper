@@ -69,15 +69,16 @@
 │                                                                         │
 │  C9: c9-jokes  :6090                                                    │
 │  FastAPI + Jinja2 + SQLite                                              │
-│  ├─ Dashboard    /            health cards for all containers           │
+│  ├─ Dashboard    /            health cards (C1–C8, C10, C11)              │
 │  ├─ Chat         /chat        single-agent chat UI                      │
 │  ├─ Pairs        /pairs       batch multi-agent validation              │
 │  ├─ Logs         /logs        full audit trail (source + elapsed_ms)    │
 │  ├─ Health       /health      container health snapshots                │
-│  └─ API Docs     /api/docs    interactive reference                     │
+│  ├─ Agent / Multi / multi-Agento  IDE flows → C10 / C11 sandboxes      │
+│  └─ API reference /api       api_reference.html (/api/docs → redirect)  │
 │                                                                         │
 │  Connects to C1 (/v1/chat/completions, /v1/files)                       │
-│  Probes C2–C8 health endpoints                                          │
+│  Probes C2–C8, C10, C11 health endpoints                                │
 │  Writes all calls to SQLite c9.db                                       │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
@@ -611,7 +612,7 @@ C9 FastAPI (c9_jokes/app.py)
   │    /logs          → logs.html       (audit trail)
   │    /health        → health.html     (health snapshots)
   │    /sessions      → sessions.html   (C1 session proxy)
-  │    /api/docs      → api_reference.html
+  │    /api           → api_reference.html  (GET /api/docs → 307 /api)
   │
   ├─ JSON API routes
   │    POST /api/chat        → proxies to C1 /v1/chat/completions

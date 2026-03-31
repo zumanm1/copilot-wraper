@@ -34,17 +34,6 @@ from circuit_breaker import get_circuit_breaker, CircuitOpenError
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s:%(name)s:%(message)s")
 
-# #region agent log
-import time as _dbg_time
-_DBG_LOG = "/app/.cursor/debug-aa3936.log"
-def _dlog(loc, msg, data=None):
-    try:
-        with open(_DBG_LOG, "a") as _f:
-            _f.write(json.dumps({"sessionId":"aa3936","location":loc,"message":msg,"data":data or {},"timestamp":int(_dbg_time.time()*1000)}) + "\n")
-    except Exception:
-        pass
-# #endregion
-
 # ── Streaming event protocol ──────────────────────────────────────────────────
 _DONE_EVENTS = {"done", "error", "throttled", "badMessage"}
 
@@ -427,9 +416,6 @@ class CopilotBackend:
         global _cache_hits, _cache_misses
         import time as _time
         _t0 = _time.monotonic()
-        # #region agent log
-        _dlog("copilot_backend.py:chat_completion", "entry", {"agent_id": agent_id, "provider": self.provider.name, "style": self.style, "prompt_len": len(prompt), "hypothesisId": "H4"})
-        # #endregion
 
         if attachment_path:
             return await self._do_chat_completion(prompt, attachment_path, context, agent_id=agent_id, chat_mode=chat_mode)

@@ -12,9 +12,9 @@
   --surface3: rgba(245, 245, 247, 0.08);
   --text: var(--fg);
 
-  /* Semantic mapping to enforce 5-color rule */
-  --ok: var(--fg);
-  --fail: var(--muted);
+  /* Status colors — green/red/amber for clear LED readability */
+  --ok: #30d158;
+  --fail: #ff3b30;
   --warn: var(--accent);
 }
 * { box-sizing: border-box; }
@@ -50,7 +50,7 @@ h2 { margin-top: 0; }
   padding: 1rem;
   margin-bottom: 1rem;
 }
-.card.card-down { border-color: var(--muted); }
+.card.card-down { border-color: rgba(255, 59, 48, 0.45); }
 .card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; }
 .card-url { margin: 0.15rem 0 0.25rem; }
 .card-meta { font-size: 0.75rem; margin-bottom: 0.35rem; }
@@ -63,9 +63,9 @@ h2 { margin-top: 0; }
 
 /* ── Badges ──────────────────────────────────────────────────────────────── */
 .badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.8rem; font-weight: 600; }
-.badge.ok   { background: rgba(245, 245, 247, 0.15); color: var(--fg); }
-.badge.fail { background: rgba(142, 142, 147, 0.15); color: var(--muted); }
-.badge.warn { background: rgba(10, 132, 255, 0.15);  color: var(--accent); }
+.badge.ok   { background: rgba(48, 209, 88, 0.15);  color: var(--ok); }
+.badge.fail { background: rgba(255, 59, 48, 0.15);  color: var(--fail); }
+.badge.warn { background: rgba(10, 132, 255, 0.15); color: var(--accent); }
 
 /* ── Status bar (dashboard) ──────────────────────────────────────────────── */
 .status-bar {
@@ -80,9 +80,9 @@ h2 { margin-top: 0; }
   margin-bottom: 1.1rem;
   font-size: 0.9rem;
 }
-.status-bar.bar-ok   { border-color: var(--border); }
+.status-bar.bar-ok   { border-color: rgba(48, 209, 88, 0.4); }
 .status-bar.bar-warn { border-color: rgba(10, 132, 255, 0.4); }
-.status-bar.bar-fail { border-color: rgba(142, 142, 147, 0.4); }
+.status-bar.bar-fail { border-color: rgba(255, 59, 48, 0.4); }
 .status-ts { color: var(--muted); font-size: 0.82rem; }
 
 /* ── Toolbar ─────────────────────────────────────────────────────────────── */

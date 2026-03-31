@@ -281,7 +281,7 @@ open http://localhost:6090/pairs    # Pairs validation
 open http://localhost:6090/logs     # Logs (may be empty on first run)
 open http://localhost:6090/health   # Health snapshots
 open http://localhost:6090/sessions # Sessions (proxy of C1 /v1/sessions)
-open http://localhost:6090/api/docs # API reference
+open http://localhost:6090/api      # API reference (/api/docs redirects)
 ```
 
 **Dashboard check:**

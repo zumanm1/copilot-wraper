@@ -122,6 +122,8 @@ C1 receives prompt → POST C3 /chat → Playwright types in M365 UI → SignalR
 | C7b | `C7b_openclaw-cli` | `copilot-openclaw-cli:latest` | `8080` (health) | OpenClaw CLI / TUI |
 | C8 | `C8_hermes-agent` | `copilot-hermes-agent:latest` | `8080` (health) | Hermes Agent (memory, skills, cron) |
 | C9 | `C9_jokes` | `copilot-c9-jokes:latest` | `6090` | Validation console — chat, pairs, logs, health UI |
+| C10 | `C10_sandbox` | `copilot-c10-sandbox:latest` | (internal `8100`) | Agent workspace shell/file sandbox for `/agent` flows |
+| C11 | `C11_sandbox` | `copilot-c11-sandbox:latest` | (internal `8200`) | Session-scoped sandbox for `/multi-Agento` |
 | CT | `CT_tests` | `copilot-openai-wrapper-test:latest` | — | Playwright automated test suite |
 
 ### Architecture Diagram
@@ -336,7 +338,7 @@ xdg-open http://localhost:6090      # Linux
 | Pairs | `http://localhost:6090/pairs` | Batch: run one prompt against multiple agents |
 | Logs | `http://localhost:6090/logs` | Full history — source, elapsed_ms, response excerpts |
 | Health | `http://localhost:6090/health` | Live health snapshots for all containers |
-| API Docs | `http://localhost:6090/api/docs` | C9 interactive API reference |
+| API reference | `http://localhost:6090/api` | C9 endpoint reference (`/api/docs` redirects here) |
 
 ### Stop everything
 
@@ -1511,12 +1513,12 @@ xdg-open http://localhost:6090      # Linux
 
 | Page | URL | Description |
 |---|---|---|
-| **Dashboard** | `/` | Real-time health card for every container (C1–C8) |
+| **Dashboard** | `/` | Real-time health cards for C1–C8, C10, and C11 |
 | **Chat** | `/chat` | Single-turn chat — select agent, thinking mode, Work/Web toggle, file upload |
 | **Pairs** | `/pairs` | Batch mode — run one prompt against multiple agents (sequential or parallel) |
 | **Logs** | `/logs` | Full history of all chat + validation calls (source, elapsed_ms, response excerpt, errors) |
 | **Health** | `/health` | Timestamped container health snapshots |
-| **API Docs** | `/api/docs` | Interactive C9 API reference (all endpoints) |
+| **API reference** | `/api` | Server-rendered C9 API reference (`/api/docs` → `/api`) |
 
 ### Features
 

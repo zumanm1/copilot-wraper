@@ -195,7 +195,7 @@ async def exec_command(req: ExecRequest):
                 proc.kill()
             except Exception:
                 pass
-            stdout_bytes, stderr_bytes = b"", b"[killed: timeout — use nohup cmd & for long-running servers]"
+            stdout_bytes, stderr_bytes = b"", b"[killed: timeout - use nohup cmd & for long-running servers]"
             timed_out = True
         return JSONResponse({
             "stdout": stdout_bytes.decode("utf-8", errors="replace"),

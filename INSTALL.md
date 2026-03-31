@@ -400,7 +400,7 @@ docker compose exec hermes-agent         curl -sf http://localhost:8080/health
 | Pairs | `http://localhost:6090/pairs` | Batch: one prompt → multiple agents |
 | Logs | `http://localhost:6090/logs` | All chat + validation history with timing |
 | Health | `http://localhost:6090/health` | Live health snapshots |
-| API Docs | `http://localhost:6090/api/docs` | C9 REST API reference |
+| API reference | `http://localhost:6090/api` | C9 REST API reference (`/api/docs` redirects here) |
 
 ---
 

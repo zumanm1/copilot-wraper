@@ -16,7 +16,7 @@
   - [Logs](#logs-)
   - [Health](#health-)
   - [Sessions](#sessions-)
-  - [API Docs](#api-docs-)
+  - [API reference](#api-reference-)
 - [UX Flows](#ux-flows)
 - [Backend Architecture](#backend-architecture)
 - [Database Schema](#database-schema)
@@ -33,15 +33,15 @@
 
 ## What is C9?
 
-C9 (`c9-jokes`, port **6090**) is the **observation and validation layer** for the entire 9-container stack. It provides:
+C9 (`c9-jokes`, port **6090**) is the **observation and validation layer** for the Copilot wrapper stack (C1–C8 backbone, plus **C10/C11 sandboxes** used by Agent and multi-Agento pages). It provides:
 
 - A **full web UI** to interact with every AI agent without needing a terminal
 - **Batch validation** — run one prompt against all agents simultaneously and compare responses
 - A **complete audit log** of every AI call (chat + batch validation) with timing and source metadata
-- A **health dashboard** showing live status for all 9 containers
+- A **health dashboard** showing live status for **all probed services** (C1–C8, **C10**, **C11**, plus an extra C3 `/status` row on `/api/status`)
 - A **REST API** for automated validation pipelines
 
-**C9 never modifies C1–C8.** It only reads, proxies, and records.
+**C9 does not rewrite C1–C8 environment or C3 cookies.** It reads, proxies, and records. **C10/C11** receive workspace mutations only through C9’s documented `/api/agent/*`, `/api/ma/*`, and streaming agent endpoints.
 
 ```
 Browser
@@ -75,10 +75,10 @@ curl http://localhost:6090/api/status
 
 ### Dashboard `/`
 
-The **landing page** — a real-time health card grid showing the status of all 9 containers.
+The **landing page** — a real-time health card grid showing the status of every entry in `TARGETS` (C1–C8 plus **C10** and **C11** sandboxes).
 
 **What you see:**
-- One card per container (C1–C8), colour-coded green/red/grey
+- One card per health target, colour-coded green/red/grey
 - Container label, service name, health endpoint URL
 - HTTP status code of the last health probe
 - "Refresh" button to re-probe all containers immediately
@@ -216,11 +216,13 @@ Useful for confirming that agent sessions were created and are still alive.
 
 ---
 
-### API Docs `/api/docs`
+### API reference `/api`
 
-**Interactive API reference** for all C9 endpoints — rendered from a static template.
+**Server-rendered API reference** for C9 endpoints (template `api_reference.html`).
 
-Lists every `GET` / `POST` endpoint with request/response examples.
+**Bookmark compatibility:** `GET /api/docs` redirects to `/api` (307) for older docs that used the `/api/docs` path.
+
+Lists key `GET` / `POST` routes with curl-oriented examples.
 
 ---
 
@@ -347,18 +349,21 @@ To add a new agent: append a dict and restart C9.
 
 ### Health targets
 
+In code this map is named **`TARGETS`** (`c9_jokes/app.py`). Each entry supplies `env`, `default`, `label`, and `health` path; `_urls()` resolves the base URL.
+
 ```python
-HEALTH_TARGETS = {
-    "c1":  {"url": C1_URL  + "/health",  "label": "C1 copilot-api"},
-    "c2":  {"url": C2_URL  + "/health",  "label": "C2 agent-terminal"},
-    "c3":  {"url": C3_URL  + "/health",  "label": "C3 browser-auth"},
-    "c5":  {"url": C5_URL  + "/health",  "label": "C5 claude-code"},
-    "c6":  {"url": C6_URL  + "/health",  "label": "C6 kilocode"},
-    "c7a": {"url": C7A_URL + "/healthz", "label": "C7a openclaw-gw"},
-    "c7b": {"url": C7B_URL + "/health",  "label": "C7b openclaw-cli"},
-    "c8":  {"url": C8_URL  + "/health",  "label": "C8 hermes-agent"},
+TARGETS = {
+    "c1":  {...}, "c2": {...}, "c3": {...},
+    "c5":  {...}, "c6": {...}, "c7a": {...}, "c7b": {...},
+    "c8":  {...},
+    "c10": {"env": "C10_URL", "default": "http://c10-sandbox:8100",
+            "label": "C10 agent sandbox", "health": "/health"},
+    "c11": {"env": "C11_URL", "default": "http://c11-sandbox:8200",
+            "label": "C11 multi-agent sandbox", "health": "/health"},
 }
 ```
+
+`GET /api/status` also probes **`c3-status`** (`C3_URL + /status`) and merges that into the JSON (extra row in history), while the dashboard cards follow `TARGETS` keys only.
 
 ---
 
@@ -588,6 +593,8 @@ All environment variables are pre-wired by `docker-compose.yml`:
 | `C7A_URL` | `http://openclaw-gateway:18789` | C7a health probe URL |
 | `C7B_URL` | `http://openclaw-cli:8080` | C7b health probe URL |
 | `C8_URL` | `http://hermes-agent:8080` | C8 health probe URL |
+| `C10_URL` | `http://c10-sandbox:8100` | C10 sandbox API (Agent workspace) |
+| `C11_URL` | `http://c11-sandbox:8200` | C11 sandbox API (multi-Agento sessions) |
 | `DATABASE_PATH` | `/app/data/c9.db` | SQLite database path |
 
 ---

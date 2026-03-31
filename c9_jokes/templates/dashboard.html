@@ -1,6 +1,68 @@
 {% extends "base.html" %}
 {% block title %}Dashboard{% endblock %}
 {% block content %}
+
+<!-- ── System Overview Banner ─────────────────────────────────────────────── -->
+<div id="system-banner" style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:1rem;">
+  <!-- C3 / 6080 status -->
+  <div class="card" id="c3-banner-card" style="padding:0.75rem 1rem;display:flex;align-items:center;gap:0.75rem;">
+    <span id="c3-banner-dot" style="width:12px;height:12px;border-radius:50%;background:var(--muted);flex-shrink:0;"></span>
+    <div>
+      <div style="font-size:0.82rem;color:var(--muted);margin-bottom:0.1rem;">App 6080 — C3 browser-auth</div>
+      <div id="c3-banner-label" style="font-weight:600;font-size:0.95rem;">Checking…</div>
+    </div>
+  </div>
+  <!-- M365 session status -->
+  <div class="card" id="m365-banner-card" style="padding:0.75rem 1rem;display:flex;align-items:center;gap:0.75rem;">
+    <span id="m365-banner-dot" style="width:12px;height:12px;border-radius:50%;background:var(--muted);flex-shrink:0;"></span>
+    <div>
+      <div style="font-size:0.82rem;color:var(--muted);margin-bottom:0.1rem;">M365 Session — Copilot Auth</div>
+      <div id="m365-banner-label" style="font-weight:600;font-size:0.95rem;">Checking…</div>
+    </div>
+  </div>
+</div>
+<script>
+(function() {
+  function updateBannerCard(dotId, labelId, cardId, ok, label) {
+    var dot   = document.getElementById(dotId);
+    var lbl   = document.getElementById(labelId);
+    var card  = document.getElementById(cardId);
+    if (!dot) return;
+    var color = ok ? 'var(--ok)' : 'var(--fail)';
+    dot.style.background = color;
+    if (ok) dot.style.animation = '';
+    else dot.style.animation = 'led-pulse 1.2s ease-in-out infinite';
+    lbl.textContent = label;
+    lbl.style.color = color;
+    card.style.borderColor = ok ? 'rgba(48,209,88,0.35)' : 'rgba(255,59,48,0.35)';
+  }
+  function refreshBanner() {
+    // C3 probe
+    fetch('/api/status').then(function(r){return r.json();}).then(function(d){
+      var c3 = d.c3;
+      var ok = c3 && c3.ok;
+      var pool = d['c3-status'] && d['c3-status'].body;
+      var poolLabel = pool ? (' · pool ' + (pool.pool_available||0) + '/' + (pool.pool_size||0)) : '';
+      updateBannerCard('c3-banner-dot','c3-banner-label','c3-banner-card',
+        ok, ok ? ('Online · ' + (c3.elapsed_ms||'') + 'ms' + poolLabel) : ('DOWN — ' + (c3.error||'unreachable')));
+    }).catch(function(){
+      updateBannerCard('c3-banner-dot','c3-banner-label','c3-banner-card', false, 'Status check failed');
+    });
+    // M365 session
+    fetch('/api/session-health').then(function(r){return r.json();}).then(function(d){
+      var active = d.session === 'active';
+      var mode = d.chat_mode ? (' · ' + d.chat_mode.charAt(0).toUpperCase() + d.chat_mode.slice(1)) : '';
+      updateBannerCard('m365-banner-dot','m365-banner-label','m365-banner-card',
+        active, active ? ('Authenticated' + mode) : (d.session === 'expired' ? 'Session Expired — sign in via noVNC :6080' : 'Unknown'));
+    }).catch(function(){
+      updateBannerCard('m365-banner-dot','m365-banner-label','m365-banner-card', false, 'Unreachable');
+    });
+  }
+  refreshBanner();
+  setInterval(refreshBanner, 15000);
+})();
+</script>
+
 <div class="status-bar{% if up == total %} bar-ok{% elif up == 0 %} bar-fail{% else %} bar-warn{% endif %}" id="status-bar">
   <span id="summary-text">
     <strong id="up-count">{{ up }}</strong> / <strong>{{ total }}</strong> containers UP

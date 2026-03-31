@@ -486,7 +486,8 @@ On POST: writes to `.env` and triggers `POST /v1/reload-config` on C1.
 | `GET /logs` | Logs | Full audit trail (chat + validate history) |
 | `GET /health` | Health | Container health snapshots |
 | `GET /sessions` | Sessions | Live proxy of C1 `/v1/sessions` |
-| `GET /api/docs` | API Docs | Interactive endpoint reference |
+| `GET /api` | API reference | Server-rendered endpoint reference (primary) |
+| `GET /api/docs` | API reference (alias) | **307 → `/api`** — bookmark compatibility |
 
 ---
 

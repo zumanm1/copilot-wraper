@@ -1,6 +1,6 @@
 """
 C9_JOKES — read-only validation console (FastAPI + httpx + SQLite).
-Does not modify C1–C8; only HTTP GET/POST to peer URLs you configure.
+Does not rewrite C1–C8 env or C3 cookies; HTTP to peers + controlled C10/C11 workspace APIs for agent pages.
 """
 from __future__ import annotations
 
@@ -11,16 +11,6 @@ import re
 import sqlite3
 import uuid
 
-# #region agent log
-_DEBUG_LOG = os.getenv("DEBUG_LOG_PATH", "/app/.cursor/debug-aa3936.log")
-def _dlog(loc, msg, data=None):
-    import time as _t
-    try:
-        with open(_DEBUG_LOG, "a") as _f:
-            _f.write(json.dumps({"sessionId":"aa3936","location":loc,"message":msg,"data":data or {},"timestamp":int(_t.time()*1000)}) + "\n")
-    except Exception:
-        pass
-# #endregion
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
@@ -28,7 +18,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import Body, FastAPI, Request, UploadFile, File
-from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
@@ -51,6 +41,8 @@ TARGETS = {
     "c7a": {"env": "C7A_URL", "default": "http://localhost:18789", "label": "C7a openclaw-gateway", "health": "/healthz"},
     "c7b": {"env": "C7B_URL", "default": "http://localhost:8080",  "label": "C7b openclaw-cli",     "health": "/health"},
     "c8":  {"env": "C8_URL",  "default": "http://localhost:8080",  "label": "C8 hermes-agent",      "health": "/health"},
+    "c10": {"env": "C10_URL", "default": "http://c10-sandbox:8100", "label": "C10 agent sandbox",  "health": "/health"},
+    "c11": {"env": "C11_URL", "default": "http://c11-sandbox:8200", "label": "C11 multi-agent sandbox", "health": "/health"},
 }
 
 # ── AI agents that can chat ───────────────────────────────────────────────────
@@ -809,9 +801,6 @@ async def _chat_one(agent_id: str, prompt: str, c1_url: str, chat_mode: str = ""
         headers["X-Work-Mode"] = work_mode
     client = _get_http()
     t0 = time.monotonic()
-    # #region agent log
-    _dlog("app.py:_chat_one", "chat_request_start", {"agent_id": agent_id, "prompt": prompt[:80], "c1_url": c1_url, "hypothesisId": "H4"})
-    # #endregion
     try:
         r = await client.post(
             f"{c1_url}/v1/chat/completions",
@@ -820,9 +809,6 @@ async def _chat_one(agent_id: str, prompt: str, c1_url: str, chat_mode: str = ""
             timeout=360,
         )
         elapsed_ms = int((time.monotonic() - t0) * 1000)
-        # #region agent log
-        _dlog("app.py:_chat_one", "chat_request_done", {"agent_id": agent_id, "status": r.status_code, "elapsed_ms": elapsed_ms, "hypothesisId": "H4"})
-        # #endregion
         text = ""
         error = None
         if 200 <= r.status_code < 300:
@@ -984,6 +970,12 @@ async def page_api_reference(request: Request):
     return templates.TemplateResponse(request, "api_reference.html", {
         "urls": _urls(), "targets": TARGETS, "agents": AGENTS,
     })
+
+
+@app.get("/api/docs", include_in_schema=False)
+async def api_docs_alias():
+    """Docs and older bookmarks use `/api/docs`; the canonical page is `/api`."""
+    return RedirectResponse(url="/api", status_code=307)
 
 
 @app.get("/agent", response_class=HTMLResponse, name="page_agent")
@@ -1150,9 +1142,6 @@ async def api_chat(request: Request):
 @app.post("/api/validate", name="api_validate")
 async def api_validate(request: Request):
     """Run all agents with a prompt concurrently, persist to validation_runs + pair_results."""
-    # #region agent log
-    _dlog("app.py:api_validate", "validate_start", {"hypothesisId": "H4"})
-    # #endregion
     c1 = _urls()["c1"]
     try:
         payload = await request.json()

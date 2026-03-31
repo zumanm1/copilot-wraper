@@ -122,7 +122,7 @@ C1 and C3 require **no code changes**.
 │  /logs        Logs         — full audit trail (source, elapsed_ms)           │
 │  /health      Health       — container health snapshots                      │
 │  /sessions    Sessions     — live proxy of C1 /v1/sessions                  │
-│  /api/docs    API Docs     — interactive endpoint reference                  │
+│  /api         API reference — server-rendered ( /api/docs → redirect )       │
 │                                                                              │
 │  Connects to C1 (chat, file upload)                                          │
 │  Probes C2–C8 health endpoints                                               │
@@ -160,4 +160,4 @@ C1 and C3 require **no code changes**.
 | Logs | `http://localhost:6090/logs` | Full audit trail |
 | Health | `http://localhost:6090/health` | Health snapshot history |
 | Sessions | `http://localhost:6090/sessions` | C1 session proxy |
-| API Docs | `http://localhost:6090/api/docs` | C9 API reference |
+| API reference | `http://localhost:6090/api` | C9 API reference (`/api/docs` redirects) |
