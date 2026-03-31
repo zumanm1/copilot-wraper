@@ -1055,9 +1055,16 @@
   const poolLbl   = document.getElementById('pool-indicator-label');
   async function refreshPoolIndicator() {
     try {
-      const r = await fetch('http://localhost:8001/status');
+      const r = await fetch('/api/runtime-status');
       if (!r.ok) throw new Error('no-ok');
-      const d = await r.json();
+      const rt = await r.json();
+      const d = (rt.components || {}).c3_pool || {};
+      if (d.state === 'down') {
+        poolDot.style.background = 'var(--border)';
+        poolLbl.textContent = 'Pool';
+        poolDot.title = 'C3 pool status unavailable';
+        return;
+      }
       const avail = d.pool_available;
       const total = d.pool_size;
       const init  = d.pool_initialized;
@@ -2022,7 +2029,7 @@
       if (e.data) {
         try { handleError(JSON.parse(e.data)); } catch(_) { handleError({message: e.data}); }
       } else if (running) {
-        appendEntry('error', '<span class="stream-label">❌ Error</span> Connection to server lost.');
+        appendEntry('error', '<span class="stream-label">❌ Error</span> Stream disconnected. Session is kept; resume it from History if C1/C3 recovers.');
         setIdle(false);
       }
     });

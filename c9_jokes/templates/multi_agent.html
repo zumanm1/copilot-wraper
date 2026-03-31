@@ -583,12 +583,18 @@
 
   // ── Pool status ────────────────────────────────────────────────────────────
   function updatePool() {
-    fetch('http://localhost:8001/status').then(function(r) { return r.json(); })
+    fetch('/api/runtime-status').then(function(r) { return r.json(); })
       .then(function(d) {
-        var avail = d.pool_available != null ? d.pool_available : '?';
-        var size  = d.pool_size != null ? d.pool_size : '?';
+        var pool = (d.components || {}).c3_pool || {};
+        var avail = pool.pool_available != null ? pool.pool_available : '?';
+        var size  = pool.pool_size != null ? pool.pool_size : '?';
         var dot = document.getElementById('pool-dot');
         var lbl = document.getElementById('pool-label');
+        if (pool.state === 'down') {
+          lbl.textContent = 'Pool: offline';
+          dot.className = 'pool-dot';
+          return;
+        }
         lbl.textContent = 'Pool: ' + avail + '/' + size + ' tabs';
         dot.className = 'pool-dot';
         if (typeof avail === 'number') {
@@ -1119,7 +1125,7 @@
       if (_reconnectAttempts <= 3) {
         supText.textContent = '⚠️ SSE reconnecting… (' + _reconnectAttempts + '/3)';
       } else {
-        supText.textContent = '❌ SSE connection failed after 3 attempts.';
+        supText.textContent = '⚠️ SSE connection failed after 3 attempts. Session is preserved; reopen it from history after C1/C3 recovers.';
         setIdle();
       }
     };

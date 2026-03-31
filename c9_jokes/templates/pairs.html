@@ -448,7 +448,7 @@ python3 tests/validate_all_agents.py --parallel</pre>
   const poolNotice  = document.getElementById('pool-expand-notice');
 
   function updatePoolBadge(data) {
-    if (!data || data.status === 'error') {
+    if (!data || data.state === 'down') {
       poolDot.style.background = 'var(--border)';
       poolLabel.textContent = 'Pool: offline';
       return;
@@ -465,8 +465,10 @@ python3 tests/validate_all_agents.py --parallel</pre>
 
   async function refreshPool() {
     try {
-      const r = await fetch('http://localhost:8001/status');
-      if (r.ok) updatePoolBadge(await r.json());
+      const r = await fetch('/api/runtime-status');
+      if (!r.ok) throw new Error('runtime offline');
+      const d = await r.json();
+      updatePoolBadge((d.components || {}).c3_pool || null);
     } catch(_) {
       updatePoolBadge(null);
     }

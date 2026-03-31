@@ -51,6 +51,14 @@ def _make_mock_http(response_json: dict, status: int = 200):
     return mock_client
 
 
+def _json_response(payload: dict, status: int = 200):
+    resp = MagicMock()
+    resp.status_code = status
+    resp.json = MagicMock(return_value=payload)
+    resp.text = json.dumps(payload)
+    return resp
+
+
 class _FakeStreamResponse:
     def __init__(self, *, status_code: int = 200, lines: list[str] | None = None, body: str = ""):
         self.status_code = status_code
@@ -210,6 +218,12 @@ class TestC9PageRoutes:
     def test_health_page_returns_200(self, c9_app):
         r = c9_app.get("/health")
         assert r.status_code == 200
+
+    def test_pages_include_runtime_status_badge_polling(self, c9_app):
+        r = c9_app.get("/chat")
+        assert r.status_code == 200
+        assert "runtime-badge" in r.text
+        assert "/api/runtime-status" in r.text
 
 
 # ── /api/chat tests ───────────────────────────────────────────────────────────
@@ -654,6 +668,58 @@ class TestC9ApiStatus:
         for _agent_id, probe in agent_probes.items():
             assert "http_status" in probe
             assert "name" in probe
+
+    def test_runtime_status_classifies_c3_pool_saturation(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        async def fake_get(url, timeout=None, **kwargs):
+            if url.endswith("/session-health"):
+                return _json_response({"session": "active", "profile": "m365_hub", "chat_mode": "work"})
+            if url.endswith("/status"):
+                return _json_response({"status": "ok", "pool_size": 6, "pool_available": 0, "pool_initialized": True})
+            if url.endswith("/health"):
+                return _json_response({"status": "ok"})
+            raise AssertionError(f"unexpected GET {url}")
+
+        mock_http = _make_mock_http(_make_c1_ok())
+        mock_http.get = AsyncMock(side_effect=fake_get)
+        c9_mod._runtime_cache["data"] = None
+        c9_mod._runtime_cache["captured_monotonic"] = 0.0
+        with patch.object(c9_mod, "_get_http", return_value=mock_http):
+            r = c9_app.get("/api/runtime-status?force=true")
+
+        assert r.status_code == 200
+        body = r.json()
+        assert body["level"] == "warn"
+        assert body["badge_label"] == "C3 Pool Busy"
+        assert body["components"]["c3_pool"]["state"] == "saturated"
+        assert "saturated" in body["summary"].lower()
+
+    def test_chat_timeout_is_classified_when_runtime_is_otherwise_healthy(self, c9_app):
+        import httpx
+        import c9_jokes.app as c9_mod
+
+        async def fake_get(url, timeout=None, **kwargs):
+            if url.endswith("/session-health"):
+                return _json_response({"session": "active", "profile": "m365_hub", "chat_mode": "work"})
+            if url.endswith("/status"):
+                return _json_response({"status": "ok", "pool_size": 6, "pool_available": 4, "pool_initialized": True})
+            if url.endswith("/health"):
+                return _json_response({"status": "ok"})
+            raise AssertionError(f"unexpected GET {url}")
+
+        mock_http = _make_mock_http(_make_c1_ok())
+        mock_http.get = AsyncMock(side_effect=fake_get)
+        mock_http.post = AsyncMock(side_effect=httpx.ReadTimeout("timed out"))
+        c9_mod._runtime_cache["data"] = None
+        c9_mod._runtime_cache["captured_monotonic"] = 0.0
+        with patch.object(c9_mod, "_get_http", return_value=mock_http):
+            r = c9_app.post("/api/chat", json={"agent_id": "c9-jokes", "prompt": "Will time out"})
+
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is False
+        assert "M365 Copilot slow or not responding" in (body.get("error") or "")
 
 
 # ── /api/upload tests ─────────────────────────────────────────────────────────

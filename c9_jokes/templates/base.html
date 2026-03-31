@@ -33,6 +33,15 @@
                    transition:color 0.2s,border-color 0.2s,background 0.2s;">
         📊 <span id="global-token-val">—</span>
       </span>
+      <span id="runtime-badge"
+            title="C1/C3 runtime health"
+            style="display:inline-flex;align-items:center;gap:4px;
+                   background:rgba(245,245,247,0.06);border:1px solid rgba(245,245,247,0.12);
+                   border-radius:999px;padding:2px 10px;font-size:0.72rem;
+                   color:#8e8e93;font-family:monospace;white-space:nowrap;
+                   transition:color 0.2s,border-color 0.2s,background 0.2s;">
+        Runtime: checking…
+      </span>
       <div id="session-led" class="session-led checking" title="M365 browser session status">
         <span class="session-led-dot"></span>
         <span class="session-led-label">Checking…</span>
@@ -59,14 +68,43 @@
         led.title = 'Could not reach C3: ' + (data.reason || '');
       }
     }
+    function updateRuntime(data) {
+      var badge = document.getElementById('runtime-badge');
+      if (!badge) return;
+      var level = data.level || 'unknown';
+      var label = data.badge_label || 'Unknown';
+      badge.textContent = 'Runtime: ' + label;
+      badge.title = data.summary || 'Runtime unknown';
+      if (level === 'ok') {
+        badge.style.color = '#30d158';
+        badge.style.borderColor = 'rgba(48,209,88,0.35)';
+        badge.style.background = 'rgba(48,209,88,0.08)';
+      } else if (level === 'warn') {
+        badge.style.color = '#ffa000';
+        badge.style.borderColor = 'rgba(255,160,0,0.35)';
+        badge.style.background = 'rgba(255,160,0,0.08)';
+      } else {
+        badge.style.color = '#ff453a';
+        badge.style.borderColor = 'rgba(255,69,58,0.35)';
+        badge.style.background = 'rgba(255,69,58,0.08)';
+      }
+    }
     function pollSession() {
       fetch('/api/session-health')
         .then(function(r) { return r.json(); })
         .then(function(d) { updateLed(d); })
         .catch(function() { updateLed({session: 'unknown', reason: 'network error'}); });
     }
+    function pollRuntime() {
+      fetch('/api/runtime-status')
+        .then(function(r) { return r.json(); })
+        .then(function(d) { updateRuntime(d); })
+        .catch(function() { updateRuntime({level:'error', badge_label:'Unavailable', summary:'Runtime status fetch failed'}); });
+    }
     pollSession();
+    pollRuntime();
     setInterval(pollSession, 30000);
+    setInterval(pollRuntime, 15000);
 
     // ── Global token counter (top-right badge) ──────────────────────────────
     // Each page can call window.updateGlobalTokens(n) to push a live value.

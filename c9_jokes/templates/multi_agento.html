@@ -556,7 +556,7 @@ function launch(){
   ['session','supervisor','pane_init','pane_thinking','pane_tool','pane_obs','pane_file','pane_done','pane_error','final','error'].forEach(function(ev){
     _src.addEventListener(ev,function(e){try{handleEvent(ev,JSON.parse(e.data));}catch(ex){}});
   });
-  _src.onerror=function(){setRunning(false);};
+  _src.onerror=function(){supText.textContent='⚠️ Stream disconnected. Session is preserved; reopen it from History after C1/C3 recovers.';setRunning(false);};
   setRunning(true);startFileInterval();
   // Add to session list
   loadSessions();

@@ -59,6 +59,23 @@ AGENTS = [
 
 # ── Shared async HTTP client ─────────────────────────────────────────────────
 _http: httpx.AsyncClient | None = None
+_runtime_cache: dict[str, object] = {"captured_monotonic": 0.0, "data": None}
+_runtime_cache_lock: asyncio.Lock | None = None
+
+RUNTIME_SLOW_MS = max(500, int(os.environ.get("C9_RUNTIME_SLOW_MS", "2500")))
+RUNTIME_CACHE_TTL_S = max(1.0, float(os.environ.get("C9_RUNTIME_CACHE_TTL_S", "3")))
+WAIT_HEARTBEAT_S = max(5.0, float(os.environ.get("C9_WAIT_HEARTBEAT_S", "15")))
+POOL_TIGHT_THRESHOLD = max(1, int(os.environ.get("C9_POOL_TIGHT_THRESHOLD", "2")))
+_COPILOT_SERVICE_PHRASES = (
+    "something went wrong",
+    "please try again later",
+    "please try again",
+    "please retry",
+    "try again later",
+    "experiencing high demand",
+    "we're experiencing",
+    "high demand",
+)
 
 
 def _get_http() -> httpx.AsyncClient:
@@ -69,6 +86,13 @@ def _get_http() -> httpx.AsyncClient:
             timeout=httpx.Timeout(connect=5.0, read=360.0, write=10.0, pool=10.0),
         )
     return _http
+
+
+def _get_runtime_lock() -> asyncio.Lock:
+    global _runtime_cache_lock
+    if _runtime_cache_lock is None:
+        _runtime_cache_lock = asyncio.Lock()
+    return _runtime_cache_lock
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -814,6 +838,324 @@ async def _probe_health(client: httpx.AsyncClient, name: str, url: str, path: st
         }
 
 
+async def _probe_session_health(client: httpx.AsyncClient, c3_url: str, timeout: float = 5.0) -> dict:
+    full = f"{c3_url}/session-health"
+    t0 = time.monotonic()
+    try:
+        r = await client.get(full, timeout=timeout)
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        try:
+            parsed = r.json()
+        except Exception:
+            parsed = {
+                "session": "unknown",
+                "profile": "unknown",
+                "reason": "C3 returned non-JSON body",
+            }
+        return {
+            "name": "C3 /session-health",
+            "url": full,
+            "ok": r.status_code == 200,
+            "http_status": r.status_code,
+            "body": parsed,
+            "elapsed_ms": elapsed_ms,
+        }
+    except Exception as exc:
+        elapsed_ms = int((time.monotonic() - t0) * 1000)
+        return {
+            "name": "C3 /session-health",
+            "url": full,
+            "ok": False,
+            "http_status": None,
+            "error": str(exc),
+            "elapsed_ms": elapsed_ms,
+            "body": {
+                "session": "unknown",
+                "profile": "unknown",
+                "reason": str(exc),
+            },
+        }
+
+
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _short_detail(detail: str, limit: int = 180) -> str:
+    text = re.sub(r"\s+", " ", str(detail or "")).strip()
+    return text[:limit]
+
+
+def _probe_state(probe: dict | None) -> str:
+    if not probe or not probe.get("ok"):
+        return "down"
+    if _safe_int(probe.get("elapsed_ms")) >= RUNTIME_SLOW_MS:
+        return "slow"
+    return "ok"
+
+
+def _component_from_probe(label: str, probe: dict | None) -> dict:
+    probe = probe or {}
+    state = _probe_state(probe)
+    detail = probe.get("error") or ""
+    http_status = probe.get("http_status")
+    elapsed_ms = probe.get("elapsed_ms")
+    if state == "ok":
+        message = f"{label} reachable"
+    elif state == "slow":
+        message = f"{label} slow ({elapsed_ms}ms)"
+    elif http_status:
+        message = f"{label} unavailable (HTTP {http_status})"
+    else:
+        message = f"{label} unavailable"
+        if detail:
+            message += f" ({_short_detail(detail, 90)})"
+    return {
+        "state": state,
+        "ok": probe.get("ok") is True,
+        "http_status": http_status,
+        "elapsed_ms": elapsed_ms,
+        "message": message,
+    }
+
+
+def _classify_c3_pool(probe: dict | None) -> dict:
+    probe = probe or {}
+    body = probe.get("body") if isinstance(probe.get("body"), dict) else {}
+    if not probe.get("ok") or not isinstance(body, dict) or body.get("status") == "error":
+        return {
+            "state": "down",
+            "pool_size": 0,
+            "pool_available": 0,
+            "pool_initialized": False,
+            "message": "C3 pool status unavailable",
+        }
+    pool_size = _safe_int(body.get("pool_size"))
+    pool_available = _safe_int(body.get("pool_available"))
+    pool_initialized = bool(body.get("pool_initialized"))
+    if not pool_initialized:
+        state = "warming"
+        message = "C3 pool initializing"
+    elif pool_size > 0 and pool_available <= 0:
+        state = "saturated"
+        message = f"C3 browser pool saturated ({pool_available}/{pool_size} tabs free)"
+    elif pool_size > 0 and pool_available <= min(POOL_TIGHT_THRESHOLD, pool_size):
+        state = "tight"
+        message = f"C3 browser pool tight ({pool_available}/{pool_size} tabs free)"
+    else:
+        state = "ready"
+        message = f"C3 browser pool ready ({pool_available}/{pool_size} tabs free)"
+    return {
+        "state": state,
+        "pool_size": pool_size,
+        "pool_available": pool_available,
+        "pool_initialized": pool_initialized,
+        "message": message,
+    }
+
+
+def _build_runtime_status_payload(probes: dict[str, dict], session_probe: dict) -> dict:
+    session_body = session_probe.get("body") if isinstance(session_probe.get("body"), dict) else {}
+    session_state = (session_body.get("session") or "unknown").strip().lower()
+    components = {
+        "c1": _component_from_probe("C1 API", probes.get("c1")),
+        "c3": _component_from_probe("C3 browser-auth", probes.get("c3")),
+        "c10": _component_from_probe("C10 sandbox", probes.get("c10")),
+        "c11": _component_from_probe("C11 sandbox", probes.get("c11")),
+        "c3_pool": _classify_c3_pool(probes.get("c3-status")),
+        "m365": {
+            "state": session_state,
+            "profile": session_body.get("profile") or "unknown",
+            "reason": session_body.get("reason"),
+            "chat_mode": session_body.get("chat_mode"),
+            "http_status": session_probe.get("http_status"),
+            "elapsed_ms": session_probe.get("elapsed_ms"),
+            "message": (
+                "M365 session active"
+                if session_state == "active"
+                else "M365 session expired"
+                if session_state == "expired"
+                else "M365 session state unavailable"
+            ),
+        },
+    }
+    issues: list[dict] = []
+
+    def add_issue(component: str, code: str, severity: str, message: str) -> None:
+        issues.append({
+            "component": component,
+            "code": code,
+            "severity": severity,
+            "message": message,
+        })
+
+    if components["m365"]["state"] == "expired":
+        add_issue("m365", "session_expired", "error", "M365 session expired — sign in again via C3/noVNC")
+    elif components["m365"]["state"] == "unknown":
+        add_issue("m365", "session_unknown", "warn", "M365 session state unavailable")
+
+    if components["c3"]["state"] == "down":
+        add_issue("c3", "c3_down", "error", "C3 browser-auth unavailable")
+    elif components["c3"]["state"] == "slow":
+        add_issue("c3", "c3_slow", "warn", f"C3 browser-auth slow ({components['c3']['elapsed_ms']}ms)")
+
+    if components["c1"]["state"] == "down":
+        add_issue("c1", "c1_down", "error", "C1 API unavailable")
+    elif components["c1"]["state"] == "slow":
+        add_issue("c1", "c1_slow", "warn", f"C1 API slow ({components['c1']['elapsed_ms']}ms)")
+
+    if components["c10"]["state"] == "down":
+        add_issue("c10", "c10_down", "warn", "C10 sandbox unavailable")
+    if components["c11"]["state"] == "down":
+        add_issue("c11", "c11_down", "warn", "C11 sandbox unavailable")
+
+    c3_pool = components["c3_pool"]
+    if c3_pool["state"] == "saturated":
+        add_issue("c3_pool", "pool_saturated", "warn", c3_pool["message"])
+    elif c3_pool["state"] == "tight":
+        add_issue("c3_pool", "pool_tight", "warn", c3_pool["message"])
+    elif c3_pool["state"] == "warming":
+        add_issue("c3_pool", "pool_warming", "warn", c3_pool["message"])
+
+    if any(issue["severity"] == "error" for issue in issues):
+        level = "error"
+    elif issues:
+        level = "warn"
+    else:
+        level = "ok"
+
+    badge_label = "Healthy"
+    summary = "Runtime healthy — C1/C3 reachable and M365 session active."
+    if issues:
+        summary = issues[0]["message"]
+        if issues[0]["code"] == "session_expired":
+            badge_label = "M365 Expired"
+        elif issues[0]["component"] == "c3_pool":
+            badge_label = "C3 Pool Busy"
+        elif issues[0]["component"] == "c3":
+            badge_label = "C3 Degraded"
+        elif issues[0]["component"] == "c1":
+            badge_label = "C1 Degraded"
+        elif issues[0]["component"] == "c10":
+            badge_label = "C10 Down"
+        elif issues[0]["component"] == "c11":
+            badge_label = "C11 Down"
+        else:
+            badge_label = "Runtime Degraded"
+    elif components["m365"]["state"] != "active":
+        summary = components["m365"]["message"]
+        badge_label = "M365 Unknown"
+
+    return {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "level": level,
+        "badge_label": badge_label,
+        "summary": summary,
+        "issues": issues,
+        "components": components,
+    }
+
+
+async def _collect_runtime_status(client: httpx.AsyncClient | None = None) -> dict:
+    urls = _urls()
+    client = client or _get_http()
+    keys = ("c1", "c3", "c10", "c11")
+    health_tasks = [
+        _probe_health(client, TARGETS[key]["label"], urls[key], TARGETS[key]["health"])
+        for key in keys
+    ]
+    c3_status_task = _probe_health(client, "C3 /status", urls["c3"], "/status")
+    session_task = _probe_session_health(client, urls["c3"])
+    health_results = await asyncio.gather(*health_tasks, c3_status_task, session_task)
+    probes = {key: result for key, result in zip(keys, health_results[: len(keys)])}
+    probes["c3-status"] = health_results[len(keys)]
+    session_probe = health_results[len(keys) + 1]
+    return _build_runtime_status_payload(probes, session_probe)
+
+
+async def _get_runtime_status_snapshot(force: bool = False, client: httpx.AsyncClient | None = None) -> dict:
+    now_mono = time.monotonic()
+    cached = _runtime_cache.get("data")
+    cached_at = float(_runtime_cache.get("captured_monotonic") or 0.0)
+    if not force and cached and (now_mono - cached_at) < RUNTIME_CACHE_TTL_S:
+        return cached  # type: ignore[return-value]
+    async with _get_runtime_lock():
+        cached = _runtime_cache.get("data")
+        cached_at = float(_runtime_cache.get("captured_monotonic") or 0.0)
+        if not force and cached and (time.monotonic() - cached_at) < RUNTIME_CACHE_TTL_S:
+            return cached  # type: ignore[return-value]
+        data = await _collect_runtime_status(client=client)
+        _runtime_cache["captured_monotonic"] = time.monotonic()
+        _runtime_cache["data"] = data
+        return data
+
+
+def _runtime_wait_message(runtime: dict | None) -> str:
+    if not runtime:
+        return "checking C1/C3 status…"
+    issues = runtime.get("issues") or []
+    if issues:
+        return issues[0].get("message") or runtime.get("summary") or "runtime degraded"
+    components = runtime.get("components") or {}
+    m365 = (components.get("m365") or {}).get("state")
+    if m365 == "active":
+        return "C1/C3 reachable; M365 session active"
+    return runtime.get("summary") or "runtime steady"
+
+
+def _is_timeoutish(detail: str) -> bool:
+    text = (detail or "").lower()
+    return any(token in text for token in ("timeout", "timed out", "readtimeout", "connecttimeout", "pool timeout"))
+
+
+async def _diagnose_copilot_issue(
+    detail: str,
+    *,
+    client: httpx.AsyncClient | None = None,
+    runtime: dict | None = None,
+) -> dict:
+    runtime = runtime or await _get_runtime_status_snapshot(force=True, client=client)
+    components = runtime.get("components") or {}
+    c1_state = (components.get("c1") or {}).get("state")
+    c3_state = (components.get("c3") or {}).get("state")
+    c3_pool_state = (components.get("c3_pool") or {}).get("state")
+    m365_state = (components.get("m365") or {}).get("state")
+    short = _short_detail(detail)
+
+    if m365_state == "expired":
+        code = "m365_session_expired"
+        summary = "M365 session expired — sign in again via C3/noVNC"
+    elif c3_state == "down":
+        code = "c3_unreachable"
+        summary = "C3 browser-auth unavailable"
+    elif c1_state == "down":
+        code = "c1_unreachable"
+        summary = "C1 API unavailable"
+    elif c3_pool_state == "saturated":
+        code = "c3_pool_saturated"
+        summary = "C3 browser pool saturated"
+    elif _is_timeoutish(short) and m365_state == "active" and c1_state in ("ok", "slow") and c3_state in ("ok", "slow"):
+        code = "m365_upstream_timeout"
+        summary = "M365 Copilot slow or not responding"
+    elif any(p in short.lower() for p in _COPILOT_SERVICE_PHRASES):
+        code = "m365_service_error"
+        summary = "M365 Copilot returned a service-side error"
+    elif runtime.get("summary"):
+        code = "runtime_degraded"
+        summary = str(runtime.get("summary"))
+    else:
+        code = "copilot_request_failed"
+        summary = "Copilot request failed"
+
+    message = summary
+    if short and short.lower() not in summary.lower():
+        message = f"{summary} ({short})"
+    return {"code": code, "summary": summary, "message": message, "runtime": runtime}
+
+
 async def _probe_all() -> list[dict]:
     urls = _urls()
     client = _get_http()
@@ -1043,6 +1385,32 @@ def _sse_event(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
+async def _post_with_heartbeats(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    headers: dict,
+    body: dict,
+    request_timeout: float,
+    heartbeat_every: float = WAIT_HEARTBEAT_S,
+):
+    task = asyncio.create_task(client.post(url, headers=headers, json=body, timeout=request_timeout))
+    waited_s = 0
+    while True:
+        try:
+            response = await asyncio.wait_for(asyncio.shield(task), timeout=heartbeat_every)
+            yield {"kind": "response", "response": response, "waited_s": waited_s}
+            return
+        except asyncio.TimeoutError:
+            waited_s += int(heartbeat_every)
+            runtime = None
+            try:
+                runtime = await _get_runtime_status_snapshot(client=client)
+            except Exception:
+                runtime = None
+            yield {"kind": "heartbeat", "waited_s": waited_s, "runtime": runtime}
+
+
 async def _chat_one(agent_id: str, prompt: str, c1_url: str, chat_mode: str = "", attachments: list | None = None, work_mode: str = "", messages: list | None = None) -> dict:
     """Call C1 for a single agent. Returns {ok, http_status, text, elapsed_ms}.
     If `messages` is provided it is used as the full conversation history (multi-turn).
@@ -1062,24 +1430,42 @@ async def _chat_one(agent_id: str, prompt: str, c1_url: str, chat_mode: str = ""
         elapsed_ms = int((time.monotonic() - t0) * 1000)
         text = ""
         error = None
+        diagnosis = None
         if 200 <= r.status_code < 300:
             try:
                 d = r.json()
                 text = d.get("choices", [{}])[0].get("message", {}).get("content", "")
             except Exception:
                 text = r.text[:2000]
+            if not text.strip():
+                diagnosis = await _diagnose_copilot_issue("empty response from Copilot", client=client)
+                error = diagnosis["message"]
+            elif any(p in text.lower() for p in _COPILOT_SERVICE_PHRASES):
+                diagnosis = await _diagnose_copilot_issue(text, client=client)
+                error = diagnosis["message"]
         else:
-            error = _error_text(r.text[:2000])
+            raw_error = _error_text(r.text[:2000])
+            diagnosis = await _diagnose_copilot_issue(raw_error or f"HTTP {r.status_code}", client=client)
+            error = diagnosis["message"]
         return {
-            "ok": 200 <= r.status_code < 300,
+            "ok": 200 <= r.status_code < 300 and not error,
             "http_status": r.status_code,
             "text": text,
             "error": error,
             "elapsed_ms": elapsed_ms,
+            "diagnosis": diagnosis,
         }
     except Exception as e:
         elapsed_ms = int((time.monotonic() - t0) * 1000)
-        return {"ok": False, "http_status": None, "text": "", "error": str(e), "elapsed_ms": elapsed_ms}
+        diagnosis = await _diagnose_copilot_issue(str(e), client=client)
+        return {
+            "ok": False,
+            "http_status": None,
+            "text": "",
+            "error": diagnosis["message"],
+            "elapsed_ms": elapsed_ms,
+            "diagnosis": diagnosis,
+        }
 
 
 # ── App lifecycle ─────────────────────────────────────────────────────────────
@@ -1241,20 +1627,17 @@ async def api_session_health():
     """Proxy C3's /session-health endpoint; used by the LED indicator on all pages."""
     c3_url = _urls().get("c3", "http://browser-auth:8001")
     client = _get_http()
-    now = datetime.now(timezone.utc).isoformat()
-    try:
-        r = await client.get(f"{c3_url}/session-health", timeout=5)
-        try:
-            body = r.json()
-        except Exception:
-            body = {"session": "unknown", "profile": "unknown",
-                    "reason": "C3 returned non-JSON body", "checked_at": now}
-        return JSONResponse(body, status_code=r.status_code)
-    except Exception as exc:
-        return JSONResponse(
-            {"session": "unknown", "profile": "unknown", "reason": str(exc), "checked_at": now},
-            status_code=503,
-        )
+    probe = await _probe_session_health(client, c3_url, timeout=5)
+    body = probe.get("body") if isinstance(probe.get("body"), dict) else {}
+    if "checked_at" not in body:
+        body["checked_at"] = datetime.now(timezone.utc).isoformat()
+    return JSONResponse(body, status_code=probe.get("http_status") or 503)
+
+
+@app.get("/api/runtime-status", name="api_runtime_status")
+async def api_runtime_status(force: bool = False):
+    """Classified runtime status for C1/C3/C10/C11 + C3 pool + M365 session state."""
+    return JSONResponse(await _get_runtime_status_snapshot(force=force))
 
 
 @app.get("/api/status", name="api_status")
@@ -1396,7 +1779,11 @@ async def api_chat(request: Request):
                     http_status = resp.status_code
                     if resp.status_code < 200 or resp.status_code >= 300:
                         raw_error = (await resp.aread()).decode("utf-8", errors="replace")
-                        error_text = _error_text(raw_error) or f"C1 returned HTTP {resp.status_code}"
+                        diagnosis = await _diagnose_copilot_issue(
+                            _error_text(raw_error) or f"HTTP {resp.status_code}",
+                            client=client,
+                        )
+                        error_text = diagnosis["message"]
                         now = datetime.now(timezone.utc).isoformat()
                         elapsed_ms = int((time.monotonic() - t0) * 1000)
                         _log_chat_failure(
@@ -1425,7 +1812,11 @@ async def api_chat(request: Request):
                         except json.JSONDecodeError:
                             continue
                         if "error" in chunk:
-                            error_text = _error_text(chunk["error"]) or "Upstream streaming error"
+                            diagnosis = await _diagnose_copilot_issue(
+                                _error_text(chunk["error"]) or "Upstream streaming error",
+                                client=client,
+                            )
+                            error_text = diagnosis["message"]
                             now = datetime.now(timezone.utc).isoformat()
                             elapsed_ms = int((time.monotonic() - t0) * 1000)
                             _log_chat_failure(
@@ -1448,7 +1839,8 @@ async def api_chat(request: Request):
             except Exception as exc:
                 now = datetime.now(timezone.utc).isoformat()
                 elapsed_ms = int((time.monotonic() - t0) * 1000)
-                error_text = str(exc)
+                diagnosis = await _diagnose_copilot_issue(str(exc), client=client)
+                error_text = diagnosis["message"]
                 _log_chat_failure(
                     session_id,
                     agent_id,
@@ -1465,7 +1857,8 @@ async def api_chat(request: Request):
             elapsed_ms = int((time.monotonic() - t0) * 1000)
             if not full_text:
                 now = datetime.now(timezone.utc).isoformat()
-                error_text = "C1 returned an empty reply"
+                diagnosis = await _diagnose_copilot_issue("empty response from Copilot", client=client)
+                error_text = diagnosis["message"]
                 _log_chat_failure(
                     session_id,
                     agent_id,
@@ -1837,6 +2230,7 @@ async def api_validate(request: Request):
             "text": r.get("text", ""),
             "elapsed_ms": r.get("elapsed_ms"),
             "error": r.get("error"),
+            "diagnosis": r.get("diagnosis"),
         }
 
     agent_tasks = [_run_one(agent) for agent in agents_to_run]
@@ -2242,33 +2636,46 @@ async def api_agent_run(
             }
 
             try:
-                llm_r = await client.post(
+                llm_r = None
+                async for item in _post_with_heartbeats(
+                    client,
                     f"{c1}/v1/chat/completions",
                     headers=headers,
-                    json=body,
-                    timeout=180,
-                )
+                    body=body,
+                    request_timeout=180,
+                ):
+                    if item["kind"] == "heartbeat":
+                        wait_msg = _runtime_wait_message(item.get("runtime"))
+                        yield _sse("thinking", {
+                            "step": step,
+                            "text": f"⏳ Waiting on Copilot ({item['waited_s']}s)… {wait_msg}",
+                        })
+                        continue
+                    llm_r = item["response"]
+                if llm_r is None:
+                    raise RuntimeError("Copilot request ended without a response")
                 if llm_r.status_code != 200:
                     raw = llm_r.text[:400]
-                    yield _sse("error", {"message": f"C1 returned HTTP {llm_r.status_code}: {raw}"})
+                    diagnosis = await _diagnose_copilot_issue(raw or f"HTTP {llm_r.status_code}", client=client)
+                    yield _sse("error", {"message": diagnosis["message"]})
                     return
                 llm_data = llm_r.json()
                 response_text: str = llm_data.get("choices", [{}])[0].get("message", {}).get("content", "")
             except Exception as exc:
-                err_detail = str(exc) or type(exc).__name__
+                diagnosis = await _diagnose_copilot_issue(str(exc) or type(exc).__name__, client=client)
+                err_detail = diagnosis["message"]
                 # Transient errors (ReadTimeout, ConnectError, etc.) — retry up to 3 times
                 service_error_retries += 1
                 if service_error_retries <= 3:
                     wait_s = service_error_retries * 15  # 15s, 30s, 45s back-off
                     yield _sse("thinking", {"step": step, "text":
-                        f"⚠️ M365 Copilot unreachable ({err_detail[:80]}) — "
+                        f"⚠️ {err_detail[:120]} — "
                         f"retrying in {wait_s}s (attempt {service_error_retries}/3)..."})
                     await asyncio.sleep(wait_s)
                     continue
                 yield _sse("error", {"message":
-                    f"M365 Copilot is not reachable after 3 retries. "
-                    f"Check the browser session at :6080 or verify internet/auth. "
-                    f"Last error: {err_detail[:200]}"})
+                    f"{err_detail[:220]} after 3 retries. "
+                    f"Use the runtime badge to identify whether C1, C3, or M365 is degraded, then resume the session from History."})
                 return
 
             # ── Content-filter detection ────────────────────────────────────────────
@@ -2311,22 +2718,20 @@ async def api_agent_run(
             )
             if not response_text.strip():
                 # Empty response = auth session expired or Copilot unreachable
-                yield _sse("error", {"message":
-                    "M365 Copilot returned an empty response. "
-                    "Auth may be expired or internet is down. "
-                    "Check the browser session at :6080."})
+                diagnosis = await _diagnose_copilot_issue("empty response from Copilot", client=client)
+                yield _sse("error", {"message": diagnosis["message"]})
                 return
 
             if any(p in response_text.lower() for p in _SERVICE_ERROR_PHRASES):
                 service_error_retries += 1
                 if service_error_retries > 3:
-                    yield _sse("error", {"message":
-                        "M365 Copilot is unavailable (service error) after 3 retries. "
-                        "Check the browser session at :6080 or wait and try again."})
+                    diagnosis = await _diagnose_copilot_issue(response_text, client=client)
+                    yield _sse("error", {"message": diagnosis["message"]})
                     return
                 wait_s = service_error_retries * 15  # 15s, 30s, 45s
+                diagnosis = await _diagnose_copilot_issue(response_text, client=client)
                 yield _sse("thinking", {"step": step, "text":
-                    f"⚠️ M365 Copilot service error — waiting {wait_s}s then retrying "
+                    f"⚠️ {diagnosis['summary']} — waiting {wait_s}s then retrying "
                     f"(attempt {service_error_retries}/3)..."})
                 await asyncio.sleep(wait_s)
                 # Do NOT advance history — retry the exact same step
@@ -3033,39 +3438,54 @@ async def _ma_role_loop(
             headers["X-Work-Mode"] = work_mode
 
         try:
-            llm_r = await client.post(
+            llm_r = None
+            async for item in _post_with_heartbeats(
+                client,
                 f"{c1}/v1/chat/completions",
                 headers=headers,
-                json={"model": "copilot", "messages": messages, "stream": False},
-                timeout=180,
-            )
+                body={"model": "copilot", "messages": messages, "stream": False},
+                request_timeout=180,
+            ):
+                if item["kind"] == "heartbeat":
+                    _q("pane_thinking", {
+                        "step": step,
+                        "text": f"⏳ Waiting on Copilot ({item['waited_s']}s)… {_runtime_wait_message(item.get('runtime'))}",
+                    })
+                    continue
+                llm_r = item["response"]
+            if llm_r is None:
+                raise RuntimeError("Copilot request ended without a response")
             if llm_r.status_code != 200:
-                _q("pane_error", {"message": f"C1 HTTP {llm_r.status_code}: {llm_r.text[:200]}"})
+                diagnosis = await _diagnose_copilot_issue(llm_r.text[:200] or f"HTTP {llm_r.status_code}", client=client)
+                _q("pane_error", {"message": diagnosis["message"]})
                 return {"role": role, "pane_id": pane_id, "done": False, "summary": "C1 error", "files": files_created, "steps": step}
             response_text: str = llm_r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
         except Exception as exc:
             service_error_retries += 1
+            diagnosis = await _diagnose_copilot_issue(str(exc), client=client)
             if service_error_retries <= 2:
                 wait_s = service_error_retries * 12
-                _q("pane_thinking", {"step": step, "text": f"⚠️ Copilot unreachable — retrying in {wait_s}s..."})
+                _q("pane_thinking", {"step": step, "text": f"⚠️ {diagnosis['summary']} — retrying in {wait_s}s..."})
                 await asyncio.sleep(wait_s)
                 continue
-            _q("pane_error", {"message": f"Copilot unreachable after retries: {exc}"})
-            return {"role": role, "pane_id": pane_id, "done": False, "summary": str(exc), "files": files_created, "steps": step}
+            _q("pane_error", {"message": diagnosis["message"]})
+            return {"role": role, "pane_id": pane_id, "done": False, "summary": diagnosis["summary"], "files": files_created, "steps": step}
 
         _SERVICE_PHRASES = ("something went wrong", "please try again", "experiencing high demand", "we're experiencing")
         if not response_text.strip():
-            _q("pane_error", {"message": "Empty response from Copilot — auth may be expired."})
+            diagnosis = await _diagnose_copilot_issue("empty response from Copilot", client=client)
+            _q("pane_error", {"message": diagnosis["message"]})
             return {"role": role, "pane_id": pane_id, "done": False, "summary": "empty response", "files": files_created, "steps": step}
 
         if any(p in response_text.lower() for p in _SERVICE_PHRASES):
             service_error_retries += 1
+            diagnosis = await _diagnose_copilot_issue(response_text, client=client)
             if service_error_retries <= 2:
                 wait_s = service_error_retries * 12
-                _q("pane_thinking", {"step": step, "text": f"⚠️ Service error — retrying in {wait_s}s..."})
+                _q("pane_thinking", {"step": step, "text": f"⚠️ {diagnosis['summary']} — retrying in {wait_s}s..."})
                 await asyncio.sleep(wait_s)
                 continue
-            _q("pane_error", {"message": "Copilot service error after retries."})
+            _q("pane_error", {"message": diagnosis["message"]})
             return {"role": role, "pane_id": pane_id, "done": False, "summary": "service error", "files": files_created, "steps": step}
 
         service_error_retries = 0
@@ -3267,16 +3687,28 @@ async def api_multi_agent_run(
             + "\n\nBe concise and concrete. Each assignment should be actionable in 1-3 steps."
         )
         try:
-            sup_r = await client.post(
+            sup_r = None
+            async for item in _post_with_heartbeats(
+                client,
                 f"{c1}/v1/chat/completions",
                 headers={"Content-Type": "application/json", "X-Agent-ID": "ma-supervisor"},
-                json={"model": "copilot", "messages": [{"role": "user", "content": supervisor_prompt}], "stream": False},
-                timeout=60,
-            )
+                body={"model": "copilot", "messages": [{"role": "user", "content": supervisor_prompt}], "stream": False},
+                request_timeout=60,
+            ):
+                if item["kind"] == "heartbeat":
+                    yield _sse("supervisor", {
+                        "step": 0,
+                        "text": f"⏳ Supervisor waiting on Copilot ({item['waited_s']}s)… {_runtime_wait_message(item.get('runtime'))}",
+                    })
+                    continue
+                sup_r = item["response"]
+            if sup_r is None:
+                raise RuntimeError("Supervisor request ended without a response")
             sup_text = sup_r.json().get("choices", [{}])[0].get("message", {}).get("content", "") if sup_r.status_code == 200 else ""
         except Exception as exc:
             sup_text = ""
-            yield _sse("supervisor", {"step": 0, "text": f"⚠️ Supervisor failed: {exc} — using default assignments"})
+            diagnosis = await _diagnose_copilot_issue(str(exc), client=client)
+            yield _sse("supervisor", {"step": 0, "text": f"⚠️ Supervisor failed: {diagnosis['summary']} — using default assignments"})
 
         # Parse ASSIGN lines from supervisor response
         assignments: dict[str, str] = {}
@@ -3495,39 +3927,54 @@ async def _ma_role_loop_c11(
             headers["X-Work-Mode"] = work_mode
 
         try:
-            llm_r = await client.post(
+            llm_r = None
+            async for item in _post_with_heartbeats(
+                client,
                 f"{c1}/v1/chat/completions",
                 headers=headers,
-                json={"model": "copilot", "messages": messages, "stream": False},
-                timeout=180,
-            )
+                body={"model": "copilot", "messages": messages, "stream": False},
+                request_timeout=180,
+            ):
+                if item["kind"] == "heartbeat":
+                    _q("pane_thinking", {
+                        "step": step,
+                        "text": f"⏳ Waiting on Copilot ({item['waited_s']}s)… {_runtime_wait_message(item.get('runtime'))}",
+                    })
+                    continue
+                llm_r = item["response"]
+            if llm_r is None:
+                raise RuntimeError("Copilot request ended without a response")
             if llm_r.status_code != 200:
-                _q("pane_error", {"message": f"C1 HTTP {llm_r.status_code}: {llm_r.text[:200]}"})
+                diagnosis = await _diagnose_copilot_issue(llm_r.text[:200] or f"HTTP {llm_r.status_code}", client=client)
+                _q("pane_error", {"message": diagnosis["message"]})
                 return {"role": role, "pane_id": pane_id, "done": False, "summary": "C1 error", "files": files_created, "steps": step}
             response_text: str = llm_r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
         except Exception as exc:
             service_error_retries += 1
+            diagnosis = await _diagnose_copilot_issue(str(exc), client=client)
             if service_error_retries <= 2:
                 wait_s = service_error_retries * 12
-                _q("pane_thinking", {"step": step, "text": f"⚠️ Copilot unreachable — retrying in {wait_s}s..."})
+                _q("pane_thinking", {"step": step, "text": f"⚠️ {diagnosis['summary']} — retrying in {wait_s}s..."})
                 await asyncio.sleep(wait_s)
                 continue
-            _q("pane_error", {"message": f"Copilot unreachable after retries: {exc}"})
-            return {"role": role, "pane_id": pane_id, "done": False, "summary": str(exc), "files": files_created, "steps": step}
+            _q("pane_error", {"message": diagnosis["message"]})
+            return {"role": role, "pane_id": pane_id, "done": False, "summary": diagnosis["summary"], "files": files_created, "steps": step}
 
         _SERVICE_PHRASES = ("something went wrong", "please try again", "experiencing high demand", "we're experiencing")
         if not response_text.strip():
-            _q("pane_error", {"message": "Empty response from Copilot — auth may be expired."})
+            diagnosis = await _diagnose_copilot_issue("empty response from Copilot", client=client)
+            _q("pane_error", {"message": diagnosis["message"]})
             return {"role": role, "pane_id": pane_id, "done": False, "summary": "empty response", "files": files_created, "steps": step}
 
         if any(p in response_text.lower() for p in _SERVICE_PHRASES):
             service_error_retries += 1
+            diagnosis = await _diagnose_copilot_issue(response_text, client=client)
             if service_error_retries <= 2:
                 wait_s = service_error_retries * 12
-                _q("pane_thinking", {"step": step, "text": f"⚠️ Service error — retrying in {wait_s}s..."})
+                _q("pane_thinking", {"step": step, "text": f"⚠️ {diagnosis['summary']} — retrying in {wait_s}s..."})
                 await asyncio.sleep(wait_s)
                 continue
-            _q("pane_error", {"message": "Copilot service error after retries."})
+            _q("pane_error", {"message": diagnosis["message"]})
             return {"role": role, "pane_id": pane_id, "done": False, "summary": "service error", "files": files_created, "steps": step}
 
         service_error_retries = 0
@@ -3691,12 +4138,22 @@ async def api_ma_run(
                 f"Format: ROLE_NAME: assignment text\n"
                 f"Be specific. Each role has distinct responsibilities."
             )
-            sup_r = await client.post(
+            sup_r = None
+            async for item in _post_with_heartbeats(
+                client,
                 f"{c1}/v1/chat/completions",
                 headers={"Content-Type": "application/json", "X-Agent-ID": agent_id},
-                json={"model": "copilot", "messages": [{"role": "user", "content": sup_prompt}], "stream": False},
-                timeout=60,
-            )
+                body={"model": "copilot", "messages": [{"role": "user", "content": sup_prompt}], "stream": False},
+                request_timeout=60,
+            ):
+                if item["kind"] == "heartbeat":
+                    yield _sse("supervisor", {
+                        "text": f"⏳ Supervisor waiting on Copilot ({item['waited_s']}s)… {_runtime_wait_message(item.get('runtime'))}"
+                    })
+                    continue
+                sup_r = item["response"]
+            if sup_r is None:
+                raise RuntimeError("Supervisor request ended without a response")
             if sup_r.status_code == 200:
                 sup_text = sup_r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
                 for line in sup_text.splitlines():
@@ -3705,7 +4162,8 @@ async def api_ma_run(
                             assignments[r] = line[len(r)+1:].strip()
                             break
         except Exception as exc:
-            yield _sse("supervisor", {"text": f"⚠️ Supervisor error: {exc} — using default assignments"})
+            diagnosis = await _diagnose_copilot_issue(str(exc), client=client)
+            yield _sse("supervisor", {"text": f"⚠️ Supervisor error: {diagnosis['summary']} — using default assignments"})
 
         for r in active_roles:
             if r not in assignments:

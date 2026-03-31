@@ -37,24 +37,21 @@
     card.style.borderColor = ok ? 'rgba(48,209,88,0.35)' : 'rgba(255,59,48,0.35)';
   }
   function refreshBanner() {
-    // C3 probe
-    fetch('/api/status').then(function(r){return r.json();}).then(function(d){
-      var c3 = d.c3;
-      var ok = c3 && c3.ok;
-      var pool = d['c3-status'] && d['c3-status'].body;
-      var poolLabel = pool ? (' · pool ' + (pool.pool_available||0) + '/' + (pool.pool_size||0)) : '';
-      updateBannerCard('c3-banner-dot','c3-banner-label','c3-banner-card',
-        ok, ok ? ('Online · ' + (c3.elapsed_ms||'') + 'ms' + poolLabel) : ('DOWN — ' + (c3.error||'unreachable')));
+    fetch('/api/runtime-status').then(function(r){return r.json();}).then(function(d){
+      var c3 = (d.components || {}).c3 || {};
+      var pool = (d.components || {}).c3_pool || {};
+      var c3Ok = c3.state === 'ok' || c3.state === 'slow';
+      var poolLabel = pool.pool_initialized ? (' · pool ' + (pool.pool_available||0) + '/' + (pool.pool_size||0)) : '';
+      var c3Label = c3Ok ? ((c3.state === 'slow' ? 'Slow' : 'Online') + ' · ' + (c3.elapsed_ms || 0) + 'ms' + poolLabel)
+                         : (c3.message || 'DOWN');
+      updateBannerCard('c3-banner-dot','c3-banner-label','c3-banner-card', c3Ok, c3Label);
+      var m365 = (d.components || {}).m365 || {};
+      var active = m365.state === 'active';
+      var mode = m365.chat_mode ? (' · ' + m365.chat_mode.charAt(0).toUpperCase() + m365.chat_mode.slice(1)) : '';
+      updateBannerCard('m365-banner-dot','m365-banner-label','m365-banner-card',
+        active, active ? ('Authenticated' + mode) : (m365.message || 'Unknown'));
     }).catch(function(){
       updateBannerCard('c3-banner-dot','c3-banner-label','c3-banner-card', false, 'Status check failed');
-    });
-    // M365 session
-    fetch('/api/session-health').then(function(r){return r.json();}).then(function(d){
-      var active = d.session === 'active';
-      var mode = d.chat_mode ? (' · ' + d.chat_mode.charAt(0).toUpperCase() + d.chat_mode.slice(1)) : '';
-      updateBannerCard('m365-banner-dot','m365-banner-label','m365-banner-card',
-        active, active ? ('Authenticated' + mode) : (d.session === 'expired' ? 'Session Expired — sign in via noVNC :6080' : 'Unknown'));
-    }).catch(function(){
       updateBannerCard('m365-banner-dot','m365-banner-label','m365-banner-card', false, 'Unreachable');
     });
   }
