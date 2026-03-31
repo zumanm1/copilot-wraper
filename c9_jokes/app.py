@@ -18,6 +18,7 @@ from pathlib import Path
 
 import httpx
 from fastapi import Body, FastAPI, Request, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
@@ -964,6 +965,12 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="C9 Jokes — Validation Console", version="1.0.0", lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.mount("/static", StaticFiles(directory=str(BASE_DIR / "static")), name="static")
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
 
@@ -1376,7 +1383,14 @@ async def api_chat_summarize(request: Request):
     agent_id = (body.get("agent_id") or "c9-jokes").strip()
     if not messages:
         return JSONResponse({"ok": False, "error": "messages required"}, status_code=400)
-    summary = await _summarize_history(messages, c1, agent_id)
+    try:
+        summary = await asyncio.wait_for(
+            _summarize_history(messages, c1, agent_id),
+            timeout=45.0
+        )
+    except asyncio.TimeoutError:
+        lines = [f"[{m['role'].upper()}]: {str(m.get('content',''))[:200]}" for m in messages[-4:]]
+        summary = "[Summarize timed out — last turns]:\n" + "\n".join(lines)
     return JSONResponse({"ok": True, "summary": summary})
 
 
