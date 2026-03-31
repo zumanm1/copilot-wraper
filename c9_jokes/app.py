@@ -13,7 +13,7 @@ import uuid
 
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
 import httpx
@@ -245,6 +245,25 @@ def _ensure_db() -> None:
                     content TEXT NOT NULL
                 )
             """)
+    except sqlite3.Error:
+        pass
+    # Migrate: create token_usage table for per-agent token tracking
+    try:
+        with sqlite3.connect(DEFAULT_DB) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS token_usage (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts TEXT NOT NULL,
+                    agent_id TEXT NOT NULL,
+                    page TEXT NOT NULL,
+                    tokens INTEGER NOT NULL DEFAULT 0,
+                    model TEXT DEFAULT '',
+                    session_id TEXT DEFAULT '',
+                    status TEXT DEFAULT 'ok'
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_tu_agent ON token_usage(agent_id)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_tu_ts    ON token_usage(ts)")
     except sqlite3.Error:
         pass
 
@@ -1359,6 +1378,132 @@ async def api_chat_summarize(request: Request):
         return JSONResponse({"ok": False, "error": "messages required"}, status_code=400)
     summary = await _summarize_history(messages, c1, agent_id)
     return JSONResponse({"ok": True, "summary": summary})
+
+
+# ── Token Usage tracking ──────────────────────────────────────────────────────
+
+@app.post("/api/token-usage/record", name="api_token_usage_record")
+async def api_token_usage_record(request: Request):
+    """Record a token-usage event.
+    Body: {agent_id, page, tokens, model?, session_id?, status?}
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "invalid JSON"}, status_code=400)
+    agent_id   = (body.get("agent_id") or "unknown").strip()
+    page       = (body.get("page")     or "unknown").strip()
+    tokens     = int(body.get("tokens") or 0)
+    model      = (body.get("model")      or "").strip()
+    session_id = (body.get("session_id") or "").strip()
+    status     = (body.get("status")     or "ok").strip()
+    ts = datetime.utcnow().isoformat() + "Z"
+    try:
+        with _db() as conn:
+            conn.execute(
+                "INSERT INTO token_usage (ts, agent_id, page, tokens, model, session_id, status) "
+                "VALUES (?,?,?,?,?,?,?)",
+                (ts, agent_id, page, tokens, model, session_id, status)
+            )
+        return JSONResponse({"ok": True, "recorded": tokens})
+    except sqlite3.Error as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+
+
+@app.get("/api/token-usage/summary", name="api_token_usage_summary")
+async def api_token_usage_summary():
+    """Return today's total and per-agent totals for the global badge."""
+    today = datetime.utcnow().strftime("%Y-%m-%d")
+    try:
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(tokens),0) FROM token_usage WHERE ts >= ?",
+                (today,)
+            ).fetchone()
+            today_total = row[0] if row else 0
+            rows = conn.execute(
+                "SELECT agent_id, COALESCE(SUM(tokens),0) FROM token_usage "
+                "WHERE ts >= ? GROUP BY agent_id ORDER BY 2 DESC",
+                (today,)
+            ).fetchall()
+            by_agent = {r[0]: r[1] for r in rows}
+        return JSONResponse({"ok": True, "today_total": today_total, "by_agent": by_agent})
+    except sqlite3.Error as e:
+        return JSONResponse({"ok": False, "error": str(e), "today_total": 0, "by_agent": {}}, status_code=500)
+
+
+@app.get("/api/token-usage/history", name="api_token_usage_history")
+async def api_token_usage_history(
+    agent_id: str = "",
+    page: str = "",
+    days: int = 30,
+    limit: int = 200
+):
+    """Return token usage rows for the dashboard table."""
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+    clauses, params = ["ts >= ?"], [cutoff]
+    if agent_id:
+        clauses.append("agent_id = ?"); params.append(agent_id)
+    if page:
+        clauses.append("page = ?"); params.append(page)
+    where = " AND ".join(clauses)
+    params.append(limit)
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                f"SELECT id,ts,agent_id,page,tokens,model,session_id,status "
+                f"FROM token_usage WHERE {where} ORDER BY ts DESC LIMIT ?",
+                params
+            ).fetchall()
+            cols = ["id","ts","agent_id","page","tokens","model","session_id","status"]
+            data = [dict(zip(cols, r)) for r in rows]
+        return JSONResponse({"ok": True, "rows": data, "count": len(data)})
+    except sqlite3.Error as e:
+        return JSONResponse({"ok": False, "error": str(e), "rows": []}, status_code=500)
+
+
+@app.get("/api/token-usage/agents", name="api_token_usage_agents")
+async def api_token_usage_agents(days: int = 30):
+    """Per-agent aggregated stats with % share, status breakdown, daily trend."""
+    cutoff = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                "SELECT agent_id, page, "
+                "  COUNT(*) as calls, "
+                "  COALESCE(SUM(tokens),0) as total_tokens, "
+                "  COALESCE(MAX(tokens),0) as max_tokens, "
+                "  COALESCE(AVG(tokens),0) as avg_tokens, "
+                "  MAX(ts) as last_used, "
+                "  SUM(CASE WHEN status='ok' THEN 1 ELSE 0 END) as ok_calls, "
+                "  SUM(CASE WHEN status!='ok' THEN 1 ELSE 0 END) as err_calls "
+                "FROM token_usage WHERE ts >= ? "
+                "GROUP BY agent_id, page ORDER BY total_tokens DESC",
+                (cutoff,)
+            ).fetchall()
+            cols = ["agent_id","page","calls","total_tokens","max_tokens","avg_tokens",
+                    "last_used","ok_calls","err_calls"]
+            data = [dict(zip(cols, r)) for r in rows]
+            grand_total = sum(r["total_tokens"] for r in data) or 1
+            for r in data:
+                r["pct"] = round(r["total_tokens"] / grand_total * 100, 1)
+                r["avg_tokens"] = round(r["avg_tokens"])
+            # Daily totals for sparkline
+            daily = conn.execute(
+                "SELECT substr(ts,1,10) as day, agent_id, COALESCE(SUM(tokens),0) as t "
+                "FROM token_usage WHERE ts >= ? "
+                "GROUP BY day, agent_id ORDER BY day",
+                (cutoff,)
+            ).fetchall()
+            daily_data = [{"day": r[0], "agent_id": r[1], "tokens": r[2]} for r in daily]
+        return JSONResponse({"ok": True, "agents": data, "daily": daily_data, "grand_total": grand_total})
+    except sqlite3.Error as e:
+        return JSONResponse({"ok": False, "error": str(e), "agents": [], "daily": []}, status_code=500)
+
+
+@app.get("/token-counter", response_class=HTMLResponse, name="page_token_counter")
+async def page_token_counter(request: Request):
+    return templates.TemplateResponse(request, "token_counter.html", {})
 
 
 @app.post("/api/validate", name="api_validate")

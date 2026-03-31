@@ -3,12 +3,12 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>{% block title %}C9 Jokes{% endblock %} — Stack validation</title>
+  <title>{% block title %}APP C9{% endblock %} — Stack validation</title>
   <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}"/>
 </head>
 <body>
   <header>
-    <h1>C9_JOKES — validation console</h1>
+    <h1>APP C9</h1>
     <nav>
       <a href="{{ url_for('dashboard') }}">Dashboard</a>
       <a href="{{ url_for('page_health') }}">Health</a>
@@ -20,10 +20,23 @@
       <a href="{{ url_for('page_agent') }}" style="color:var(--ok);font-weight:600;">⚡ Agent</a>
       <a href="{{ url_for('page_multi_agent') }}" style="color:var(--accent);font-weight:600;">🤖 Multi-Agent</a>
       <a href="{{ url_for('page_multi_agento') }}" style="color:var(--accent);font-weight:600;">🚀 multi-Agento</a>
+      <a href="{{ url_for('page_token_counter') }}" style="color:#ffa000;font-weight:600;">📊 Token Counter</a>
     </nav>
-    <div id="session-led" class="session-led checking" title="M365 browser session status">
-      <span class="session-led-dot"></span>
-      <span class="session-led-label">Checking…</span>
+    <div style="display:flex;align-items:center;gap:0.6rem;flex-shrink:0;">
+      <!-- Global token counter (top-right) — updated by each page via window._globalTokens -->
+      <span id="global-token-badge"
+            title="Total tokens used this session across all agents"
+            style="display:inline-flex;align-items:center;gap:4px;
+                   background:rgba(245,245,247,0.06);border:1px solid rgba(245,245,247,0.12);
+                   border-radius:999px;padding:2px 10px;font-size:0.72rem;
+                   color:#8e8e93;font-family:monospace;white-space:nowrap;
+                   transition:color 0.2s,border-color 0.2s,background 0.2s;">
+        📊 <span id="global-token-val">—</span>
+      </span>
+      <div id="session-led" class="session-led checking" title="M365 browser session status">
+        <span class="session-led-dot"></span>
+        <span class="session-led-label">Checking…</span>
+      </div>
     </div>
   </header>
   <script>
@@ -54,6 +67,31 @@
     }
     pollSession();
     setInterval(pollSession, 30000);
+
+    // ── Global token counter (top-right badge) ──────────────────────────────
+    // Each page can call window.updateGlobalTokens(n) to push a live value.
+    // On load we also fetch the daily total from the DB.
+    window.updateGlobalTokens = function(tokens) {
+      var el = document.getElementById('global-token-val');
+      var badge = document.getElementById('global-token-badge');
+      if (!el || !badge) return;
+      var k = tokens >= 1000 ? (Math.round(tokens / 100) / 10) + 'k' : tokens;
+      el.textContent = k + ' tokens';
+      if (tokens >= 80000)      { badge.style.color = '#ff3b30'; badge.style.borderColor = '#ff3b30'; }
+      else if (tokens >= 40000) { badge.style.color = '#ffa000'; badge.style.borderColor = '#ffa000'; }
+      else                      { badge.style.color = '#8e8e93'; badge.style.borderColor = 'rgba(245,245,247,0.12)'; }
+    };
+    function refreshGlobalTokens() {
+      fetch('/api/token-usage/summary')
+        .then(function(r) { return r.json(); })
+        .then(function(d) {
+          var total = d.today_total || 0;
+          window.updateGlobalTokens(total);
+        })
+        .catch(function() {});
+    }
+    refreshGlobalTokens();
+    setInterval(refreshGlobalTokens, 60000);
   })();
   </script>
   <main>

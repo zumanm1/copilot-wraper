@@ -1034,6 +1034,19 @@
         loadOutputFiles();
         showFollowupBar();
         updatePool();
+        // Record token usage for each pane that completed
+        Object.keys(results).forEach(function(pid) {
+          var r = results[pid];
+          if (!r.done) return;
+          var pEl = document.getElementById('pane-badge-' + pid);
+          var tokNum = 0;
+          if (pEl) { var m = pEl.textContent.match(/([\d.]+)k?/); if (m) tokNum = parseFloat(m[1]) * (pEl.textContent.includes('k') ? 1000 : 1); }
+          var agId = (r.agent_id || pid.replace('ma-','c') || 'unknown');
+          fetch('/api/token-usage/record', {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ agent_id: agId, page: 'multi-agent', tokens: Math.round(tokNum) || 0, session_id: _sessionId || '', status: 'ok' })
+          }).catch(function(){});
+        });
         break;
 
       case 'error':

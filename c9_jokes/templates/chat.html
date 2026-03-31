@@ -677,6 +677,18 @@
         // Update token counter
         var tok = j.token_estimate || estimateTokens(chatHistory);
         updateTokenUI(tok);
+        // Record to global token-usage DB + update global badge
+        if (window.updateGlobalTokens) window.updateGlobalTokens(tok);
+        fetch('/api/token-usage/record', {
+          method: 'POST', headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({
+            agent_id:   agent_id,
+            page:       'chat',
+            tokens:     tok,
+            session_id: currentSessionId || '',
+            status:     'ok'
+          })
+        }).catch(function(){});
         // Auto-compress if needed
         await maybeCompress();
       } else {

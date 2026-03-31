@@ -425,6 +425,11 @@ function handleEvent(type,data){
     sumText.textContent=data.summary||('Files: '+(data.files_created||[]).join(', ')||'Complete');
     sumBar.classList.add('show');
     setRunning(false);refreshFiles();
+    // Record token usage
+    var _maTok = (data.files_created||[]).length * 500 || 0;
+    fetch('/api/token-usage/record',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({agent_id:'multi-agento',page:'multi-agento',tokens:_maTok,session_id:_sid||'',status:'ok'})
+    }).catch(function(){});
   }
   else if(type==='error'){supText.textContent='❌ '+esc(data.message||'Error');setRunning(false);}
 }

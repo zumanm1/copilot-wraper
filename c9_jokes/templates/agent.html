@@ -1492,6 +1492,20 @@
     }
     appendEntry('final', inner);
     if (data.session_id) currentSessId = data.session_id;
+    // Record final token usage to global DB
+    const _agId = (document.getElementById('agent-select') || {}).value || 'c9-jokes';
+    const _badge = document.getElementById('agent-token-badge');
+    const _tokTxt = _badge ? _badge.textContent : '0';
+    const _tokNum = parseFloat(_tokTxt) * (_tokTxt.includes('k') ? 1000 : 1) || 0;
+    if (_tokNum > 0) {
+      fetch('/api/token-usage/record', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          agent_id: _agId, page: 'agent', tokens: Math.round(_tokNum),
+          session_id: currentSessId || '', status: 'ok'
+        })
+      }).catch(function(){});
+    }
     setIdle(true);
     refreshFiles();
     refreshHistory();
@@ -1509,8 +1523,10 @@
     const k = Math.round(tokens / 100) / 10;
     badge.textContent = k + 'k tokens';
     badge.className = 'token-badge-agent';
-    if (tokens >= 38000)     badge.className = 'token-badge-agent danger';
+    if (tokens >= 38000)      badge.className = 'token-badge-agent danger';
     else if (tokens >= 20000) badge.className = 'token-badge-agent warn';
+    // Update global badge in header
+    if (window.updateGlobalTokens) window.updateGlobalTokens(tokens);
   }
 
   function handleTokenWarning(data) {
