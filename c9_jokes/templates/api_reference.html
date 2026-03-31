@@ -11,7 +11,7 @@
     <tr><td>GET</td><td><code>/api/status</code></td><td>JSON health for all <code>TARGETS</code> + <code>c3-status</code>; persists to <code>health_snapshots</code></td></tr>
     <tr><td>GET</td><td><code>/api/session-health</code></td><td>Proxies C3 M365 session LED data (active / expired)</td></tr>
     <tr><td>GET</td><td><code>/api/health-history</code></td><td>Query: <code>?target=c1&amp;limit=10</code> — last snapshots for one target</td></tr>
-    <tr><td>POST</td><td><code>/api/chat</code></td><td>Proxy chat to C1. Body: <code>{"agent_id":"c2-aider","prompt":"…"}</code>; logs to SQLite</td></tr>
+    <tr><td>POST</td><td><code>/api/chat</code></td><td>Proxy chat to C1. Body: <code>{"agent_id":"c2-aider","prompt":"…","stream":true}</code>; returns JSON by default or SSE when <code>stream:true</code>; logs to SQLite</td></tr>
     <tr><td>POST</td><td><code>/api/validate</code></td><td>Pair validation. Body: <code>{"prompt":"…","parallel":true,"agent_ids":["c2-aider"]}</code></td></tr>
     <tr><td>POST</td><td><code>/api/upload</code></td><td>Upload file to C1. Multipart <code>file</code> field → <code>{"ok":true,"file_id":"…","type":"text|image"}</code></td></tr>
     <tr><td>GET</td><td><code>/api/validation-runs</code></td><td>Query: <code>?limit=10</code> — recent runs with <code>pairs</code> detail</td></tr>
@@ -145,6 +145,11 @@
 <pre>curl -sS -X POST http://localhost:6090/api/chat \
   -H "Content-Type: application/json" \
   -d '{"agent_id":"c2-aider","prompt":"Tell me a joke"}'</pre>
+
+<h3>Example: Chat via C9 proxy (streaming)</h3>
+<pre>curl -N -X POST http://localhost:6090/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id":"c2-aider","prompt":"Tell me a joke","stream":true}'</pre>
 
 <h3>Agent IDs</h3>
 <table>

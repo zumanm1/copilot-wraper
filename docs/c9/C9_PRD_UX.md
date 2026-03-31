@@ -8,7 +8,7 @@ Describe user flows for validation, monitoring, and exploratory “ask” action
 
 1. **Discoverability**: First-time user lands on Dashboard; one-click path to “how to test” (API page).
 2. **Validation flow**: User runs full or pair validation → sees progress (loading state) → table of results with pass/fail and expandable error detail.
-3. **Chat flow**: User selects agent channel (maps to `X-Agent-ID` + endpoint) → enters prompt → sees assistant text and latency note; errors show HTTP status + body snippet (no secrets).
+3. **Chat flow**: User selects agent channel (maps to `X-Agent-ID` + endpoint) → enters prompt → sees assistant text stream live and then a latency note; errors show HTTP status + body snippet (no secrets).
 4. **Logs flow**: Recent runs listed newest-first; filter by `pair_id` or `container`.
 5. **Sessions flow**: Read-only view of C1 `/v1/sessions`; refresh button; no delete/mutate in v1.
 
@@ -23,5 +23,5 @@ Describe user flows for validation, monitoring, and exploratory “ask” action
 
 ## Out of scope (scaffold)
 
-- Toast library, WebSocket live push (documented as future in C9_PRD_BACKEND.md).
+- Toast library and extra live-push channels beyond the existing chat SSE flow.
 - CrewAI-driven multi-step workflows (future phase).

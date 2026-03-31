@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Flask application serving HTML and JSON APIs for health polling, validation orchestration, and optional direct C1 chat proxy.
+Web application serving HTML plus JSON/SSE APIs for health polling, validation orchestration, and direct C1 chat proxying.
 
 ## Architecture
 
@@ -17,11 +17,12 @@ Flask application serving HTML and JSON APIs for health polling, validation orch
 | GET | `/`, `/health`, … | Render stub templates | Same + inject live data |
 | GET | `/api/status` | Aggregate JSON: C1/C3/C7a probe | Same |
 | POST | `/api/validate/run` | Optional: shell out or in-process mirror of `tests/validate_all_agents.py` logic | Persist run to SQLite |
-| POST | `/api/chat` | Proxy to C1 with chosen agent id | Rate-limit + log redaction |
+| POST | `/api/chat` | Proxy to C1 with chosen agent id; JSON by default, SSE when `stream:true` | Rate-limit + log redaction |
 
-## Future: WebSocket
+## Future: Live updates
 
-- Optional `flask-socketio` or SSE for live validation log tail (out of scaffold).
+- Chat streaming is implemented with SSE on `POST /api/chat` when `stream:true`.
+- Optional WebSocket or SSE log-tail for validation dashboards remains future work.
 
 ## Acceptance criteria
 

@@ -871,51 +871,192 @@ async def _summarize_history(messages: list[dict], c1_url: str, agent_id: str) -
     return "[Auto-summary of earlier context]:\n" + "\n".join(lines)
 
 
-async def _chat_one(agent_id: str, prompt: str, c1_url: str, chat_mode: str = "", attachments: list | None = None, work_mode: str = "", messages: list | None = None) -> dict:
-    """Call C1 for a single agent. Returns {ok, http_status, text, elapsed_ms}.
-    If `messages` is provided it is used as the full conversation history (multi-turn).
-    Otherwise falls back to single-turn prompt.
-    """
+def _content_to_text(content) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for part in content:
+            if not isinstance(part, dict):
+                continue
+            if part.get("type") in ("text", "input_text"):
+                text = str(part.get("text", "")).strip()
+                if text:
+                    parts.append(text)
+        return "\n".join(parts)
+    if content is None:
+        return ""
+    return str(content)
+
+
+def _chat_prompt(prompt: str, messages: list | None = None) -> str:
+    prompt = (prompt or "").strip()
+    if prompt:
+        return prompt
+    for msg in reversed(messages or []):
+        if isinstance(msg, dict) and msg.get("role") == "user":
+            text = _content_to_text(msg.get("content")).strip()
+            if text:
+                return text
+    return ""
+
+
+def _build_chat_messages(prompt: str, attachments: list | None = None, messages: list | None = None) -> list[dict]:
+    attachments = attachments or []
     if messages:
-        # Multi-turn: use provided history directly
-        # Inject attachments into the last user message if present
-        if attachments and messages:
-            last = messages[-1]
-            if last.get("role") == "user":
-                content: list = [{"type": "text", "text": str(last.get("content", ""))}]
-                for att in attachments:
-                    if att.get("file_id"):
-                        content.append({"type": "file_ref", "file_id": att["file_id"], "filename": att.get("filename", "")})
-                messages = messages[:-1] + [{"role": "user", "content": content}]
-        body = {"model": "copilot", "messages": messages, "stream": False}
-    elif attachments:
-        # Build multi-part content: text + file_ref parts
-        content_list: list = [{"type": "text", "text": prompt}]
+        built: list[dict] = []
+        for msg in messages:
+            if not isinstance(msg, dict):
+                continue
+            built.append({
+                "role": msg.get("role", "user"),
+                "content": msg.get("content", ""),
+            })
+        if attachments and built and built[-1].get("role") == "user":
+            content: list[dict] = [{"type": "text", "text": _content_to_text(built[-1].get("content"))}]
+            for att in attachments:
+                if att.get("file_id"):
+                    content.append({
+                        "type": "file_ref",
+                        "file_id": att["file_id"],
+                        "filename": att.get("filename", ""),
+                    })
+            built = built[:-1] + [{"role": "user", "content": content}]
+        return built
+
+    if attachments:
+        content: list[dict] = [{"type": "text", "text": prompt}]
         for att in attachments:
             if att.get("file_id"):
-                content_list.append({"type": "file_ref", "file_id": att["file_id"], "filename": att.get("filename", "")})
-        user_msg = {"role": "user", "content": content_list}
-        body = {"model": "copilot", "messages": [user_msg], "stream": False}
-    else:
-        user_msg = {"role": "user", "content": prompt}
-        body = {"model": "copilot", "messages": [user_msg], "stream": False,}
-    body_final = {
+                content.append({
+                    "type": "file_ref",
+                    "file_id": att["file_id"],
+                    "filename": att.get("filename", ""),
+                })
+        return [{"role": "user", "content": content}]
+
+    return [{"role": "user", "content": prompt}]
+
+
+def _build_chat_body(prompt: str, attachments: list | None = None, messages: list | None = None, stream: bool = False) -> dict:
+    return {
         "model": "copilot",
-        "messages": body["messages"],
-        "stream": False,
+        "messages": _build_chat_messages(prompt, attachments=attachments, messages=messages),
+        "stream": stream,
     }
+
+
+def _build_chat_headers(agent_id: str, chat_mode: str = "", work_mode: str = "") -> dict:
     headers = {"Content-Type": "application/json", "X-Agent-ID": agent_id}
     if chat_mode:
         headers["X-Chat-Mode"] = chat_mode
     if work_mode in ("work", "web"):
         headers["X-Work-Mode"] = work_mode
+    return headers
+
+
+def _error_text(payload) -> str:
+    if isinstance(payload, bytes):
+        payload = payload.decode("utf-8", errors="replace")
+    if isinstance(payload, str):
+        text = payload.strip()
+        if not text:
+            return ""
+        try:
+            payload = json.loads(text)
+        except Exception:
+            return text
+    if isinstance(payload, dict):
+        for key in ("detail", "error", "message"):
+            value = payload.get(key)
+            if value:
+                return _error_text(value)
+        return json.dumps(payload)[:2000]
+    return str(payload)
+
+
+def _persist_chat_turn(
+    session_id: str,
+    agent_id: str,
+    prompt: str,
+    response_text: str,
+    now: str,
+    *,
+    messages: list | None = None,
+    http_status: int | None = None,
+    elapsed_ms: int | None = None,
+    source: str = "chat",
+) -> int:
+    token_est = _estimate_tokens(messages) if messages else (len(prompt) + len(response_text)) // 4
+    with _db() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO chat_sessions (id, created_at, updated_at, agent_id, title) VALUES (?,?,?,?,?)",
+            (session_id, now, now, agent_id, (prompt or "Chat")[:80]),
+        )
+        turn_row = conn.execute(
+            "SELECT MAX(turn) FROM chat_messages WHERE session_id=?", (session_id,)
+        ).fetchone()
+        next_turn = (turn_row[0] or 0) + 1
+        conn.execute(
+            "INSERT INTO chat_messages (session_id, turn, role, content, created_at) VALUES (?,?,?,?,?)",
+            (session_id, next_turn, "user", prompt[:4000], now),
+        )
+        conn.execute(
+            "INSERT INTO chat_messages (session_id, turn, role, content, created_at) VALUES (?,?,?,?,?)",
+            (session_id, next_turn, "assistant", response_text[:4000], now),
+        )
+        conn.execute(
+            "UPDATE chat_sessions SET updated_at=?, message_count=message_count+2, token_estimate=? WHERE id=?",
+            (now, token_est, session_id),
+        )
+        conn.execute(
+            "INSERT INTO chat_logs (created_at, agent_id, prompt_excerpt, response_excerpt, http_status, elapsed_ms, source, session_id) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (now, agent_id, prompt[:200], response_text[:500], http_status, elapsed_ms, source, session_id),
+        )
+    return token_est
+
+
+def _log_chat_failure(
+    session_id: str,
+    agent_id: str,
+    prompt: str,
+    error_text: str,
+    now: str,
+    *,
+    http_status: int | None = None,
+    elapsed_ms: int | None = None,
+    source: str = "chat",
+) -> None:
+    try:
+        with _db() as conn:
+            conn.execute(
+                "INSERT INTO chat_logs (created_at, agent_id, prompt_excerpt, response_excerpt, http_status, elapsed_ms, source, session_id) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (now, agent_id, prompt[:200], error_text[:500], http_status, elapsed_ms, source, session_id),
+            )
+    except sqlite3.Error:
+        pass
+
+
+def _sse_event(payload: dict) -> str:
+    return f"data: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+async def _chat_one(agent_id: str, prompt: str, c1_url: str, chat_mode: str = "", attachments: list | None = None, work_mode: str = "", messages: list | None = None) -> dict:
+    """Call C1 for a single agent. Returns {ok, http_status, text, elapsed_ms}.
+    If `messages` is provided it is used as the full conversation history (multi-turn).
+    Otherwise falls back to single-turn prompt.
+    """
+    body = _build_chat_body(prompt, attachments=attachments, messages=messages, stream=False)
+    headers = _build_chat_headers(agent_id, chat_mode=chat_mode, work_mode=work_mode)
     client = _get_http()
     t0 = time.monotonic()
     try:
         r = await client.post(
             f"{c1_url}/v1/chat/completions",
             headers=headers,
-            json=body_final,
+            json=body,
             timeout=360,
         )
         elapsed_ms = int((time.monotonic() - t0) * 1000)
@@ -928,19 +1069,7 @@ async def _chat_one(agent_id: str, prompt: str, c1_url: str, chat_mode: str = ""
             except Exception:
                 text = r.text[:2000]
         else:
-            # Extract the actual error message from C1's JSON error body
-            # so the C9 dashboard shows it instead of a generic "failed".
-            raw = r.text[:2000]
-            try:
-                d = r.json()
-                error = (
-                    d.get("detail")
-                    or d.get("error")
-                    or d.get("message")
-                    or raw
-                )
-            except Exception:
-                error = raw
+            error = _error_text(r.text[:2000])
         return {
             "ok": 200 <= r.status_code < 300,
             "http_status": r.status_code,
@@ -1222,7 +1351,7 @@ async def api_upload(file: UploadFile = File(...)):
 @app.post("/api/chat", name="api_chat")
 async def api_chat(request: Request):
     """Proxy a chat turn to C1.
-    Body: {agent_id, prompt, chat_mode?, work_mode?, attachments?,
+    Body: {agent_id, prompt, chat_mode?, work_mode?, attachments?, stream?,
            messages?: [{role,content},...],  # full history for multi-turn
            session_id?: str}                 # persistent session ID
     """
@@ -1235,83 +1364,193 @@ async def api_chat(request: Request):
     prompt     = (payload_in.get("prompt") or "").strip()
     chat_mode  = (payload_in.get("chat_mode") or "").strip().lower()
     work_mode  = (payload_in.get("work_mode") or "").strip().lower()
+    stream     = bool(payload_in.get("stream"))
     attachments = payload_in.get("attachments") or []
     messages_in = payload_in.get("messages")  # full history array (optional)
     session_id  = (payload_in.get("session_id") or "").strip()
+    messages = messages_in if isinstance(messages_in, list) and len(messages_in) > 0 else None
+    prompt_text = _chat_prompt(prompt, messages)
 
-    if not prompt and not messages_in:
+    if not prompt_text and not messages:
         return JSONResponse({"ok": False, "error": "prompt or messages required"}, status_code=400)
 
-    # ── Session persistence ────────────────────────────────────────────────
-    now = datetime.now(timezone.utc).isoformat()
     if not session_id:
         session_id = "cs_" + uuid.uuid4().hex[:8]
 
-    # Ensure session row exists
-    try:
-        with _db() as conn:
-            conn.execute(
-                "INSERT OR IGNORE INTO chat_sessions (id, created_at, updated_at, agent_id, title) VALUES (?,?,?,?,?)",
-                (session_id, now, now, agent_id, (prompt or "Chat")[:80]),
-            )
-    except sqlite3.Error:
-        pass
+    if stream:
+        async def generate():
+            client = _get_http()
+            headers = _build_chat_headers(agent_id, chat_mode=chat_mode, work_mode=work_mode)
+            body = _build_chat_body(prompt_text, attachments=attachments, messages=messages, stream=True)
+            full_text = ""
+            http_status = 200
+            t0 = time.monotonic()
+            try:
+                async with client.stream(
+                    "POST",
+                    f"{c1}/v1/chat/completions",
+                    headers=headers,
+                    json=body,
+                    timeout=360,
+                ) as resp:
+                    http_status = resp.status_code
+                    if resp.status_code < 200 or resp.status_code >= 300:
+                        raw_error = (await resp.aread()).decode("utf-8", errors="replace")
+                        error_text = _error_text(raw_error) or f"C1 returned HTTP {resp.status_code}"
+                        now = datetime.now(timezone.utc).isoformat()
+                        elapsed_ms = int((time.monotonic() - t0) * 1000)
+                        _log_chat_failure(
+                            session_id,
+                            agent_id,
+                            prompt_text,
+                            error_text,
+                            now,
+                            http_status=resp.status_code,
+                            elapsed_ms=elapsed_ms,
+                            source="chat-stream",
+                        )
+                        yield _sse_event({"type": "error", "message": error_text})
+                        return
 
-    # If caller sends full messages[], use it; otherwise build from prompt alone
-    if messages_in and isinstance(messages_in, list) and len(messages_in) > 0:
-        messages = messages_in
-    else:
-        messages = None  # will use prompt-only path in _chat_one
+                    async for raw_line in resp.aiter_lines():
+                        if not raw_line.startswith("data:"):
+                            continue
+                        data_str = raw_line[5:].strip()
+                        if not data_str:
+                            continue
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            continue
+                        if "error" in chunk:
+                            error_text = _error_text(chunk["error"]) or "Upstream streaming error"
+                            now = datetime.now(timezone.utc).isoformat()
+                            elapsed_ms = int((time.monotonic() - t0) * 1000)
+                            _log_chat_failure(
+                                session_id,
+                                agent_id,
+                                prompt_text,
+                                error_text,
+                                now,
+                                http_status=http_status,
+                                elapsed_ms=elapsed_ms,
+                                source="chat-stream",
+                            )
+                            yield _sse_event({"type": "error", "message": error_text})
+                            return
+                        for ch in chunk.get("choices", []):
+                            token = (ch.get("delta") or {}).get("content") or ""
+                            if token:
+                                full_text += token
+                                yield _sse_event({"type": "token", "text": token})
+            except Exception as exc:
+                now = datetime.now(timezone.utc).isoformat()
+                elapsed_ms = int((time.monotonic() - t0) * 1000)
+                error_text = str(exc)
+                _log_chat_failure(
+                    session_id,
+                    agent_id,
+                    prompt_text,
+                    error_text,
+                    now,
+                    http_status=http_status,
+                    elapsed_ms=elapsed_ms,
+                    source="chat-stream",
+                )
+                yield _sse_event({"type": "error", "message": error_text})
+                return
+
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            if not full_text:
+                now = datetime.now(timezone.utc).isoformat()
+                error_text = "C1 returned an empty reply"
+                _log_chat_failure(
+                    session_id,
+                    agent_id,
+                    prompt_text,
+                    error_text,
+                    now,
+                    http_status=http_status,
+                    elapsed_ms=elapsed_ms,
+                    source="chat-stream",
+                )
+                yield _sse_event({"type": "error", "message": error_text})
+                return
+
+            now = datetime.now(timezone.utc).isoformat()
+            try:
+                token_est = _persist_chat_turn(
+                    session_id,
+                    agent_id,
+                    prompt_text,
+                    full_text,
+                    now,
+                    messages=messages,
+                    http_status=http_status,
+                    elapsed_ms=elapsed_ms,
+                    source="chat-stream",
+                )
+            except sqlite3.Error as exc:
+                yield _sse_event({"type": "error", "message": str(exc)})
+                return
+
+            yield _sse_event({
+                "type": "done",
+                "text": full_text,
+                "session_id": session_id,
+                "token_estimate": token_est,
+                "http_status": http_status,
+            })
+
+        return StreamingResponse(
+            generate(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     result = await _chat_one(
-        agent_id, prompt, c1,
+        agent_id, prompt_text, c1,
         chat_mode=chat_mode,
         attachments=attachments,
         work_mode=work_mode,
         messages=messages,
     )
 
-    # ── Persist turn to chat_messages + update session metadata ───────────
-    resp_text = result.get("text") or result.get("error") or ""
-    try:
-        with _db() as conn:
-            # Count existing turns to get next turn number
-            turn_row = conn.execute(
-                "SELECT MAX(turn) FROM chat_messages WHERE session_id=?", (session_id,)
-            ).fetchone()
-            next_turn = (turn_row[0] or 0) + 1
-
-            # Persist user message
-            conn.execute(
-                "INSERT INTO chat_messages (session_id, turn, role, content, created_at) VALUES (?,?,?,?,?)",
-                (session_id, next_turn, "user", prompt[:4000], now),
+    now = datetime.now(timezone.utc).isoformat()
+    resp_text = result.get("text") or ""
+    if result.get("ok") and resp_text:
+        try:
+            token_est = _persist_chat_turn(
+                session_id,
+                agent_id,
+                prompt_text,
+                resp_text,
+                now,
+                messages=messages,
+                http_status=result.get("http_status"),
+                elapsed_ms=result.get("elapsed_ms"),
+                source="chat",
             )
-            # Persist assistant reply
-            conn.execute(
-                "INSERT INTO chat_messages (session_id, turn, role, content, created_at) VALUES (?,?,?,?,?)",
-                (session_id, next_turn, "assistant", resp_text[:4000], now),
-            )
-
-            # Compute token estimate from full messages if available
-            token_est = _estimate_tokens(messages) if messages else (len(prompt) + len(resp_text)) // 4
-
-            conn.execute(
-                "UPDATE chat_sessions SET updated_at=?, message_count=message_count+2, token_estimate=? WHERE id=?",
-                (now, token_est, session_id),
-            )
-
-            # Legacy chat_logs
-            conn.execute(
-                "INSERT INTO chat_logs (created_at, agent_id, prompt_excerpt, response_excerpt, http_status, elapsed_ms, source, session_id) "
-                "VALUES (?,?,?,?,?,?,?,?)",
-                (now, agent_id, prompt[:200], resp_text[:500],
-                 result.get("http_status"), result.get("elapsed_ms"), "chat", session_id),
-            )
-    except sqlite3.Error:
-        pass
+        except sqlite3.Error:
+            token_est = _estimate_tokens(messages) if messages else (len(prompt_text) + len(resp_text)) // 4
+    else:
+        error_text = result.get("error") or resp_text or "C1 returned an empty reply"
+        _log_chat_failure(
+            session_id,
+            agent_id,
+            prompt_text,
+            error_text,
+            now,
+            http_status=result.get("http_status"),
+            elapsed_ms=result.get("elapsed_ms"),
+            source="chat",
+        )
+        token_est = _estimate_tokens(messages) if messages else (len(prompt_text) + len(resp_text)) // 4
 
     result["session_id"] = session_id
-    result["token_estimate"] = _estimate_tokens(messages) if messages else (len(prompt) + len(resp_text)) // 4
+    result["token_estimate"] = token_est
     return JSONResponse(result)
 
 

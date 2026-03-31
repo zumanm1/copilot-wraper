@@ -4,12 +4,13 @@
 
 Document REST endpoints exposed by C9 and the upstream APIs used for validation (C1, C3).
 
-## C9 endpoints (JSON)
+## C9 endpoints (JSON / SSE)
 
 | Method | Path | Description |
 |--------|------|-------------|
 | GET | `/api/status` | `{ "c1": {...}, "c3": {...}, "c7a": {...} }` from live probes |
 | GET | `/api/health` | Alias or subset for dashboard widgets |
+| POST | `/api/chat` | Chat proxy to C1; JSON by default, `text/event-stream` when body includes `"stream": true` |
 
 Scaffold may return minimal JSON; expand per C9_PRD_BACKEND.
 

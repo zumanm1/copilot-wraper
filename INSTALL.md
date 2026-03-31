@@ -1,6 +1,6 @@
 # Installation Guide — Copilot OpenAI-Compatible API Wrapper
 
-> **Fresh-machine setup for Linux and macOS — from GitHub clone to all 9 containers running.**
+> **Fresh-machine setup for Linux and macOS — from GitHub clone to all 11 runtime containers running.**
 
 ---
 
@@ -27,7 +27,7 @@
 
 ## 1. Overview
 
-This project wraps Microsoft Copilot behind a standard OpenAI- and Anthropic-compatible REST API. Nine Docker containers handle every part of the stack:
+This project wraps Microsoft Copilot behind a standard OpenAI- and Anthropic-compatible REST API. Eleven runtime containers handle the full stack:
 
 | # | Container | Port(s) | What it does |
 |---|---|---|---|
@@ -40,6 +40,8 @@ This project wraps Microsoft Copilot behind a standard OpenAI- and Anthropic-com
 | C7b | `openclaw-cli` | — | OpenClaw CLI / TUI |
 | C8 | `hermes-agent` | — | Hermes Agent — persistent memory, skills, cron jobs |
 | C9 | `c9-jokes` | **6090** | Validation console — chat UI, batch pairs, logs, health dashboard |
+| C10 | `c10-sandbox` | — | Internal agent workspace sandbox used by C9 `/api/agent/*` |
+| C11 | `c11-sandbox` | — | Internal multi-agent sandbox used by C9 `/api/multi-agent/*` |
 
 All containers share the `copilot-net` Docker bridge network. Only the ports listed above are exposed to the host.
 
@@ -132,7 +134,7 @@ cd copilot-wraper/copilot-openai-wrapper
 You should see these key files:
 
 ```
-docker-compose.yml          # Full 9-container stack definition
+docker-compose.yml          # Full C1-C11 runtime stack definition
 .env.example                # Configuration template
 Dockerfile                  # C1 (FastAPI server)
 Dockerfile.browser          # C3 (Headless Chrome + noVNC)
@@ -143,6 +145,8 @@ Dockerfile.openclaw-gw      # C7a (OpenClaw gateway)
 Dockerfile.openclaw-cli     # C7b (OpenClaw CLI)
 Dockerfile.hermes           # C8 (Hermes Agent)
 Dockerfile.c9-jokes         # C9 (Validation console)
+Dockerfile.c10-sandbox      # C10 (agent sandbox)
+Dockerfile.c11-sandbox      # C11 (multi-agent sandbox)
 start.sh                    # Automated C1+C3 startup script
 cluster-start.sh            # Interactive agent launcher
 ```
@@ -212,7 +216,7 @@ Then in the C3 authentication step (Section 7), log in to `https://m365.cloud.mi
 Docker builds all images from source. This only runs on first install or after a `git pull` that changes a Dockerfile.
 
 ```bash
-# Build all 9 container images
+# Build all runtime images
 docker compose build
 
 # Expected build time (first run, with internet):
@@ -225,7 +229,9 @@ docker compose build
 # C7b — ~2 min  (Node.js 22 + openclaw)
 # C8  — ~6 min  (Python + uv + Hermes git clone v2026.3.17 + submodules)
 # C9  — ~1 min  (Python + fastapi + uvicorn + jinja2)
-# Total: ~15–30 min depending on internet speed
+# C10 — ~1 min  (Python sandbox runtime)
+# C11 — ~1 min  (Python multi-agent sandbox runtime)
+# Total: ~15–35 min depending on internet speed
 ```
 
 > **Clean build** (if you hit a stale-cache issue):
@@ -309,7 +315,7 @@ If the noVNC flow doesn't work (corporate proxy, VPN, etc.):
 
 ## 8. Start the Full Stack
 
-After authentication, start all 9 containers:
+After authentication, start all 11 runtime containers (C1-C11):
 
 ```bash
 docker compose up -d
@@ -317,6 +323,39 @@ docker compose ps
 ```
 
 You should see all services listed as `running` or `healthy`. The first full start takes ~30–60 seconds for all health checks to pass.
+
+### 8.1 Quick start: clone → build → auth → run C1-C11
+
+```bash
+# 1. Clone the repo
+git clone https://github.com/zumanm1/copilot-wraper.git
+cd copilot-wraper/copilot-openai-wrapper
+
+# 2. Create your env file
+cp .env.example .env
+
+# 3. Build all images
+docker compose build
+
+# 4. Start C1 + C3 first for authentication
+docker compose up -d app browser-auth
+
+# 5. Open the C3 noVNC browser and log in
+open http://localhost:6080          # macOS
+# xdg-open http://localhost:6080    # Linux
+
+# 6. Extract cookies into .env
+curl -X POST http://localhost:8001/extract
+curl -X POST http://localhost:8000/v1/reload-config
+
+# 7. Start the full runtime stack
+docker compose up -d
+
+# 8. Verify C1-C11
+docker compose ps
+curl http://localhost:8000/health
+curl http://localhost:6090/api/status
+```
 
 **Using the automated startup script:**
 ```bash
@@ -355,6 +394,10 @@ curl http://localhost:18789/healthz
 curl http://localhost:6090/api/status
 # → JSON dict with keys for each container
 
+# ── C10 / C11 — Internal sandboxes ───────────────────────────
+docker compose exec c10-sandbox curl -sf http://localhost:8100/health
+docker compose exec c11-sandbox curl -sf http://localhost:8200/health
+
 # ── Agent containers (health via exec) ───────────────────────
 docker compose exec agent-terminal       curl -sf http://localhost:8080/health
 docker compose exec claude-code-terminal curl -sf http://localhost:8080/health
@@ -377,6 +420,8 @@ docker compose exec hermes-agent         curl -sf http://localhost:8080/health
 | C7b | `openclaw-cli` | `docker compose exec openclaw-cli curl -sf http://localhost:8080/health` | `ok` |
 | C8 | `hermes-agent` | `docker compose exec hermes-agent curl -sf http://localhost:8080/health` | `ok` |
 | C9 | `c9-jokes` | `curl http://localhost:6090/api/status` | JSON dict |
+| C10 | `c10-sandbox` | `docker compose exec c10-sandbox curl -sf http://localhost:8100/health` | `200 OK` JSON |
+| C11 | `c11-sandbox` | `docker compose exec c11-sandbox curl -sf http://localhost:8200/health` | `200 OK` JSON |
 
 ---
 
@@ -390,13 +435,15 @@ docker compose exec hermes-agent         curl -sf http://localhost:8080/health
 | **C3 Setup** | `http://localhost:8001/setup` | Portal profile configuration form |
 | **C7a Gateway** | `http://localhost:18789` | OpenClaw WebSocket gateway |
 | **C9 Console** | `http://localhost:6090` | Validation dashboard — chat, pairs, logs, health |
+| **C10 Sandbox** | Internal only (`c10-sandbox:8100`) | Used by C9 `GET /api/agent/run` and related `/api/agent/*` APIs |
+| **C11 Sandbox** | Internal only (`c11-sandbox:8200`) | Used by C9 `GET /api/multi-agent/run` and related `/api/multi-agent/*` APIs |
 
 **C9 Pages:**
 
 | Page | URL | Purpose |
 |---|---|---|
 | Dashboard | `http://localhost:6090/` | Health overview for all containers |
-| Chat | `http://localhost:6090/chat` | Chat with any agent; thinking mode + file upload |
+| Chat | `http://localhost:6090/chat` | Chat with any agent; live token streaming, thinking mode, and file upload |
 | Pairs | `http://localhost:6090/pairs` | Batch: one prompt → multiple agents |
 | Logs | `http://localhost:6090/logs` | All chat + validation history with timing |
 | Health | `http://localhost:6090/health` | Live health snapshots |
@@ -484,6 +531,8 @@ docker compose ps
 > - `openclaw-config` — C7a gateway configuration
 > - `hermes-config` — C8 Hermes Agent memory, skills, cron jobs
 > - `c9-data` — C9 SQLite database (all chat logs, pair results, health history)
+> - `c10-workspace` — C10 agent workspace files
+> - `c11-workspace` — C11 multi-agent workspace files
 
 ---
 
@@ -507,6 +556,8 @@ docker image rm \
   copilot-openclaw-cli:latest \
   copilot-hermes-agent:latest \
   copilot-c9-jokes:latest \
+  copilot-c10-sandbox:latest \
+  copilot-c11-sandbox:latest \
   2>/dev/null || true
 
 # Remove the cloned repository
@@ -601,10 +652,10 @@ ${HOME}/Library/Application Support/Google/Chrome Canary
 
 ### Docker Desktop memory limit
 
-Docker Desktop allocates a fixed amount of memory to the Docker VM. For the full 9-container stack:
+Docker Desktop allocates a fixed amount of memory to the Docker VM. For the full C1-C11 stack:
 
 1. Open Docker Desktop → Settings (gear icon) → Resources
-2. Set **Memory** to at least **8 GB** (12 GB recommended if running all agents simultaneously)
+2. Set **Memory** to at least **8 GB** (12 GB recommended for the full C1-C11 stack)
 3. Set **Disk image size** to at least **30 GB**
 4. Click "Apply & restart"
 
@@ -758,6 +809,8 @@ All dependencies are managed inside Docker — you do not need Python, Node.js, 
 | C7b | `node:22-alpine` | openclaw@2026.3.13 |
 | C8 | `python:3.11-slim` | uv, hermes-agent v2026.3.17 (git clone), ripgrep, ffmpeg |
 | C9 | `python:3.11-slim` | fastapi, uvicorn, httpx, jinja2, python-multipart |
+| C10 | `python:3.11-slim` | FastAPI sandbox runtime for single-agent workspace execution |
+| C11 | `python:3.11-slim` | FastAPI sandbox runtime for multi-agent session execution |
 
 ---
 

@@ -51,6 +51,65 @@ def _make_mock_http(response_json: dict, status: int = 200):
     return mock_client
 
 
+class _FakeStreamResponse:
+    def __init__(self, *, status_code: int = 200, lines: list[str] | None = None, body: str = ""):
+        self.status_code = status_code
+        self._lines = lines or []
+        self._body = body
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def aiter_lines(self):
+        for line in self._lines:
+            yield line
+
+    async def aread(self):
+        return self._body.encode("utf-8")
+
+
+def _make_c1_sse_lines(tokens: list[str]) -> list[str]:
+    chat_id = "chatcmpl-stream"
+    created = 1700000000
+    base = {"id": chat_id, "object": "chat.completion.chunk", "created": created, "model": "copilot"}
+    lines = [
+        "data: " + json.dumps({
+            **base,
+            "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": None}],
+        })
+    ]
+    for token in tokens:
+        lines.append(
+            "data: " + json.dumps({
+                **base,
+                "choices": [{"index": 0, "delta": {"content": token}, "finish_reason": None}],
+            })
+        )
+    lines.append(
+        "data: " + json.dumps({
+            **base,
+            "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+        })
+    )
+    lines.append("data: [DONE]")
+    return lines
+
+
+def _parse_c9_sse(raw_sse: str) -> list[dict]:
+    events: list[dict] = []
+    for line in raw_sse.splitlines():
+        if not line.startswith("data: "):
+            continue
+        payload = line[len("data: "):].strip()
+        if not payload or payload == "[DONE]":
+            continue
+        events.append(json.loads(payload))
+    return events
+
+
 # ── TestClient fixture ────────────────────────────────────────────────────────
 
 @pytest.fixture
@@ -287,6 +346,113 @@ class TestC9ApiChat:
             r = c9_app.post("/api/chat", json={"prompt": "Joke"})
         assert r.status_code == 200
         assert captured_headers.get("X-Agent-ID") == "c9-jokes"
+
+    def test_streaming_chat_returns_sse_and_persists_session(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        mock_http = _make_mock_http(_make_c1_ok())
+        mock_http.stream = MagicMock(return_value=_FakeStreamResponse(
+            lines=_make_c1_sse_lines(["Why ", "streaming ", "works."])
+        ))
+
+        with patch.object(c9_mod, "_get_http", return_value=mock_http):
+            r = self._post_chat(c9_app, {
+                "agent_id": "c9-jokes",
+                "prompt": "Tell me a joke",
+                "stream": True,
+            })
+
+        assert r.status_code == 200
+        assert "text/event-stream" in r.headers.get("content-type", "")
+        events = _parse_c9_sse(r.text)
+        assert [ev["type"] for ev in events[:-1]] == ["token", "token", "token"]
+        done = events[-1]
+        assert done["type"] == "done"
+        assert done["text"] == "Why streaming works."
+        assert done["session_id"].startswith("cs_")
+        assert done["token_estimate"] > 0
+
+        r_sess = c9_app.get(f"/api/chat/session/{done['session_id']}")
+        assert r_sess.status_code == 200
+        msgs = r_sess.json()["messages"]
+        assert len(msgs) == 2
+        assert msgs[0]["role"] == "user"
+        assert msgs[0]["content"] == "Tell me a joke"
+        assert msgs[1]["role"] == "assistant"
+        assert msgs[1]["content"] == "Why streaming works."
+
+    def test_streaming_chat_forwards_messages_and_attachments(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        captured = {}
+
+        def capture_stream(method, url, *, headers=None, json=None, timeout=None, **kwargs):
+            captured["method"] = method
+            captured["url"] = url
+            captured["headers"] = dict(headers or {})
+            captured["json"] = json or {}
+            captured["timeout"] = timeout
+            return _FakeStreamResponse(lines=_make_c1_sse_lines(["Attached reply"]))
+
+        mock_http = _make_mock_http(_make_c1_ok())
+        mock_http.stream = capture_stream
+        with patch.object(c9_mod, "_get_http", return_value=mock_http):
+            r = self._post_chat(c9_app, {
+                "agent_id": "c9-jokes",
+                "prompt": "Summarise the attachment",
+                "chat_mode": "deep",
+                "work_mode": "web",
+                "stream": True,
+                "messages": [{"role": "user", "content": "Summarise the attachment"}],
+                "attachments": [{"file_id": "fid_xyz", "filename": "doc.txt"}],
+            })
+
+        assert r.status_code == 200
+        assert captured["method"] == "POST"
+        assert captured["headers"]["X-Agent-ID"] == "c9-jokes"
+        assert captured["headers"]["X-Chat-Mode"] == "deep"
+        assert captured["headers"]["X-Work-Mode"] == "web"
+        assert captured["json"]["stream"] is True
+        content = captured["json"]["messages"][0]["content"]
+        assert isinstance(content, list)
+        types = [part["type"] for part in content]
+        assert "text" in types
+        assert "file_ref" in types
+        file_ref = next(part for part in content if part["type"] == "file_ref")
+        assert file_ref["file_id"] == "fid_xyz"
+        assert file_ref["filename"] == "doc.txt"
+
+    def test_streaming_chat_emits_error_without_persisting_messages(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        mock_http = _make_mock_http(_make_c1_ok())
+        mock_http.stream = MagicMock(return_value=_FakeStreamResponse(
+            status_code=503,
+            body=json.dumps({"detail": "Upstream timeout from Copilot"}),
+        ))
+
+        with patch.object(c9_mod, "_get_http", return_value=mock_http):
+            r = self._post_chat(c9_app, {
+                "agent_id": "c9-jokes",
+                "prompt": "Will fail",
+                "stream": True,
+            })
+
+        assert r.status_code == 200
+        events = _parse_c9_sse(r.text)
+        assert len(events) == 1
+        assert events[0]["type"] == "error"
+        assert "Upstream timeout" in events[0]["message"]
+
+        r_sessions = c9_app.get("/api/chat/sessions?limit=10")
+        assert r_sessions.status_code == 200
+        assert r_sessions.json() == []
+
+        r_logs = c9_app.get("/api/logs")
+        assert r_logs.status_code == 200
+        latest = r_logs.json()["rows"][0]
+        assert latest["source"] == "chat-stream"
+        assert "Upstream timeout" in (latest["response_excerpt"] or "")
 
 
 # ── /api/validate tests ───────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 # 06 — Testing & Validation
 
-> **Last updated: 2026-03-27**
+> **Last updated: 2026-03-31**
 > How to verify every layer of the stack is working — from a single `curl` to full parallel batch validation using the C9 console.
 
 ---
@@ -354,6 +354,27 @@ data: {"id":"chatcmpl-xyz","choices":[{"delta":{"content":"1"},"index":0}]}
 data: {"id":"chatcmpl-xyz","choices":[{"delta":{"content":", 2"},"index":0}]}
 ...
 data: [DONE]
+```
+
+**C9 proxy path:**
+
+```bash
+curl -N -X POST http://localhost:6090/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id":"c8-hermes",
+    "messages":[{"role":"user","content":"Count to 5 slowly"}],
+    "stream":true
+  }'
+```
+
+✅ **Pass:** C9 emits incremental `token` events followed by one `done` event.
+
+```text
+data: {"type":"token","text":"1"}
+data: {"type":"token","text":", 2"}
+...
+data: {"type":"done","text":"1, 2, 3, 4, 5","session_id":"cs_ab12cd34","token_estimate":23,"http_status":200}
 ```
 
 ---

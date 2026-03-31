@@ -463,6 +463,58 @@
     return bubble;
   }
 
+  function parseSseBlock(block) {
+    var dataLines = block.split('\n').filter(function(line) {
+      return line.indexOf('data:') === 0;
+    });
+    if (!dataLines.length) return null;
+    var payload = dataLines.map(function(line) {
+      return line.slice(5).trim();
+    }).join('\n');
+    if (!payload || payload === '[DONE]') return null;
+    try {
+      return JSON.parse(payload);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function readChatStream(response, onEvent) {
+    if (!response.body) throw new Error('Streaming response body missing');
+    var reader = response.body.getReader();
+    var decoder = new TextDecoder();
+    var buffer = '';
+    while (true) {
+      var part = await reader.read();
+      if (part.done) break;
+      buffer += decoder.decode(part.value, { stream: true });
+      var boundary = buffer.indexOf('\n\n');
+      while (boundary !== -1) {
+        var block = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        var event = parseSseBlock(block);
+        if (event) onEvent(event);
+        boundary = buffer.indexOf('\n\n');
+      }
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) {
+      var trailing = parseSseBlock(buffer.trim());
+      if (trailing) onEvent(trailing);
+    }
+  }
+
+  async function readJsonError(response) {
+    var raw = await response.text();
+    if (!raw) return 'Request failed';
+    try {
+      var parsed = JSON.parse(raw);
+      return parsed.error || parsed.detail || parsed.message || raw;
+    } catch (e) {
+      return raw;
+    }
+  }
+
   /* ── Session management ──────────────────────────────────────────────── */
   function startNewSession() {
     currentSessionId = '';
@@ -639,11 +691,13 @@
     loader.className = 'bubble assistant loading';
     loader.innerHTML = '<div class="bubble-header">' + agentLabel() + '</div>' +
                        '<div class="bubble-body">Thinking…</div>';
+    var loaderBody = loader.querySelector('.bubble-body');
     chatEmpty.style.display = 'none';
     chatWindow.appendChild(loader);
     chatWindow.scrollTop = chatWindow.scrollHeight;
 
     var t0 = performance.now();
+    var httpStatus = '?';
     try {
       // Build request — always send full history so C1 has context
       var reqBody = {
@@ -651,6 +705,7 @@
         prompt:     promptText,
         chat_mode:  thinkingMode,
         work_mode:  workMode,
+        stream:     true,
         messages:   chatHistory.slice(),  // full conversation history
         session_id: currentSessionId
       };
@@ -663,45 +718,60 @@
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(reqBody)
       });
-      var j = await res.json();
-      var elapsed = ((performance.now() - t0) / 1000).toFixed(1);
-      loader.remove();
-
-      if (j.ok && j.text) {
-        // Persist session id returned by server
-        if (j.session_id) saveSessionId(j.session_id);
-        // Add assistant reply to history
-        chatHistory.push({ role: 'assistant', content: j.text });
-        appendBubble('assistant', renderMarkdown(j.text),
-          'HTTP ' + j.http_status + ' · ' + elapsed + 's · ' + agent_id, true);
-        // Update token counter
-        var tok = j.token_estimate || estimateTokens(chatHistory);
-        updateTokenUI(tok);
-        // Record to global token-usage DB + update global badge
-        if (window.updateGlobalTokens) window.updateGlobalTokens(tok);
-        fetch('/api/token-usage/record', {
-          method: 'POST', headers: {'Content-Type':'application/json'},
-          body: JSON.stringify({
-            agent_id:   agent_id,
-            page:       'chat',
-            tokens:     tok,
-            session_id: currentSessionId || '',
-            status:     'ok'
-          })
-        }).catch(function(){});
-        // Auto-compress if needed
-        await maybeCompress();
-      } else {
-        // Remove last user turn from history on error (avoid corrupting context)
-        chatHistory.pop();
-        var errMsg = j.error || j.raw || JSON.stringify(j);
-        appendBubble('error', errMsg,
-          'HTTP ' + (j.http_status || '?') + ' · ' + elapsed + 's', false);
+      httpStatus = res.status;
+      var ct = res.headers.get('content-type') || '';
+      if (ct.indexOf('text/event-stream') === -1) {
+        throw new Error(await readJsonError(res));
       }
+
+      var fullText = '';
+      var streamDone = null;
+      var streamError = '';
+      await readChatStream(res, function(event) {
+        if (event.type === 'token') {
+          fullText += event.text || '';
+          loader.className = 'bubble assistant';
+          loaderBody.innerHTML = fullText ? esc(fullText).replace(/\n/g, '<br>') : 'Thinking…';
+          chatWindow.scrollTop = chatWindow.scrollHeight;
+        } else if (event.type === 'done') {
+          streamDone = event;
+          if (event.text && !fullText) fullText = event.text;
+        } else if (event.type === 'error') {
+          streamError = event.message || 'Streaming failed';
+        }
+      });
+
+      var elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+      if (loader.isConnected) loader.remove();
+
+      if (streamError) throw new Error(streamError);
+      if (!streamDone || !fullText) throw new Error('C1 returned an empty reply');
+
+      if (streamDone.session_id) saveSessionId(streamDone.session_id);
+      chatHistory.push({ role: 'assistant', content: fullText });
+      appendBubble('assistant', renderMarkdown(fullText),
+        'HTTP ' + (streamDone.http_status || httpStatus) + ' · ' + elapsed + 's · ' + agent_id, true);
+
+      var tok = streamDone.token_estimate || estimateTokens(chatHistory);
+      updateTokenUI(tok);
+      if (window.updateGlobalTokens) window.updateGlobalTokens(tok);
+      fetch('/api/token-usage/record', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          agent_id:   agent_id,
+          page:       'chat',
+          tokens:     tok,
+          session_id: streamDone.session_id || currentSessionId || '',
+          status:     'ok'
+        })
+      }).catch(function(){});
+      await maybeCompress();
     } catch(e) {
       chatHistory.pop();
-      loader.remove();
-      appendBubble('error', 'Network error: ' + e.message, null, false);
+      if (loader.isConnected) loader.remove();
+      var elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+      appendBubble('error', e.message || 'Streaming failed',
+        'HTTP ' + httpStatus + ' · ' + elapsed + 's', false);
     }
     busy = false;
     sendBtn.disabled = false;

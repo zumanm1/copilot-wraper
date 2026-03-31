@@ -1,6 +1,6 @@
 # C9 — Validation Console Guide (APP2)
 
-> **Last updated: 2026-03-27**
+> **Last updated: 2026-03-31**
 > Complete reference for APP2: the C9 validation console — UI, UX, backend, database, and API.
 
 ---
@@ -93,7 +93,7 @@ The **landing page** — a real-time health card grid showing the status of ever
 
 ### Chat `/chat`
 
-**Single-agent chat interface** — send one message to one agent and see the response.
+**Single-agent chat interface** — send one message to one agent and see the response stream live.
 
 **Controls:**
 | Control | Location | What it does |
@@ -106,9 +106,9 @@ The **landing page** — a real-time health card grid showing the status of ever
 | Send button | Bottom-right | Submit the message |
 
 **Response area:**
-- Shows the agent's response text
-- Shows elapsed time in milliseconds
-- Shows HTTP status code
+- Shows the agent's response text as tokens arrive from `POST /api/chat`
+- Shows elapsed time in milliseconds when the stream completes
+- Shows HTTP status code on completion or on error
 
 **File attachments:**
 - Click "+" → choose "📋 Add content" (paste text) or "⬆ Upload files" (file picker)
@@ -120,6 +120,7 @@ The **landing page** — a real-time health card grid showing the status of ever
 **Persistence:**
 - Thinking mode preference saved to `localStorage['chatThinkingMode']`
 - Agent selection not persisted (defaults to first agent on reload)
+- Session history is sent back as `messages[]` on subsequent turns; `session_id` is reused when present
 
 ---
 
@@ -174,15 +175,16 @@ The **landing page** — a real-time health card grid showing the status of ever
 | Response | First 500 characters of the response (or error message) |
 | Status | HTTP status code from C1 |
 | Time (ms) | `elapsed_ms` — round-trip time |
-| Source | `chat` (from /chat page) or `validate` (from /pairs page) |
+| Source | `chat`, `chat-stream`, or `validate` |
 
 **Filters:**
 - Agent ID dropdown — filter by specific agent
-- Source filter — show only `chat` or only `validate` entries
+- Source filter — show only `chat`, `chat-stream`, or `validate` entries
 - Pagination — next/prev buttons
 
 **How to read the Source column:**
-- `chat` — message was sent from the /chat page or via `POST /api/chat`
+- `chat` — non-streaming chat request sent via `POST /api/chat`
+- `chat-stream` — streaming chat request sent via `POST /api/chat` with `stream:true`
 - `validate` — message was sent from the /pairs page or via `POST /api/validate`
 
 ---
@@ -238,16 +240,18 @@ User opens /chat
   └── Types: "Summarise my recent project files"
   └── Clicks Send
         └── JavaScript: POST /api/chat
-              Body: {agent_id:"c8-hermes", prompt:"...", chat_mode:"deep", work_mode:"work"}
-              └── C9 _chat_one() → POST http://app:8000/v1/chat/completions
+              Body: {agent_id:"c8-hermes", prompt:"...", chat_mode:"deep", work_mode:"work", stream:true}
+              └── C9 api_chat(stream=true) → POST http://app:8000/v1/chat/completions
                     Header: X-Agent-ID: c8-hermes
                     Header: X-Chat-Mode: deep
                     Header: X-Work-Mode: work
-                    └── C1 → Copilot → response
-              └── C9 writes to chat_logs (source='chat', elapsed_ms=N)
-              └── Returns {ok:true, response:"...", elapsed_ms:N}
-  └── Response text displayed in UI
-  └── Elapsed time shown
+                    Body includes stream:true
+                    └── C1 → Copilot → streaming response
+              └── C9 emits SSE `token` events while text arrives
+              └── C9 writes to chat_logs (source='chat-stream', elapsed_ms=N) after completion
+              └── Final SSE event: {type:"done", text:"...", session_id:"...", token_estimate:N}
+  └── Response text grows in the UI as tokens arrive
+  └── Elapsed time shown when the stream finishes
 ```
 
 ### Flow 2: Upload a file and ask about it
@@ -263,9 +267,9 @@ User opens /chat
   └── Types: "What are the key findings?"
   └── Clicks Send
         └── JavaScript: POST /api/chat
-              Body: {agent_id:"c8-hermes", prompt:"...",
+              Body: {agent_id:"c8-hermes", prompt:"...", stream:true,
                      attachments:[{file_id:"abc123", filename:"report.pdf"}]}
-              └── C9 _chat_one() → POST http://app:8000/v1/chat/completions
+              └── C9 api_chat(stream=true) → POST http://app:8000/v1/chat/completions
                     Content: [{type:"text", text:"What are the key findings?"},
                                {type:"file_ref", file_id:"abc123", filename:"report.pdf"}]
                     └── C1 resolves file_ref → injects PDF text into prompt → Copilot
@@ -305,7 +309,7 @@ User opens /pairs
 ### Key internal functions
 
 ```python
-# Single agent chat call (used by /api/chat and /api/validate)
+# Single agent non-stream chat call (used by /api/validate and /api/chat when stream=false)
 async def _chat_one(agent_id, prompt, c1_url,
                     chat_mode="", attachments=None, work_mode="") -> dict:
     # Builds content blocks (text + file_ref attachments)
@@ -466,7 +470,7 @@ Full reference: [`API-DOCUMENTATION/04-api-reference.md`](../API-DOCUMENTATION/0
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/api/status` | Health probe all containers; writes health_snapshots |
-| `POST` | `/api/chat` | Single chat call to one agent; writes chat_logs (source='chat') |
+| `POST` | `/api/chat` | Single chat call to one agent; JSON by default, SSE when `stream:true` |
 | `POST` | `/api/validate` | Batch run to multiple agents; writes chat_logs + pair_results |
 | `POST` | `/api/upload` | Upload file to C1 `/v1/files`; returns file_id |
 | `GET` | `/api/logs` | Paginated chat_logs (filterable by agent, source) |

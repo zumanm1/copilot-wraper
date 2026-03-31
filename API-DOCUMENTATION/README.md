@@ -117,7 +117,7 @@ C1 and C3 require **no code changes**.
 │  FastAPI + Jinja2 + SQLite (c9-data volume)                                  │
 │                                                                              │
 │  /            Dashboard    — health cards for all containers                 │
-│  /chat        Chat UI      — single agent, thinking mode, file upload        │
+│  /chat        Chat UI      — single agent, live streaming, file upload        │
 │  /pairs       Pairs UI     — batch multi-agent (parallel / sequential)       │
 │  /logs        Logs         — full audit trail (source, elapsed_ms)           │
 │  /health      Health       — container health snapshots                      │
@@ -155,7 +155,7 @@ C1 and C3 require **no code changes**.
 | Page | URL | Purpose |
 |------|-----|---------|
 | Dashboard | `http://localhost:6090/` | All container health at a glance |
-| Chat | `http://localhost:6090/chat` | Interactive single-agent chat |
+| Chat | `http://localhost:6090/chat` | Interactive single-agent chat with live token streaming |
 | Pairs | `http://localhost:6090/pairs` | Batch multi-agent validation |
 | Logs | `http://localhost:6090/logs` | Full audit trail |
 | Health | `http://localhost:6090/health` | Health snapshot history |

@@ -614,8 +614,8 @@ C9 FastAPI (c9_jokes/app.py)
   │    /sessions      → sessions.html   (C1 session proxy)
   │    /api           → api_reference.html  (GET /api/docs → 307 /api)
   │
-  ├─ JSON API routes
-  │    POST /api/chat        → proxies to C1 /v1/chat/completions
+  ├─ JSON + SSE API routes
+  │    POST /api/chat        → proxies to C1 /v1/chat/completions; JSON by default, SSE when stream:true
   │    POST /api/validate    → runs prompt against N agents (parallel/sequential)
   │    POST /api/upload      → proxies to C1 /v1/files
   │    GET  /api/status      → probes all containers, writes health_snapshots
@@ -635,6 +635,7 @@ C9 FastAPI (c9_jokes/app.py)
 | **Thinking mode** | Dropdown: Auto / Quick Response / Think Deeper → sends `X-Chat-Mode` to C1 |
 | **Work / Web toggle** | Scopes M365 context → sends `X-Work-Mode` to C1 |
 | **File upload** | "+" button → uploads to C1 `/v1/files` → attaches `file_id` to message |
+| **Live token streaming** | `/chat` reads `POST /api/chat` as SSE and renders assistant text incrementally |
 | **Batch validation** | Run one prompt against multiple agents simultaneously |
 | **Parallel mode** | All agents run concurrently via `asyncio.gather` |
 | **Source tracking** | Logs distinguish `chat` vs `validate` calls |
@@ -750,12 +751,13 @@ C9 returns {ok:true, file_id:"abc123", filename:"report.pdf"}
 
 User browser → POST http://localhost:6090/api/chat
   Body: {agent_id:"c8-hermes", prompt:"Summarise this document",
-         attachments:[{file_id:"abc123", filename:"report.pdf"}]}
+         attachments:[{file_id:"abc123", filename:"report.pdf"}],
+         stream:true}
   │
   ▼
-C9 _chat_one("c8-hermes", prompt, attachments=[{file_id:"abc123"}])
+C9 api_chat(stream=true)
   └─ POST http://app:8000/v1/chat/completions
-       Body: {model:"copilot", messages:[{
+       Body: {model:"copilot", stream:true, messages:[{
          role:"user",
          content:[
            {type:"text", text:"Summarise this document"},
@@ -768,6 +770,8 @@ C9 _chat_one("c8-hermes", prompt, attachments=[{file_id:"abc123"}])
                 entry = _file_store["abc123"]
                 inject "[Attached file: report.pdf]\n{entry.text}" into prompt
        └─ → Copilot receives full prompt + document text
+  └─ C9 streams `token` events to the browser as chunks arrive
+  └─ On completion, C9 persists the full reply + session metadata and emits `done`
 ```
 
 ---

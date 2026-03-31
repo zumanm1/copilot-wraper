@@ -334,7 +334,7 @@ xdg-open http://localhost:6090      # Linux
 | Page | URL | Purpose |
 |---|---|---|
 | Dashboard | `http://localhost:6090/` | Container health overview |
-| Chat | `http://localhost:6090/chat` | Chat with any agent (thinking mode + file upload) |
+| Chat | `http://localhost:6090/chat` | Chat with any agent with live token streaming, thinking mode, and file upload |
 | Pairs | `http://localhost:6090/pairs` | Batch: run one prompt against multiple agents |
 | Logs | `http://localhost:6090/logs` | Full history — source, elapsed_ms, response excerpts |
 | Health | `http://localhost:6090/health` | Live health snapshots for all containers |
@@ -1514,7 +1514,7 @@ xdg-open http://localhost:6090      # Linux
 | Page | URL | Description |
 |---|---|---|
 | **Dashboard** | `/` | Real-time health cards for C1–C8, C10, and C11 |
-| **Chat** | `/chat` | Single-turn chat — select agent, thinking mode, Work/Web toggle, file upload |
+| **Chat** | `/chat` | Single-agent chat with live token streaming, thinking mode, Work/Web toggle, and file upload |
 | **Pairs** | `/pairs` | Batch mode — run one prompt against multiple agents (sequential or parallel) |
 | **Logs** | `/logs` | Full history of all chat + validation calls (source, elapsed_ms, response excerpt, errors) |
 | **Health** | `/health` | Timestamped container health snapshots |
@@ -1525,7 +1525,8 @@ xdg-open http://localhost:6090      # Linux
 - **Thinking mode** — dropdown pill: Auto / Quick Response / Think Deeper (maps to Copilot's balanced / precise / creative styles via `X-Chat-Mode` header to C1)
 - **Work / Web toggle** — controls M365 scope via `X-Work-Mode` header to C1
 - **File upload** — "+" button supports images (PNG, JPG, GIF, WebP) and documents (PDF, TXT, DOCX, XLSX, PPTX); files are uploaded to C1 `/v1/files` and referenced by `file_id` in the chat message
-- **Source tracking** — Logs page shows `chat` vs `validate` source column so you can distinguish interactive chats from batch validation runs
+- **Live token streaming** — `/chat` sends `POST /api/chat` with `stream:true` and renders assistant text progressively while keeping the same `messages[]`, attachments, and session state as the JSON path
+- **Source tracking** — Logs page shows `chat`, `chat-stream`, and `validate` in the source column so you can distinguish JSON chat, streamed chat, and batch validation runs
 - **Elapsed time** — Every log row shows `elapsed_ms` so you can benchmark response times across agents and thinking modes
 
 ### C9 API Endpoints
@@ -1533,7 +1534,7 @@ xdg-open http://localhost:6090      # Linux
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/api/status` | Health dict for all containers |
-| `POST` | `/api/chat` | Single chat call to one agent |
+| `POST` | `/api/chat` | Single chat call to one agent; JSON by default, SSE when `stream:true` |
 | `POST` | `/api/validate` | Batch validation: prompt → N agents (sequential or parallel) |
 | `POST` | `/api/upload` | Upload a file to C1; returns `{file_id, filename}` |
 | `GET` | `/api/logs` | Paginated chat + validation history |

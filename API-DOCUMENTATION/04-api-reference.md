@@ -481,7 +481,7 @@ On POST: writes to `.env` and triggers `POST /v1/reload-config` on C1.
 | Route | Page | Description |
 |---|---|---|
 | `GET /` | Dashboard | Health card grid for all containers |
-| `GET /chat` | Chat | Single-agent chat with thinking mode + file upload |
+| `GET /chat` | Chat | Single-agent chat with live streaming, thinking mode, and file upload |
 | `GET /pairs` | Pairs | Batch multi-agent validation |
 | `GET /logs` | Logs | Full audit trail (chat + validate history) |
 | `GET /health` | Health | Container health snapshots |
@@ -516,7 +516,7 @@ curl http://localhost:6090/api/status
 
 ### `POST /api/chat`
 
-Send a single chat message to one agent via C1.
+Send a single chat message to one agent via C1. By default this returns JSON. If the request body includes `"stream": true`, C9 returns `text/event-stream` with C9-specific SSE events while preserving the same `messages[]`, attachments, and session handling.
 
 ```bash
 curl -X POST http://localhost:6090/api/chat \
@@ -539,15 +539,38 @@ curl -X POST http://localhost:6090/api/chat \
 }
 ```
 
+Streaming example:
+
+```bash
+curl -N -X POST http://localhost:6090/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "c8-hermes",
+    "messages": [{"role":"user","content":"What is 2+2?"}],
+    "stream": true
+  }'
+```
+
+Example SSE events:
+
+```text
+data: {"type":"token","text":"2"}
+data: {"type":"token","text":"+2 equals 4."}
+data: {"type":"done","text":"2+2 equals 4.","session_id":"cs_ab12cd34","token_estimate":18,"http_status":200}
+```
+
 | Field | Type | Required | Description |
 |---|---|---|---|
 | `agent_id` | string | yes | Agent to send the message to |
-| `prompt` | string | yes | The user message text |
+| `prompt` | string | yes* | The user message text |
 | `chat_mode` | string | no | `auto`, `quick`, or `deep` |
 | `work_mode` | string | no | `work` or `web` |
 | `attachments` | array | no | List of `{file_id, filename}` objects |
+| `messages` | array | no | Full multi-turn message history; used when continuing a C9 chat session |
+| `session_id` | string | no | Existing C9 chat session identifier; generated if omitted |
+| `stream` | boolean | no | When `true`, returns SSE with `token`, `done`, and `error` events |
 
-Logged to `chat_logs` table with `source='chat'`.
+`prompt` or `messages` is required. Successful JSON chats are logged with `source='chat'`; successful streaming chats are logged with `source='chat-stream'`.
 
 ---
 
