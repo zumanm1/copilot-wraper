@@ -3373,6 +3373,11 @@ async def _ma_role_loop_c11(
 
 # ── /multi-Agento routes ──────────────────────────────────────────────────────
 
+@app.get("/multi-agento", response_class=HTMLResponse, include_in_schema=False)
+async def page_multi_agento_lower(request: Request, task: str = ""):
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/multi-Agento" + (f"?task={task}" if task else ""), status_code=301)
+
 @app.get("/multi-Agento", response_class=HTMLResponse, name="page_multi_agento")
 async def page_multi_agento(request: Request, task: str = ""):
     """Full-featured multi-agent IDE with C11 session-scoped workspace."""

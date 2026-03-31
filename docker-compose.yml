@@ -534,6 +534,7 @@ services:
     volumes:
       - ./c9_jokes:/app/c9_jokes
       - c9-data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
     working_dir: /app/c9_jokes
     networks:
       - copilot-net
