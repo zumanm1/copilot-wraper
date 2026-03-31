@@ -1,31 +1,114 @@
 {% extends "base.html" %}
 {% block title %}API reference{% endblock %}
 {% block content %}
-<h2>API reference</h2>
+<h2>API Reference</h2>
+<p style="color:var(--muted);font-size:.85rem;margin-top:-.25rem;">C9 Jokes app — port 6090</p>
 
-<h3>C9 endpoints (this service — port 6090)</h3>
+<h3>Core Endpoints</h3>
 <table>
   <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
   <tbody>
-    <tr><td>GET</td><td><code>/api/status</code></td><td>JSON health for all <code>TARGETS</code> keys plus <code>c3-status</code> (C3 <code>/status</code>); persists rows to <code>health_snapshots</code></td></tr>
+    <tr><td>GET</td><td><code>/api/status</code></td><td>JSON health for all <code>TARGETS</code> + <code>c3-status</code>; persists to <code>health_snapshots</code></td></tr>
     <tr><td>GET</td><td><code>/api/session-health</code></td><td>Proxies C3 M365 session LED data (active / expired)</td></tr>
-    <tr><td>GET</td><td><code>/api/health-history</code></td><td>Query: <code>?target=c1&amp;limit=10</code> — last snapshots for one target (or omit <code>target</code> for recent rows)</td></tr>
-    <tr><td>POST</td><td><code>/api/chat</code></td><td>Proxy chat to C1. Body: <code>{"agent_id":"c2-aider","prompt":"Tell me a joke"}</code>; logs to SQLite</td></tr>
-    <tr><td>POST</td><td><code>/api/validate</code></td><td>Pair validation. Body: <code>{"prompt":"…","parallel":true,"agent_ids":["c2-aider"]}</code> (omit <code>agent_ids</code> for all)</td></tr>
-    <tr><td>POST</td><td><code>/api/upload</code></td><td>Upload a file to C1. Multipart <code>file</code> field. Returns <code>{"ok":true,"file_id":"…","type":"text|image","preview":"…"}</code>. Use <code>file_id</code> in chat attachments.</td></tr>
+    <tr><td>GET</td><td><code>/api/health-history</code></td><td>Query: <code>?target=c1&amp;limit=10</code> — last snapshots for one target</td></tr>
+    <tr><td>POST</td><td><code>/api/chat</code></td><td>Proxy chat to C1. Body: <code>{"agent_id":"c2-aider","prompt":"…"}</code>; logs to SQLite</td></tr>
+    <tr><td>POST</td><td><code>/api/validate</code></td><td>Pair validation. Body: <code>{"prompt":"…","parallel":true,"agent_ids":["c2-aider"]}</code></td></tr>
+    <tr><td>POST</td><td><code>/api/upload</code></td><td>Upload file to C1. Multipart <code>file</code> field → <code>{"ok":true,"file_id":"…","type":"text|image"}</code></td></tr>
     <tr><td>GET</td><td><code>/api/validation-runs</code></td><td>Query: <code>?limit=10</code> — recent runs with <code>pairs</code> detail</td></tr>
     <tr><td>GET</td><td><code>/api/logs</code></td><td>Query: <code>?agent=c2-aider&amp;offset=0&amp;limit=20</code> — JSON chat log rows + total</td></tr>
-    <tr><td>GET</td><td><code>/</code></td><td>Dashboard — container status grid</td></tr>
-    <tr><td>GET</td><td><code>/health</code></td><td>Detailed health table + per-target history dots</td></tr>
-    <tr><td>GET</td><td><code>/pairs</code></td><td>Run pair validation from UI</td></tr>
-    <tr><td>GET</td><td><code>/chat</code></td><td>Interactive agent chat</td></tr>
-    <tr><td>GET</td><td><code>/logs</code></td><td>Chat log history (SQLite)</td></tr>
-    <tr><td>GET</td><td><code>/sessions</code></td><td>C1 <code>/v1/sessions</code> list</td></tr>
-    <tr><td>GET</td><td><code>/api</code></td><td>This API reference page</td></tr>
   </tbody>
 </table>
 
-<h3>Container health endpoints</h3>
+<h3>Agent Workspace Endpoints (C10 Sandbox)</h3>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td>GET</td><td><code>/api/agent/run</code></td>
+        <td><strong>SSE stream</strong> — run autonomous agent task. Query: <code>?task=…&amp;agent_id=…&amp;mode=work|web&amp;thinking=auto|quick|deep&amp;session_id=…&amp;project=…</code><br>
+        Events: <code>step</code>, <code>tool_call</code>, <code>observation</code>, <code>file_update</code>, <code>token_estimate</code>, <code>web_server</code>, <code>final</code>, <code>error</code></td></tr>
+    <tr><td>POST</td><td><code>/api/agent/stop</code></td><td>Stop the running agent task</td></tr>
+    <tr><td>POST</td><td><code>/api/agent/reset</code></td><td>Reset C10 workspace (delete all files)</td></tr>
+    <tr><td>GET</td><td><code>/api/agent/files</code></td><td>List workspace files. Query: <code>?project=…</code></td></tr>
+    <tr><td>GET</td><td><code>/api/agent/file</code></td><td>Read file content. Query: <code>?path=…</code></td></tr>
+    <tr><td>DELETE</td><td><code>/api/agent/file</code></td><td>Delete a file. Query: <code>?path=…</code></td></tr>
+    <tr><td>POST</td><td><code>/api/agent/file</code></td><td>Write file. Body: <code>{"path":"…","content":"…"}</code></td></tr>
+    <tr><td>GET</td><td><code>/api/agent/sessions</code></td><td>List recent agent sessions</td></tr>
+    <tr><td>POST</td><td><code>/api/agent/project</code></td><td>Create project folder. Body: <code>{"name":"…"}</code></td></tr>
+    <tr><td>GET</td><td><code>/api/agent/preview</code></td><td>Proxy web app running in C10. Query: <code>?port=5001</code></td></tr>
+    <tr><td>GET</td><td><code>/api/agent/token-usage</code></td><td>Token usage stats for current session</td></tr>
+  </tbody>
+</table>
+
+<h3>Multi-Agent Workspace Endpoints (C11 Sandbox)</h3>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td>GET</td><td><code>/api/multi-agent/run</code></td>
+        <td><strong>SSE stream</strong> — run multi-agent task across N roles. Query: <code>?task=…&amp;roles=builder,tester,…&amp;session_id=…</code><br>
+        Events: <code>pane_init</code>, <code>pane_update</code>, <code>pane_obs</code>, <code>pane_file</code>, <code>pane_done</code>, <code>pane_error</code>, <code>final</code>, <code>error</code></td></tr>
+    <tr><td>POST</td><td><code>/api/multi-agent/stop</code></td><td>Stop multi-agent session. Body: <code>{"session_id":"…"}</code></td></tr>
+    <tr><td>POST</td><td><code>/api/multi-agent/pause</code></td><td>Pause multi-agent session</td></tr>
+    <tr><td>POST</td><td><code>/api/multi-agent/resume</code></td><td>Resume paused session</td></tr>
+    <tr><td>POST</td><td><code>/api/multi-agent/inject</code></td><td>Inject message into a running pane. Body: <code>{"session_id":"…","role":"…","message":"…"}</code></td></tr>
+    <tr><td>GET</td><td><code>/api/multi-agent/files</code></td><td>List C11 workspace files. Query: <code>?session_id=…</code></td></tr>
+    <tr><td>GET</td><td><code>/api/multi-agent/sessions</code></td><td>List recent multi-agent sessions</td></tr>
+    <tr><td>GET</td><td><code>/api/multi-agent/preview</code></td><td>Proxy web app in C11. Query: <code>?port=…&amp;session_id=…</code></td></tr>
+  </tbody>
+</table>
+
+<h3>Sandbox Terminal API</h3>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td>POST</td><td><code>/api/sandbox/exec</code></td>
+        <td>Execute a shell command in C10 or C11 sandbox.<br>
+        Body: <code>{"command":"ls -la","sandbox":"c10","timeout":30,"cwd":".","session_id":""}</code><br>
+        Returns: <code>{"stdout":"…","stderr":"…","exit_code":0,"timed_out":false}</code><br>
+        <code>sandbox</code>: <code>"c10"</code> (agent workspace) or <code>"c11"</code> (multi-agent, needs <code>session_id</code>)</td></tr>
+  </tbody>
+</table>
+
+<h3>Container Management API</h3>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td>GET</td><td><code>/api/containers</code></td>
+        <td>List all Docker containers with status and toggleable flag.<br>
+        Returns: <code>{"ok":true,"containers":[{"name":"…","status":"…","state":"running","toggleable":true,"core":false}]}</code></td></tr>
+    <tr><td>POST</td><td><code>/api/container/toggle</code></td>
+        <td>Start or stop an optional container (C2, C5, C7a, C7b, C8 only — core containers are protected).<br>
+        Body: <code>{"name":"C2_agent-terminal","action":"stop"}</code><br>
+        Returns: <code>{"ok":true,"name":"…","action":"stop","output":"…"}</code></td></tr>
+  </tbody>
+</table>
+<p style="font-size:.8rem;color:var(--muted);">
+  <strong>Core containers</strong> (always protected, cannot be toggled): C1, C3, C6, C9, C10, C11<br>
+  <strong>Optional containers</strong> (can be started/stopped): C2, C5, C7a, C7b, C8
+</p>
+
+<h3>SSE Streaming — Event Reference</h3>
+<table>
+  <thead><tr><th>Event type</th><th>Endpoint</th><th>Payload fields</th></tr></thead>
+  <tbody>
+    <tr><td><code>step</code></td><td>agent/run</td><td><code>step</code>, <code>max_steps</code>, <code>label</code></td></tr>
+    <tr><td><code>tool_call</code></td><td>agent/run</td><td><code>tool</code>, <code>args</code>, <code>step</code></td></tr>
+    <tr><td><code>observation</code></td><td>agent/run</td><td><code>text</code>, <code>step</code></td></tr>
+    <tr><td><code>file_update</code></td><td>agent/run</td><td><code>path</code>, <code>action</code></td></tr>
+    <tr><td><code>token_estimate</code></td><td>agent/run</td><td><code>tokens</code>, <code>session_total</code></td></tr>
+    <tr><td><code>web_server</code></td><td>agent/run</td><td><code>port</code></td></tr>
+    <tr><td><code>final</code></td><td>agent/run</td><td><code>summary</code>, <code>steps_taken</code>, <code>files_created</code>, <code>session_id</code>, <code>web_port</code></td></tr>
+    <tr><td><code>error</code></td><td>agent/run</td><td><code>message</code></td></tr>
+    <tr><td><code>pane_init</code></td><td>multi-agent/run</td><td><code>role</code>, <code>pane_id</code></td></tr>
+    <tr><td><code>pane_update</code></td><td>multi-agent/run</td><td><code>role</code>, <code>text</code>, <code>step</code></td></tr>
+    <tr><td><code>pane_obs</code></td><td>multi-agent/run</td><td><code>role</code>, <code>text</code></td></tr>
+    <tr><td><code>pane_file</code></td><td>multi-agent/run</td><td><code>role</code>, <code>path</code></td></tr>
+    <tr><td><code>pane_done</code></td><td>multi-agent/run</td><td><code>role</code>, <code>summary</code></td></tr>
+    <tr><td><code>pane_error</code></td><td>multi-agent/run</td><td><code>role</code>, <code>message</code></td></tr>
+    <tr><td><code>final</code></td><td>multi-agent/run</td><td><code>summary</code>, <code>files_created</code>, <code>session_id</code></td></tr>
+  </tbody>
+</table>
+
+<h3>Container Health Endpoints</h3>
 <table>
   <thead><tr><th>Container</th><th>Internal URL</th><th>Health path</th></tr></thead>
   <tbody>
@@ -39,16 +122,29 @@
   </tbody>
 </table>
 
-<h3>Example: Chat via curl</h3>
-<pre>curl -sS -X POST http://localhost:6090/api/chat \
-  -H "Content-Type: application/json" \
-  -d '{"agent_id":"c2-aider","prompt":"Tell me a joke"}'</pre>
+<h3>Example: Run Agent Task (SSE)</h3>
+<pre>curl -N "http://localhost:6090/api/agent/run?task=write+a+hello+world+flask+app&agent_id=c9-jokes"</pre>
 
-<h3>Example: Direct C1 call</h3>
+<h3>Example: Run Shell Command in Sandbox</h3>
+<pre>curl -sS -X POST http://localhost:6090/api/sandbox/exec \
+  -H "Content-Type: application/json" \
+  -d '{"command":"ls -la","sandbox":"c10","timeout":10}'</pre>
+
+<h3>Example: Stop a Container</h3>
+<pre>curl -sS -X POST http://localhost:6090/api/container/toggle \
+  -H "Content-Type: application/json" \
+  -d '{"name":"C2_agent-terminal","action":"stop"}'</pre>
+
+<h3>Example: Direct C1 Call (streaming)</h3>
 <pre>curl -sS -X POST {{ urls.c1 }}/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "X-Agent-ID: c9-smoke" \
-  -d '{"model":"copilot","messages":[{"role":"user","content":"Tell me a joke"}],"stream":false}'</pre>
+  -d '{"model":"copilot","messages":[{"role":"user","content":"Tell me a joke"}],"stream":true}'</pre>
+
+<h3>Example: Chat via C9 proxy</h3>
+<pre>curl -sS -X POST http://localhost:6090/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id":"c2-aider","prompt":"Tell me a joke"}'</pre>
 
 <h3>Agent IDs</h3>
 <table>

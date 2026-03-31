@@ -2580,6 +2580,100 @@ async def api_agent_upload_workspace(file: UploadFile = File(...)):
     })
 
 
+# ── User-facing sandbox terminal API ─────────────────────────────────────────
+
+@app.post("/api/sandbox/exec", name="api_sandbox_exec")
+async def api_sandbox_exec(request: Request):
+    """Execute a shell command in C10 (agent) or C11 (multi-agento) sandbox.
+    Body: {command: str, sandbox: "c10"|"c11", timeout?: int, cwd?: str, session_id?: str}
+    Returns: {stdout, stderr, exit_code, timed_out}
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "invalid JSON"}, status_code=400)
+    command = (body.get("command") or "").strip()
+    if not command:
+        return JSONResponse({"ok": False, "error": "command required"}, status_code=400)
+    sandbox = (body.get("sandbox") or "c10").lower()
+    timeout = min(max(int(body.get("timeout", 30)), 1), 120)
+    cwd = body.get("cwd", ".")
+    session_id = body.get("session_id", "")
+    if sandbox == "c11":
+        result = await _c11_exec(command, timeout=timeout, cwd=cwd, session_id=session_id)
+    else:
+        result = await _c10_exec(command, timeout=timeout, cwd=cwd)
+    return JSONResponse(result)
+
+
+# ── Container control API (start/stop optional containers) ───────────────────
+
+# Containers that can be toggled on/off to save resources
+_OPTIONAL_CONTAINERS = {"C2_agent-terminal", "C5_claude-code", "C7a_openclaw-gateway", "C7b_openclaw-cli", "C8_hermes-agent"}
+# Containers that must stay running
+_CORE_CONTAINERS = {"C1_copilot-api", "C3_browser-auth", "C6_kilocode", "C9_jokes", "C10_sandbox", "C11_sandbox"}
+
+
+@app.get("/api/containers", name="api_containers")
+async def api_containers():
+    """Return status of all Docker containers with toggleable flag."""
+    import subprocess
+    try:
+        r = subprocess.run(
+            ["docker", "ps", "-a", "--format", "{{.Names}}\t{{.Status}}\t{{.State}}"],
+            capture_output=True, text=True, timeout=10,
+        )
+        containers = []
+        for line in r.stdout.strip().split("\n"):
+            if not line.strip():
+                continue
+            parts = line.split("\t")
+            if len(parts) >= 3:
+                name, status, state = parts[0], parts[1], parts[2]
+                containers.append({
+                    "name": name,
+                    "status": status,
+                    "state": state,
+                    "toggleable": name in _OPTIONAL_CONTAINERS,
+                    "core": name in _CORE_CONTAINERS,
+                })
+        return JSONResponse({"ok": True, "containers": containers})
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc), "containers": []})
+
+
+@app.post("/api/container/toggle", name="api_container_toggle")
+async def api_container_toggle(request: Request):
+    """Start or stop an optional container.
+    Body: {name: str, action: "start"|"stop"}
+    Only works for containers in _OPTIONAL_CONTAINERS.
+    """
+    import subprocess
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "invalid JSON"}, status_code=400)
+    name = (body.get("name") or "").strip()
+    action = (body.get("action") or "").strip().lower()
+    if name not in _OPTIONAL_CONTAINERS:
+        return JSONResponse({"ok": False, "error": f"Container '{name}' is not toggleable (core container)"}, status_code=400)
+    if action not in ("start", "stop"):
+        return JSONResponse({"ok": False, "error": "action must be 'start' or 'stop'"}, status_code=400)
+    try:
+        r = subprocess.run(
+            ["docker", action, name],
+            capture_output=True, text=True, timeout=30,
+        )
+        return JSONResponse({
+            "ok": r.returncode == 0,
+            "name": name,
+            "action": action,
+            "output": (r.stdout + r.stderr).strip()[:500],
+        })
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)})
+
+
 # ── Multi-Agent (smux-style) Workspace ───────────────────────────────────────
 
 # Role definitions: id, label, emoji, system prompt focus

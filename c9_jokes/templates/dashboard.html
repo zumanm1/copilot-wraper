@@ -95,6 +95,116 @@
 
 <p><a href="{{ url_for('api_status') }}">JSON: /api/status</a></p>
 
+<!-- ── Container Resource Manager ─────────────────────────────────────────── -->
+<div style="margin-top:1.5rem;">
+  <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem;">
+    <h3 style="margin:0;font-size:1rem;">🐳 Container Manager</h3>
+    <span style="font-size:0.76rem;color:var(--muted);">Start/stop optional containers to save resources. Core containers (C1, C3, C6, C9, C10, C11) are always protected.</span>
+    <button type="button" id="ct-refresh-btn" class="btn-sm" style="margin-left:auto;">↺ Refresh</button>
+  </div>
+  <div id="ct-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:0.6rem;">
+    <div style="color:var(--muted);font-size:0.82rem;padding:0.5rem;">Loading containers…</div>
+  </div>
+  <div id="ct-msg" style="font-size:0.78rem;margin-top:0.5rem;min-height:1.2em;"></div>
+</div>
+
+<style>
+.ct-card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:0.65rem 0.85rem;display:flex;align-items:center;gap:0.6rem;}
+.ct-card.ct-running{border-color:rgba(48,209,88,0.35);}
+.ct-card.ct-stopped{border-color:rgba(255,59,48,0.25);opacity:0.75;}
+.ct-card.ct-core{border-color:rgba(10,132,255,0.3);background:rgba(10,132,255,0.04);}
+.ct-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
+.ct-dot.up{background:var(--ok);}
+.ct-dot.down{background:var(--fail);}
+.ct-dot.core{background:var(--accent);}
+.ct-name{font-size:0.82rem;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ct-status{font-size:0.7rem;color:var(--muted);white-space:nowrap;}
+.ct-toggle{background:var(--surface2);border:1px solid var(--border);color:var(--fg);border-radius:5px;font-size:0.72rem;padding:0.2rem 0.6rem;cursor:pointer;white-space:nowrap;flex-shrink:0;}
+.ct-toggle:hover{border-color:var(--accent);color:var(--accent);}
+.ct-toggle.stopping{opacity:0.5;pointer-events:none;}
+.ct-lock{font-size:0.68rem;color:var(--muted);white-space:nowrap;}
+</style>
+
+<script>
+(function(){
+  var grid = document.getElementById('ct-grid');
+  var msg  = document.getElementById('ct-msg');
+
+  function showMsg(text, ok) {
+    msg.textContent = text;
+    msg.style.color = ok ? 'var(--ok)' : 'var(--fail)';
+    setTimeout(function(){ msg.textContent = ''; }, 4000);
+  }
+
+  function renderContainers(containers) {
+    if (!containers || !containers.length) {
+      grid.innerHTML = '<div style="color:var(--muted);font-size:0.82rem;padding:0.5rem;">No containers found — is Docker accessible from C9?</div>';
+      return;
+    }
+    var html = '';
+    containers.forEach(function(ct) {
+      var running = ct.state === 'running';
+      var cardCls = ct.core ? 'ct-card ct-core' : (running ? 'ct-card ct-running' : 'ct-card ct-stopped');
+      var dotCls  = ct.core ? 'ct-dot core' : (running ? 'ct-dot up' : 'ct-dot down');
+      var shortName = ct.name.replace(/^C\d+[a-z]?_/, '').replace(/_/g, '-');
+      var label = ct.name.split('_')[0] + ' ' + shortName;
+      var actionBtn = '';
+      if (ct.toggleable) {
+        var action = running ? 'stop' : 'start';
+        var btnLabel = running ? '⏹ Stop' : '▶ Start';
+        actionBtn = '<button class="ct-toggle" data-name="' + ct.name + '" data-action="' + action + '">' + btnLabel + '</button>';
+      } else {
+        actionBtn = '<span class="ct-lock" title="Core container — always running">🔒 Core</span>';
+      }
+      html += '<div class="' + cardCls + '">'
+        + '<span class="' + dotCls + '"></span>'
+        + '<div style="flex:1;min-width:0;">'
+        + '<div class="ct-name" title="' + ct.name + '">' + label + '</div>'
+        + '<div class="ct-status">' + (ct.status || ct.state || '—') + '</div>'
+        + '</div>'
+        + actionBtn
+        + '</div>';
+    });
+    grid.innerHTML = html;
+    // Attach toggle handlers
+    grid.querySelectorAll('.ct-toggle').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var name   = btn.dataset.name;
+        var action = btn.dataset.action;
+        btn.classList.add('stopping');
+        btn.textContent = action === 'stop' ? 'Stopping…' : 'Starting…';
+        fetch('/api/container/toggle', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({name: name, action: action}),
+        }).then(function(r){ return r.json(); }).then(function(d) {
+          if (d.ok) {
+            showMsg((action === 'stop' ? 'Stopped ' : 'Started ') + name, true);
+          } else {
+            showMsg('Error: ' + (d.error || 'unknown'), false);
+          }
+          loadContainers();
+        }).catch(function(e) {
+          showMsg('Request failed: ' + e.message, false);
+          loadContainers();
+        });
+      });
+    });
+  }
+
+  function loadContainers() {
+    fetch('/api/containers').then(function(r){ return r.json(); }).then(function(d) {
+      renderContainers(d.containers || []);
+    }).catch(function(e) {
+      grid.innerHTML = '<div style="color:var(--fail);font-size:0.82rem;padding:0.5rem;">Failed to load: ' + e.message + '</div>';
+    });
+  }
+
+  document.getElementById('ct-refresh-btn').addEventListener('click', loadContainers);
+  loadContainers();
+})();
+</script>
+
 <script>
 (function() {
   const INTERVAL = 15000;

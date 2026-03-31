@@ -127,6 +127,19 @@
 .mao-sm-modal{width:min(88vw,380px);}
 /* thinking dropdown pos */
 .mao-td{position:relative;display:inline-block;}
+.mao-elapsed{font-size:.72rem;color:var(--muted);font-family:monospace;padding:.1rem .4rem;border:1px solid var(--border);border-radius:4px;white-space:nowrap;}
+.mao-elapsed.running{color:var(--accent);border-color:rgba(10,132,255,.4);}
+.mao-shell{display:flex;flex-direction:column;height:100%;background:#1a1a2e;font-family:monospace;font-size:.78rem;}
+.mao-shell-out{flex:1;overflow-y:auto;padding:.4rem .6rem;color:#e0e0e0;white-space:pre-wrap;line-height:1.5;}
+.mao-shell-out .sh-cmd{color:#56d364;}.mao-shell-out .sh-err{color:#f85149;}.mao-shell-out .sh-info{color:#79c0ff;font-style:italic;}.mao-shell-out .sh-exit{color:#8b949e;font-size:.68rem;}
+.mao-shell-row{display:flex;align-items:center;border-top:1px solid #30363d;background:#161b22;flex-shrink:0;}
+.mao-shell-row .sh-p{color:#56d364;padding:.3rem 0 .3rem .6rem;font-size:.78rem;white-space:nowrap;}
+.mao-shell-row input{flex:1;background:transparent;border:none;outline:none;color:#e0e0e0;font-family:inherit;font-size:.78rem;padding:.3rem .4rem;}
+.mao-shell-row input::placeholder{color:#484f58;}
+.mao-shell-tb{display:flex;align-items:center;gap:.35rem;padding:.18rem .6rem;background:#161b22;border-bottom:1px solid #30363d;flex-shrink:0;}
+.mao-shell-tb .stb{background:rgba(255,255,255,.06);border:1px solid #30363d;color:#8b949e;border-radius:3px;font-size:.68rem;padding:.12rem .45rem;cursor:pointer;}
+.mao-shell-tb .stb:hover{background:rgba(255,255,255,.12);color:#e0e0e0;}
+.mao-shell-cwd{color:#8b949e;font-size:.68rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 </style>
 
 <div class="mao" id="mao">
@@ -200,6 +213,7 @@
     <span class="mao-sup-lbl">🧭 Supervisor</span>
     <span id="mao-sup-text">Ready — enter a task and launch.</span>
     <span id="mao-prog"></span>
+  <span id="mao-elapsed" class="mao-elapsed" style="display:none">0s</span>
   </div>
 
   <!-- RIGHT SIDEBAR HEADER (same grid row as supbar) -->
@@ -223,6 +237,7 @@
   <div class="mao-right">
     <div class="mao-rtabs">
       <button class="mao-rtab active" data-tab="files">📁 Files</button>
+      <button class="mao-rtab" data-tab="shell">🐧 Shell</button>
       <button class="mao-rtab"        data-tab="preview">🌐 Preview</button>
     </div>
     <!-- Files tab -->
@@ -243,6 +258,65 @@
         <span>Enter port and click Load to preview a running web server.</span>
       </div>
       <iframe id="mao-preview-iframe" style="flex:1;border:none;background:var(--fg);width:100%;display:none;"></iframe>
+    </div>
+    <!-- Linux Shell panel (C11 sandbox) -->
+    <div class="mao-rpanel" id="rpanel-shell">
+      <div class="mao-shell">
+        <div class="mao-shell-tb">
+          <span style="color:#56d364;font-size:.74rem;font-weight:600;">🐧 C11 Sandbox Shell</span>
+          <span class="mao-shell-cwd" id="mao-shell-cwd">/workspace</span>
+          <button class="stb" id="mao-shell-clear">Clear</button>
+          <button class="stb" id="mao-shell-ls">ls</button>
+          <button class="stb" id="mao-shell-pwd">pwd</button>
+        </div>
+        <div class="mao-shell-out" id="mao-shell-out">
+<span class="sh-info">C11 multi-agent sandbox shell. Session-scoped workspace.</span>
+<span class="sh-info">Commands run here share the workspace with running agents.</span>
+
+</div>
+        <div class="mao-shell-row">
+          <span class="sh-p">workspace $&nbsp;</span>
+          <input id="mao-shell-input" type="text" placeholder="Type a command… (Enter to run)" autocomplete="off" spellcheck="false">
+        </div>
+      </div>
+    </div>
+    <!-- Linux Shell panel (C11 sandbox) -->
+    <div class="mao-rpanel" id="rpanel-shell">
+      <div class="mao-shell">
+        <div class="mao-shell-tb">
+          <span style="color:#56d364;font-size:.74rem;font-weight:600;">🐧 C11 Sandbox Shell</span>
+          <span class="mao-shell-cwd" id="mao-shell-cwd">/workspace</span>
+          <button class="stb" id="mao-shell-clear">Clear</button>
+          <button class="stb" id="mao-shell-ls">ls</button>
+          <button class="stb" id="mao-shell-pwd">pwd</button>
+        </div>
+        <div class="mao-shell-out" id="mao-shell-out"><span class="sh-info">C11 multi-agent sandbox shell. Commands share the session workspace with agents.</span>
+
+</div>
+        <div class="mao-shell-row">
+          <span class="sh-p">workspace $ </span>
+          <input id="mao-shell-input" type="text" placeholder="Type a command… (Enter to run)" autocomplete="off" spellcheck="false">
+        </div>
+      </div>
+    </div>
+    <!-- Linux Shell panel (C11 sandbox) -->
+    <div class="mao-rpanel" id="rpanel-shell">
+      <div class="mao-shell">
+        <div class="mao-shell-tb">
+          <span style="color:#56d364;font-size:.74rem;font-weight:600;">🐧 C11 Sandbox Shell</span>
+          <span class="mao-shell-cwd" id="mao-shell-cwd">/workspace</span>
+          <button class="stb" id="mao-shell-clear">Clear</button>
+          <button class="stb" id="mao-shell-ls">ls</button>
+          <button class="stb" id="mao-shell-pwd">pwd</button>
+        </div>
+        <div class="mao-shell-out" id="mao-shell-out"><span class="sh-info">C11 multi-agent sandbox shell. Commands share the session workspace with agents.</span>
+
+</div>
+        <div class="mao-shell-row">
+          <span class="sh-p">workspace $ </span>
+          <input id="mao-shell-input" type="text" placeholder="Type a command… (Enter to run)" autocomplete="off" spellcheck="false">
+        </div>
+      </div>
     </div>
   </div>
 
@@ -335,13 +409,37 @@ document.addEventListener('click',function(){document.getElementById('think-menu
 document.querySelectorAll('.mao-mbtn').forEach(function(b){b.addEventListener('click',function(){_wm=b.dataset.wm;document.querySelectorAll('.mao-mbtn').forEach(function(x){x.classList.toggle('active',x.dataset.wm===_wm);});});});
 
 // Right tabs
-document.querySelectorAll('.mao-rtab').forEach(function(t){t.addEventListener('click',function(){document.querySelectorAll('.mao-rtab').forEach(function(x){x.classList.remove('active');});document.querySelectorAll('.mao-rpanel').forEach(function(x){x.classList.remove('active');});t.classList.add('active');document.getElementById('rpanel-'+t.dataset.tab).classList.add('active');});});
+document.querySelectorAll('.mao-rtab').forEach(function(t){t.addEventListener('click',function(){document.querySelectorAll('.mao-rtab').forEach(function(x){x.classList.remove('active');});document.querySelectorAll('.mao-rpanel').forEach(function(x){x.classList.remove('active');});t.classList.add('active');document.getElementById('rpanel-'+t.dataset.tab).classList.add('active');if(t.dataset.tab==='shell')document.getElementById('mao-shell-input').focus();if(t.dataset.tab==='shell')document.getElementById('mao-shell-input').focus();});});
 
 // Task textarea — Enter to launch
 taskEl.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();if(!_run)launch();}});
 
 // Elapsed helpers
 function fmt(ms){var s=Math.floor(ms/1000);return s<60?s+'s':Math.floor(s/60)+'m '+(s%60)+'s';}
+var _taskStart=null,_taskTimer=null,_elBadge=document.getElementById('mao-elapsed');
+function startTaskElapsed(){
+  _taskStart=Date.now();
+  if(_elBadge){_elBadge.style.display='';_elBadge.className='mao-elapsed running';_elBadge.textContent='0s';}
+  if(_taskTimer)clearInterval(_taskTimer);
+  _taskTimer=setInterval(function(){if(_elBadge&&_taskStart)_elBadge.textContent=fmt(Date.now()-_taskStart);},1000);
+}
+function stopTaskElapsed(){
+  if(_taskTimer){clearInterval(_taskTimer);_taskTimer=null;}
+  if(_elBadge&&_taskStart){_elBadge.textContent=fmt(Date.now()-_taskStart);_elBadge.className='mao-elapsed';}
+}
+
+var _taskStart=null,_taskTimer=null,_elBadge=document.getElementById('mao-elapsed');
+function startTaskElapsed(){
+  _taskStart=Date.now();
+  if(_elBadge){_elBadge.style.display='';_elBadge.className='mao-elapsed running';_elBadge.textContent='0s';}
+  if(_taskTimer)clearInterval(_taskTimer);
+  _taskTimer=setInterval(function(){if(_elBadge&&_taskStart)_elBadge.textContent=fmt(Date.now()-_taskStart);},1000);
+}
+function stopTaskElapsed(){
+  if(_taskTimer){clearInterval(_taskTimer);_taskTimer=null;}
+  if(_elBadge&&_taskStart){_elBadge.textContent=fmt(Date.now()-_taskStart);_elBadge.className='mao-elapsed';}
+}
+
 function startTimer(pid){_pstart[pid]=Date.now();var p=_panes[pid];if(!p)return;_ptimers[pid]=setInterval(function(){if(p.el_el)p.el_el.textContent=fmt(Date.now()-_pstart[pid]);},1000);}
 function stopTimer(pid){if(_ptimers[pid]){clearInterval(_ptimers[pid]);delete _ptimers[pid];}}
 function clearTimers(){Object.keys(_ptimers).forEach(function(id){clearInterval(_ptimers[id]);});_ptimers={};}
@@ -422,7 +520,8 @@ function handleEvent(type,data){
   }
   else if(type==='pane_error'){appendPane(pid,'error','❌ '+esc(data.message||'Error'));setPaneStatus(pid,'error');}
   else if(type==='final'){
-    sumText.textContent=data.summary||('Files: '+(data.files_created||[]).join(', ')||'Complete');
+    var _el=_taskStart?(' · ⏱ '+fmt(Date.now()-_taskStart)):'';
+    sumText.textContent=(data.summary||('Files: '+(data.files_created||[]).join(', ')||'Complete'))+_el;
     sumBar.classList.add('show');
     setRunning(false);refreshFiles();
     // Record token usage
@@ -439,7 +538,7 @@ function setRunning(v){
   launchBtn.disabled=v;
   pauseBtn.classList.toggle('vis',v);
   stopBtn.classList.toggle('vis',v);
-  if(!v){clearTimers();stopFileInterval();}
+  if(v){startTaskElapsed();}else{stopTaskElapsed();clearTimers();stopFileInterval();}
 }
 
 // Launch
@@ -625,6 +724,148 @@ document.addEventListener('keydown',function(e){if(e.key==='Escape')document.que
 
 // Sessions modal trigger via "History" btn
 document.querySelector('[onclick="loadSessions()"]')&&(document.querySelector('[onclick="loadSessions()"]').onclick=function(){loadSessions();openModal('sess-overlay');});
+
+// ── Interactive Linux Shell (C11 sandbox) ─────────────────────────────────
+(function initMaoShell(){
+  var out=document.getElementById('mao-shell-out');
+  var inp=document.getElementById('mao-shell-input');
+  var cwdEl=document.getElementById('mao-shell-cwd');
+  var clearBtn=document.getElementById('mao-shell-clear');
+  var lsBtn=document.getElementById('mao-shell-ls');
+  var pwdBtn=document.getElementById('mao-shell-pwd');
+  if(!out||!inp)return;
+  var _hist=[],_histIdx=-1,_busy=false;
+
+  function sadd(cls,text){
+    var d=document.createElement('div');
+    d.className=cls;d.textContent=text;
+    out.appendChild(d);out.scrollTop=out.scrollHeight;
+  }
+
+  async function shellRun(cmd){
+    cmd=cmd.trim();if(!cmd||_busy)return;
+    _hist.push(cmd);_histIdx=_hist.length;
+    sadd('sh-cmd','$ '+cmd);
+    _busy=true;inp.disabled=true;inp.placeholder='Running\u2026';
+    try{
+      var r=await fetch('/api/sandbox/exec',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({command:cmd,sandbox:'c11',timeout:60,session_id:_sid||''})
+      });
+      var d=await r.json();
+      var so=(d.stdout||'').replace(/\n$/,'');
+      var se=(d.stderr||'').replace(/\n$/,'');
+      if(so)sadd('',so);
+      if(se)sadd('sh-err',se);
+      if(d.timed_out)sadd('sh-exit','[timed out]');
+      else if(d.exit_code!==0&&d.exit_code!=null)sadd('sh-exit','exit '+d.exit_code);
+      if(/^\s*cd\s/.test(cmd)){
+        var pr=await fetch('/api/sandbox/exec',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({command:'pwd',sandbox:'c11',timeout:5,session_id:_sid||''})
+        });
+        var pd=await pr.json();
+        var cwd=(pd.stdout||'').trim();
+        if(cwd&&cwdEl)cwdEl.textContent=cwd;
+      }
+      if(/^(pip|npm|python|cp|mv|rm|mkdir|touch|git|wget|curl)/i.test(cmd))refreshFiles();
+    }catch(e){sadd('sh-err','Error: '+e.message);}
+    _busy=false;inp.disabled=false;
+    inp.placeholder='Type a command\u2026 (Enter to run)';
+    inp.focus();
+  }
+
+  inp.addEventListener('keydown',function(e){
+    if(e.key==='Enter'){
+      e.preventDefault();shellRun(inp.value);inp.value='';
+    }else if(e.key==='ArrowUp'){
+      e.preventDefault();
+      if(_hist.length&&_histIdx>0){_histIdx--;inp.value=_hist[_histIdx];}
+    }else if(e.key==='ArrowDown'){
+      e.preventDefault();
+      if(_histIdx<_hist.length-1){_histIdx++;inp.value=_hist[_histIdx];}
+      else{_histIdx=_hist.length;inp.value='';}
+    }else if(e.key==='l'&&e.ctrlKey){
+      e.preventDefault();out.innerHTML='';
+    }
+  });
+  if(clearBtn)clearBtn.addEventListener('click',function(){out.innerHTML='';sadd('sh-info','Cleared.');});
+  if(lsBtn)lsBtn.addEventListener('click',function(){shellRun('ls -la');});
+  if(pwdBtn)pwdBtn.addEventListener('click',function(){shellRun('pwd');});
+})();
+
+// ── Interactive Linux Shell (C11 sandbox) ─────────────────────────────────
+(function initMaoShell(){
+  var out=document.getElementById('mao-shell-out');
+  var inp=document.getElementById('mao-shell-input');
+  var cwdEl=document.getElementById('mao-shell-cwd');
+  var clearBtn=document.getElementById('mao-shell-clear');
+  var lsBtn=document.getElementById('mao-shell-ls');
+  var pwdBtn=document.getElementById('mao-shell-pwd');
+  if(!out||!inp)return;
+  var _hist=[],_histIdx=-1,_busy=false;
+
+  function sadd(cls,text){
+    var d=document.createElement('div');
+    d.className=cls;d.textContent=text;
+    out.appendChild(d);out.scrollTop=out.scrollHeight;
+  }
+
+  async function shellRun(cmd){
+    cmd=cmd.trim();if(!cmd||_busy)return;
+    _hist.push(cmd);_histIdx=_hist.length;
+    sadd('sh-cmd','$ '+cmd);
+    _busy=true;inp.disabled=true;inp.placeholder='Running\u2026';
+    try{
+      var r=await fetch('/api/sandbox/exec',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({command:cmd,sandbox:'c11',timeout:60,session_id:_sid||''})
+      });
+      var d=await r.json();
+      var so=(d.stdout||'').replace(/\n$/,'');
+      var se=(d.stderr||'').replace(/\n$/,'');
+      if(so)sadd('',so);
+      if(se)sadd('sh-err',se);
+      if(d.timed_out)sadd('sh-exit','[timed out]');
+      else if(d.exit_code!==0&&d.exit_code!=null)sadd('sh-exit','exit '+d.exit_code);
+      if(/^\s*cd\s/.test(cmd)){
+        var pr=await fetch('/api/sandbox/exec',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({command:'pwd',sandbox:'c11',timeout:5,session_id:_sid||''})
+        });
+        var pd=await pr.json();
+        var cwd=(pd.stdout||'').trim();
+        if(cwd&&cwdEl)cwdEl.textContent=cwd;
+      }
+      if(/^(pip|npm|python|cp|mv|rm|mkdir|touch|git|wget|curl)/i.test(cmd))refreshFiles();
+    }catch(e){sadd('sh-err','Error: '+e.message);}
+    _busy=false;inp.disabled=false;
+    inp.placeholder='Type a command\u2026 (Enter to run)';
+    inp.focus();
+  }
+
+  inp.addEventListener('keydown',function(e){
+    if(e.key==='Enter'){
+      e.preventDefault();shellRun(inp.value);inp.value='';
+    }else if(e.key==='ArrowUp'){
+      e.preventDefault();
+      if(_hist.length&&_histIdx>0){_histIdx--;inp.value=_hist[_histIdx];}
+    }else if(e.key==='ArrowDown'){
+      e.preventDefault();
+      if(_histIdx<_hist.length-1){_histIdx++;inp.value=_hist[_histIdx];}
+      else{_histIdx=_hist.length;inp.value='';}
+    }else if(e.key==='l'&&e.ctrlKey){
+      e.preventDefault();out.innerHTML='';
+    }
+  });
+  if(clearBtn)clearBtn.addEventListener('click',function(){out.innerHTML='';sadd('sh-info','Cleared.');});
+  if(lsBtn)lsBtn.addEventListener('click',function(){shellRun('ls -la');});
+  if(pwdBtn)pwdBtn.addEventListener('click',function(){shellRun('pwd');});
+})();
 
 })();
 </script>
