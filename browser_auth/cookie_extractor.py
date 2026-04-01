@@ -918,6 +918,54 @@ async def _wait_for_m365_chat_ready(
     return False, last_issue or "M365 chat did not stabilize before prompt send"
 
 
+async def _recover_tab1_after_turn_failure(
+    page: Page,
+    context: BrowserContext,
+    *,
+    reason: str = "",
+) -> tuple[Page, str | None]:
+    """
+    Recover Tab 1 after a cold-start first-turn failure.
+
+    This is intentionally narrow: it is only used by validate_tab1_with_hello
+    when the first post-restart turn times out with no reply text.
+    """
+    reason = (reason or "unknown").strip()
+    try:
+        print(f"[validate_tab1] Recovering Tab 1 after first-turn failure: {reason}")
+        try:
+            await page.goto("about:blank", wait_until="domcontentloaded", timeout=15_000)
+        except Exception:
+            pass
+
+        ok, prep_error = await _prepare_m365_chat_page(page, timeout_ms=30_000, settle_seconds=6.0)
+        if not ok:
+            raise RuntimeError(prep_error or "M365 chat page not ready after recovery refresh")
+
+        ready_ok, ready_error = await _wait_for_m365_chat_ready(page, timeout_s=20.0, stable_s=3.0)
+        if not ready_ok:
+            raise RuntimeError(ready_error or "M365 chat did not stabilize after recovery refresh")
+        return page, None
+    except Exception as exc:
+        print(f"[validate_tab1] Tab 1 refresh recovery failed: {exc}")
+        try:
+            if not page.is_closed():
+                await page.close()
+        except Exception:
+            pass
+        try:
+            replacement = await context.new_page()
+            ok, prep_error = await _prepare_m365_chat_page(replacement, timeout_ms=30_000, settle_seconds=6.0)
+            if not ok:
+                raise RuntimeError(prep_error or "replacement Tab 1 not ready")
+            ready_ok, ready_error = await _wait_for_m365_chat_ready(replacement, timeout_s=20.0, stable_s=3.0)
+            if not ready_ok:
+                raise RuntimeError(ready_error or "replacement Tab 1 did not stabilize")
+            return replacement, None
+        except Exception as replacement_exc:
+            return page, f"Tab 1 recovery failed after '{reason}': {replacement_exc}"
+
+
 async def _restore_tab1_focus(context: BrowserContext | None = None) -> bool:
     """Return the visible noVNC browser to the dedicated non-pool auth tab."""
     try:
@@ -2421,7 +2469,8 @@ async def _browser_chat_on_page(
             _progress("popup_watch", "done", "No auth popup blocked the turn")
             _progress("reply", "done", f"Reply received ({len(text)} chars)")
         else:
-            _progress("reply", "error", "No Copilot reply captured before timeout")
+            result["error"] = "No Copilot reply captured before timeout"
+            _progress("reply", "error", result["error"])
         return result, page
 
     except Exception as e:
@@ -2642,36 +2691,84 @@ async def validate_tab1_with_hello(timeout_ms: int = 45_000) -> dict:
         mark_tab1_auth_progress_done("stabilize_1", "Tab 1 stabilized after authentication")
 
         for prompt_text, fresh_chat, step_label, progress_steps in prompts:
-            ready_ok, ready_error = await _wait_for_m365_chat_ready(
-                tab1,
-                timeout_s=20.0 if fresh_chat else 12.0,
-                stable_s=3.0 if fresh_chat else 2.0,
-            )
-            if not ready_ok:
-                invalidate_tab1_ready_state(f"{step_label}_not_ready")
-                return _fail(
-                    progress_steps["prepare"],
-                    ready_error or f"Tab 1 was not ready for {step_label}",
-                    tab_url=tab1.url or "",
+            max_prompt_attempts = 2 if step_label == "hello_1" else 1
+            attempt = 0
+            prompt_succeeded = False
+            last_result: dict = {}
+            reply_text = ""
+            while attempt < max_prompt_attempts:
+                ready_ok, ready_error = await _wait_for_m365_chat_ready(
+                    tab1,
+                    timeout_s=20.0 if fresh_chat else 12.0,
+                    stable_s=3.0 if fresh_chat else 2.0,
                 )
-            update_tab1_auth_progress(progress_steps["prepare"], "running", f"Preparing prompt '{prompt_text}'")
+                if not ready_ok:
+                    invalidate_tab1_ready_state(f"{step_label}_not_ready")
+                    return _fail(
+                        progress_steps["prepare"],
+                        ready_error or f"Tab 1 was not ready for {step_label}",
+                        tab_url=tab1.url or "",
+                    )
+                if attempt == 0:
+                    update_tab1_auth_progress(progress_steps["prepare"], "running", f"Preparing prompt '{prompt_text}'")
+                else:
+                    update_tab1_auth_progress(
+                        progress_steps["prepare"],
+                        "running",
+                        f"Retrying prompt '{prompt_text}' after first-turn recovery",
+                    )
 
-            print(f"[validate_tab1] Sending '{prompt_text}' on Tab 1 ({step_label})…")
-            result, tab1 = await _browser_chat_on_page(
-                tab1,
-                context,
-                prompt_text,
-                mode=chat_mode,
-                timeout_ms=timeout_ms,
-                fresh_chat=fresh_chat,
-                progress_steps=progress_steps,
-            )
-            reply_text = (result.get("text") or "").strip()
-            success = result.get("success", False) and bool(reply_text)
-            _SERVICE_ERR = ("something went wrong", "please try again", "experiencing high demand", "we're experiencing")
-            if success and any(p in reply_text.lower() for p in _SERVICE_ERR):
-                success = False
-            if not success:
+                print(f"[validate_tab1] Sending '{prompt_text}' on Tab 1 ({step_label})… attempt {attempt + 1}/{max_prompt_attempts}")
+                result, tab1 = await _browser_chat_on_page(
+                    tab1,
+                    context,
+                    prompt_text,
+                    mode=chat_mode,
+                    timeout_ms=timeout_ms,
+                    fresh_chat=fresh_chat,
+                    progress_steps=progress_steps,
+                )
+                last_result = result
+                reply_text = (result.get("text") or "").strip()
+                success = result.get("success", False) and bool(reply_text)
+                _SERVICE_ERR = ("something went wrong", "please try again", "experiencing high demand", "we're experiencing")
+                if success and any(p in reply_text.lower() for p in _SERVICE_ERR):
+                    success = False
+                if success:
+                    prompt_succeeded = True
+                    break
+
+                retryable_first_turn = (
+                    step_label == "hello_1"
+                    and attempt == 0
+                    and not reply_text
+                    and not result.get("service_error")
+                )
+                if retryable_first_turn:
+                    recovery_reason = result.get("error") or "No Copilot reply captured before timeout"
+                    update_tab1_auth_progress(
+                        progress_steps["reply"],
+                        "running",
+                        f"First turn stalled after restart; refreshing Tab 1 and retrying once ({recovery_reason})",
+                    )
+                    tab1, recovery_error = await _recover_tab1_after_turn_failure(
+                        tab1,
+                        context,
+                        reason=recovery_reason,
+                    )
+                    if recovery_error:
+                        invalidate_tab1_ready_state(f"{step_label}_recovery_failed")
+                        return _fail(
+                            progress_steps["reply"],
+                            recovery_error,
+                            reply=reply_text,
+                            tab_url=tab1.url or "",
+                        )
+                    attempt += 1
+                    continue
+                break
+
+            if not prompt_succeeded:
                 popup_step = _auth_progress_step(progress_steps["popup_watch"])
                 if popup_step and popup_step.get("status") in ("pending", "running"):
                     mark_tab1_auth_progress_done(
@@ -2681,7 +2778,7 @@ async def validate_tab1_with_hello(timeout_ms: int = 45_000) -> dict:
                 invalidate_tab1_ready_state(f"{step_label}_failed")
                 return _fail(
                     progress_steps["reply"],
-                    result.get("error") or f"{step_label} failed",
+                    last_result.get("error") or f"{step_label} failed",
                     reply=reply_text,
                     tab_url=tab1.url or "",
                 )

@@ -321,6 +321,60 @@ def test_validate_tab1_fails_if_chat_never_stabilizes(monkeypatch):
     assert next(s for s in snap["steps"] if s["id"] == "stabilize_1")["status"] == "error"
 
 
+def test_validate_tab1_retries_first_hello_after_empty_timeout(monkeypatch):
+    ce = _import_cookie_extractor()
+    page = _DummyPage(url="https://m365.cloud.microsoft/chat?auth=1")
+    calls: list[tuple[str, bool]] = []
+    recovery_calls: list[str] = []
+
+    async def fake_get_context():
+        return SimpleNamespace()
+
+    async def fake_get_page(context):
+        return page
+
+    async def fake_clear_auth_dialog(tab, settle_seconds=8.0):
+        return True, None
+
+    async def fake_has_auth_dialog(tab):
+        return False
+
+    async def fake_wait_ready(tab, timeout_s=30.0, stable_s=5.0):
+        return True, None
+
+    async def fake_recover(tab, context, reason=""):
+        recovery_calls.append(reason)
+        return tab, None
+
+    async def fake_browser_chat_on_page(tab, context, prompt, mode="chat", timeout_ms=60000, fresh_chat=True, progress_steps=None):
+        calls.append((prompt, fresh_chat))
+        if prompt == "hello" and len([c for c in calls if c[0] == "hello"]) == 1:
+            return {"success": False, "error": "No Copilot reply captured before timeout", "text": ""}, tab
+        return {"success": True, "text": f"ok:{prompt}"}, tab
+
+    monkeypatch.setenv("M365_CHAT_MODE", "work")
+    monkeypatch.setattr(ce, "_get_context", fake_get_context)
+    monkeypatch.setattr(ce, "_get_or_create_page", fake_get_page)
+    monkeypatch.setattr(ce, "_clear_auth_dialog_if_present", fake_clear_auth_dialog)
+    monkeypatch.setattr(ce, "_page_has_auth_dialog", fake_has_auth_dialog)
+    monkeypatch.setattr(ce, "_wait_for_m365_chat_ready", fake_wait_ready)
+    monkeypatch.setattr(ce, "_recover_tab1_after_turn_failure", fake_recover)
+    monkeypatch.setattr(ce, "_browser_chat_on_page", fake_browser_chat_on_page)
+
+    result = asyncio.run(ce.validate_tab1_with_hello(timeout_ms=1000))
+    snap = ce.get_tab1_auth_progress_snapshot()
+
+    assert result["validated"] is True
+    assert calls == [
+        ("hello", True),
+        ("hello", True),
+        ("follow up 2", False),
+    ]
+    assert recovery_calls == ["No Copilot reply captured before timeout"]
+    assert next(s for s in snap["steps"] if s["id"] == "hello_reply")["status"] == "done"
+    assert next(s for s in snap["steps"] if s["id"] == "follow_reply")["status"] == "done"
+
+
 def test_browser_chat_blocks_pool_creation_until_tab1_ready(monkeypatch):
     ce = _import_cookie_extractor()
 
