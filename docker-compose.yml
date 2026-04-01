@@ -481,10 +481,12 @@ services:
     environment:
       - ENV_PATH=/app/.env
       - API1_URL=http://app:8000
-      - VNC_RESOLUTION=1280x1024x24
-      - C3_CHAT_TAB_POOL_SIZE=6        # default pool (normal mode: 1 auth + 6 pool = 7 tabs)
-      - C3_POOL_SIZE_PARALLEL=12      # expanded pool (parallel mode: 1 auth + 12 pool = 13 tabs)
-      - C3_CHAT_MAX_CONCURRENT=12     # semaphore: allow up to 12 concurrent Playwright operations
+      - VNC_RESOLUTION=1280x900x24
+      - C3_CHAT_TAB_POOL_SIZE=4        # default pool (normal mode: 1 auth + 4 pool = 5 tabs)
+      - C3_POOL_SIZE_PARALLEL=6       # expanded pool for bursty parallel runs
+      - C3_CHAT_MAX_CONCURRENT=4      # cap concurrent Playwright operations
+      - C3_POOL_IDLE_TRIM_SECONDS=60  # collapse extra free tabs after burst usage
+      - BROWSER_AUTH_UVICORN_RELOAD=0
     volumes:
       # Share .env with Container 1 so extracted cookies persist
       - ./.env:/app/.env
@@ -523,6 +525,7 @@ services:
       - C1_URL=http://app:8000
       - C2_URL=http://agent-terminal:8080
       - C3_URL=http://browser-auth:8001
+      - C3_POOL_SIZE_PARALLEL=6
       - C5_URL=http://claude-code-terminal:8080
       - C6_URL=http://kilocode-terminal:8080
       - C7A_URL=http://openclaw-gateway:18789

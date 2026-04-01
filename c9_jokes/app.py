@@ -1523,6 +1523,11 @@ async def page_health(request: Request):
     return templates.TemplateResponse(request, "health.html", {"probes": probes})
 
 
+@app.get("/c3-auth", response_class=HTMLResponse, name="page_c3_auth")
+async def page_c3_auth(request: Request):
+    return templates.TemplateResponse(request, "c3_auth.html", {})
+
+
 @app.get("/pairs", response_class=HTMLResponse, name="page_pairs")
 async def page_pairs(request: Request):
     return templates.TemplateResponse(request, "pairs.html", {"agents": AGENTS})
@@ -1632,6 +1637,63 @@ async def api_session_health():
     if "checked_at" not in body:
         body["checked_at"] = datetime.now(timezone.utc).isoformat()
     return JSONResponse(body, status_code=probe.get("http_status") or 503)
+
+
+@app.get("/api/c3-auth-progress", name="api_c3_auth_progress")
+async def api_c3_auth_progress():
+    """Proxy C3's Tab 1 auth-progress snapshot plus C3/session/runtime context."""
+    urls = _urls()
+    c3_url = urls.get("c3", "http://browser-auth:8001")
+    client = _get_http()
+    progress_body: dict = {
+        "active": False,
+        "result": None,
+        "error": "C3 auth progress unavailable",
+        "current_step_id": None,
+        "steps": [],
+    }
+    progress_ok = False
+    progress_status = 503
+    try:
+        progress_resp = await client.get(f"{c3_url}/auth-progress", timeout=5)
+        progress_status = progress_resp.status_code
+        ct = progress_resp.headers.get("content-type", "")
+        if ct.startswith("application/json"):
+            payload = progress_resp.json()
+            if isinstance(payload, dict):
+                progress_body = payload
+        progress_ok = progress_resp.status_code < 400
+    except Exception as exc:
+        progress_body["error"] = str(exc)
+
+    session_probe = await _probe_session_health(client, c3_url, timeout=5)
+    c3_status_probe = await _probe_health(client, "C3 /status", c3_url, "/status")
+    runtime = await _get_runtime_status_snapshot(client=client)
+    return JSONResponse({
+        "ok": progress_ok,
+        "http_status": progress_status,
+        "progress": progress_body,
+        "session": session_probe.get("body") if isinstance(session_probe.get("body"), dict) else {},
+        "c3_status": c3_status_probe.get("body") if isinstance(c3_status_probe.get("body"), dict) else {},
+        "runtime": runtime,
+    })
+
+
+@app.post("/api/c3-auth-progress/run", name="api_c3_auth_progress_run")
+async def api_c3_auth_progress_run():
+    """Start a live Tab 1 validate-auth run on C3; the UI polls /api/c3-auth-progress while this runs."""
+    urls = _urls()
+    c3_url = urls.get("c3", "http://browser-auth:8001")
+    client = _get_http()
+    try:
+        resp = await client.post(f"{c3_url}/validate-auth", timeout=130)
+        ct = resp.headers.get("content-type", "")
+        body = resp.json() if ct.startswith("application/json") else {"validated": False, "error": resp.text}
+        if not isinstance(body, dict):
+            body = {"validated": False, "error": "Unexpected C3 validate-auth response"}
+        return JSONResponse(body, status_code=resp.status_code)
+    except Exception as exc:
+        return JSONResponse({"validated": False, "error": str(exc)}, status_code=503)
 
 
 @app.get("/api/runtime-status", name="api_runtime_status")
@@ -2172,11 +2234,11 @@ async def api_validate(request: Request):
     parallel = payload.get("parallel", True)
     mode = "parallel" if parallel else "sequential"
 
-    # Pre-warm C3 pool to 12 tabs before parallel run so all agents get pre-created tabs.
+    # Pre-warm C3 pool before a parallel run so agents get pre-created tabs.
     # Non-fatal — on-demand tab creation is the fallback if this fails.
     if parallel and len(agents_to_run) > 1:
         c3 = _urls().get("c3", "http://browser-auth:8001")
-        parallel_pool_size = max(1, int(os.environ.get("C3_POOL_SIZE_PARALLEL", "12")))
+        parallel_pool_size = max(1, int(os.environ.get("C3_POOL_SIZE_PARALLEL", "6")))
         try:
             _expand_r = await _get_http().post(
                 f"{c3}/pool-expand",
@@ -3653,7 +3715,7 @@ async def api_multi_agent_run(
         active_roles = [r for r in active_roles if r != "supervisor"]  # supervisor is implicit
 
         if len(active_roles) > 1:
-            pool_size = max(1, int(os.environ.get("C3_POOL_SIZE_PARALLEL", "12")))
+            pool_size = max(1, int(os.environ.get("C3_POOL_SIZE_PARALLEL", "6")))
             try:
                 await client.post(f"{c3_url}/pool-expand", params={"target_size": pool_size}, timeout=90)
             except Exception:

@@ -6,7 +6,7 @@
 set -e
 
 DISPLAY_NUM=99
-SCREEN_RES="${VNC_RESOLUTION:-1280x1024x24}"
+SCREEN_RES="${VNC_RESOLUTION:-1280x900x24}"
 VNC_PORT=5900
 NOVNC_PORT=6080
 API_PORT=8001
@@ -302,16 +302,23 @@ wait_novnc() {
 wait_novnc
 
 # 4. Start FastAPI cookie extractor server
-# IMPORTANT: Do NOT use 'exec' here. If uvicorn is exec'd as PID 1, a hot-reload
-# (triggered by __pycache__ writes or .log file changes in the bind-mounted /browser-auth)
-# will SIGTERM the process, which kills the entire container — taking x11vnc and
-# websockify with it and causing noVNC "connection closed" errors.
+# IMPORTANT: Do NOT use 'exec' here. If uvicorn is exec'd as PID 1, a reload
+# or clean shutdown can kill the whole container — taking x11vnc and websockify
+# with it and causing noVNC "connection closed" errors.
 # Run uvicorn in the background and use a wait loop so the container stays alive.
 echo "[browser-auth] Starting cookie extractor API on port ${API_PORT}..."
 echo "[browser-auth] Portal setup: http://localhost:${API_PORT}/setup"
 echo "[browser-auth] Open http://localhost:${NOVNC_PORT}/ (or vnc_auto.html) to see the browser"
 echo "[browser-auth] Trigger: curl -X POST http://localhost:${API_PORT}/extract"
-uvicorn server:app --host 0.0.0.0 --port ${API_PORT} --log-level info --reload --reload-dir /browser-auth &
+UVICORN_RELOAD="${BROWSER_AUTH_UVICORN_RELOAD:-0}"
+UVICORN_ARGS=(server:app --host 0.0.0.0 --port "${API_PORT}" --log-level info)
+if [ "${UVICORN_RELOAD,,}" = "1" ] || [ "${UVICORN_RELOAD,,}" = "true" ] || [ "${UVICORN_RELOAD,,}" = "yes" ]; then
+    UVICORN_ARGS+=(--reload --reload-dir /browser-auth)
+    echo "[browser-auth] uvicorn reload enabled"
+else
+    echo "[browser-auth] uvicorn reload disabled (low-resource mode)"
+fi
+uvicorn "${UVICORN_ARGS[@]}" &
 UVICORN_PID=$!
 echo "[browser-auth] uvicorn pid ${UVICORN_PID}"
 

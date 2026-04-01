@@ -54,6 +54,7 @@ def _make_mock_http(response_json: dict, status: int = 200):
 def _json_response(payload: dict, status: int = 200):
     resp = MagicMock()
     resp.status_code = status
+    resp.headers = {"content-type": "application/json"}
     resp.json = MagicMock(return_value=payload)
     resp.text = json.dumps(payload)
     return resp
@@ -218,6 +219,16 @@ class TestC9PageRoutes:
     def test_health_page_returns_200(self, c9_app):
         r = c9_app.get("/health")
         assert r.status_code == 200
+
+    def test_c3_auth_page_returns_200(self, c9_app):
+        r = c9_app.get("/c3-auth")
+        assert r.status_code == 200
+        assert "C3 Tab 1 Auth Progress" in r.text
+        assert "/api/c3-auth-progress" in r.text
+        assert "Run Tab 1 Validation" in r.text
+        assert "25-Step Checklist" in r.text
+        assert "Pool Monitor" in r.text
+        assert "Min / Avg / Max" not in r.text  # rendered dynamically in JS
 
     def test_pages_include_runtime_status_badge_polling(self, c9_app):
         r = c9_app.get("/chat")
@@ -720,6 +731,78 @@ class TestC9ApiStatus:
         body = r.json()
         assert body["ok"] is False
         assert "M365 Copilot slow or not responding" in (body.get("error") or "")
+
+    def test_api_c3_auth_progress_proxies_snapshot(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        async def fake_get(url, timeout=None, **kwargs):
+            if url.endswith("/auth-progress"):
+                return _json_response({
+                    "run_id": "auth-123",
+                    "active": True,
+                    "current_step_id": "hello_submit",
+                    "steps": [{
+                        "id": "hello_submit",
+                        "label": "First prompt submitted",
+                        "status": "running",
+                        "detail": "Submitting hello",
+                        "stats": {"runs": 2, "min_ms": 1100, "avg_ms": 1450.5, "max_ms": 1801},
+                    }],
+                    "pool_monitor": {
+                        "phase": "expanding",
+                        "requested_target": 12,
+                        "target_size": 12,
+                        "pool_size": 6,
+                        "pool_available": 4,
+                        "pool_initialized": True,
+                        "agent_tabs": 2,
+                        "last_added": 2,
+                        "last_reloaded": 0,
+                        "detail": "Expanding pool to 12",
+                    },
+                })
+            if url.endswith("/session-health"):
+                return _json_response({"session": "active", "profile": "m365_hub", "chat_mode": "work"})
+            if url.endswith("/status"):
+                return _json_response({"status": "ok", "pool_size": 4, "pool_available": 2, "pool_initialized": True, "agent_tabs": 1})
+            if url.endswith("/health"):
+                return _json_response({"status": "ok"})
+            raise AssertionError(f"unexpected GET {url}")
+
+        mock_http = _make_mock_http(_make_c1_ok())
+        mock_http.get = AsyncMock(side_effect=fake_get)
+        c9_mod._runtime_cache["data"] = None
+        c9_mod._runtime_cache["captured_monotonic"] = 0.0
+        with patch.object(c9_mod, "_get_http", return_value=mock_http):
+            r = c9_app.get("/api/c3-auth-progress")
+
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body["progress"]["run_id"] == "auth-123"
+        assert body["progress"]["current_step_id"] == "hello_submit"
+        assert body["progress"]["pool_monitor"]["target_size"] == 12
+        assert body["progress"]["steps"][0]["stats"]["avg_ms"] == 1450.5
+        assert body["session"]["session"] == "active"
+        assert body["c3_status"]["pool_initialized"] is True
+
+    def test_api_c3_auth_progress_run_proxies_validate_auth(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        async def fake_post(url, timeout=None, **kwargs):
+            if url.endswith("/validate-auth"):
+                return _json_response({"validated": True, "pool_tabs_reloaded": 4, "pool_tabs_added": 2})
+            raise AssertionError(f"unexpected POST {url}")
+
+        mock_http = _make_mock_http(_make_c1_ok())
+        mock_http.post = AsyncMock(side_effect=fake_post)
+        with patch.object(c9_mod, "_get_http", return_value=mock_http):
+            r = c9_app.post("/api/c3-auth-progress/run")
+
+        assert r.status_code == 200
+        assert r.json()["validated"] is True
+        assert r.json()["pool_tabs_reloaded"] == 4
+        assert r.json()["pool_tabs_added"] == 2
 
 
 # ── /api/upload tests ─────────────────────────────────────────────────────────

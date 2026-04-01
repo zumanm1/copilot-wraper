@@ -6,8 +6,8 @@ Layers tested (outermost → innermost):
   B. C9 _chat_one              — header is set iff chat_mode is truthy
   C. C9 /api/chat              — chat_mode extracted from body → _chat_one
   D. C9 /api/validate          — chat_mode flows into every _run_one call
-  E. C1 server                 — X-Chat-Mode header extracted → backend
-  F. C1 copilot_backend        — chat_mode threaded all the way to _c3_proxy_call
+  E. C1 server                 — X-Work-Mode header extracted → backend
+  F. C1 copilot_backend        — work/web mode threaded all the way to _c3_proxy_call
   G. C3 /chat endpoint         — chat_mode read from body → browser_chat
   H. C3 /session-health        — chat_mode from env in response
   I. Phase 3.5 DOM logic       — toggle click, fallback, wrong URL, exception
@@ -183,7 +183,7 @@ class TestValidateChatModeThreading:
         client, c9mod = c9_client
         recorded_modes = []
 
-        async def spy_chat_one(agent_id, prompt, c1_url, chat_mode=""):
+        async def spy_chat_one(agent_id, prompt, c1_url, chat_mode="", **kwargs):
             recorded_modes.append(chat_mode)
             return {"ok": True, "http_status": 200, "text": "joke", "elapsed_ms": 10}
 
@@ -201,7 +201,7 @@ class TestValidateChatModeThreading:
         client, c9mod = c9_client
         recorded_modes = []
 
-        async def spy_chat_one(agent_id, prompt, c1_url, chat_mode=""):
+        async def spy_chat_one(agent_id, prompt, c1_url, chat_mode="", **kwargs):
             recorded_modes.append(chat_mode)
             return {"ok": True, "http_status": 200, "text": "joke", "elapsed_ms": 10}
 
@@ -220,7 +220,7 @@ class TestValidateChatModeThreading:
         client, c9mod = c9_client
         recorded_modes = []
 
-        async def spy_chat_one(agent_id, prompt, c1_url, chat_mode=""):
+        async def spy_chat_one(agent_id, prompt, c1_url, chat_mode="", **kwargs):
             recorded_modes.append(chat_mode)
             return {"ok": True, "http_status": 200, "text": "joke", "elapsed_ms": 10}
 
@@ -237,7 +237,7 @@ class TestValidateChatModeThreading:
         """Regression: passed/failed counts must not be swapped (old bug: passed = len - passed)."""
         client, c9mod = c9_client
 
-        async def all_pass(agent_id, prompt, c1_url, chat_mode=""):
+        async def all_pass(agent_id, prompt, c1_url, chat_mode="", **kwargs):
             return {"ok": True, "http_status": 200, "text": "joke", "elapsed_ms": 10}
 
         with patch.object(c9mod, "_chat_one", all_pass):
@@ -255,7 +255,7 @@ class TestValidateChatModeThreading:
         """Regression: old code had 'failed': prompt in the JSON (corrupted key)."""
         client, c9mod = c9_client
 
-        async def one_fail(agent_id, prompt, c1_url, chat_mode=""):
+        async def one_fail(agent_id, prompt, c1_url, chat_mode="", **kwargs):
             return {"ok": False, "http_status": 500, "text": "", "error": "timeout", "elapsed_ms": 5}
 
         with patch.object(c9mod, "_chat_one", one_fail):
@@ -275,8 +275,8 @@ class TestValidateChatModeThreading:
 # E. C1 server — X-Chat-Mode header extraction
 # ═════════════════════════════════════════════════════════════════════════════
 
-class TestC1ServerChatModeHeader:
-    """C1 FastAPI server extracts X-Chat-Mode and passes it to the backend."""
+class TestC1ServerWorkModeHeader:
+    """C1 FastAPI server extracts X-Work-Mode and passes it to the backend."""
 
     @pytest.fixture
     def c1_app(self, monkeypatch):
@@ -310,7 +310,7 @@ class TestC1ServerChatModeHeader:
         client, captured = c1_app
         client.post("/v1/chat/completions",
             json={"model": "copilot", "messages": [{"role": "user", "content": "hi"}]},
-            headers={"X-Chat-Mode": "work", "X-Agent-ID": "c2-aider"},
+            headers={"X-Work-Mode": "work", "X-Agent-ID": "c2-aider"},
         )
         assert captured.get("chat_mode") == "work"
 
@@ -318,7 +318,7 @@ class TestC1ServerChatModeHeader:
         client, captured = c1_app
         client.post("/v1/chat/completions",
             json={"model": "copilot", "messages": [{"role": "user", "content": "hi"}]},
-            headers={"X-Chat-Mode": "web", "X-Agent-ID": "c2-aider"},
+            headers={"X-Work-Mode": "web", "X-Agent-ID": "c2-aider"},
         )
         assert captured.get("chat_mode") == "web"
 
@@ -335,7 +335,7 @@ class TestC1ServerChatModeHeader:
         client, captured = c1_app
         client.post("/v1/chat/completions",
             json={"model": "copilot", "messages": [{"role": "user", "content": "hi"}]},
-            headers={"X-Chat-Mode": "WORK", "X-Agent-ID": "c2-aider"},
+            headers={"X-Work-Mode": "WORK", "X-Agent-ID": "c2-aider"},
         )
         assert captured.get("chat_mode") == "work"
 
@@ -343,7 +343,7 @@ class TestC1ServerChatModeHeader:
         client, captured = c1_app
         client.post("/v1/chat/completions",
             json={"model": "copilot", "messages": [{"role": "user", "content": "hi"}]},
-            headers={"X-Chat-Mode": "  web  ", "X-Agent-ID": "c2-aider"},
+            headers={"X-Work-Mode": "  web  ", "X-Agent-ID": "c2-aider"},
         )
         assert captured.get("chat_mode") == "web"
 
@@ -739,7 +739,7 @@ class TestEdgeCases:
         all_agent_ids = ["c2-aider", "c5-claude-code", "c6-kilocode"]
         recorded = {}
 
-        async def spy_chat_one(agent_id, prompt, c1_url, chat_mode=""):
+        async def spy_chat_one(agent_id, prompt, c1_url, chat_mode="", **kwargs):
             recorded[agent_id] = chat_mode
             return {"ok": True, "http_status": 200, "text": "joke", "elapsed_ms": 15}
 

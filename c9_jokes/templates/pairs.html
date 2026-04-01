@@ -132,7 +132,7 @@
   </div>
   <!-- Parallel expansion status line (hidden until parallel run starts) -->
   <div id="pool-expand-notice" style="display:none;margin-top:6px;padding:4px 10px;border-radius:6px;background:#1a2a1a;border:1px solid #2a4a2a;color:#6dbf6d;font-size:0.8rem;">
-    ⏳ Expanding browser pool to 13 tabs for parallel run…
+    ⏳ Expanding browser pool for parallel run…
   </div>
 </div>
 
@@ -488,7 +488,7 @@ python3 tests/validate_all_agents.py --parallel</pre>
     // Show expansion notice for parallel runs
     if (useParallel) {
       poolNotice.style.display = '';
-      poolNotice.textContent = '⏳ Expanding browser pool to 13 tabs for parallel run…';
+      poolNotice.textContent = '⏳ Expanding browser pool for parallel run…';
     }
 
     try {
