@@ -1,0 +1,289 @@
+{% extends "base.html" %}
+{% block title %}C3 Auth{% endblock %}
+{% block content %}
+
+<div class="card" style="margin-bottom:1rem;">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:0.8rem;flex-wrap:wrap;">
+    <div>
+      <h2 style="margin:0 0 0.35rem 0;">C3 Tab 1 Auth Progress</h2>
+      <div class="muted" style="font-size:0.9rem;">
+        Tracks the 25-step Tab 1 and worker-pool sequence, including pool expansion and inheritance checks.
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
+      <button id="run-auth-btn" class="btn-sm">Run Tab 1 Validation</button>
+      <button id="refresh-auth-btn" class="btn-sm">Refresh</button>
+    </div>
+  </div>
+</div>
+
+<div style="display:grid;grid-template-columns:1.1fr 0.9fr;gap:1rem;align-items:start;">
+  <div class="card">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.75rem;">
+      <strong>Run Summary</strong>
+      <span id="auth-run-badge" class="badge">Idle</span>
+    </div>
+    <div id="auth-summary-grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0.6rem 1rem;font-size:0.88rem;">
+      <div><span class="muted">Run ID</span><div id="auth-run-id">—</div></div>
+      <div><span class="muted">Current step</span><div id="auth-current-step">—</div></div>
+      <div><span class="muted">Started</span><div id="auth-started">—</div></div>
+      <div><span class="muted">Updated</span><div id="auth-updated">—</div></div>
+      <div><span class="muted">Session</span><div id="auth-session">—</div></div>
+      <div><span class="muted">C3 pool</span><div id="auth-pool">—</div></div>
+    </div>
+    <div style="margin-top:0.85rem;">
+      <div class="muted" style="font-size:0.8rem;margin-bottom:0.25rem;">Error / last result</div>
+      <pre id="auth-result" style="min-height:4.5rem;margin:0;">Waiting for first poll…</pre>
+    </div>
+  </div>
+
+  <div class="card">
+    <strong style="display:block;margin-bottom:0.75rem;">Runtime Context</strong>
+    <div style="display:grid;gap:0.55rem;font-size:0.88rem;">
+      <div><span class="muted">Runtime badge</span><div id="runtime-summary">—</div></div>
+      <div><span class="muted">M365 session</span><div id="runtime-session">—</div></div>
+      <div><span class="muted">C3 status</span><div id="runtime-c3">—</div></div>
+      <div><span class="muted">Progress API</span><div id="runtime-progress">—</div></div>
+    </div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:1rem;">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.75rem;">
+    <strong>Pool Monitor</strong>
+    <span class="muted" id="pool-monitor-note">Tracking current pool state</span>
+  </div>
+  <div id="pool-monitor-grid" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0.6rem 1rem;font-size:0.88rem;">
+    <div><span class="muted">Phase</span><div id="pool-phase">—</div></div>
+    <div><span class="muted">Target</span><div id="pool-target">—</div></div>
+    <div><span class="muted">Current</span><div id="pool-current">—</div></div>
+    <div><span class="muted">Free</span><div id="pool-free">—</div></div>
+    <div><span class="muted">Agent tabs</span><div id="pool-agent-tabs">—</div></div>
+    <div><span class="muted">Last action</span><div id="pool-last-action">—</div></div>
+  </div>
+  <div style="margin-top:0.85rem;">
+    <div class="muted" style="font-size:0.8rem;margin-bottom:0.25rem;">Pool detail</div>
+    <pre id="pool-detail" style="min-height:3.4rem;margin:0;">Waiting for first poll…</pre>
+  </div>
+</div>
+
+<div class="card" style="margin-top:1rem;">
+  <div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.75rem;">
+    <strong>25-Step Checklist</strong>
+    <span class="muted" id="auth-poll-note">Polling…</span>
+  </div>
+  <ol id="step-list" style="list-style:none;padding:0;margin:0;display:grid;gap:0.6rem;"></ol>
+</div>
+
+<style>
+.c3-auth-step{
+  display:grid;
+  grid-template-columns:auto 1fr;
+  gap:0.75rem;
+  align-items:start;
+  border:1px solid var(--border);
+  border-radius:10px;
+  padding:0.7rem 0.8rem;
+  background:rgba(245,245,247,0.02);
+}
+.c3-auth-step .idx{
+  width:1.65rem;
+  height:1.65rem;
+  border-radius:999px;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  font-size:0.75rem;
+  font-weight:700;
+  background:rgba(142,142,147,0.18);
+  color:var(--muted);
+}
+.c3-auth-step.pending .idx{ background:rgba(142,142,147,0.18); color:var(--muted); }
+.c3-auth-step.running .idx{ background:rgba(10,132,255,0.18); color:#0a84ff; }
+.c3-auth-step.done .idx{ background:rgba(48,209,88,0.18); color:#30d158; }
+.c3-auth-step.error .idx{ background:rgba(255,69,58,0.18); color:#ff453a; }
+.c3-auth-step .label{ font-weight:600; }
+.c3-auth-step .meta{ font-size:0.78rem; color:var(--muted); margin-top:0.2rem; }
+.c3-auth-step .detail{ font-size:0.82rem; margin-top:0.22rem; white-space:pre-wrap; word-break:break-word; }
+</style>
+
+<script>
+(function() {
+  var runBtn = document.getElementById('run-auth-btn');
+  var refreshBtn = document.getElementById('refresh-auth-btn');
+  var runBadge = document.getElementById('auth-run-badge');
+  var stepList = document.getElementById('step-list');
+  var authResult = document.getElementById('auth-result');
+  var pollNote = document.getElementById('auth-poll-note');
+  var inflight = false;
+  var pollTimer = null;
+
+  function esc(v) {
+    return String(v == null ? '' : v)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function setBadge(text, level) {
+    runBadge.textContent = text;
+    runBadge.className = 'badge ' + (level || '');
+  }
+
+  function fmtDuration(ms) {
+    if (ms == null || ms === '') return '—';
+    var n = Number(ms);
+    if (!isFinite(n)) return '—';
+    if (n >= 1000) return (Math.round((n / 1000) * 10) / 10) + 's';
+    return Math.round(n) + 'ms';
+  }
+
+  function fmtSession(session) {
+    if (!session || !session.session) return 'Unknown';
+    var mode = session.chat_mode ? (' · ' + session.chat_mode) : '';
+    var profile = session.profile ? (' · ' + session.profile) : '';
+    return session.session + profile + mode;
+  }
+
+  function renderSteps(steps) {
+    if (!Array.isArray(steps) || !steps.length) {
+      stepList.innerHTML = '<li class="muted">No C3 auth progress data yet.</li>';
+      return;
+    }
+    stepList.innerHTML = steps.map(function(step, idx) {
+      var status = step.status || 'pending';
+      return (
+        '<li class="c3-auth-step ' + esc(status) + '">' +
+          '<div class="idx">' + (idx + 1) + '</div>' +
+          '<div>' +
+            '<div class="label">' + esc(step.label || step.id || ('Step ' + (idx + 1))) + '</div>' +
+            '<div class="meta">Status: ' + esc(status) +
+              (step.updated_at ? ' · ' + esc(step.updated_at) : '') +
+              ' · last ' + esc(fmtDuration(step.last_ms)) +
+              ' · min ' + esc(fmtDuration(step.stats && step.stats.min_ms)) +
+              ' · avg ' + esc(fmtDuration(step.stats && step.stats.avg_ms)) +
+              ' · max ' + esc(fmtDuration(step.stats && step.stats.max_ms)) +
+            '</div>' +
+            '<div class="detail">' + esc(step.detail || '—') + '</div>' +
+          '</div>' +
+        '</li>'
+      );
+    }).join('');
+  }
+
+  function render(payload) {
+    var progress = (payload && payload.progress) || {};
+    var runtime = (payload && payload.runtime) || {};
+    var session = (payload && payload.session) || {};
+    var c3status = (payload && payload.c3_status) || {};
+    var pool = progress.pool_monitor || {};
+    var active = !!progress.active;
+    var result = progress.result || (active ? 'running' : 'idle');
+
+    document.getElementById('auth-run-id').textContent = progress.run_id || '—';
+    document.getElementById('auth-current-step').textContent = progress.current_step_id || '—';
+    document.getElementById('auth-started').textContent = progress.started_at || '—';
+    document.getElementById('auth-updated').textContent = progress.updated_at || '—';
+    document.getElementById('auth-session').textContent = fmtSession(session);
+    document.getElementById('auth-pool').textContent =
+      (c3status.pool_initialized ? ('ready · ' + (c3status.pool_available || 0) + '/' + (c3status.pool_size || 0) + ' free') : 'not initialized');
+    document.getElementById('runtime-summary').textContent = runtime.summary || '—';
+    document.getElementById('runtime-session').textContent = fmtSession((runtime.components || {}).m365 || session);
+    document.getElementById('runtime-c3').textContent = c3status.status ? JSON.stringify(c3status) : '—';
+    document.getElementById('runtime-progress').textContent = payload && payload.ok ? 'available' : ('unavailable' + (payload && payload.http_status ? ' · HTTP ' + payload.http_status : ''));
+
+    if (active) setBadge('Running', 'warn');
+    else if (result === 'ok') setBadge('Passed', 'ok');
+    else if (result === 'error') setBadge('Failed', 'fail');
+    else setBadge('Idle', '');
+
+    var lines = [];
+    if (progress.error) lines.push(progress.error);
+    if (!lines.length && progress.result) lines.push('Result: ' + progress.result);
+    if (!lines.length) lines.push('No run result yet.');
+    authResult.textContent = lines.join('\n');
+    document.getElementById('pool-phase').textContent = pool.phase || 'idle';
+    document.getElementById('pool-target').textContent = (pool.target_size || 0) ? String(pool.target_size) : '—';
+    document.getElementById('pool-current').textContent = (pool.pool_size || 0) ? String(pool.pool_size) : '0';
+    document.getElementById('pool-free').textContent = (pool.pool_available || 0) + ' free';
+    document.getElementById('pool-agent-tabs').textContent = String(pool.agent_tabs || 0);
+    document.getElementById('pool-last-action').textContent =
+      'added ' + String(pool.last_added || 0) + ' · reloaded ' + String(pool.last_reloaded || 0);
+    document.getElementById('pool-detail').textContent = pool.detail || 'No pool activity yet.';
+    document.getElementById('pool-monitor-note').textContent =
+      'Current ' + (pool.pool_initialized ? 'initialized' : 'not initialized') +
+      ' · target ' + String(pool.target_size || 0) +
+      ' · requested ' + String(pool.requested_target || 0);
+    renderSteps(progress.steps || []);
+    pollNote.textContent = active ? 'Polling every 2s while run is active' : 'Polling every 5s';
+  }
+
+  async function refresh() {
+    try {
+      var res = await fetch('/api/c3-auth-progress', { cache: 'no-store' });
+      var data = await res.json();
+      render(data);
+      return data;
+    } catch (err) {
+      setBadge('Unavailable', 'fail');
+      authResult.textContent = String(err);
+      stepList.innerHTML = '<li class="muted">Failed to load /api/c3-auth-progress.</li>';
+      return null;
+    }
+  }
+
+  function scheduleNext(active) {
+    if (pollTimer) clearTimeout(pollTimer);
+    pollTimer = setTimeout(function() {
+      refresh().then(function(data) {
+        var nextActive = !!((data && data.progress && data.progress.active));
+        scheduleNext(nextActive);
+      });
+    }, active ? 2000 : 5000);
+  }
+
+  async function startRun() {
+    if (inflight) return;
+    inflight = true;
+    runBtn.disabled = true;
+    setBadge('Starting…', 'warn');
+    authResult.textContent = 'Starting validate-auth run…';
+    fetch('/api/c3-auth-progress/run', { method: 'POST' })
+      .then(function(res) {
+        return res.json().then(function(body) {
+          return { ok: res.ok, status: res.status, body: body };
+        });
+      })
+      .then(function(out) {
+        authResult.textContent = JSON.stringify(out.body, null, 2);
+      })
+      .catch(function(err) {
+        authResult.textContent = String(err);
+      })
+      .finally(function() {
+        inflight = false;
+        runBtn.disabled = false;
+        refresh().then(function(data) {
+          scheduleNext(!!(data && data.progress && data.progress.active));
+        });
+      });
+    var data = await refresh();
+    scheduleNext(!!(data && data.progress && data.progress.active));
+  }
+
+  runBtn.addEventListener('click', startRun);
+  refreshBtn.addEventListener('click', function() {
+    refresh().then(function(data) {
+      scheduleNext(!!(data && data.progress && data.progress.active));
+    });
+  });
+
+  refresh().then(function(data) {
+    scheduleNext(!!(data && data.progress && data.progress.active));
+  });
+})();
+</script>
+
+{% endblock %}

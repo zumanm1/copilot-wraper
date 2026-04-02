@@ -61,10 +61,10 @@
   <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
   <tbody>
     <tr><td>POST</td><td><code>/api/sandbox/exec</code></td>
-        <td>Execute a shell command in C10 or C11 sandbox.<br>
+        <td>Execute a shell command in C10, C11, or C12b sandbox.<br>
         Body: <code>{"command":"ls -la","sandbox":"c10","timeout":30,"cwd":".","session_id":""}</code><br>
         Returns: <code>{"stdout":"…","stderr":"…","exit_code":0,"timed_out":false}</code><br>
-        <code>sandbox</code>: <code>"c10"</code> (agent workspace) or <code>"c11"</code> (multi-agent, needs <code>session_id</code>)</td></tr>
+        <code>sandbox</code>: <code>"c10"</code> (agent workspace), <code>"c11"</code> (multi-agent, needs <code>session_id</code>), or <code>"c12b"</code> (lean host-exposed coding/test sandbox)</td></tr>
   </tbody>
 </table>
 
@@ -129,6 +129,11 @@
 <pre>curl -sS -X POST http://localhost:6090/api/sandbox/exec \
   -H "Content-Type: application/json" \
   -d '{"command":"ls -la","sandbox":"c10","timeout":10}'</pre>
+
+<h3>Example: Run Shell Command in Lean C12b Sandbox</h3>
+<pre>curl -sS -X POST http://localhost:6090/api/sandbox/exec \
+  -H "Content-Type: application/json" \
+  -d '{"command":"python3 --version && node --version && uv --version","sandbox":"c12b","timeout":10}'</pre>
 
 <h3>Example: Stop a Container</h3>
 <pre>curl -sS -X POST http://localhost:6090/api/container/toggle \

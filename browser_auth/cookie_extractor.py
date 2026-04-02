@@ -19,9 +19,12 @@ Key fixes vs v1:
 """
 from __future__ import annotations
 import asyncio
+import datetime
+import json
 import os
 import re
 import time
+import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 from playwright.async_api import async_playwright, BrowserContext, Page, Browser
@@ -50,6 +53,91 @@ _BING_COOKIE_NAMES = [
 ]
 
 _VALID_PROFILES = frozenset({"consumer", "m365_hub"})
+
+_AUTH_STEP_DEFS = [
+    ("c3_health", "C3 browser-auth healthy"),
+    ("tab1_setup", "Tab 1 opened on /setup"),
+    ("work_mode", "Work mode selected"),
+    ("portal_connect", "Portal connect issued"),
+    ("m365_nav", "Tab 1 navigated to M365"),
+    ("session_auth", "M365 session authenticated"),
+    ("popup_check_1", "Initial auth popup checked"),
+    ("popup_continue_1", "Initial Continue click handled if needed"),
+    ("stabilize_1", "Tab 1 stabilized after auth"),
+    ("hello_prepare", "First prompt prepared"),
+    ("hello_type", "First prompt typed"),
+    ("hello_submit", "First prompt submitted"),
+    ("hello_popup_watch", "Popup watch during first prompt"),
+    ("hello_reply", "First reply received"),
+    ("follow_prepare", "Follow-up prompt prepared"),
+    ("follow_type", "Follow-up prompt typed"),
+    ("follow_submit", "Follow-up prompt submitted"),
+    ("follow_popup_watch", "Popup watch during follow-up"),
+    ("follow_reply", "Follow-up reply received"),
+    ("pool_ready", "Tab 1 ready for pool creation"),
+    ("pool_target", "Pool target selected"),
+    ("pool_expand_request", "Pool expansion request accepted"),
+    ("pool_expand_progress", "Pool tabs preparing"),
+    ("pool_expand_verify", "Pool inheritance verified"),
+    ("pool_expand_done", "Pool expansion complete"),
+]
+
+
+def _new_auth_progress_state() -> dict:
+    now = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    return {
+        "run_id": None,
+        "active": False,
+        "source": None,
+        "started_at": None,
+        "updated_at": now,
+        "finished_at": None,
+        "result": None,
+        "error": None,
+        "current_step_id": None,
+        "steps": [
+            {
+                "id": step_id,
+                "label": label,
+                "status": "pending",
+                "detail": "",
+                "started_at": None,
+                "ended_at": None,
+                "last_ms": None,
+                "updated_at": now,
+            }
+            for step_id, label in _AUTH_STEP_DEFS
+        ],
+    }
+
+
+_tab1_auth_progress = _new_auth_progress_state()
+_tab1_auth_step_stats: dict[str, dict[str, float | int | None]] = {
+    step_id: {"runs": 0, "total_ms": 0.0, "min_ms": None, "max_ms": None}
+    for step_id, _ in _AUTH_STEP_DEFS
+}
+
+
+def _new_pool_monitor_state() -> dict:
+    now = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    return {
+        "phase": "idle",
+        "source": None,
+        "detail": "",
+        "base_size": 0,
+        "requested_target": 0,
+        "target_size": 0,
+        "pool_size": 0,
+        "pool_available": 0,
+        "pool_initialized": False,
+        "agent_tabs": 0,
+        "last_added": 0,
+        "last_reloaded": 0,
+        "updated_at": now,
+    }
+
+
+_tab1_pool_monitor = _new_pool_monitor_state()
 
 # M365 chat may load on canonical host or the common *.microsoft.com alias; both
 # can carry distinct cookies.  Extraction stays on these hosts only — no
@@ -160,7 +248,40 @@ _chat_lock = asyncio.Lock()  # kept as fallback; pool mode bypasses this
 _pool_pages: set = set()      # pages owned by PagePool; skipped by _get_or_create_page
 _page_pool: "PagePool | None" = None  # initialized lazily on first browser_chat call
 _chat_semaphore: asyncio.Semaphore | None = None  # limits concurrent Playwright operations
+_tab1_ready_lock = asyncio.Lock()
+_tab1_session_ready = False
+_tab1_session_meta: dict[str, object] = {"ready": False, "reason": "startup"}
 _DISMISS_AUTH_DIALOG = os.getenv("BROWSER_AUTH_AUTO_DISMISS_AUTH_DIALOG", "false").strip().lower() == "true"
+_M365_CHAT_URL = "https://m365.cloud.microsoft/chat"
+_M365_COMPOSER_SEL = (
+    '[data-testid="composer-input"], '
+    '[role="textbox"][contenteditable="true"], '
+    'textarea'
+)
+_M365_SERVICE_ERROR_PHRASES = (
+    "service communication is currently unavailable",
+    "something went wrong",
+    "please try again later",
+    "experiencing high demand",
+    "try again later",
+    "we're experiencing",
+)
+
+
+async def _page_text_hint(page: Page, limit: int = 4000) -> str:
+    """Return a small lower-cased title/body snapshot without serializing full HTML."""
+    try:
+        text = await page.evaluate(
+            """(limit) => {
+                const title = document.title || "";
+                const body = (document.body && (document.body.innerText || document.body.textContent || "")) || "";
+                return (title + "\\n" + body).slice(0, limit);
+            }""",
+            limit,
+        )
+        return (text or "").lower()
+    except Exception:
+        return ""
 
 
 async def _get_context() -> BrowserContext:
@@ -192,17 +313,16 @@ async def _get_context() -> BrowserContext:
             headless=False,
             args=[
                 "--no-sandbox",
-                "--disable-dev-shm-usage",
                 "--disable-blink-features=AutomationControlled",
                 "--disable-quic",
-                "--window-size=1280,1024",
+                "--window-size=1280,900",
                 "--window-position=0,0",
                 "--start-maximized",
                 "--hide-crash-restore-bubble",
                 "--test-type",
                 "--disable-popup-blocking",
             ],
-            ignore_default_args=["--enable-automation", "--disable-infobars"],
+            ignore_default_args=["--enable-automation", "--disable-infobars", "--disable-dev-shm-usage"],
             viewport=None,
             ignore_https_errors=False,
             accept_downloads=False,
@@ -262,14 +382,11 @@ async def _auth_dialog_monitor() -> None:
                     try:
                         if page.is_closed():
                             continue
-                        content = (await page.content()).lower()
-                        if "authentication required" in content and "continue" in content:
+                        if await _page_has_auth_dialog(page):
                             print("[cookie_extractor] Auth dialog detected — auto-clicking Continue")
-                            # Find and click the Continue button
-                            btn = page.locator("button", has_text="Continue")
-                            if await btn.count() > 0:
-                                await btn.first.click(timeout=5_000)
-                                print("[cookie_extractor] Auth dialog dismissed")
+                            note = await _click_auth_dialog_button(page)
+                            if note:
+                                print(f"[cookie_extractor] Auth dialog dismissed via {note}")
                                 await asyncio.sleep(3)  # let re-auth complete
                     except Exception:
                         pass
@@ -287,6 +404,581 @@ async def _get_or_create_page(context: BrowserContext) -> Page:
     return await context.new_page()
 
 
+def invalidate_tab1_ready_state(reason: str = "") -> None:
+    """Mark Tab 1 as requiring re-validation before pool tabs may be created."""
+    global _tab1_session_ready, _tab1_session_meta
+    _tab1_session_ready = False
+    _tab1_session_meta = {
+        "ready": False,
+        "reason": reason or "unknown",
+        "updated_at": int(time.time()),
+    }
+
+
+def _auth_progress_step(step_id: str) -> dict | None:
+    for step in _tab1_auth_progress["steps"]:
+        if step["id"] == step_id:
+            return step
+    return None
+
+
+def _auth_progress_now() -> str:
+    return datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _pool_step_ids() -> tuple[str, ...]:
+    return (
+        "pool_target",
+        "pool_expand_request",
+        "pool_expand_progress",
+        "pool_expand_verify",
+        "pool_expand_done",
+    )
+
+
+def _step_stats_view(step_id: str) -> dict:
+    raw = _tab1_auth_step_stats.get(step_id) or {}
+    runs = int(raw.get("runs") or 0)
+    total_ms = float(raw.get("total_ms") or 0.0)
+    avg_ms = round(total_ms / runs, 1) if runs else None
+    return {
+        "runs": runs,
+        "min_ms": raw.get("min_ms"),
+        "avg_ms": avg_ms,
+        "max_ms": raw.get("max_ms"),
+    }
+
+
+def _record_step_duration(step_id: str, duration_ms: int) -> None:
+    stats = _tab1_auth_step_stats.setdefault(
+        step_id,
+        {"runs": 0, "total_ms": 0.0, "min_ms": None, "max_ms": None},
+    )
+    stats["runs"] = int(stats.get("runs") or 0) + 1
+    stats["total_ms"] = float(stats.get("total_ms") or 0.0) + float(duration_ms)
+    current_min = stats.get("min_ms")
+    current_max = stats.get("max_ms")
+    stats["min_ms"] = duration_ms if current_min is None else min(int(current_min), duration_ms)
+    stats["max_ms"] = duration_ms if current_max is None else max(int(current_max), duration_ms)
+
+
+def _sync_pool_monitor(pool: "PagePool | None" = None, **updates) -> dict:
+    global _tab1_pool_monitor
+    monitor = dict(_tab1_pool_monitor)
+    monitor.update(updates)
+    pool = pool or _page_pool
+    if pool is not None:
+        monitor["base_size"] = getattr(pool, "_base_size", monitor.get("base_size") or 0)
+        monitor["pool_size"] = pool.size
+        monitor["pool_available"] = pool.available
+        monitor["pool_initialized"] = pool._initialized
+        monitor["agent_tabs"] = len(pool.agents)
+    monitor["updated_at"] = _auth_progress_now()
+    _tab1_pool_monitor = monitor
+    return monitor
+
+
+def get_pool_monitor_snapshot() -> dict:
+    return json.loads(json.dumps(_tab1_pool_monitor))
+
+
+def _resume_tab1_auth_progress(source: str) -> None:
+    if not _tab1_auth_progress.get("run_id"):
+        reset_tab1_auth_progress(source)
+        return
+    now = _auth_progress_now()
+    _tab1_auth_progress["active"] = True
+    _tab1_auth_progress["source"] = source
+    _tab1_auth_progress["result"] = None
+    _tab1_auth_progress["error"] = None
+    _tab1_auth_progress["finished_at"] = None
+    _tab1_auth_progress["updated_at"] = now
+    for step_id in _pool_step_ids():
+        step = _auth_progress_step(step_id)
+        if step is None:
+            continue
+        step["status"] = "pending"
+        step["detail"] = ""
+        step["started_at"] = None
+        step["ended_at"] = None
+        step["last_ms"] = None
+        step["updated_at"] = now
+        step.pop("_started_mono", None)
+
+
+def reset_tab1_auth_progress(source: str = "validate-auth") -> dict:
+    global _tab1_auth_progress
+    state = _new_auth_progress_state()
+    state["run_id"] = f"auth-{uuid.uuid4().hex[:12]}"
+    state["active"] = True
+    state["source"] = source
+    state["started_at"] = _auth_progress_now()
+    state["updated_at"] = state["started_at"]
+    _tab1_auth_progress = state
+    _sync_pool_monitor(
+        None,
+        phase="idle",
+        source=source,
+        detail="",
+        requested_target=0,
+        target_size=0,
+        last_added=0,
+        last_reloaded=0,
+    )
+    return get_tab1_auth_progress_snapshot()
+
+
+def update_tab1_auth_progress(step_id: str, status: str, detail: str = "") -> None:
+    step = _auth_progress_step(step_id)
+    if step is None:
+        return
+    now = _auth_progress_now()
+    previous_status = step.get("status")
+    if status == "running" and previous_status != "running":
+        step["started_at"] = now
+        step["ended_at"] = None
+        step["last_ms"] = None
+        step["_started_mono"] = time.monotonic()
+    elif status in ("done", "error") and previous_status == "running":
+        started_mono = step.pop("_started_mono", None)
+        if started_mono is not None:
+            duration_ms = int((time.monotonic() - float(started_mono)) * 1000)
+            step["last_ms"] = duration_ms
+            step["ended_at"] = now
+            _record_step_duration(step_id, duration_ms)
+    step["status"] = status
+    step["detail"] = detail or step.get("detail", "")
+    step["updated_at"] = now
+    _tab1_auth_progress["current_step_id"] = step_id
+    _tab1_auth_progress["updated_at"] = now
+
+
+def finish_tab1_auth_progress(result: str, error: str | None = None) -> None:
+    now = _auth_progress_now()
+    _tab1_auth_progress["active"] = False
+    _tab1_auth_progress["result"] = result
+    _tab1_auth_progress["error"] = error
+    _tab1_auth_progress["finished_at"] = now
+    _tab1_auth_progress["updated_at"] = now
+
+
+def get_tab1_auth_progress_snapshot() -> dict:
+    snap = json.loads(json.dumps(_tab1_auth_progress))
+    for step in snap.get("steps", []):
+        step.pop("_started_mono", None)
+        step["stats"] = _step_stats_view(step.get("id", ""))
+    snap["pool_monitor"] = get_pool_monitor_snapshot()
+    return snap
+
+
+def mark_tab1_auth_progress_done(step_id: str, detail: str = "") -> None:
+    step = _auth_progress_step(step_id)
+    if step is None:
+        return
+    if step.get("status") == "done" and not detail:
+        return
+    update_tab1_auth_progress(step_id, "done", detail or step.get("detail", ""))
+
+
+def mark_tab1_auth_progress_error(step_id: str, detail: str = "") -> None:
+    step = _auth_progress_step(step_id)
+    if step is None:
+        return
+    update_tab1_auth_progress(step_id, "error", detail or step.get("detail", ""))
+
+
+def _maybe_invalidate_tab1_for_auth(page: Page, reason: str) -> bool:
+    """Only poison Tab 1 readiness when the auth problem happened on the real Tab 1 page."""
+    if page in _pool_pages:
+        return False
+    invalidate_tab1_ready_state(reason)
+    return True
+
+
+def _mark_tab1_ready(result: dict | None = None) -> None:
+    global _tab1_session_ready, _tab1_session_meta
+    _tab1_session_ready = True
+    meta = {"ready": True, "updated_at": int(time.time())}
+    if result:
+        for key in ("tab1_url", "reply", "checked_at", "follow_up_validated"):
+            if key in result:
+                meta[key] = result[key]
+    _tab1_session_meta = meta
+
+
+async def _page_has_auth_dialog(page: Page) -> bool:
+    """Detect the in-app M365 auth gate shown as 'Authentication required'."""
+    try:
+        blocked = await page.evaluate("""() => {
+            const headings = [...document.querySelectorAll('h1,h2,h3,[role="heading"]')];
+            return headings.some(h => ((h.textContent || '').trim().toLowerCase()).includes('authentication required'));
+        }""")
+        if blocked:
+            return True
+    except Exception:
+        pass
+    hint = await _page_text_hint(page, limit=2000)
+    return "authentication required" in hint and "continue" in hint
+
+
+async def _click_auth_dialog_button(page: Page) -> str | None:
+    """Hit the auth-gate button with a real Playwright mouse click first."""
+    labels = ("Continue", "Sign in", "Refresh", "OK")
+    last_error: Exception | None = None
+
+    for label in labels:
+        candidates = (
+            page.locator("button", has_text=label),
+            page.locator("[role='button']", has_text=label),
+        )
+        for locator in candidates:
+            try:
+                if await locator.count() == 0:
+                    continue
+                button = locator.first
+                try:
+                    await button.scroll_into_view_if_needed(timeout=2_000)
+                except Exception:
+                    pass
+                try:
+                    await page.bring_to_front()
+                except Exception:
+                    pass
+                try:
+                    box = await button.bounding_box()
+                except Exception:
+                    box = None
+                if box and box.get("width", 0) > 0 and box.get("height", 0) > 0:
+                    x = box["x"] + (box["width"] / 2.0)
+                    y = box["y"] + (box["height"] / 2.0)
+                    await page.mouse.move(x, y, steps=8)
+                    await asyncio.sleep(0.1)
+                    await page.mouse.down()
+                    await asyncio.sleep(0.05)
+                    await page.mouse.up()
+                    return f"clicked:{label.lower()}(mouse)"
+                await button.click(timeout=5_000, force=True)
+                return f"clicked:{label.lower()}(locator)"
+            except Exception as exc:
+                last_error = exc
+    if last_error is not None:
+        print(f"[browser_chat] Auth dialog real-click failed: {last_error}")
+    return None
+
+
+async def _clear_auth_dialog_if_present(page: Page, settle_seconds: float = 8.0) -> tuple[bool, str | None]:
+    """Dismiss the M365 auth gate if present and report whether the page is clear."""
+    try:
+        auth_blocked = await page.evaluate("""() => {
+            const headings = [...document.querySelectorAll('h1,h2,h3,[role="heading"]')];
+            const authHeading = headings.find(h =>
+                ((h.textContent || '').trim().toLowerCase()).includes('authentication required')
+            );
+            return authHeading ? 'auth_dialog_present' : null;
+        }""")
+    except Exception:
+        auth_blocked = None
+
+    if not auth_blocked:
+        return True, None
+
+    real_click_note = await _click_auth_dialog_button(page)
+    if real_click_note:
+        auth_blocked = real_click_note
+    else:
+        try:
+            fallback_note = await page.evaluate("""() => {
+                const btns = [...document.querySelectorAll('button,[role="button"]')];
+                for (const b of btns) {
+                    const t = ((b.textContent || '') + ' ' + (b.getAttribute('aria-label') || '')).trim().toLowerCase();
+                    if (t === 'sign in' || t === 'refresh' || t === 'ok' || t === 'continue' || t.startsWith('continue')) {
+                        b.dispatchEvent(new MouseEvent('click', {
+                            bubbles: true, cancelable: true, view: window
+                        }));
+                        return 'clicked:' + t + '(dom)';
+                    }
+                }
+                return 'auth_dialog_present';
+            }""")
+            if fallback_note:
+                auth_blocked = str(fallback_note)
+        except Exception:
+            pass
+
+    print(f"[browser_chat] Auth check: {auth_blocked}")
+    await asyncio.sleep(settle_seconds)
+    if await _page_has_auth_dialog(page):
+        retry_note = await _click_auth_dialog_button(page)
+        if retry_note:
+            auth_blocked = retry_note
+            print(f"[browser_chat] Auth check retry: {auth_blocked}")
+            await asyncio.sleep(max(2.0, settle_seconds / 2.0))
+    if await _page_has_auth_dialog(page):
+        return False, "Authentication required on m365.cloud.microsoft — sign in via noVNC at http://localhost:6080 then retry"
+    print("[browser_chat] Auth dialog dismissed — proceeding")
+    return True, str(auth_blocked)
+
+
+async def _wait_for_done_with_auth_watch(
+    page: Page,
+    done_event: asyncio.Event,
+    timeout_s: float,
+    popup_step_id: str | None = None,
+) -> bool:
+    """Wait for completion while re-clearing any auth dialog that reappears."""
+    deadline = time.monotonic() + timeout_s
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        slice_s = min(3.0, remaining)
+        try:
+            await asyncio.wait_for(done_event.wait(), timeout=slice_s)
+            return True
+        except asyncio.TimeoutError:
+            pass
+        try:
+            if await _page_has_auth_dialog(page):
+                auth_ok, auth_note = await _clear_auth_dialog_if_present(page, settle_seconds=2.0)
+                if auth_ok:
+                    if popup_step_id:
+                        update_tab1_auth_progress(
+                            popup_step_id,
+                            "running",
+                            auth_note or "Auth dialog re-cleared during reply wait",
+                        )
+                    print("[browser_chat] Auth dialog re-cleared during wait loop")
+                else:
+                    if popup_step_id:
+                        mark_tab1_auth_progress_error(
+                            popup_step_id,
+                            auth_note or "Auth dialog persisted during reply wait",
+                        )
+                    print(f"[browser_chat] Auth dialog persisted during wait loop: {auth_note}")
+        except Exception as exc:
+            print(f"[browser_chat] Auth wait-loop check error (non-fatal): {exc}")
+
+
+def _is_m365_chat_url(url: str) -> bool:
+    current = (url or "").lower()
+    return "m365.cloud.microsoft/chat" in current or "copilot.microsoft.com" in current
+
+
+async def _goto_m365_chat_page(page: Page, timeout_ms: int = 30_000) -> str:
+    """Navigate to M365 chat and tolerate redirect-style ERR_ABORTED transitions."""
+    last_error: Exception | None = None
+    for attempt in range(2):
+        try:
+            await page.goto(_M365_CHAT_URL, wait_until="domcontentloaded", timeout=timeout_ms)
+        except Exception as exc:
+            last_error = exc
+            current_url = page.url or ""
+            if _is_m365_chat_url(current_url):
+                return current_url
+            try:
+                await page.wait_for_load_state("domcontentloaded", timeout=min(timeout_ms, 10_000))
+            except Exception:
+                pass
+            current_url = page.url or ""
+            if _is_m365_chat_url(current_url):
+                return current_url
+            if "ERR_ABORTED" in str(exc) and attempt == 0:
+                await asyncio.sleep(1.5)
+                continue
+            raise
+        current_url = page.url or ""
+        if _is_m365_chat_url(current_url):
+            return current_url
+        try:
+            await page.wait_for_load_state("domcontentloaded", timeout=min(timeout_ms, 10_000))
+        except Exception:
+            pass
+        current_url = page.url or ""
+        if _is_m365_chat_url(current_url):
+            return current_url
+    current_url = page.url or ""
+    if _is_m365_chat_url(current_url):
+        return current_url
+    detail = f": {last_error}" if last_error else ""
+    raise RuntimeError(f"M365 chat navigation did not reach target (url={current_url}){detail}")
+
+
+async def _prepare_m365_chat_page(
+    page: Page,
+    timeout_ms: int = 30_000,
+    settle_seconds: float = 8.0,
+) -> tuple[bool, str | None]:
+    """Only treat a page as ready once auth is clear and the M365 composer is visible."""
+    try:
+        await _goto_m365_chat_page(page, timeout_ms=timeout_ms)
+    except Exception as exc:
+        return False, f"navigate failed: {exc}"
+
+    auth_ok, auth_error = await _clear_auth_dialog_if_present(page, settle_seconds=settle_seconds)
+    if not auth_ok:
+        return False, auth_error
+
+    try:
+        await page.wait_for_selector(_M365_COMPOSER_SEL, state="visible", timeout=25_000)
+    except Exception as exc:
+        return False, f"M365 composer not ready on {page.url or 'unknown'}: {exc}"
+
+    if await _page_has_auth_dialog(page):
+        return False, "Authentication required dialog persisted after page preparation"
+
+    return True, None
+
+
+async def _page_service_issue_text(page: Page) -> str | None:
+    """Return the visible M365 service-error phrase when the page is not turn-ready."""
+    phrases = list(_M365_SERVICE_ERROR_PHRASES)
+    try:
+        hit = await page.evaluate(
+            """(phrases) => {
+                const body = (document.body && (document.body.innerText || document.body.textContent || "")) || "";
+                const text = body.toLowerCase();
+                return phrases.find(p => text.includes(p)) || null;
+            }""",
+            phrases,
+        )
+        if hit:
+            return str(hit)
+    except Exception:
+        pass
+    hint = await _page_text_hint(page, limit=4000)
+    for phrase in phrases:
+        if phrase in hint:
+            return phrase
+    return None
+
+
+async def _page_has_visible_composer(page: Page, timeout_ms: int = 2_000) -> bool:
+    try:
+        await page.wait_for_selector(_M365_COMPOSER_SEL, state="visible", timeout=timeout_ms)
+        return True
+    except Exception:
+        return False
+
+
+async def _wait_for_m365_chat_ready(
+    page: Page,
+    timeout_s: float = 30.0,
+    stable_s: float = 5.0,
+) -> tuple[bool, str | None]:
+    """
+    Wait until the visible M365 chat tab is actually ready for a turn.
+
+    "Ready" means:
+      - no auth dialog is blocking the page
+      - no service-communication banner is visible
+      - the composer is visible for a continuous stable window
+    """
+    deadline = time.monotonic() + max(3.0, timeout_s)
+    stable_since: float | None = None
+    last_issue: str | None = None
+    refresh_attempted = False
+
+    while time.monotonic() < deadline:
+        auth_ok, auth_note = await _clear_auth_dialog_if_present(page, settle_seconds=1.5)
+        if not auth_ok:
+            stable_since = None
+            last_issue = auth_note or "Authentication required on m365.cloud.microsoft"
+            await asyncio.sleep(1.5)
+            continue
+
+        service_issue = await _page_service_issue_text(page)
+        if service_issue:
+            stable_since = None
+            last_issue = service_issue
+            if not refresh_attempted:
+                refresh_attempted = True
+                try:
+                    await _goto_m365_chat_page(page, timeout_ms=20_000)
+                    await asyncio.sleep(4.0)
+                    continue
+                except Exception as exc:
+                    last_issue = f"{service_issue}; refresh failed: {exc}"
+            await asyncio.sleep(2.0)
+            continue
+
+        composer_ready = await _page_has_visible_composer(page, timeout_ms=2_000)
+        if not composer_ready:
+            stable_since = None
+            last_issue = f"Composer not ready on {page.url or 'unknown'}"
+            await asyncio.sleep(1.5)
+            continue
+
+        if stable_since is None:
+            stable_since = time.monotonic()
+        elif (time.monotonic() - stable_since) >= max(1.0, stable_s):
+            return True, None
+
+        await asyncio.sleep(1.0)
+
+    return False, last_issue or "M365 chat did not stabilize before prompt send"
+
+
+async def _recover_tab1_after_turn_failure(
+    page: Page,
+    context: BrowserContext,
+    *,
+    reason: str = "",
+) -> tuple[Page, str | None]:
+    """
+    Recover Tab 1 after a cold-start first-turn failure.
+
+    This is intentionally narrow: it is only used by validate_tab1_with_hello
+    when the first post-restart turn times out with no reply text.
+    """
+    reason = (reason or "unknown").strip()
+    try:
+        print(f"[validate_tab1] Recovering Tab 1 after first-turn failure: {reason}")
+        try:
+            await page.goto("about:blank", wait_until="domcontentloaded", timeout=15_000)
+        except Exception:
+            pass
+
+        ok, prep_error = await _prepare_m365_chat_page(page, timeout_ms=30_000, settle_seconds=6.0)
+        if not ok:
+            raise RuntimeError(prep_error or "M365 chat page not ready after recovery refresh")
+
+        ready_ok, ready_error = await _wait_for_m365_chat_ready(page, timeout_s=20.0, stable_s=3.0)
+        if not ready_ok:
+            raise RuntimeError(ready_error or "M365 chat did not stabilize after recovery refresh")
+        return page, None
+    except Exception as exc:
+        print(f"[validate_tab1] Tab 1 refresh recovery failed: {exc}")
+        try:
+            if not page.is_closed():
+                await page.close()
+        except Exception:
+            pass
+        try:
+            replacement = await context.new_page()
+            ok, prep_error = await _prepare_m365_chat_page(replacement, timeout_ms=30_000, settle_seconds=6.0)
+            if not ok:
+                raise RuntimeError(prep_error or "replacement Tab 1 not ready")
+            ready_ok, ready_error = await _wait_for_m365_chat_ready(replacement, timeout_s=20.0, stable_s=3.0)
+            if not ready_ok:
+                raise RuntimeError(ready_error or "replacement Tab 1 did not stabilize")
+            return replacement, None
+        except Exception as replacement_exc:
+            return page, f"Tab 1 recovery failed after '{reason}': {replacement_exc}"
+
+
+async def _restore_tab1_focus(context: BrowserContext | None = None) -> bool:
+    """Return the visible noVNC browser to the dedicated non-pool auth tab."""
+    try:
+        ctx = context or await _get_context()
+        tab1 = await _get_or_create_page(ctx)
+        if tab1.is_closed():
+            return False
+        await tab1.bring_to_front()
+        return True
+    except Exception:
+        return False
+
+
 class PagePool:
     """
     Agent-keyed pool of browser tabs for M365 Chat.
@@ -298,16 +990,13 @@ class PagePool:
     requests within one agent while different agents run in full parallel.
     """
 
-    _M365_CHAT_URL = "https://m365.cloud.microsoft/chat"
-    _COMPOSER_SEL = (
-        '[data-testid="composer-input"], '
-        '[role="textbox"][contenteditable="true"], '
-        'textarea'
-    )
-    _CREATE_CONCURRENCY = 4
+    _M365_CHAT_URL = _M365_CHAT_URL
+    _COMPOSER_SEL = _M365_COMPOSER_SEL
+    _CREATE_CONCURRENCY = 2
 
     def __init__(self, size: int) -> None:
         self._size = size
+        self._base_size = size
         self._agent_tabs: dict[str, Page] = {}
         self._agent_locks: dict[str, asyncio.Lock] = {}
         self._free_tabs: asyncio.Queue[Page] = asyncio.Queue()
@@ -315,8 +1004,9 @@ class PagePool:
         self._init_lock = asyncio.Lock()
         self._initialized = False
         self._context: BrowserContext | None = None
+        self._trim_generation = 0
 
-    async def initialize(self, context: BrowserContext) -> None:
+    async def initialize(self, context: BrowserContext, progress_step_id: str | None = None) -> None:
         """Pre-create N tabs (concurrency-limited to avoid browser overload)."""
         async with self._init_lock:
             if self._initialized:
@@ -324,28 +1014,53 @@ class PagePool:
             self._context = context
             _t0 = time.monotonic()
             print(f"[PagePool] Pre-creating {self._size} tabs (max {self._CREATE_CONCURRENCY} concurrent)...")
+            if progress_step_id:
+                update_tab1_auth_progress(
+                    progress_step_id,
+                    "running",
+                    f"Preparing base pool tabs 0/{self._size} ready",
+                )
+            _sync_pool_monitor(
+                self,
+                phase="preparing",
+                detail=f"Preparing base pool tabs 0/{self._size} ready",
+                requested_target=self._size,
+                target_size=self._size,
+            )
             sem = asyncio.Semaphore(self._CREATE_CONCURRENCY)
 
             async def _init_one(idx: int) -> "Page | None":
                 async with sem:
+                    page = None
                     try:
                         page = await context.new_page()
                         _pool_pages.add(page)
-                        await page.goto(
-                            self._M365_CHAT_URL,
-                            wait_until="domcontentloaded",
-                            timeout=30_000,
-                        )
-                        try:
-                            await page.wait_for_selector(
-                                self._COMPOSER_SEL, state="visible", timeout=25_000,
+                        ok, prep_error = await _prepare_m365_chat_page(page, timeout_ms=30_000)
+                        if not ok:
+                            raise RuntimeError(prep_error or "M365 chat page not ready")
+                        ready = self._free_tabs.qsize() + 1
+                        if progress_step_id:
+                            update_tab1_auth_progress(
+                                progress_step_id,
+                                "running",
+                                f"Preparing base pool tabs {ready}/{self._size} ready",
                             )
-                        except Exception:
-                            pass
+                        _sync_pool_monitor(
+                            self,
+                            phase="preparing",
+                            detail=f"Preparing base pool tabs {ready}/{self._size} ready",
+                            target_size=self._size,
+                        )
                         print(f"[PagePool] Tab {idx + 1}/{self._size} ready: {page.url[:60]}")
                         return page
                     except Exception as exc:
                         print(f"[PagePool] Tab {idx + 1} init error (skipped): {exc}")
+                        if page is not None:
+                            _pool_pages.discard(page)
+                            try:
+                                await page.close()
+                            except Exception:
+                                pass
                         return None
 
             results = await asyncio.gather(*[_init_one(i) for i in range(self._size)])
@@ -355,6 +1070,12 @@ class PagePool:
             _ms = int((time.monotonic() - _t0) * 1000)
             ready = self._free_tabs.qsize()
             print(f"[PagePool] {ready}/{self._size} tabs ready in {_ms}ms")
+            _sync_pool_monitor(
+                self,
+                phase="ready" if ready > 0 else "error",
+                detail=f"Base pool ready: {ready}/{self._size} tabs free",
+                target_size=self._size,
+            )
             # Only mark initialized if at least one tab succeeded.
             # If all tabs failed (e.g. DNS timing race at startup), stay
             # uninitialized so the next acquire() can trigger a re-init.
@@ -368,17 +1089,14 @@ class PagePool:
         assert self._context is not None
         page = await self._context.new_page()
         _pool_pages.add(page)
-        await page.goto(
-            self._M365_CHAT_URL,
-            wait_until="domcontentloaded",
-            timeout=30_000,
-        )
-        try:
-            await page.wait_for_selector(
-                self._COMPOSER_SEL, state="visible", timeout=25_000,
-            )
-        except Exception:
-            pass
+        ok, prep_error = await _prepare_m365_chat_page(page, timeout_ms=30_000)
+        if not ok:
+            _pool_pages.discard(page)
+            try:
+                await page.close()
+            except Exception:
+                pass
+            raise RuntimeError(prep_error or f"M365 chat replacement tab '{label}' not ready")
         print(f"[PagePool] Replacement tab for '{label}' ready: {page.url[:60]}")
         return page
 
@@ -492,6 +1210,7 @@ class PagePool:
         """
         reloaded = 0
         pages_to_reload = list(_pool_pages)
+        _sync_pool_monitor(self, phase="reloading", detail=f"Reloading {len(pages_to_reload)} pool tab(s)")
         for page in pages_to_reload:
             try:
                 if page.is_closed():
@@ -501,52 +1220,149 @@ class PagePool:
                 print(f"[PagePool] Reloaded pool tab: {page.url[:60]}")
             except Exception as exc:
                 print(f"[PagePool] Tab reload failed (non-fatal): {exc}")
+        await _restore_tab1_focus(self._context)
+        _sync_pool_monitor(self, phase="ready", detail=f"Reloaded {reloaded} pool tab(s)", last_reloaded=reloaded)
         return reloaded
 
-    async def expand_to(self, context: "BrowserContext", target_size: int) -> int:
+    async def expand_to(
+        self,
+        context: "BrowserContext",
+        target_size: int,
+        progress_step_id: str | None = None,
+    ) -> int:
         """Add tabs until free + agent-assigned tabs total >= target_size.
 
         Never shrinks the pool — safe to call even if already at target.
-        Called by C9 before 'Run all parallel' to pre-warm 12 tabs.
+        Called by C9 before bursty parallel runs to pre-warm extra tabs.
         Returns the number of new tabs actually created.
         """
         current_total = self._free_tabs.qsize() + len(self._agent_tabs)
         needed = max(0, target_size - current_total)
         if needed == 0:
             print(f"[PagePool] expand_to({target_size}): already at {current_total} tabs, no-op")
+            _sync_pool_monitor(
+                self,
+                phase="ready",
+                detail=f"Pool already at target {target_size}",
+                requested_target=target_size,
+                target_size=target_size,
+                last_added=0,
+            )
             return 0
         print(f"[PagePool] expand_to({target_size}): adding {needed} tab(s) (current={current_total})")
+        if progress_step_id:
+            update_tab1_auth_progress(
+                progress_step_id,
+                "running",
+                f"Expanding pool to {target_size}: 0/{needed} additional tabs ready",
+            )
+        _sync_pool_monitor(
+            self,
+            phase="expanding",
+            detail=f"Expanding pool to {target_size}: 0/{needed} additional tabs ready",
+            requested_target=target_size,
+            target_size=target_size,
+        )
         sem = asyncio.Semaphore(self._CREATE_CONCURRENCY)
 
         async def _add_one(idx: int) -> "Page | None":
             async with sem:
+                page = None
                 try:
                     page = await context.new_page()
                     _pool_pages.add(page)
-                    await page.goto(
-                        self._M365_CHAT_URL,
-                        wait_until="domcontentloaded",
-                        timeout=30_000,
-                    )
-                    try:
-                        await page.wait_for_selector(
-                            self._COMPOSER_SEL, state="visible", timeout=25_000,
-                        )
-                    except Exception:
-                        pass
+                    ok, prep_error = await _prepare_m365_chat_page(page, timeout_ms=30_000)
+                    if not ok:
+                        raise RuntimeError(prep_error or "M365 expansion tab not ready")
                     await self._free_tabs.put(page)
+                    ready = max(0, self._free_tabs.qsize() + len(self._agent_tabs) - current_total)
+                    if progress_step_id:
+                        update_tab1_auth_progress(
+                            progress_step_id,
+                            "running",
+                            f"Expanding pool to {target_size}: {ready}/{needed} additional tabs ready",
+                        )
+                    _sync_pool_monitor(
+                        self,
+                        phase="expanding",
+                        detail=f"Expanding pool to {target_size}: {ready}/{needed} additional tabs ready",
+                        target_size=target_size,
+                    )
                     print(f"[PagePool] Expansion tab {idx + 1}/{needed} ready: {page.url[:60]}")
                     return page
                 except Exception as exc:
                     print(f"[PagePool] Expansion tab {idx + 1} failed (skipped): {exc}")
+                    if page is not None:
+                        _pool_pages.discard(page)
+                        try:
+                            await page.close()
+                        except Exception:
+                            pass
                     return None
 
         results = await asyncio.gather(*[_add_one(i) for i in range(needed)])
         added = sum(1 for r in results if r is not None)
         if target_size > self._size:
             self._size = target_size  # update declared pool size
+        await self._schedule_idle_trim()
+        await _restore_tab1_focus(context)
+        _sync_pool_monitor(
+            self,
+            phase="ready",
+            detail=f"Pool expanded to {self._size} with {self._free_tabs.qsize()} free tab(s)",
+            requested_target=target_size,
+            target_size=target_size,
+            last_added=added,
+        )
         print(f"[PagePool] expand_to({target_size}): added {added}/{needed} tabs, pool now {self._free_tabs.qsize()} free")
         return added
+
+    async def _schedule_idle_trim(self) -> None:
+        idle_seconds = max(0, int(os.getenv("C3_POOL_IDLE_TRIM_SECONDS", "0") or "0"))
+        if idle_seconds <= 0:
+            return
+        self._trim_generation += 1
+        generation = self._trim_generation
+
+        async def _trim_later() -> None:
+            await asyncio.sleep(idle_seconds)
+            if generation != self._trim_generation:
+                return
+            await self.trim_free_tabs()
+
+        asyncio.create_task(_trim_later())
+
+    async def trim_free_tabs(self) -> int:
+        """Close surplus free tabs while keeping sticky agent tabs intact."""
+        target_free = max(0, self._base_size - len(self._agent_tabs))
+        to_close = max(0, self._free_tabs.qsize() - target_free)
+        if to_close == 0:
+            return 0
+        closed = 0
+        for _ in range(to_close):
+            try:
+                page = self._free_tabs.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+            _pool_pages.discard(page)
+            try:
+                if not page.is_closed():
+                    await page.close()
+            except Exception:
+                pass
+            closed += 1
+        self._size = max(self._base_size, len(self._agent_tabs) + self._free_tabs.qsize())
+        if closed:
+            print(
+                f"[PagePool] Trimmed {closed} surplus free tab(s); "
+                f"free={self._free_tabs.qsize()} agent_tabs={len(self._agent_tabs)}"
+            )
+            _sync_pool_monitor(
+                self,
+                phase="trimmed",
+                detail=f"Trimmed {closed} surplus pool tab(s)",
+            )
+        return closed
 
     def update_tab(self, agent_id: str, page: Page) -> None:
         """Update the tab reference for an agent (e.g. after page replacement)."""
@@ -597,10 +1413,11 @@ async def _is_logged_in(
         # M365 shell can show an in-app auth gate ("Authentication required" + Continue)
         # even while URL remains on the portal host; treat this as not logged in.
         try:
-            html = (await page.content()).lower()
-            if "authentication required" in html and "continue" in html:
+            page_hint = await _page_text_hint(page, limit=2000)
+            if "authentication required" in page_hint and "continue" in page_hint:
                 return False
         except Exception:
+            page_hint = ""
             pass
 
         # Must be on one of the expected portal hosts.
@@ -626,9 +1443,9 @@ async def _is_logged_in(
                 return True
             # Fallback UI heuristics when cookie inspection lags.
             signed_in_ui_markers = ("my account", "sign out", "logout")
-            if any(tok in html for tok in signed_in_ui_markers):
+            if any(tok in page_hint for tok in signed_in_ui_markers):
                 return True
-            if any(tok in html for tok in ("sign in", "log in")):
+            if any(tok in page_hint for tok in ("sign in", "log in")):
                 return False
             return False
 
@@ -910,6 +1727,7 @@ async def warm_browser_for_novnc() -> None:
     instead of a black Xvfb before the first /extract or /navigate.
     """
     setup_url = os.getenv("BROWSER_AUTH_SETUP_URL", "http://127.0.0.1:8001/setup")
+    invalidate_tab1_ready_state("setup_page_loaded")
     async with _lock:
         context = await _get_context()
         page = await _get_or_create_page(context)
@@ -986,7 +1804,8 @@ async def browser_chat(prompt: str, mode: str = "chat", timeout_ms: int = 60000,
 
     Each AI agent gets a **dedicated** browser tab (agent-to-tab affinity).
     Tabs are pre-created at startup and assigned lazily on first request.
-    A global semaphore limits concurrent Playwright operations to 3 to prevent
+    A global semaphore limits concurrent Playwright operations to the configured
+    C3_CHAT_MAX_CONCURRENT value to prevent
     browser resource exhaustion.  Different agents run in parallel; concurrent
     requests from the same agent are serialised by a per-agent lock.
 
@@ -995,13 +1814,22 @@ async def browser_chat(prompt: str, mode: str = "chat", timeout_ms: int = 60000,
     global _page_pool, _chat_semaphore
 
     context = await _get_context()
+    ready_check = await ensure_tab1_ready_for_pool(timeout_ms=max(timeout_ms, 60_000))
+    if not ready_check.get("validated"):
+        return {
+            "success": False,
+            "error": ready_check.get("error") or "Tab 1 is not authenticated yet",
+            "events": [],
+            "text": "",
+            "tab1_url": ready_check.get("tab1_url", ""),
+        }
 
-    pool_size = max(1, int(os.getenv("C3_CHAT_TAB_POOL_SIZE", "6")))
+    pool_size = max(1, int(os.getenv("C3_CHAT_TAB_POOL_SIZE", "4")))
     async with _chat_lock:
         if _page_pool is None:
             _page_pool = PagePool(pool_size)
         if _chat_semaphore is None:
-            max_concurrent = max(1, int(os.getenv("C3_CHAT_MAX_CONCURRENT", "6")))
+            max_concurrent = max(1, int(os.getenv("C3_CHAT_MAX_CONCURRENT", "4")))
             _chat_semaphore = asyncio.Semaphore(max_concurrent)
     await _page_pool.initialize(context)
 
@@ -1041,6 +1869,8 @@ async def _browser_chat_on_page(
     prompt: str,
     mode: str = "chat",
     timeout_ms: int = 60000,
+    fresh_chat: bool = True,
+    progress_steps: dict[str, str] | None = None,
 ) -> "tuple[dict, Page]":
     """
     Execute one chat request on a given browser page.
@@ -1056,6 +1886,14 @@ async def _browser_chat_on_page(
     # ── Timing instrumentation ──────────────────────────────────────────
     _t_start = time.monotonic()
     _timings: dict = {"prompt_len": len(prompt)}
+
+    def _progress(kind: str, status: str, detail: str = "") -> None:
+        if not progress_steps:
+            return
+        step_id = progress_steps.get(kind)
+        if not step_id:
+            return
+        update_tab1_auth_progress(step_id, status, detail)
 
     # Health check: verify the page is responsive before doing anything.
     # A stale/crashed page will hang on goto; detect and replace it early.
@@ -1196,20 +2034,25 @@ async def _browser_chat_on_page(
     # ── Attach WS listener — M365 opens a NEW WS per chat message ──
     page.on("websocket", _on_websocket)
 
-    # ── Phase 3: fast reset ─────────────────────────────────────────────────────
-    # Priority order:
+    # ── Phase 3: ready the chat surface ────────────────────────────────────────
+    # fresh_chat=True:
     #   1. Composer already visible (fresh tab or idle) → use immediately
     #   2. Click "New chat" sidebar button → wait for composer
     #   3. Full page teardown (about:blank → m365 chat) as last resort
+    # fresh_chat=False:
+    #   Reuse the current conversation if the composer is still visible.
     _t_nav_start = time.monotonic()
-    _M365_CHAT_URL = "https://m365.cloud.microsoft/chat"
     _fast_reset_ok = False
-    _combined = (
-        '[data-testid="composer-input"], '
-        '[role="textbox"][contenteditable="true"], '
-        'textarea'
-    )
-    if "m365.cloud.microsoft" in (page.url or ""):
+    _combined = _M365_COMPOSER_SEL
+    if not fresh_chat and "m365.cloud.microsoft" in (page.url or ""):
+        try:
+            await page.wait_for_selector(_combined, state="visible", timeout=5_000)
+            _fast_reset_ok = True
+            print(f"[browser_chat] Reusing current conversation — {page.url[:60]}")
+        except Exception:
+            pass
+
+    if fresh_chat and "m365.cloud.microsoft" in (page.url or ""):
         try:
             _clicked = await page.evaluate("""() => {
                 // Use dispatchEvent so React's synthetic event system receives the click
@@ -1253,16 +2096,9 @@ async def _browser_chat_on_page(
         print("[browser_chat] Fast reset unavailable — full page teardown")
         try:
             await page.goto("about:blank", wait_until="domcontentloaded", timeout=15_000)
-            await page.goto(_M365_CHAT_URL, wait_until="domcontentloaded", timeout=30_000)
-            _combined_teardown = (
-                '[role="textbox"][contenteditable="true"], '
-                '[contenteditable="true"], '
-                'textarea'
-            )
-            try:
-                await page.wait_for_selector(_combined_teardown, state="visible", timeout=25_000)
-            except Exception:
-                pass
+            ok, prep_error = await _prepare_m365_chat_page(page, timeout_ms=30_000, settle_seconds=6.0)
+            if not ok:
+                raise RuntimeError(prep_error or "M365 chat teardown failed")
             print(f"[browser_chat] Full teardown complete: {page.url}")
         except Exception as e:
             print(f"[browser_chat] navigate failed: {e}")
@@ -1312,40 +2148,15 @@ async def _browser_chat_on_page(
         # Use page.evaluate() for auth dialog check — immune to overlay dialogs
         await asyncio.sleep(0.3)  # Brief settle after nav
 
-        # Check for "Authentication required" dialog (M365 session expired)
-        auth_blocked = await page.evaluate("""() => {
-            const h = document.querySelector('h2');
-            if (h && h.textContent.includes('Authentication required')) {
-                // Try to click any dismiss button: Sign in, Refresh, OK, Continue
-                const btns = document.querySelectorAll('button');
-                for (const b of btns) {
-                    const t = b.textContent.trim().toLowerCase();
-                    if (t === 'sign in' || t === 'refresh' || t === 'ok' || t === 'continue') {
-                        b.click();
-                        return 'clicked:' + t;
-                    }
-                }
-                return 'auth_dialog_present';
-            }
-            return null;
-        }""")
-        if auth_blocked:
-            print(f"[browser_chat] Auth check: {auth_blocked}")
-            # Whether we clicked a button or found no button, wait and re-check.
-            # The background _auth_dialog_monitor may dismiss it within 15s;
-            # a clicked button also needs a few seconds to complete re-auth.
-            await asyncio.sleep(8)
-            still_blocked = await page.evaluate("""() => {
-                const h = document.querySelector('h2');
-                return h && h.textContent.includes('Authentication required');
-            }""")
-            if still_blocked:
-                return {
-                    "success": False,
-                    "error": "Authentication required on m365.cloud.microsoft — sign in via noVNC at http://localhost:6080 then retry",
-                    "events": [], "text": "",
-                }, page
-            print("[browser_chat] Auth dialog dismissed — proceeding")
+        auth_ok, auth_note = await _clear_auth_dialog_if_present(page, settle_seconds=8.0)
+        if not auth_ok:
+            _progress("popup_watch", "error", auth_note or "Authentication required on m365.cloud.microsoft")
+            _maybe_invalidate_tab1_for_auth(page, "auth_dialog_present")
+            return {
+                "success": False,
+                "error": auth_note or "Authentication required on m365.cloud.microsoft",
+                "events": [], "text": "",
+            }, page
 
         # ── Discover DOM elements via page.evaluate (fast, overlay-immune) ──
         dom_info = await page.evaluate("""() => {
@@ -1388,11 +2199,14 @@ async def _browser_chat_on_page(
         composer_sel = dom_info.get("composer")
         if not composer_sel:
             err = f"No composer found (page: {dom_info.get('url')}, title: {dom_info.get('title')})"
+            _progress("prepare", "error", err)
             print(f"[browser_chat] {err}")
             return {"success": False, "error": err, "events": [], "text": ""}, page
 
         # ── Text input via Playwright keyboard (React-compatible) ────────
         _t_type_start = time.monotonic()
+        _progress("prepare", "done", f"Chat surface ready on {dom_info.get('url', page.url or '')[:120]}")
+        _progress("type", "running", f"Typing {len(prompt)} characters")
         composer = page.locator(composer_sel).first
         try:
             await composer.click(force=True, timeout=5_000)
@@ -1407,9 +2221,10 @@ async def _browser_chat_on_page(
         await page.keyboard.press("Backspace")
         await asyncio.sleep(0.1)
 
-        await page.keyboard.type(prompt, delay=20)
+        await page.keyboard.type(prompt)
         await asyncio.sleep(0.3)
         print(f"[browser_chat] Typed prompt ({len(prompt)} chars)")
+        _progress("type", "done", f"Typed {len(prompt)} characters")
 
         # ── Submit: 3-tier strategy for React synthetic events ──
         # Tier 1: Enter key (keyboard events always reach React, no element targeting needed)
@@ -1418,9 +2233,11 @@ async def _browser_chat_on_page(
         _timings["type_ms"] = int((time.monotonic() - _t_type_start) * 1000)
         _t_submit = time.monotonic()
         send_sel = dom_info.get("sendBtn")
+        _progress("submit", "running", "Submitting prompt")
 
         # Tier 1: Enter key on the focused composer
         await page.keyboard.press("Enter")
+        submit_note = "Submitted via Enter"
         print("[browser_chat] Tier1: submitted via Enter key")
         await asyncio.sleep(0.5)
 
@@ -1441,6 +2258,7 @@ async def _browser_chat_on_page(
             try:
                 btn = page.locator(send_sel).first
                 await btn.click(force=True, timeout=3_000)
+                submit_note = "Submitted via send button"
                 print(f"[browser_chat] Tier2: Playwright clicked send button")
             except Exception:
                 # Tier 3: React-compatible dispatchEvent (bubbles through event delegation)
@@ -1452,7 +2270,11 @@ async def _browser_chat_on_page(
                         }));
                     }
                 }""", send_sel)
+                submit_note = "Submitted via fallback dispatchEvent"
                 print(f"[browser_chat] Tier3: dispatchEvent on send button")
+        _progress("submit", "done", submit_note)
+        _progress("popup_watch", "running", "Watching for auth popup while waiting for reply")
+        _progress("reply", "running", "Waiting for Copilot reply")
 
         # ── Wait for response — with smart retry on Copilot service errors ──────
         # Three possible outcomes from each attempt:
@@ -1465,8 +2287,15 @@ async def _browser_chat_on_page(
 
         for _attempt in range(_MAX_CHAT_RETRIES + 1):
             # ── Wait for WS completion signal ──────────────────────────────────
+            got_done = await _wait_for_done_with_auth_watch(
+                page,
+                done_event,
+                timeout_s,
+                progress_steps.get("popup_watch") if progress_steps else None,
+            )
             try:
-                await asyncio.wait_for(done_event.wait(), timeout=timeout_s)
+                if not got_done:
+                    raise asyncio.TimeoutError
                 print(f"[browser_chat] WS done_event received (attempt {_attempt + 1})")
                 # After WS signals done, Copilot may still be rendering the final DOM.
                 # Wait briefly so we capture the complete response text.
@@ -1491,7 +2320,9 @@ async def _browser_chat_on_page(
                 if still_gen:
                     print(f"[browser_chat] Copilot still generating ({still_gen}) — extending wait 60s")
                     try:
-                        await asyncio.wait_for(done_event.wait(), timeout=60)
+                        got_done = await _wait_for_done_with_auth_watch(page, done_event, 60.0)
+                        if not got_done:
+                            raise asyncio.TimeoutError
                         await asyncio.sleep(1.5)  # settle after extended wait too
                     except asyncio.TimeoutError:
                         print("[browser_chat] Extended wait expired — proceeding with DOM fallback")
@@ -1572,13 +2403,7 @@ async def _browser_chat_on_page(
             # ── Service-error detection: "Something went wrong" / high demand ──
             # Copilot M365 shows various service-overload messages.
             # The UI renders a "Try again" button — click it and retry.
-            _SERVICE_PHRASES = (
-                "something went wrong",
-                "please try again later",
-                "experiencing high demand",
-                "try again later",
-                "we're experiencing",
-            )
+            _SERVICE_PHRASES = _M365_SERVICE_ERROR_PHRASES
             _is_service_err = any(p in text.lower() for p in _SERVICE_PHRASES)
 
             if _is_service_err and _attempt < _MAX_CHAT_RETRIES:
@@ -1618,10 +2443,7 @@ async def _browser_chat_on_page(
             break
 
         # ── Final result ──────────────────────────────────────────────────────
-        _SERVICE_FINAL_PHRASES = (
-            "something went wrong", "please try again later",
-            "experiencing high demand", "we're experiencing",
-        )
+        _SERVICE_FINAL_PHRASES = _M365_SERVICE_ERROR_PHRASES
         _service_error_final = any(p in text.lower() for p in _SERVICE_FINAL_PHRASES)
         success = bool(text) and not _service_error_final
         _timings["ws_wait_ms"] = int((time.monotonic() - _t_submit) * 1000)
@@ -1642,9 +2464,17 @@ async def _browser_chat_on_page(
         }
         if _service_error_final:
             result["service_error"] = True
+            _progress("reply", "error", "M365 service returned a retry/error response")
+        elif success:
+            _progress("popup_watch", "done", "No auth popup blocked the turn")
+            _progress("reply", "done", f"Reply received ({len(text)} chars)")
+        else:
+            result["error"] = "No Copilot reply captured before timeout"
+            _progress("reply", "error", result["error"])
         return result, page
 
     except Exception as e:
+        _progress("reply", "error", str(e))
         print(f"[browser_chat] error: {e}")
         return {"success": False, "error": str(e), "events": events_recv, "text": "".join(collected_text)}, page
     finally:
@@ -1760,64 +2590,360 @@ async def validate_tab1_with_hello(timeout_ms: int = 45_000) -> dict:
     import time as _time
     _t0 = _time.monotonic()
     checked_at = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+    reset_tab1_auth_progress("validate-auth")
+    update_tab1_auth_progress("c3_health", "running", "Starting Tab 1 auth validation")
     try:
+        def _fail(step_id: str, error: str, *, reply: str | None = None, tab_url: str = "", follow_up_validated: bool = False) -> dict:
+            mark_tab1_auth_progress_error(step_id, error)
+            finish_tab1_auth_progress("error", error)
+            return {
+                "validated": False,
+                "reply": reply[:120] if reply else None,
+                "elapsed_ms": int((_time.monotonic() - _t0) * 1000),
+                "tab1_url": tab_url,
+                "error": error,
+                "checked_at": checked_at,
+                "follow_up_validated": follow_up_validated,
+            }
+
+        mark_tab1_auth_progress_done("c3_health", "C3 validator running")
         context = await _get_context()
         # _get_or_create_page returns a non-pool page = Tab 1
         tab1 = await _get_or_create_page(context)
         tab1_url = tab1.url or ""
         print(f"[validate_tab1] Tab 1 URL before validation: {tab1_url[:80]}")
+        update_tab1_auth_progress("tab1_setup", "running", f"Tab 1 current URL: {tab1_url or 'about:blank'}")
+        if "/setup" in tab1_url or "127.0.0.1:8001/setup" in tab1_url:
+            mark_tab1_auth_progress_done("tab1_setup", "Tab 1 opened on /setup")
+        elif tab1_url:
+            mark_tab1_auth_progress_done("tab1_setup", f"Tab 1 already past setup: {tab1_url[:120]}")
 
         # Navigate to M365 chat if not already there
-        m365_chat = "https://m365.cloud.microsoft/chat"
-        if "m365.cloud.microsoft/chat" not in tab1_url and "copilot.microsoft.com" not in tab1_url:
-            print(f"[validate_tab1] Navigating Tab 1 to {m365_chat}")
+        if not _is_m365_chat_url(tab1_url):
+            update_tab1_auth_progress("work_mode", "running", "Applying Work mode validation profile")
+            mark_tab1_auth_progress_done("work_mode", "Work mode selected for validation")
+            update_tab1_auth_progress("portal_connect", "running", "Connecting Tab 1 to the selected M365 portal")
+            print(f"[validate_tab1] Navigating Tab 1 to {_M365_CHAT_URL}")
             try:
-                await tab1.goto(m365_chat, wait_until="domcontentloaded", timeout=25_000)
+                await _goto_m365_chat_page(tab1, timeout_ms=25_000)
                 await asyncio.sleep(2)
                 tab1_url = tab1.url or ""
                 print(f"[validate_tab1] Tab 1 now at: {tab1_url[:80]}")
+                mark_tab1_auth_progress_done("portal_connect", f"Portal connect completed: {tab1_url[:120]}")
             except Exception as nav_exc:
-                return {
-                    "validated": False,
-                    "reply": None,
-                    "elapsed_ms": int((_time.monotonic() - _t0) * 1000),
-                    "tab1_url": tab1_url,
-                    "error": f"navigation failed: {nav_exc}",
-                    "checked_at": checked_at,
-                }
+                return _fail("m365_nav", f"navigation failed: {nav_exc}", tab_url=tab1_url)
+        else:
+            mark_tab1_auth_progress_done("work_mode", "Work mode already active on Tab 1")
+            mark_tab1_auth_progress_done("portal_connect", "Tab 1 already connected to the M365 portal")
+        update_tab1_auth_progress("m365_nav", "running", "Waiting for Tab 1 to settle on M365 chat")
+        if not _is_m365_chat_url(tab1.url or ""):
+            return _fail("m365_nav", "Tab 1 did not reach the M365 chat URL", tab_url=tab1.url or "")
+        mark_tab1_auth_progress_done("m365_nav", f"Tab 1 navigated to {tab1.url or ''}")
 
-        # Send "Hello" using the full browser chat automation (same as pool tabs)
-        print("[validate_tab1] Sending 'Hello' on Tab 1 for auth validation…")
-        result, tab1 = await _browser_chat_on_page(
-            tab1, context, "Hello", mode="chat", timeout_ms=timeout_ms
+        chat_mode = (os.getenv("M365_CHAT_MODE", "work") or "work").strip().lower()
+        prompts = [
+            (
+                "hello",
+                True,
+                "hello_1",
+                {
+                    "prepare": "hello_prepare",
+                    "type": "hello_type",
+                    "submit": "hello_submit",
+                    "popup_watch": "hello_popup_watch",
+                    "reply": "hello_reply",
+                },
+            ),
+            (
+                "follow up 2",
+                False,
+                "follow_up_2",
+                {
+                    "prepare": "follow_prepare",
+                    "type": "follow_type",
+                    "submit": "follow_submit",
+                    "popup_watch": "follow_popup_watch",
+                    "reply": "follow_reply",
+                },
+            ),
+        ]
+        replies: list[str] = []
+
+        update_tab1_auth_progress("session_auth", "running", "Checking M365 session state on Tab 1")
+        update_tab1_auth_progress("popup_check_1", "running", "Checking for initial authentication popup")
+        auth_ok, auth_error = await _clear_auth_dialog_if_present(tab1, settle_seconds=8.0)
+        mark_tab1_auth_progress_done("popup_check_1", "Initial auth popup check completed")
+        initial_popup_detail = (
+            auth_error
+            if auth_error
+            else "No popup shown on initial check"
         )
+        if not auth_ok:
+            invalidate_tab1_ready_state("tab1_initial_auth_gate")
+            return _fail("popup_continue_1", auth_error or "Initial authentication gate blocked", tab_url=tab1.url or "")
+        mark_tab1_auth_progress_done("popup_continue_1", initial_popup_detail)
+        mark_tab1_auth_progress_done("session_auth", "Tab 1 M365 session looks authenticated")
+        update_tab1_auth_progress("stabilize_1", "running", "Allowing Tab 1 to settle after authentication")
+        ready_ok, ready_error = await _wait_for_m365_chat_ready(tab1, timeout_s=30.0, stable_s=5.0)
+        if not ready_ok:
+            invalidate_tab1_ready_state("tab1_not_stable_after_auth")
+            return _fail("stabilize_1", ready_error or "Tab 1 did not stabilize after authentication", tab_url=tab1.url or "")
+        mark_tab1_auth_progress_done("stabilize_1", "Tab 1 stabilized after authentication")
+
+        for prompt_text, fresh_chat, step_label, progress_steps in prompts:
+            max_prompt_attempts = 2 if step_label == "hello_1" else 1
+            attempt = 0
+            prompt_succeeded = False
+            last_result: dict = {}
+            reply_text = ""
+            while attempt < max_prompt_attempts:
+                ready_ok, ready_error = await _wait_for_m365_chat_ready(
+                    tab1,
+                    timeout_s=20.0 if fresh_chat else 12.0,
+                    stable_s=3.0 if fresh_chat else 2.0,
+                )
+                if not ready_ok:
+                    invalidate_tab1_ready_state(f"{step_label}_not_ready")
+                    return _fail(
+                        progress_steps["prepare"],
+                        ready_error or f"Tab 1 was not ready for {step_label}",
+                        tab_url=tab1.url or "",
+                    )
+                if attempt == 0:
+                    update_tab1_auth_progress(progress_steps["prepare"], "running", f"Preparing prompt '{prompt_text}'")
+                else:
+                    update_tab1_auth_progress(
+                        progress_steps["prepare"],
+                        "running",
+                        f"Retrying prompt '{prompt_text}' after first-turn recovery",
+                    )
+
+                print(f"[validate_tab1] Sending '{prompt_text}' on Tab 1 ({step_label})… attempt {attempt + 1}/{max_prompt_attempts}")
+                result, tab1 = await _browser_chat_on_page(
+                    tab1,
+                    context,
+                    prompt_text,
+                    mode=chat_mode,
+                    timeout_ms=timeout_ms,
+                    fresh_chat=fresh_chat,
+                    progress_steps=progress_steps,
+                )
+                last_result = result
+                reply_text = (result.get("text") or "").strip()
+                success = result.get("success", False) and bool(reply_text)
+                _SERVICE_ERR = ("something went wrong", "please try again", "experiencing high demand", "we're experiencing")
+                if success and any(p in reply_text.lower() for p in _SERVICE_ERR):
+                    success = False
+                if success:
+                    prompt_succeeded = True
+                    break
+
+                retryable_first_turn = (
+                    step_label == "hello_1"
+                    and attempt == 0
+                    and not reply_text
+                    and not result.get("service_error")
+                )
+                if retryable_first_turn:
+                    recovery_reason = result.get("error") or "No Copilot reply captured before timeout"
+                    update_tab1_auth_progress(
+                        progress_steps["reply"],
+                        "running",
+                        f"First turn stalled after restart; refreshing Tab 1 and retrying once ({recovery_reason})",
+                    )
+                    tab1, recovery_error = await _recover_tab1_after_turn_failure(
+                        tab1,
+                        context,
+                        reason=recovery_reason,
+                    )
+                    if recovery_error:
+                        invalidate_tab1_ready_state(f"{step_label}_recovery_failed")
+                        return _fail(
+                            progress_steps["reply"],
+                            recovery_error,
+                            reply=reply_text,
+                            tab_url=tab1.url or "",
+                        )
+                    attempt += 1
+                    continue
+                break
+
+            if not prompt_succeeded:
+                popup_step = _auth_progress_step(progress_steps["popup_watch"])
+                if popup_step and popup_step.get("status") in ("pending", "running"):
+                    mark_tab1_auth_progress_done(
+                        progress_steps["popup_watch"],
+                        popup_step.get("detail") or "Popup watch completed before reply failure",
+                    )
+                invalidate_tab1_ready_state(f"{step_label}_failed")
+                return _fail(
+                    progress_steps["reply"],
+                    last_result.get("error") or f"{step_label} failed",
+                    reply=reply_text,
+                    tab_url=tab1.url or "",
+                )
+            mark_tab1_auth_progress_done(progress_steps["prepare"], f"Prompt surface ready for '{prompt_text}'")
+            mark_tab1_auth_progress_done(progress_steps["type"], f"Typed '{prompt_text}'")
+            mark_tab1_auth_progress_done(progress_steps["submit"], f"Submitted '{prompt_text}'")
+            mark_tab1_auth_progress_done(progress_steps["popup_watch"], "No popup blocked this turn")
+            mark_tab1_auth_progress_done(progress_steps["reply"], f"Reply received ({len(reply_text)} chars)")
+            replies.append(reply_text)
+
+            auth_ok, auth_error = await _clear_auth_dialog_if_present(tab1, settle_seconds=5.0)
+            if not auth_ok or await _page_has_auth_dialog(tab1):
+                invalidate_tab1_ready_state(f"{step_label}_popup_persisted")
+                return _fail(
+                    progress_steps["popup_watch"],
+                    auth_error or f"Authentication dialog persisted after {step_label}",
+                    reply=reply_text,
+                    tab_url=tab1.url or "",
+                )
+
         elapsed_ms = int((_time.monotonic() - _t0) * 1000)
-
-        reply_text = (result.get("text") or "").strip()
-        success = result.get("success", False) and bool(reply_text)
-
-        _SERVICE_ERR = ("something went wrong", "please try again", "experiencing high demand", "we're experiencing")
-        if success and any(p in reply_text.lower() for p in _SERVICE_ERR):
-            success = False
+        success = len(replies) == 2 and bool(replies[-1].strip())
+        if success:
+            _mark_tab1_ready({
+                "reply": replies[-1][:120],
+                "tab1_url": tab1.url or "",
+                "checked_at": checked_at,
+                "follow_up_validated": True,
+            })
+            update_tab1_auth_progress("pool_ready", "running", "Tab 1 validated; waiting for pool initialization")
 
         print(
             f"[validate_tab1] Result: validated={success}, "
-            f"reply_len={len(reply_text)}, elapsed={elapsed_ms}ms"
+            f"reply_len={len(replies[-1]) if replies else 0}, elapsed={elapsed_ms}ms"
         )
         return {
             "validated": success,
-            "reply": reply_text[:120] if reply_text else None,
+            "reply": replies[-1][:120] if replies else None,
             "elapsed_ms": elapsed_ms,
             "tab1_url": tab1.url or "",
-            "error": result.get("error") if not success else None,
+            "error": None if success else "Tab 1 follow-up validation failed",
             "checked_at": checked_at,
+            "follow_up_validated": success,
         }
     except Exception as exc:
-        return {
-            "validated": False,
-            "reply": None,
-            "elapsed_ms": int((_time.monotonic() - _t0) * 1000),
-            "tab1_url": "",
-            "error": str(exc),
-            "checked_at": checked_at,
-        }
+        invalidate_tab1_ready_state("validate_tab1_exception")
+        return _fail("c3_health", str(exc), tab_url="")
+
+
+async def ensure_tab1_ready_for_pool(timeout_ms: int = 60_000, force_revalidate: bool = False) -> dict:
+    """Ensure Tab 1 has completed auth + a two-step chat before pool tabs exist."""
+    if _tab1_session_ready and not force_revalidate:
+        result = dict(_tab1_session_meta)
+        result.setdefault("validated", True)
+        result["validated"] = True
+        return result
+
+    async with _tab1_ready_lock:
+        if _tab1_session_ready and not force_revalidate:
+            result = dict(_tab1_session_meta)
+            result.setdefault("validated", True)
+            result["validated"] = True
+            return result
+
+        result = await validate_tab1_with_hello(timeout_ms=timeout_ms)
+        if not result.get("validated"):
+            invalidate_tab1_ready_state(result.get("error") or "tab1_validation_failed")
+        return result
+
+
+async def prepare_pool_from_tab1(
+    context: BrowserContext | None = None,
+    reload_existing: bool = True,
+    target_size: int | None = None,
+    source: str = "pool-prepare",
+) -> dict:
+    """Initialize or refresh pool tabs only after Tab 1 has been validated."""
+    global _page_pool
+    context = context or await _get_context()
+    pool_size = max(1, int(os.getenv("C3_CHAT_TAB_POOL_SIZE", "4")))
+    requested_target = max(1, int(target_size or pool_size))
+    effective_target = max(pool_size, requested_target)
+    if not _tab1_auth_progress.get("active"):
+        _resume_tab1_auth_progress(source)
+    _sync_pool_monitor(
+        _page_pool,
+        phase="planning",
+        source=source,
+        detail=f"Pool target selected: {effective_target} tab(s)",
+        requested_target=requested_target,
+        target_size=effective_target,
+        last_added=0,
+        last_reloaded=0,
+    )
+    update_tab1_auth_progress("pool_target", "running", f"Selecting pool target {effective_target}")
+    mark_tab1_auth_progress_done(
+        "pool_target",
+        (
+            f"Pool target selected: {effective_target} tab(s)"
+            if effective_target == pool_size
+            else f"Pool target selected: {effective_target} tab(s) for burst mode"
+        ),
+    )
+    update_tab1_auth_progress("pool_expand_request", "running", f"Preparing worker tab pool to {effective_target}")
+    if _page_pool is None:
+        _page_pool = PagePool(pool_size)
+    pool = _page_pool
+    reloaded = 0
+    added = 0
+    mark_tab1_auth_progress_done("pool_expand_request", f"Pool request accepted for target {effective_target}")
+    update_tab1_auth_progress("pool_expand_progress", "running", f"Preparing pool tabs for target {effective_target}")
+    if not pool._initialized:
+        await pool.initialize(context, progress_step_id="pool_expand_progress")
+    elif reload_existing:
+        reloaded = await pool.reload_all_tabs()
+        update_tab1_auth_progress(
+            "pool_expand_progress",
+            "running",
+            f"Reloaded existing pool tabs; target remains {effective_target}",
+        )
+    current_total = pool.available + len(pool.agents)
+    if effective_target > current_total:
+        added = await pool.expand_to(context, effective_target, progress_step_id="pool_expand_progress")
+    mark_tab1_auth_progress_done(
+        "pool_expand_progress",
+        f"Pool prep complete: size={pool.size}, free={pool.available}, added={added}, reloaded={reloaded}",
+    )
+    update_tab1_auth_progress("pool_expand_verify", "running", "Verifying worker tabs inherit Tab 1 session")
+    tab1_front = await _restore_tab1_focus(context)
+    _sync_pool_monitor(
+        pool,
+        phase="verifying",
+        detail="Verifying worker tabs inherit Tab 1 session",
+        requested_target=requested_target,
+        target_size=effective_target,
+        last_added=added,
+        last_reloaded=reloaded,
+    )
+    mark_tab1_auth_progress_done(
+        "pool_expand_verify",
+        f"Worker tabs verified ({pool.available}/{pool.size} free; tab1_front={tab1_front})",
+    )
+    mark_tab1_auth_progress_done(
+        "pool_expand_done",
+        f"Pool steady: target={effective_target}, size={pool.size}, free={pool.available}",
+    )
+    mark_tab1_auth_progress_done(
+        "pool_ready",
+        f"Pool ready ({pool.available}/{pool.size} tabs free; reloaded {reloaded}; added {added})",
+    )
+    _sync_pool_monitor(
+        pool,
+        phase="ready",
+        detail=f"Pool steady at {pool.size} tabs with {pool.available} free",
+        requested_target=requested_target,
+        target_size=effective_target,
+        last_added=added,
+        last_reloaded=reloaded,
+    )
+    return {
+        "pool_initialized": pool._initialized,
+        "pool_size": pool.size,
+        "pool_available": pool.available,
+        "pool_tabs_reloaded": reloaded,
+        "pool_tabs_added": added,
+        "target_size": effective_target,
+        "tab1_front": tab1_front,
+    }

@@ -50,6 +50,9 @@
 .mao-sup-lbl{font-weight:600;color:var(--accent);white-space:nowrap;flex-shrink:0;}
 #mao-sup-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;}
 #mao-prog{white-space:nowrap;flex-shrink:0;color:var(--ok);font-size:.73rem;font-weight:600;display:none;}
+.mao-tracebar{grid-column:2/4;display:none;align-items:center;gap:.45rem;flex-wrap:wrap;padding:.4rem .9rem;background:rgba(10,132,255,.07);border-bottom:1px solid var(--border);font-size:.76rem;color:var(--muted);}
+.mao-tracebar strong{color:var(--accent);}
+.mao-tracebar a{display:inline-flex;align-items:center;justify-content:center;padding:.22rem .55rem;border-radius:7px;text-decoration:none;border:1px solid var(--border);color:var(--fg);background:#111;}
 /* right file ops header */
 .mao-rbar{grid-column:3;display:flex;align-items:center;gap:.35rem;padding:.35rem .65rem;background:var(--card);border-bottom:1px solid var(--border);border-left:1px solid var(--border);font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);flex-shrink:0;}
 /* pane grid */
@@ -204,9 +207,12 @@
         <button type="button" class="mao-mbtn"        data-wm="web">Web</button>
       </div>
       <label>Steps:<input type="number" id="mao-steps" value="8" min="2" max="12" style="width:42px;margin-left:3px;"></label>
-      <button class="btn-sm" onclick="loadSessions()" style="white-space:nowrap;">📋 History</button>
+      <button class="btn-sm" id="btn-sessions-history" style="white-space:nowrap;">📋 History</button>
     </div>
   </div>
+
+  <div class="mao-tracebar" id="mao-tracebar"></div>
+  <div class="mao-tracebar" id="mao-recoverybar"></div>
 
   <!-- SUPERVISOR BAR -->
   <div class="mao-supbar">
@@ -280,44 +286,6 @@
         </div>
       </div>
     </div>
-    <!-- Linux Shell panel (C11 sandbox) -->
-    <div class="mao-rpanel" id="rpanel-shell">
-      <div class="mao-shell">
-        <div class="mao-shell-tb">
-          <span style="color:#56d364;font-size:.74rem;font-weight:600;">🐧 C11 Sandbox Shell</span>
-          <span class="mao-shell-cwd" id="mao-shell-cwd">/workspace</span>
-          <button class="stb" id="mao-shell-clear">Clear</button>
-          <button class="stb" id="mao-shell-ls">ls</button>
-          <button class="stb" id="mao-shell-pwd">pwd</button>
-        </div>
-        <div class="mao-shell-out" id="mao-shell-out"><span class="sh-info">C11 multi-agent sandbox shell. Commands share the session workspace with agents.</span>
-
-</div>
-        <div class="mao-shell-row">
-          <span class="sh-p">workspace $ </span>
-          <input id="mao-shell-input" type="text" placeholder="Type a command… (Enter to run)" autocomplete="off" spellcheck="false">
-        </div>
-      </div>
-    </div>
-    <!-- Linux Shell panel (C11 sandbox) -->
-    <div class="mao-rpanel" id="rpanel-shell">
-      <div class="mao-shell">
-        <div class="mao-shell-tb">
-          <span style="color:#56d364;font-size:.74rem;font-weight:600;">🐧 C11 Sandbox Shell</span>
-          <span class="mao-shell-cwd" id="mao-shell-cwd">/workspace</span>
-          <button class="stb" id="mao-shell-clear">Clear</button>
-          <button class="stb" id="mao-shell-ls">ls</button>
-          <button class="stb" id="mao-shell-pwd">pwd</button>
-        </div>
-        <div class="mao-shell-out" id="mao-shell-out"><span class="sh-info">C11 multi-agent sandbox shell. Commands share the session workspace with agents.</span>
-
-</div>
-        <div class="mao-shell-row">
-          <span class="sh-p">workspace $ </span>
-          <input id="mao-shell-input" type="text" placeholder="Type a command… (Enter to run)" autocomplete="off" spellcheck="false">
-        </div>
-      </div>
-    </div>
   </div>
 
 </div><!-- end .mao -->
@@ -376,6 +344,9 @@
 (function(){
 'use strict';
 var _src=null,_run=false,_panes={},_sid='',_pdone=0,_ptotal=0,_pstart={},_ptimers={},_files=[],_maxSteps=8,_wm='work',_paused=false,_think=localStorage.getItem('maoThink')||'auto';
+var STREAM_SETTLE_MS=20000,_PROMPT_GAP_MS=25000,_LONG_STREAM_GRACE_MS=180000,_lastActivityAt=0,_lastPromptAt=0,_cooldownUntil=0,_cooldownTimer=null;
+var _resumeRequested=false;
+var taskLaunch={{ task_launch | tojson }};
 
 // DOM
 var taskEl=document.getElementById('mao-task');
@@ -389,9 +360,122 @@ var progEl=document.getElementById('mao-prog');
 var sumBar=document.getElementById('mao-sumbar');
 var sumText=document.getElementById('mao-sum-text');
 var ftree=document.getElementById('mao-ftree');
+var traceBar=document.getElementById('mao-tracebar');
+var recoveryBar=document.getElementById('mao-recoverybar');
 
 // URL param pre-fill
-(function(){var t=new URLSearchParams(location.search).get('task');if(t&&!taskEl.value)taskEl.value=t;})();
+(function(){var t=taskLaunch.task||new URLSearchParams(location.search).get('task');if(t&&!taskEl.value)taskEl.value=t;})();
+
+function renderTraceBar(){
+  var taskId=taskLaunch.task_id||'';
+  var runId=taskLaunch.task_run_id||'';
+  var source=taskLaunch.source||'';
+  var hasContext=!!(taskId||runId||source||_sid);
+  if(!traceBar)return;
+  if(!hasContext){traceBar.style.display='none';traceBar.innerHTML='';return;}
+  var links=[];
+  if(taskId){
+    links.push('<a href="/tasked?task_id='+encodeURIComponent(taskId)+'">Open Tasked</a>');
+    links.push('<a href="/piplinetask?task_id='+encodeURIComponent(taskId)+'">Open Pipeline</a>');
+  }
+  if(source==='tasked')links.push('<a href="/alerts">Open Alerts</a>');
+  traceBar.style.display='flex';
+  traceBar.innerHTML='<strong>Tasked launch context</strong>'
+    +'<span>Task ID: '+esc(taskId||'—')+'</span>'
+    +'<span>Run ID: '+esc(runId||'—')+'</span>'
+    +'<span>Source: '+esc(source||'manual')+'</span>'
+    +'<span>Session: '+esc(_sid||(_resumeRequested?'resume-pending':'new'))+'</span>'
+    +(links.length?links.join(''):'');
+}
+
+function maoTransientError(text){
+  var v=String(text||'').toLowerCase();
+  return ['timeout','timed out','readtimeout','connecttimeout','connection','network','disconnected','server disconnected','broken pipe'].some(function(token){return v.indexOf(token)>=0;});
+}
+
+function maoRecoveryOwner(){
+  return _sid||taskLaunch.task_run_id||taskLaunch.task_id||'multi-agento-page';
+}
+
+function reportRecovery(status, extra){
+  return fetch('/api/session-manager/report',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      scope:'page',
+      page:'multi-agento',
+      owner_id:maoRecoveryOwner(),
+      external_session_id:_sid||'',
+      task_id:taskLaunch.task_id||'',
+      run_id:taskLaunch.task_run_id||'',
+      upstream:'c1',
+      operation:'multi-agento-stream',
+      status:status,
+      last_error:(extra&&extra.error)||'',
+      state:extra||{}
+    })
+  }).catch(function(){});
+}
+
+function loadRecoveryBar(){
+  if(!recoveryBar)return;
+  var ownerId=maoRecoveryOwner();
+  if(!ownerId){recoveryBar.style.display='none';recoveryBar.innerHTML='';return;}
+  fetch('/api/session-manager?page=multi-agento&owner_id='+encodeURIComponent(ownerId)+'&limit=1',{cache:'no-store'})
+    .then(function(r){return r.json();})
+    .then(function(data){
+      var session=(data.items||[])[0];
+      if(!session){recoveryBar.style.display='none';recoveryBar.innerHTML='';return;}
+      recoveryBar.style.display='flex';
+      recoveryBar.innerHTML='<strong>Session manager</strong>'
+        +'<span>Status: '+esc(session.status||'steady')+'</span>'
+        +'<span>Upstream: '+esc(session.upstream||'—')+'</span>'
+        +'<span>Operation: '+esc(session.operation||'—')+'</span>'
+        +'<span>Retries: '+esc(session.retry_count||0)+'</span>'
+        +'<span>Next retry: '+esc(session.next_retry_at||'—')+'</span>'
+        +'<span>'+esc(session.last_error||'No recovery error recorded.')+'</span>'
+        +(((session.status||'')==='waiting-retry')?'<button type="button" class="mao-mini" id="mao-recovery-resume-btn">Resume recovery</button>':'');
+      var resumeBtn=document.getElementById('mao-recovery-resume-btn');
+      if(resumeBtn){
+        resumeBtn.addEventListener('click',function(){
+          resumeBtn.disabled=true;
+          resumeBtn.textContent='Resuming…';
+          fetch('/api/session-manager/'+encodeURIComponent(session.id)+'/resume',{method:'POST'})
+            .then(function(){return loadRecoveryBar();})
+            .then(function(){if(!_run&&taskEl.value.trim()){_resumeRequested=true;launch();}})
+            .catch(function(){
+              resumeBtn.disabled=false;
+              resumeBtn.textContent='Resume recovery';
+            });
+        });
+      }
+    }).catch(function(){});
+}
+
+function markRunActivity(){_lastActivityAt=Date.now();}
+function applyRunAvailability(){
+  if(_cooldownTimer){clearTimeout(_cooldownTimer);_cooldownTimer=null;}
+  if(_run){launchBtn.disabled=true;return;}
+  var waitMs=Math.max(0,_cooldownUntil-Date.now());
+  if(waitMs>0){
+    var secs=Math.ceil(waitMs/1000);
+    launchBtn.disabled=true;
+    launchBtn.textContent='Wait '+secs+'s';
+    _cooldownTimer=setTimeout(applyRunAvailability,Math.min(1000,waitMs));
+    return;
+  }
+  launchBtn.disabled=false;
+  launchBtn.textContent='▶ Launch';
+}
+function canStartRun(){
+  if(_run)return false;
+  if(Date.now()<_cooldownUntil){
+    supText.textContent='⏳ Working on the response... Please wait. Cooldown is still active before the next run.';
+    applyRunAvailability();
+    return false;
+  }
+  return true;
+}
 
 // Role chips
 document.querySelectorAll('.mao-chip').forEach(function(c){c.addEventListener('click',function(){c.classList.toggle('active');});});
@@ -409,25 +493,13 @@ document.addEventListener('click',function(){document.getElementById('think-menu
 document.querySelectorAll('.mao-mbtn').forEach(function(b){b.addEventListener('click',function(){_wm=b.dataset.wm;document.querySelectorAll('.mao-mbtn').forEach(function(x){x.classList.toggle('active',x.dataset.wm===_wm);});});});
 
 // Right tabs
-document.querySelectorAll('.mao-rtab').forEach(function(t){t.addEventListener('click',function(){document.querySelectorAll('.mao-rtab').forEach(function(x){x.classList.remove('active');});document.querySelectorAll('.mao-rpanel').forEach(function(x){x.classList.remove('active');});t.classList.add('active');document.getElementById('rpanel-'+t.dataset.tab).classList.add('active');if(t.dataset.tab==='shell')document.getElementById('mao-shell-input').focus();if(t.dataset.tab==='shell')document.getElementById('mao-shell-input').focus();});});
+document.querySelectorAll('.mao-rtab').forEach(function(t){t.addEventListener('click',function(){document.querySelectorAll('.mao-rtab').forEach(function(x){x.classList.remove('active');});document.querySelectorAll('.mao-rpanel').forEach(function(x){x.classList.remove('active');});t.classList.add('active');document.getElementById('rpanel-'+t.dataset.tab).classList.add('active');if(t.dataset.tab==='shell')document.getElementById('mao-shell-input').focus();});});
 
 // Task textarea — Enter to launch
 taskEl.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();if(!_run)launch();}});
 
 // Elapsed helpers
 function fmt(ms){var s=Math.floor(ms/1000);return s<60?s+'s':Math.floor(s/60)+'m '+(s%60)+'s';}
-var _taskStart=null,_taskTimer=null,_elBadge=document.getElementById('mao-elapsed');
-function startTaskElapsed(){
-  _taskStart=Date.now();
-  if(_elBadge){_elBadge.style.display='';_elBadge.className='mao-elapsed running';_elBadge.textContent='0s';}
-  if(_taskTimer)clearInterval(_taskTimer);
-  _taskTimer=setInterval(function(){if(_elBadge&&_taskStart)_elBadge.textContent=fmt(Date.now()-_taskStart);},1000);
-}
-function stopTaskElapsed(){
-  if(_taskTimer){clearInterval(_taskTimer);_taskTimer=null;}
-  if(_elBadge&&_taskStart){_elBadge.textContent=fmt(Date.now()-_taskStart);_elBadge.className='mao-elapsed';}
-}
-
 var _taskStart=null,_taskTimer=null,_elBadge=document.getElementById('mao-elapsed');
 function startTaskElapsed(){
   _taskStart=Date.now();
@@ -493,7 +565,8 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
 
 // SSE handler
 function handleEvent(type,data){
-  if(type==='session'){_sid=data.session_id;refreshFiles();return;}
+  markRunActivity();
+  if(type==='session'){_sid=data.session_id;_resumeRequested=false;refreshFiles();loadSessions();renderTraceBar();reportRecovery('running',{session_id:_sid||'',connected:true});loadRecoveryBar();return;}
   if(type==='supervisor'){supText.textContent=data.text||'';return;}
   if(type==='pane_init'){
     createPane(data.pane_id,data.role,data.label||data.role,{'builder':'🔨','executor':'⚡','tester':'🧪','debugger':'🐛','ui':'🎨','reporter':'📊'}[data.role]||'🤖',data.assignment||'');
@@ -529,36 +602,68 @@ function handleEvent(type,data){
     fetch('/api/token-usage/record',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({agent_id:'multi-agento',page:'multi-agento',tokens:_maTok,session_id:_sid||'',status:'ok'})
     }).catch(function(){});
+    reportRecovery('completed',{session_id:_sid||'',summary:data.summary||'',files_created:data.files_created||[]});
+    loadRecoveryBar();
+    loadSessions();
+    renderTraceBar();
   }
-  else if(type==='error'){supText.textContent='❌ '+esc(data.message||'Error');setRunning(false);}
+  else if(type==='error'){supText.textContent='❌ '+esc(data.message||'Error');reportRecovery(maoTransientError(data.message||'')?'waiting-retry':'failed',{error:data.message||'Error',session_id:_sid||''});loadRecoveryBar();setRunning(false);}
 }
 
 function setRunning(v){
   _run=v;
-  launchBtn.disabled=v;
   pauseBtn.classList.toggle('vis',v);
   stopBtn.classList.toggle('vis',v);
-  if(v){startTaskElapsed();}else{stopTaskElapsed();clearTimers();stopFileInterval();}
+  if(v){
+    _lastPromptAt=Date.now();
+    markRunActivity();
+    _cooldownUntil=0;
+    launchBtn.disabled=true;
+    startTaskElapsed();
+  }else{
+    stopTaskElapsed();
+    clearTimers();
+    stopFileInterval();
+    _cooldownUntil=Math.max(_lastPromptAt+_PROMPT_GAP_MS,_lastActivityAt+STREAM_SETTLE_MS);
+    if((Date.now()-_lastPromptAt)>_LONG_STREAM_GRACE_MS){_cooldownUntil=Math.max(_cooldownUntil,Date.now()+1000);}
+    applyRunAvailability();
+  }
 }
 
 // Launch
 function launch(){
   var task=taskEl.value.trim();if(!task)return;
+  if(!canStartRun())return;
   _maxSteps=parseInt(document.getElementById('mao-steps').value)||8;
   var roles=activeRoles().join(',');
+  var requestedSessionId=_resumeRequested?_sid:'';
   if(_src){try{_src.close();}catch(e){}_src=null;}
-  _panes={};_pdone=0;_ptotal=0;_files=[];_paused=false;_sid='';
+  _panes={};_pdone=0;_ptotal=0;_files=[];_paused=false;
+  if(!_resumeRequested)_sid='';
   paneGrid.innerHTML='';paneGrid.appendChild(paneEmpty);paneEmpty.style.display='';
   sumBar.classList.remove('show');progEl.style.display='none';supText.textContent='🧭 Decomposing task…';
   var params=new URLSearchParams({task:task,roles:roles,max_steps:_maxSteps,chat_mode:_think,work_mode:_wm});
+  if(requestedSessionId)params.set('session_id',requestedSessionId);
   _src=new EventSource('/api/ma/run?'+params.toString());
   _src.onmessage=function(e){try{handleEvent('message',JSON.parse(e.data));}catch(ex){}};
   ['session','supervisor','pane_init','pane_thinking','pane_tool','pane_obs','pane_file','pane_done','pane_error','final','error'].forEach(function(ev){
     _src.addEventListener(ev,function(e){try{handleEvent(ev,JSON.parse(e.data));}catch(ex){}});
   });
-  _src.onerror=function(){supText.textContent='⚠️ Stream disconnected. Session is preserved; reopen it from History after C1/C3 recovers.';setRunning(false);};
+  _src.onerror=function(){
+    if(!_run)return;
+    var graceUntil=Math.min(_lastPromptAt+_LONG_STREAM_GRACE_MS,_lastActivityAt+STREAM_SETTLE_MS);
+    if(_lastPromptAt&&Date.now()<graceUntil){
+      supText.textContent='⏳ Working on the response... Please wait. Stream reconnect grace is still active.';
+      return;
+    }
+    supText.textContent='⚠️ Stream disconnected. Session is preserved; reopen it from History after C1/C3 recovers.';
+    reportRecovery('waiting-retry',{error:'EventSource disconnected while the team session remained active.',session_id:_sid||''});
+    loadRecoveryBar();
+    setRunning(false);
+  };
   setRunning(true);startFileInterval();
   // Add to session list
+  renderTraceBar();
   loadSessions();
 }
 
@@ -573,6 +678,7 @@ pauseBtn.addEventListener('click',function(){
   }
 });
 stopBtn.addEventListener('click',function(){if(_src){_src.close();_src=null;}setRunning(false);});
+applyRunAvailability();
 
 // File tree
 var _ftInterval=null;
@@ -640,8 +746,8 @@ function loadSessions(){
     var sl=document.getElementById('sess-list');
     if(!rows.length){sl.innerHTML='<div class="mao-meta" style="padding:.4rem .7rem;">No sessions yet</div>';return;}
     sl.innerHTML=rows.map(function(r){
-      var cls=r.status==='completed'?'done':r.status==='failed'?'failed':'';
-      return '<div class="mao-item '+cls+'" onclick="resumeSession(\''+esc(r.id)+'\',\''+esc(r.task||'').replace(/'/g,'\\\'')+'\')" title="'+esc(r.task||'')+'">'
+      var cls=(r.status==='completed'?'done':r.status==='failed'?'failed':'') + (r.id===_sid?' active':'');
+      return '<div class="mao-item '+cls+'" data-session-id="'+esc(r.id)+'" onclick="resumeSession(\''+esc(r.id)+'\',\''+esc(r.task||'').replace(/'/g,'\\\'')+'\')" title="'+esc(r.task||'')+'">'
         +'<div style="font-size:.74rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc((r.task||'—').slice(0,50))+'</div>'
         +'<div class="mao-meta">'+esc(r.status)+' · '+esc((r.created_at||'').slice(0,10))+'</div>'
         +'</div>';
@@ -661,7 +767,12 @@ loadSessions();
 
 function resumeSession(sid,task){
   _sid=sid;
+  _resumeRequested=true;
   taskEl.value=task;
+  supText.textContent='📂 Session loaded — the next launch continues the same C11 session workspace.';
+  document.querySelectorAll('.mao-item[data-session-id]').forEach(function(el){el.classList.toggle('active',el.dataset.sessionId===sid);});
+  renderTraceBar();
+  loadRecoveryBar();
   refreshFiles();loadProjects();
 }
 
@@ -723,7 +834,7 @@ document.querySelectorAll('.mao-overlay').forEach(function(ov){
 document.addEventListener('keydown',function(e){if(e.key==='Escape')document.querySelectorAll('.mao-overlay.open').forEach(function(o){o.classList.remove('open');});});
 
 // Sessions modal trigger via "History" btn
-document.querySelector('[onclick="loadSessions()"]')&&(document.querySelector('[onclick="loadSessions()"]').onclick=function(){loadSessions();openModal('sess-overlay');});
+document.getElementById('btn-sessions-history').addEventListener('click',function(){loadSessions();openModal('sess-overlay');});
 
 // ── Interactive Linux Shell (C11 sandbox) ─────────────────────────────────
 (function initMaoShell(){
@@ -796,77 +907,8 @@ document.querySelector('[onclick="loadSessions()"]')&&(document.querySelector('[
   if(pwdBtn)pwdBtn.addEventListener('click',function(){shellRun('pwd');});
 })();
 
-// ── Interactive Linux Shell (C11 sandbox) ─────────────────────────────────
-(function initMaoShell(){
-  var out=document.getElementById('mao-shell-out');
-  var inp=document.getElementById('mao-shell-input');
-  var cwdEl=document.getElementById('mao-shell-cwd');
-  var clearBtn=document.getElementById('mao-shell-clear');
-  var lsBtn=document.getElementById('mao-shell-ls');
-  var pwdBtn=document.getElementById('mao-shell-pwd');
-  if(!out||!inp)return;
-  var _hist=[],_histIdx=-1,_busy=false;
-
-  function sadd(cls,text){
-    var d=document.createElement('div');
-    d.className=cls;d.textContent=text;
-    out.appendChild(d);out.scrollTop=out.scrollHeight;
-  }
-
-  async function shellRun(cmd){
-    cmd=cmd.trim();if(!cmd||_busy)return;
-    _hist.push(cmd);_histIdx=_hist.length;
-    sadd('sh-cmd','$ '+cmd);
-    _busy=true;inp.disabled=true;inp.placeholder='Running\u2026';
-    try{
-      var r=await fetch('/api/sandbox/exec',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({command:cmd,sandbox:'c11',timeout:60,session_id:_sid||''})
-      });
-      var d=await r.json();
-      var so=(d.stdout||'').replace(/\n$/,'');
-      var se=(d.stderr||'').replace(/\n$/,'');
-      if(so)sadd('',so);
-      if(se)sadd('sh-err',se);
-      if(d.timed_out)sadd('sh-exit','[timed out]');
-      else if(d.exit_code!==0&&d.exit_code!=null)sadd('sh-exit','exit '+d.exit_code);
-      if(/^\s*cd\s/.test(cmd)){
-        var pr=await fetch('/api/sandbox/exec',{
-          method:'POST',
-          headers:{'Content-Type':'application/json'},
-          body:JSON.stringify({command:'pwd',sandbox:'c11',timeout:5,session_id:_sid||''})
-        });
-        var pd=await pr.json();
-        var cwd=(pd.stdout||'').trim();
-        if(cwd&&cwdEl)cwdEl.textContent=cwd;
-      }
-      if(/^(pip|npm|python|cp|mv|rm|mkdir|touch|git|wget|curl)/i.test(cmd))refreshFiles();
-    }catch(e){sadd('sh-err','Error: '+e.message);}
-    _busy=false;inp.disabled=false;
-    inp.placeholder='Type a command\u2026 (Enter to run)';
-    inp.focus();
-  }
-
-  inp.addEventListener('keydown',function(e){
-    if(e.key==='Enter'){
-      e.preventDefault();shellRun(inp.value);inp.value='';
-    }else if(e.key==='ArrowUp'){
-      e.preventDefault();
-      if(_hist.length&&_histIdx>0){_histIdx--;inp.value=_hist[_histIdx];}
-    }else if(e.key==='ArrowDown'){
-      e.preventDefault();
-      if(_histIdx<_hist.length-1){_histIdx++;inp.value=_hist[_histIdx];}
-      else{_histIdx=_hist.length;inp.value='';}
-    }else if(e.key==='l'&&e.ctrlKey){
-      e.preventDefault();out.innerHTML='';
-    }
-  });
-  if(clearBtn)clearBtn.addEventListener('click',function(){out.innerHTML='';sadd('sh-info','Cleared.');});
-  if(lsBtn)lsBtn.addEventListener('click',function(){shellRun('ls -la');});
-  if(pwdBtn)pwdBtn.addEventListener('click',function(){shellRun('pwd');});
-})();
-
+renderTraceBar();
+loadRecoveryBar();
 })();
 </script>
 {% endblock %}

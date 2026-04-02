@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}TaskCompleted{% endblock %}
+{% block content %}
+<style>
+.tc-shell{display:grid;gap:1rem}
+.tc-card{background:var(--card, rgba(255,255,255,0.04));border:1px solid var(--border, rgba(255,255,255,0.08));border-radius:16px;padding:1rem 1.1rem}
+.tc-hero h1{margin:0 0 .45rem 0;font-size:1.18rem}
+.tc-note{font-size:.82rem;color:var(--muted);line-height:1.55}
+.tc-toolbar{display:flex;gap:.65rem;flex-wrap:wrap;align-items:end}
+.tc-toolbar label{display:grid;gap:.35rem;font-size:.8rem;color:var(--muted)}
+.tc-toolbar input,.tc-toolbar select{background:#111;border:1px solid var(--border,#333);border-radius:10px;color:var(--fg,#f5f5f7);padding:.58rem .7rem;font:inherit;min-width:180px}
+.tc-btn,.tc-link{background:var(--accent,#0a84ff);color:#fff;border:none;border-radius:9px;padding:.45rem .75rem;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
+.tc-link{background:transparent;border:1px solid var(--border,#333);color:var(--fg,#f5f5f7)}
+.tc-runtime{display:flex;gap:.65rem;flex-wrap:wrap;margin-top:.85rem}
+.tc-pill{display:inline-flex;align-items:center;gap:.35rem;border:1px solid var(--border,#333);border-radius:999px;padding:.12rem .45rem;font-size:.72rem;color:var(--muted);background:#111}
+.tc-list{display:grid;gap:.85rem}
+.tc-item{background:#111;border:1px solid var(--border,#333);border-radius:16px;padding:.95rem 1rem;display:grid;gap:.8rem}
+.tc-item-header{display:flex;justify-content:space-between;gap:.8rem;align-items:flex-start;flex-wrap:wrap}
+.tc-item-title strong{display:block;font-size:.96rem}
+.tc-item-meta{font-size:.77rem;color:var(--muted);line-height:1.45}
+.tc-summary{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.7rem}
+.tc-stat{background:#151515;border:1px solid var(--border,#333);border-radius:12px;padding:.65rem .75rem}
+.tc-stat strong{display:block;color:var(--fg);font-size:.9rem;margin-bottom:.15rem}
+.tc-stat span{font-size:.77rem;color:var(--muted)}
+.tc-actions{display:flex;gap:.45rem;flex-wrap:wrap}
+.tc-detail{border:1px solid var(--border,#333);border-radius:14px;background:#151515;padding:.8rem}
+.tc-detail h3{margin:0 0 .55rem 0;font-size:.88rem}
+.tc-pre{font-size:.76rem;color:var(--fg);line-height:1.5;white-space:pre-wrap;word-break:break-word}
+.tc-empty{font-size:.82rem;color:var(--muted);padding:.8rem}
+</style>
+
+<div class="tc-shell">
+  <section class="tc-card tc-hero">
+    <h1>TaskCompleted</h1>
+    <div class="tc-note">TaskCompleted lists terminal runs only. Use it to review completed, failed, or cancelled runs, then redo, clone, archive, or jump back into the full trace.</div>
+    <div class="tc-toolbar" style="margin-top:.85rem;">
+      <label>
+        Task ID
+        <input id="tc-task-id" placeholder="Optional task_id filter">
+      </label>
+      <label>
+        Status
+        <select id="tc-status">
+          <option value="completed,failed,cancelled">Completed + Failed + Cancelled</option>
+          <option value="completed">Completed only</option>
+          <option value="failed">Failed only</option>
+          <option value="cancelled">Cancelled only</option>
+        </select>
+      </label>
+      <button class="tc-btn" id="tc-refresh">Refresh</button>
+    </div>
+    <div class="tc-runtime" id="tc-runtime">
+      <span class="tc-pill">Loading C12b runtime…</span>
+    </div>
+    <div class="tc-note" id="tc-note" style="margin-top:.85rem;">Completed runs refresh every 15 seconds while this page stays visible.</div>
+  </section>
+
+  <section class="tc-card">
+    <div class="tc-list" id="tc-list">
+      <div class="tc-empty">Loading completed runs…</div>
+    </div>
+  </section>
+</div>
+
+<script>
+(function(){
+  var EXECUTOR_TARGET_LABELS = Object.fromEntries(({{ task_executor_targets|safe }} || []).map(function(item){ return [item.id, item.label]; }));
+  var AGENT_TARGET_LABELS = Object.fromEntries(({{ task_agent_targets|safe }} || []).map(function(item){ return [item.id, item.label]; }));
+  var listEl = document.getElementById('tc-list');
+  var taskIdEl = document.getElementById('tc-task-id');
+  var statusEl = document.getElementById('tc-status');
+  var noteEl = document.getElementById('tc-note');
+  var runtimeEl = document.getElementById('tc-runtime');
+  var initialTaskId = new URLSearchParams(window.location.search).get('task_id') || '';
+  function esc(v){ return String(v == null ? '' : v).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function fmtTs(ts){ if(!ts) return '—'; try { return new Date(ts).toLocaleString(); } catch(_) { return ts; } }
+  function labelForTarget(id){ return EXECUTOR_TARGET_LABELS[id] || AGENT_TARGET_LABELS[id] || id || '—'; }
+  async function taskAction(taskId, action) {
+    var res = await fetch('/api/tasks/' + encodeURIComponent(taskId) + '/' + action, { method: 'POST' });
+    var data = await res.json();
+    if (!res.ok || data.ok === false) throw new Error(data.error || ('Task action failed (' + res.status + ')'));
+    return data;
+  }
+  function renderItem(item) {
+    var run = item.run || {};
+    var feedbackSummary = (item.feedback || []).map(function(entry){ return (entry.agent_id || 'agent') + ': ' + (entry.summary || entry.status || 'feedback'); }).join('\n');
+    var latestAlert = item.latest_alert || {};
+    return '<article class="tc-item">' +
+      '<div class="tc-item-header">' +
+        '<div class="tc-item-title"><strong>' + esc(item.task_name || run.task_id || 'Tasked') + '</strong><div class="tc-item-meta">Task ID: ' + esc(run.task_id || '—') + ' · Run ID: ' + esc(run.id || '—') + ' · Trace: ' + esc(run.trace_id || run.task_id || '—') + '</div></div>' +
+        '<div class="tc-actions">' +
+          '<button class="tc-btn" data-task-action="redo" data-task-id="' + esc(run.task_id || '') + '">Redo</button>' +
+          '<button class="tc-btn" data-task-action="clone" data-task-id="' + esc(run.task_id || '') + '">Clone Task</button>' +
+          '<button class="tc-btn" data-task-action="archive" data-task-id="' + esc(run.task_id || '') + '">Archive</button>' +
+          '<a class="tc-link" href="' + esc(run.task_url || '/tasked') + '">Open Tasked</a>' +
+          '<a class="tc-link" href="' + esc(run.pipeline_url || '/piplinetask') + '">Open Pipeline</a>' +
+          '<a class="tc-link" href="/alerts">Open Alerts</a>' +
+        '</div>' +
+      '</div>' +
+      '<div class="tc-summary">' +
+        '<div class="tc-stat"><strong>' + esc(run.status || '—') + '</strong><span>Terminal status</span></div>' +
+        '<div class="tc-stat"><strong>' + esc(run.duration_label || '—') + '</strong><span>Duration</span></div>' +
+        '<div class="tc-stat"><strong>' + esc(run.current_step_id || '—') + '</strong><span>Final step</span></div>' +
+        '<div class="tc-stat"><strong>' + esc(labelForTarget(item.task_executor_target || run.executor_target || '')) + '</strong><span>Executor target</span></div>' +
+        '<div class="tc-stat"><strong>' + esc(latestAlert.status || '—') + '</strong><span>Latest alert</span></div>' +
+        '<div class="tc-stat"><strong>' + esc(item.task_archived ? 'yes' : 'no') + '</strong><span>Definition archived</span></div>' +
+      '</div>' +
+      '<div class="tc-detail"><h3>Completion trace</h3><div class="tc-pre">Finished: ' + esc(fmtTs(run.completed_at || run.finished_at)) + '\nReason: ' + esc(run.terminal_reason || '—') + '\nAlert ID: ' + esc(latestAlert.id || '—') + '\nAlert status: ' + esc(latestAlert.status || '—') + '\nRecovery: ' + esc(((item.latest_recovery_session || {}).status) || 'steady') + '\nRecovery error: ' + esc(((item.latest_recovery_session || {}).last_error) || '—') + '\n\nFeedback summary:\n' + esc(feedbackSummary || 'No agent feedback on this run.') + '</div></div>' +
+    '</article>';
+  }
+  async function loadCompleted() {
+    listEl.innerHTML = '<div class="tc-empty">Loading completed runs…</div>';
+    var url = new URL('/api/task-completed', window.location.origin);
+    var searchUrl = new URL(window.location.href);
+    var taskId = taskIdEl.value.trim();
+    var statuses = statusEl.value.trim();
+    if (taskId) { url.searchParams.set('task_id', taskId); searchUrl.searchParams.set('task_id', taskId); } else searchUrl.searchParams.delete('task_id');
+    if (statuses) { url.searchParams.set('status', statuses); searchUrl.searchParams.set('status', statuses); }
+    window.history.replaceState({}, '', searchUrl);
+    var res = await fetch(url.toString(), { cache: 'no-store' });
+    var data = await res.json();
+    var rows = data.items || [];
+    noteEl.textContent = 'Completed runs refreshed at ' + new Date().toLocaleTimeString() + '.';
+    listEl.innerHTML = rows.length ? rows.map(renderItem).join('') : '<div class="tc-empty">No terminal task runs match the current filter.</div>';
+    listEl.querySelectorAll('button[data-task-action]').forEach(function(btn){
+      btn.addEventListener('click', async function(){
+        try {
+          await taskAction(btn.dataset.taskId, btn.dataset.taskAction);
+          await loadCompleted();
+        } catch (err) {
+          noteEl.textContent = err.message || 'Task action failed.';
+        }
+      });
+    });
+  }
+  async function loadRuntime() {
+    var res = await fetch('/api/runtime-status?force=true', { cache: 'no-store' });
+    var data = await res.json();
+    var item = (data.components || {}).c12b || {};
+    var smRes = await fetch('/api/session-manager?scope=task&status=waiting-retry&limit=1', { cache: 'no-store' });
+    var smData = await smRes.json();
+    var recovery = (smData.items || [])[0] || {};
+    runtimeEl.innerHTML = '<span class="tc-pill">C12b: ' + esc(item.state || 'unknown') + ' · ' + esc(item.message || 'Unavailable') + '</span>' +
+      '<span class="tc-pill">Recovery: ' + esc(recovery.status || 'steady') + (recovery.upstream ? (' · ' + esc(recovery.upstream)) : '') + '</span>';
+  }
+  document.getElementById('tc-refresh').addEventListener('click', loadCompleted);
+  statusEl.addEventListener('change', loadCompleted);
+  taskIdEl.addEventListener('keydown', function(e){ if (e.key === 'Enter') { e.preventDefault(); loadCompleted(); } });
+  if (initialTaskId) taskIdEl.value = initialTaskId;
+  loadCompleted().catch(function(){ listEl.innerHTML = '<div class="tc-empty">Failed to load completed runs.</div>'; });
+  loadRuntime().catch(function(){ runtimeEl.innerHTML = '<span class="tc-pill">Sandbox runtime unavailable.</span>'; });
+  setInterval(function(){ if (!document.hidden) loadCompleted().catch(function(){}); }, 15000);
+  setInterval(function(){ if (!document.hidden) loadRuntime().catch(function(){}); }, 30000);
+})();
+</script>
+{% endblock %}

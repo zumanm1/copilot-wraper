@@ -1,0 +1,16 @@
+services:
+  app:
+    container_name: C1b_copilot-api
+    ports:
+      - "8100:8000"
+
+  browser-auth:
+    container_name: C3b_browser-auth
+    ports:
+      - "6180:6080"
+      - "8101:8001"
+
+  c9-jokes:
+    container_name: C9b_jokes
+    ports:
+      - "6190:6090"

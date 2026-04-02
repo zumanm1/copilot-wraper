@@ -1,0 +1,248 @@
+{% extends "base.html" %}
+{% block title %}piplinetask{% endblock %}
+{% block content %}
+<style>
+.pipeline-shell{display:grid;gap:1rem}
+.pipeline-card{background:var(--card, rgba(255,255,255,0.04));border:1px solid var(--border, rgba(255,255,255,0.08));border-radius:16px;padding:1rem 1.1rem}
+.pipeline-hero h1{margin:0 0 .45rem 0;font-size:1.18rem}
+.pipeline-note{font-size:.82rem;color:var(--muted);line-height:1.55}
+.pipeline-toolbar{display:flex;gap:.65rem;flex-wrap:wrap;align-items:end}
+.pipeline-toolbar label{display:grid;gap:.35rem;font-size:.8rem;color:var(--muted)}
+.pipeline-toolbar input,.pipeline-toolbar select{background:#111;border:1px solid var(--border,#333);border-radius:10px;color:var(--fg,#f5f5f7);padding:.62rem .8rem;font:inherit;min-width:180px}
+.pipeline-btn{background:var(--accent,#0a84ff);color:#fff;border:none;border-radius:10px;padding:.62rem .9rem;font:inherit;cursor:pointer}
+.pipeline-btn.secondary{background:transparent;border:1px solid var(--border,#333);color:var(--fg,#f5f5f7)}
+.pipeline-runtime{display:flex;gap:.65rem;flex-wrap:wrap;margin-top:.85rem}
+.pipeline-runtime-pill{display:inline-flex;align-items:center;gap:.35rem;border:1px solid var(--border,#333);border-radius:999px;padding:.18rem .55rem;font-size:.75rem;color:var(--muted);background:#111}
+.pipeline-list{display:grid;gap:.85rem}
+.pipeline-item{background:#111;border:1px solid var(--border,#333);border-radius:16px;padding:.95rem 1rem;display:grid;gap:.85rem}
+.pipeline-item-header{display:flex;justify-content:space-between;gap:.8rem;align-items:flex-start;flex-wrap:wrap}
+.pipeline-item-title strong{display:block;font-size:.96rem}
+.pipeline-item-meta{font-size:.77rem;color:var(--muted);line-height:1.45}
+.pipeline-pills{display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.4rem}
+.pipeline-pill{display:inline-flex;align-items:center;gap:.35rem;border:1px solid var(--border,#333);border-radius:999px;padding:.12rem .45rem;font-size:.72rem;color:var(--muted);background:#151515}
+.pipeline-summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.7rem}
+.pipeline-stat{background:#151515;border:1px solid var(--border,#333);border-radius:12px;padding:.65rem .75rem}
+.pipeline-stat strong{display:block;color:var(--fg);font-size:.9rem;margin-bottom:.15rem}
+.pipeline-stat span{font-size:.77rem;color:var(--muted)}
+.pipeline-actions{display:flex;gap:.45rem;flex-wrap:wrap}
+.pipeline-link{display:inline-flex;align-items:center;justify-content:center;background:transparent;border:1px solid var(--border,#333);color:var(--fg,#f5f5f7);border-radius:9px;padding:.4rem .7rem;text-decoration:none;font-size:.8rem}
+.pipeline-sections{display:grid;gap:.75rem}
+.pipeline-section{border:1px solid var(--border,#333);border-radius:14px;background:#151515;padding:.8rem}
+.pipeline-section h3{margin:0 0 .55rem 0;font-size:.88rem}
+.pipeline-trace{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.65rem}
+.pipeline-trace-item{padding:.65rem .75rem;border:1px solid var(--border,#333);border-radius:12px;background:#101010}
+.pipeline-trace-item strong{display:block;font-size:.82rem;margin-bottom:.2rem}
+.pipeline-trace-item span{font-size:.76rem;color:var(--muted);line-height:1.5;white-space:pre-wrap;word-break:break-word}
+.pipeline-step-list,.pipeline-feedback-list,.pipeline-event-list{display:grid;gap:.6rem}
+.pipeline-step,.pipeline-feedback,.pipeline-event{display:grid;gap:.35rem;padding:.7rem;border:1px solid var(--border,#333);border-radius:12px;background:#101010}
+.pipeline-step-head,.pipeline-feedback-head,.pipeline-event-head{display:flex;justify-content:space-between;gap:.7rem;align-items:flex-start;flex-wrap:wrap}
+.pipeline-step-meta,.pipeline-feedback-meta,.pipeline-event-meta{font-size:.75rem;color:var(--muted);line-height:1.45}
+.pipeline-step-pre,.pipeline-feedback-pre,.pipeline-event-pre{font-size:.76rem;color:var(--fg);line-height:1.5;white-space:pre-wrap;word-break:break-word}
+.pipeline-empty{font-size:.82rem;color:var(--muted);padding:.8rem}
+.pipeline-badge.running{color:#0a84ff}.pipeline-badge.completed{color:#30d158}.pipeline-badge.failed{color:#ff453a}.pipeline-badge.launch-pending,.pipeline-badge.waiting-feedback,.pipeline-badge.alert-open,.pipeline-badge.waiting-retry,.pipeline-badge.recovering{color:#ffa000}
+@media (max-width: 980px){
+  .pipeline-item-header{grid-template-columns:1fr}
+}
+</style>
+
+<div class="pipeline-shell">
+  <section class="pipeline-card pipeline-hero">
+    <h1>piplinetask</h1>
+    <div class="pipeline-note">
+      piplinetask is the run monitor. It shows the full path from task creation through each run, step result, agent feedback,
+      sandbox activity, alert generation, and terminal completion. This page is run-centric, not definition-centric.
+    </div>
+    <div class="pipeline-toolbar" style="margin-top:.85rem;">
+      <label>
+        Task ID
+        <input id="pipeline-task-id" placeholder="Optional task_id filter">
+      </label>
+      <label>
+        Run ID
+        <input id="pipeline-run-id" placeholder="Optional run_id filter">
+      </label>
+      <label>
+        Run status
+        <select id="pipeline-status-filter">
+          <option value="">All statuses</option>
+          <option value="running">Running</option>
+          <option value="waiting-retry">Waiting retry</option>
+          <option value="launch-pending">Launch pending</option>
+          <option value="waiting-feedback">Waiting feedback</option>
+          <option value="alert-open">Alert open</option>
+          <option value="completed">Completed</option>
+          <option value="failed">Failed</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+      </label>
+      <button class="pipeline-btn" id="pipeline-refresh">Refresh pipeline</button>
+      <button class="pipeline-btn secondary" id="pipeline-clear-filter">Clear filter</button>
+      <label><input id="pipeline-live-toggle" type="checkbox" checked> Live monitor</label>
+    </div>
+    <div class="pipeline-runtime" id="pipeline-runtime">
+      <span class="pipeline-runtime-pill">Loading C12b runtime…</span>
+    </div>
+    <div class="pipeline-note" id="pipeline-monitor-note" style="margin-top:.85rem;">Active runs refresh every 5 seconds. Idle views refresh every 15 seconds.</div>
+  </section>
+
+  <section class="pipeline-card">
+    <div class="pipeline-list" id="pipeline-list">
+      <div class="pipeline-empty">Loading task pipelines…</div>
+    </div>
+  </section>
+</div>
+
+<script>
+(function(){
+  var EXECUTOR_TARGET_LABELS = Object.fromEntries(({{ task_executor_targets|safe }} || []).map(function(item){ return [item.id, item.label]; }));
+  var AGENT_TARGET_LABELS = Object.fromEntries(({{ task_agent_targets|safe }} || []).map(function(item){ return [item.id, item.label]; }));
+  var listEl = document.getElementById('pipeline-list');
+  var taskIdEl = document.getElementById('pipeline-task-id');
+  var runIdEl = document.getElementById('pipeline-run-id');
+  var statusEl = document.getElementById('pipeline-status-filter');
+  var liveToggleEl = document.getElementById('pipeline-live-toggle');
+  var noteEl = document.getElementById('pipeline-monitor-note');
+  var runtimeEl = document.getElementById('pipeline-runtime');
+  var initialTaskId = new URLSearchParams(window.location.search).get('task_id') || '';
+  var initialRunId = new URLSearchParams(window.location.search).get('run_id') || '';
+  function esc(v){ return String(v == null ? '' : v).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function fmtTs(ts){ if(!ts) return '—'; try { return new Date(ts).toLocaleString(); } catch(_) { return ts; } }
+  function fmtJson(value){ try { return JSON.stringify(value || {}, null, 2); } catch (_) { return String(value || ''); } }
+  function targetLabel(id){ return EXECUTOR_TARGET_LABELS[id] || AGENT_TARGET_LABELS[id] || id || '—'; }
+
+  function renderStep(step) {
+    var output = step.output || {};
+    return '<div class="pipeline-step">' +
+      '<div class="pipeline-step-head">' +
+        '<strong>' + esc(step.step_name || step.step_id || 'Step') + '</strong>' +
+        '<div class="pipeline-step-meta"><span class="pipeline-badge ' + esc(step.status || '') + '">' + esc(step.status || 'unknown') + '</span> · ' + esc(step.step_kind || 'step') + '</div>' +
+      '</div>' +
+      '<div class="pipeline-step-meta">Step ID: ' + esc(step.step_id || '—') + ' · Started: ' + esc(fmtTs(step.started_at)) + ' · Finished: ' + esc(fmtTs(step.finished_at)) + ' · Duration: ' + esc(step.duration_label || '—') + '</div>' +
+      '<div class="pipeline-step-pre">' + esc(fmtJson(output)) + (step.error_text ? ('\n\nError:\n' + esc(step.error_text)) : '') + '</div>' +
+    '</div>';
+  }
+
+  function renderFeedback(feedback) {
+    return '<div class="pipeline-feedback">' +
+      '<div class="pipeline-feedback-head"><strong>' + esc(targetLabel(feedback.agent_id)) + ' feedback</strong><div class="pipeline-feedback-meta">' + esc(feedback.status || 'unknown') + ' · ' + esc(fmtTs(feedback.created_at)) + '</div></div>' +
+      '<div class="pipeline-feedback-meta">Step: ' + esc(feedback.step_id || '—') + ' · Feedback type: ' + esc(feedback.feedback_type || 'result') + '</div>' +
+      '<div class="pipeline-feedback-pre">' + esc(feedback.summary || '') + (feedback.raw_excerpt ? ('\n\n' + feedback.raw_excerpt) : '') + '\n\nSignals:\n' + esc(fmtJson(feedback.payload || {})) + '</div>' +
+    '</div>';
+  }
+
+  function renderEvent(event) {
+    return '<div class="pipeline-event">' +
+      '<div class="pipeline-event-head"><strong>' + esc(event.title || event.kind || 'Event') + '</strong><div class="pipeline-event-meta">' + esc(event.kind || '') + (event.status ? (' · ' + esc(event.status)) : '') + ' · ' + esc(fmtTs(event.ts)) + '</div></div>' +
+      '<div class="pipeline-event-pre">' + esc(event.detail || '—') + '</div>' +
+    '</div>';
+  }
+
+  function renderRecovery(item) {
+    return '<div class="pipeline-event">' +
+      '<div class="pipeline-event-head"><strong>Recovery session ' + esc(item.id || '—') + '</strong><div class="pipeline-event-meta">' + esc(item.status || 'unknown') + ' · ' + esc(fmtTs(item.updated_at)) + '</div></div>' +
+      '<div class="pipeline-event-pre">Operation: ' + esc(item.operation || '—') + '\nUpstream: ' + esc(item.upstream || '—') + '\nRetries: ' + esc(item.retry_count || 0) + '/' + esc(item.max_retries || 0) + '\nNext retry: ' + esc(fmtTs(item.next_retry_at)) + '\nError: ' + esc(item.last_error || '—') + '</div>' +
+    '</div>';
+  }
+
+  function renderItem(item) {
+    var task = item.task || {};
+    var run = item.run || {};
+    var trace = item.trace || {};
+    var summary = item.summary || {};
+    var latestAlert = (item.alerts || [])[0] || null;
+    return '<article class="pipeline-item">' +
+      '<div class="pipeline-item-header">' +
+        '<div class="pipeline-item-title">' +
+          '<strong>' + esc(task.name || task.id || 'Tasked') + '</strong>' +
+          '<div class="pipeline-item-meta">Run ID: ' + esc(run.id || '—') + ' · Trace ID: ' + esc(summary.trace_id || task.id || '—') + ' · Source: ' + esc(run.source || '—') + '</div>' +
+          '<div class="pipeline-pills">' +
+            '<span class="pipeline-pill">' + esc(task.mode_label || task.mode || 'Unknown') + '</span>' +
+            '<span class="pipeline-pill pipeline-badge ' + esc(run.status || summary.last_status || 'idle') + '">' + esc(run.status || summary.last_status || 'idle') + '</span>' +
+            '<span class="pipeline-pill">Current step: ' + esc(summary.current_step_id || run.current_step_id || '—') + '</span>' +
+            '<span class="pipeline-pill">Terminal: ' + esc(summary.terminal_reason || run.terminal_reason || '—') + '</span>' +
+          '</div>' +
+        '</div>' +
+        '<div class="pipeline-actions">' +
+          '<a class="pipeline-link" href="' + esc(task.task_url || '/tasked') + '">Open Tasked</a>' +
+          '<a class="pipeline-link" href="' + esc(task.alerts_url || '/alerts') + '">Open Alerts</a>' +
+          '<a class="pipeline-link" href="' + esc(task.completed_url || '/task-completed') + '">Open Completed</a>' +
+        '</div>' +
+      '</div>' +
+      '<div class="pipeline-summary-grid">' +
+        '<div class="pipeline-stat"><strong>' + esc(run.status || summary.last_status || 'idle') + '</strong><span>Run status</span></div>' +
+        '<div class="pipeline-stat"><strong>' + esc(run.duration_label || summary.latest_run_duration_label || '—') + '</strong><span>Duration</span></div>' +
+        '<div class="pipeline-stat"><strong>' + esc(summary.steps_total || 0) + '</strong><span>Step results</span></div>' +
+        '<div class="pipeline-stat"><strong>' + esc(summary.feedback_total || 0) + '</strong><span>Feedback events</span></div>' +
+        '<div class="pipeline-stat"><strong>' + esc(summary.alerts_total || 0) + '</strong><span>Alerts on this run</span></div>' +
+        '<div class="pipeline-stat"><strong>' + esc(summary.open_alerts || 0) + '</strong><span>Open alerts</span></div>' +
+      '</div>' +
+      '<div class="pipeline-sections">' +
+        '<section class="pipeline-section"><h3>Trace</h3><div class="pipeline-trace">' +
+          '<div class="pipeline-trace-item"><strong>Task orchestration</strong><span>Task ID: ' + esc(trace.task_id || task.id || '—') + '\nRun ID: ' + esc(trace.run_id || run.id || '—') + '\nMode: ' + esc((trace.orchestration || {}).mode || task.mode || '—') + '\nState: ' + esc(task.lifecycle_label || task.last_status || '—') + '</span></div>' +
+          '<div class="pipeline-trace-item"><strong>Task planner</strong><span>' + esc((trace.planner || {}).prompt || task.planner_prompt || '—') + '\n\nContext handoff:\n' + esc((trace.planner || {}).context_handoff || task.context_handoff || '—') + '</span></div>' +
+          '<div class="pipeline-trace-item"><strong>Task timer</strong><span>' + esc((trace.timer || {}).schedule_label || task.schedule_label || '—') + '\nNext run: ' + esc(fmtTs((trace.timer || {}).next_run_at || task.next_run_at)) + '</span></div>' +
+          '<div class="pipeline-trace-item"><strong>Task executor</strong><span>Target: ' + esc(targetLabel((trace.executor || {}).target || task.executor_target || '')) + '\nWorkspace: ' + esc((trace.executor || {}).workspace_dir || task.workspace_dir || '—') + '\nValidation: ' + esc((trace.executor || {}).validation_status || run.validation_status || '—') + '\nTest: ' + esc((trace.executor || {}).test_status || run.test_status || '—') + '</span></div>' +
+          '<div class="pipeline-trace-item"><strong>AIO sandbox assist</strong><span>Enabled: ' + esc((trace.sandbox_assist || {}).enabled ? 'yes' : 'no') + '\nTarget: ' + esc(targetLabel((trace.sandbox_assist || {}).target || task.sandbox_assist_target || '')) + '\nWorkspace: ' + esc((trace.sandbox_assist || {}).workspace_dir || task.sandbox_assist_workspace_dir || '—') + '</span></div>' +
+          '<div class="pipeline-trace-item"><strong>Task alert generator</strong><span>Status: ' + esc((trace.alert_generator || {}).latest_alert_status || (latestAlert && latestAlert.status) || '—') + '\nSeverity: ' + esc((trace.alert_generator || {}).severity || (latestAlert && latestAlert.severity) || '—') + '\nAlert ID: ' + esc(trace.alert_id || (latestAlert && latestAlert.id) || '—') + '</span></div>' +
+          '<div class="pipeline-trace-item"><strong>Completion state</strong><span>Status: ' + esc((trace.completion || {}).last_status || run.status || '—') + '\nCurrent step: ' + esc((trace.completion || {}).current_step_id || run.current_step_id || '—') + '\nReason: ' + esc((trace.completion || {}).terminal_reason || run.terminal_reason || '—') + '\nCompleted: ' + esc(fmtTs((trace.completion || {}).completed_at || run.completed_at)) + '</span></div>' +
+          '<div class="pipeline-trace-item"><strong>Session manager</strong><span>Status: ' + esc((trace.recovery || {}).status || 'steady') + '\nOperation: ' + esc((trace.recovery || {}).operation || '—') + '\nUpstream: ' + esc((trace.recovery || {}).upstream || '—') + '\nRetries: ' + esc((trace.recovery || {}).retry_count || 0) + '\nNext retry: ' + esc(fmtTs((trace.recovery || {}).next_retry_at)) + '</span></div>' +
+        '</div></section>' +
+        '<section class="pipeline-section"><h3>Step results</h3><div class="pipeline-step-list">' + ((item.steps || []).length ? item.steps.map(renderStep).join('') : '<div class="pipeline-empty">No step results recorded.</div>') + '</div></section>' +
+        '<section class="pipeline-section"><h3>Agent feedback</h3><div class="pipeline-feedback-list">' + ((item.feedback || []).length ? item.feedback.map(renderFeedback).join('') : '<div class="pipeline-empty">No agent feedback recorded for this run.</div>') + '</div></section>' +
+        '<section class="pipeline-section"><h3>Recovery sessions</h3><div class="pipeline-event-list">' + ((item.recovery_sessions || []).length ? item.recovery_sessions.map(renderRecovery).join('') : '<div class="pipeline-empty">No recovery sessions recorded for this run.</div>') + '</div></section>' +
+        '<section class="pipeline-section"><h3>Timeline</h3><div class="pipeline-event-list">' + ((item.events || []).length ? item.events.map(renderEvent).join('') : '<div class="pipeline-empty">No events recorded.</div>') + '</div></section>' +
+      '</div>' +
+    '</article>';
+  }
+
+  async function loadPipelines() {
+    listEl.innerHTML = '<div class="pipeline-empty">Loading task pipelines…</div>';
+    var url = new URL('/api/task-pipelines', window.location.origin);
+    var searchUrl = new URL(window.location.href);
+    var taskId = taskIdEl.value.trim();
+    var runId = runIdEl.value.trim();
+    var status = statusEl.value.trim();
+    if (taskId) { url.searchParams.set('task_id', taskId); searchUrl.searchParams.set('task_id', taskId); } else searchUrl.searchParams.delete('task_id');
+    if (runId) { url.searchParams.set('run_id', runId); searchUrl.searchParams.set('run_id', runId); } else searchUrl.searchParams.delete('run_id');
+    if (status) { url.searchParams.set('status', status); searchUrl.searchParams.set('status', status); } else searchUrl.searchParams.delete('status');
+    window.history.replaceState({}, '', searchUrl);
+    var res = await fetch(url.toString(), { cache: 'no-store' });
+    var data = await res.json();
+    var rows = data.pipelines || [];
+    if (noteEl) noteEl.textContent = 'Pipeline monitor refreshed at ' + new Date().toLocaleTimeString() + '. Active runs refresh every 5 seconds and terminal runs every 15 seconds.';
+    listEl.innerHTML = rows.length ? rows.map(renderItem).join('') : '<div class="pipeline-empty">No matching task pipelines found.</div>';
+  }
+
+  async function loadRuntime() {
+    var res = await fetch('/api/runtime-status?force=true', { cache: 'no-store' });
+    var data = await res.json();
+    var item = (data.components || {}).c12b || {};
+    var smRes = await fetch('/api/session-manager?scope=task&status=waiting-retry&limit=1', { cache: 'no-store' });
+    var smData = await smRes.json();
+    var recovery = (smData.items || [])[0] || {};
+    runtimeEl.innerHTML = '<span class="pipeline-runtime-pill">C12b: ' + esc(item.state || 'unknown') + ' · ' + esc(item.message || 'Unavailable') + '</span>' +
+      '<span class="pipeline-runtime-pill">Recovery: ' + esc(recovery.status || 'steady') + (recovery.upstream ? (' · ' + esc(recovery.upstream)) : '') + '</span>';
+  }
+
+  document.getElementById('pipeline-refresh').addEventListener('click', loadPipelines);
+  document.getElementById('pipeline-clear-filter').addEventListener('click', function(){
+    taskIdEl.value = '';
+    runIdEl.value = '';
+    statusEl.value = '';
+    loadPipelines();
+  });
+  [taskIdEl, runIdEl].forEach(function(el){
+    el.addEventListener('keydown', function(e){ if (e.key === 'Enter') { e.preventDefault(); loadPipelines(); } });
+  });
+  statusEl.addEventListener('change', loadPipelines);
+
+  if (initialTaskId) taskIdEl.value = initialTaskId;
+  if (initialRunId) runIdEl.value = initialRunId;
+
+  loadPipelines().catch(function(){ listEl.innerHTML = '<div class="pipeline-empty">Failed to load task pipelines.</div>'; });
+  loadRuntime().catch(function(){ runtimeEl.innerHTML = '<span class="pipeline-runtime-pill">Sandbox runtime unavailable.</span>'; });
+  setInterval(function(){ if (!document.hidden && liveToggleEl.checked) loadPipelines().catch(function(){}); }, 5000);
+  setInterval(function(){ if (!document.hidden && liveToggleEl.checked) loadRuntime().catch(function(){}); }, 30000);
+})();
+</script>
+{% endblock %}
