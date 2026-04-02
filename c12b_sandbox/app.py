@@ -18,6 +18,7 @@ import asyncio
 import os
 import shutil
 import subprocess
+import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Query
@@ -87,6 +88,7 @@ class ExecRequest(BaseModel):
     command: str
     timeout: int = 30
     cwd: str = "."
+    session_id: str = ""
 
 
 def _is_background_command(cmd: str) -> bool:
@@ -99,6 +101,7 @@ async def exec_command(req: ExecRequest):
     timeout = max(1, min(120, req.timeout))
     cwd = _safe_path(req.cwd)
     cwd.mkdir(parents=True, exist_ok=True)
+    session_id = (req.session_id or "").strip() or ("c12b_" + uuid.uuid4().hex[:10])
 
     env = {
         "HOME": str(Path.home()),
@@ -127,12 +130,13 @@ async def exec_command(req: ExecRequest):
                 "timed_out": False,
                 "background": True,
                 "pid": proc.pid,
+                "session_id": session_id,
                 "command": req.command,
                 "cwd": str(cwd),
             })
         except Exception as exc:
             return JSONResponse(
-                {"stdout": "", "stderr": str(exc), "exit_code": -1, "timed_out": False, "background": True},
+                {"stdout": "", "stderr": str(exc), "exit_code": -1, "timed_out": False, "background": True, "session_id": session_id},
                 status_code=500,
             )
 
@@ -162,12 +166,13 @@ async def exec_command(req: ExecRequest):
             "exit_code": proc.returncode if not timed_out else -1,
             "timed_out": timed_out,
             "background": False,
+            "session_id": session_id,
             "command": req.command,
             "cwd": str(cwd),
         })
     except Exception as exc:
         return JSONResponse(
-            {"stdout": "", "stderr": str(exc), "exit_code": -1, "timed_out": False, "command": req.command, "cwd": str(cwd)},
+            {"stdout": "", "stderr": str(exc), "exit_code": -1, "timed_out": False, "session_id": session_id, "command": req.command, "cwd": str(cwd)},
             status_code=500,
         )
 

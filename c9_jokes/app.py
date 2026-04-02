@@ -1016,12 +1016,12 @@ def _task_c12b_cwd(workspace_dir: str) -> str:
 
 # ── C12b Sandbox helpers (lean host-exposed sandbox) ─────────────────────────
 
-async def _c12b_exec(command: str, timeout: int = 30, cwd: str = ".") -> dict:
+async def _c12b_exec(command: str, timeout: int = 30, cwd: str = ".", session_id: str = "") -> dict:
     client = _get_http()
     try:
         r = await client.post(
             f"{C12B_URL}/exec",
-            json={"command": command, "timeout": timeout, "cwd": cwd},
+            json={"command": command, "timeout": timeout, "cwd": cwd, "session_id": session_id},
             timeout=timeout + 10,
         )
         return r.json()
@@ -3046,6 +3046,9 @@ def _seed_tasked_examples() -> dict:
                 ]
                 feedback_rows = []
 
+            # Seeded examples should show a full completed history without immediately
+            # rescheduling themselves in the background on a low-memory branch stack.
+            active = 0
             next_run_at = _task_next_run_at(schedule_kind, interval_minutes, base=base + timedelta(minutes=idx * 3 + 2)) if active else None
 
             conn.execute("DELETE FROM task_alerts WHERE run_id=?", (run_id,))
@@ -3560,7 +3563,10 @@ def _task_context_from_history(task_row: dict, run_id: str) -> dict:
         "condition_passed": None,
     }
     for result in _task_fetch_step_results(run_id):
-        context["steps"][result.get("step_id") or ""] = result.get("output") or {}
+        output = result.get("output") or {}
+        if isinstance(output, dict) and isinstance(output.get("signals"), dict):
+            output = {**output, **output.get("signals", {})}
+        context["steps"][result.get("step_id") or ""] = output
         excerpt = str((result.get("output") or {}).get("text") or "")
         if excerpt:
             context["last_text"] = excerpt
@@ -3590,7 +3596,7 @@ def _task_context_value(context: dict, source: str, field: str) -> object:
 def _task_compare_rule(actual: object, comparator: str, expected: object) -> bool:
     comparator = (comparator or "eq").strip().lower()
     if comparator == "exists":
-        return actual not in {None, "", []}
+        return actual is not None and actual != "" and actual != [] and actual != {}
     if comparator == "contains":
         return str(expected or "").lower() in str(actual or "").lower()
     if comparator in {"gt", "gte", "lt", "lte"}:
@@ -3782,8 +3788,12 @@ async def _task_resume_workflow(task_row: dict, run_id: str, *, source: str, sta
             context["steps"][current_step_id] = evaluated
             _task_finish_step_result(result_id, status="completed" if evaluated.get("matched") else "skipped", output=evaluated)
             _record_task_event(str(task_row.get("id") or ""), "condition-evaluated", json.dumps(evaluated, ensure_ascii=False)[:1500], status="completed" if evaluated.get("matched") else "skipped", run_id=run_id)
-            next_step_id = _task_resolve_next_step_id(steps, idx, step, success=bool(evaluated.get("matched")))
-            if not evaluated.get("matched") and not next_step_id:
+            matched = bool(evaluated.get("matched"))
+            if matched:
+                next_step_id = (step.get("on_success_step_id") or "").strip() or _task_resolve_next_step_id(steps, idx, step, success=True)
+            else:
+                next_step_id = (step.get("on_failure_step_id") or "").strip()
+            if not matched and not next_step_id:
                 return _task_mark_terminal(task_row, run_id, status="completed", text="Condition was false; workflow finished without alert.", current_step_id=current_step_id, terminal_reason="condition-false", next_run_at=next_run_at)
             idx = step_index.get(next_step_id, idx + 1) if next_step_id else idx + 1
             continue
@@ -4863,12 +4873,15 @@ async def _task_apply_feedback(task_id: str, run_id: str, step_id: str, *, agent
                 ),
             )
             if current_result:
+                step_output = {"signals": signals or {}, "summary": summary, "raw_excerpt": raw_excerpt}
+                if isinstance(signals, dict):
+                    step_output.update(signals)
                 conn.execute(
                     "UPDATE task_step_results SET finished_at=?, status=?, output_json=?, error_text=?, duration_ms=? WHERE id=?",
                     (
                         _iso_now(),
                         status,
-                        json.dumps({"signals": signals or {}, "summary": summary, "raw_excerpt": raw_excerpt}, ensure_ascii=False),
+                        json.dumps(step_output, ensure_ascii=False),
                         "" if status in {"completed", "ok"} else raw_excerpt[:1500],
                         _duration_ms(current_result["started_at"], _iso_now()) or 0,
                         current_result["id"],
