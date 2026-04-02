@@ -113,6 +113,7 @@ services:
       dockerfile: Dockerfile.agent
     image: copilot-agent-terminal:latest
     container_name: C2_agent-terminal
+    profiles: ["optional"]
     depends_on:
       app:
         condition: service_healthy
@@ -174,6 +175,7 @@ services:
       dockerfile: Dockerfile.openclaw-gw
     image: copilot-openclaw-gateway:latest
     container_name: C7a_openclaw-gateway
+    profiles: ["optional"]
     depends_on:
       app:
         condition: service_healthy
@@ -231,6 +233,7 @@ services:
       dockerfile: Dockerfile.openclaw-cli
     image: copilot-openclaw-cli:latest
     container_name: C7b_openclaw-cli
+    profiles: ["optional"]
     depends_on:
       - openclaw-gateway
     environment:
@@ -275,6 +278,7 @@ services:
       dockerfile: Dockerfile.claude-code
     image: copilot-claude-code-terminal:latest
     container_name: C5_claude-code
+    profiles: ["optional"]
     depends_on:
       app:
         condition: service_healthy
@@ -379,6 +383,7 @@ services:
       dockerfile: Dockerfile.hermes
     image: copilot-hermes-agent:latest
     container_name: C8_hermes-agent
+    profiles: ["optional"]
     depends_on:
       app:
         condition: service_healthy
@@ -434,6 +439,7 @@ services:
       context: .
       dockerfile: Dockerfile.test
     container_name: CT_tests
+    profiles: ["optional"]
     depends_on:
       app:
         condition: service_healthy
@@ -534,6 +540,8 @@ services:
       - DATABASE_PATH=/app/data/c9.db
       - C10_URL=http://c10-sandbox:8100
       - C11_URL=http://c11-sandbox:8200
+      - C12_URL=http://c12-sandbox:8080
+      - C12B_URL=http://c12b-sandbox:8210
     volumes:
       - ./c9_jokes:/app/c9_jokes
       - c9-data:/app/data
@@ -612,6 +620,91 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8100/health >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  # ──────────────────────────────────────────────────────────
+  # C12: AIO Sandbox (optional, host-exposed)
+  #
+  # Official upstream image: ghcr.io/agent-infra/sandbox:latest
+  # Purpose: general-purpose code/test sandbox reachable from the host via
+  # the AIO Sandbox SDK on http://localhost:8080.
+  #
+  # This branch keeps C12 optional because memory is constrained. It uses the
+  # officially documented low-cost feature flags:
+  #   - DISABLE_CODE_SERVER=true
+  #   - DISABLE_JUPYTER=true
+  #
+  # Notes:
+  #   - Browser disabling is not wired here because that flag is not
+  #     documented in the official upstream compose/runtime surface.
+  #   - Workspace is bind-mounted to ./workspace so files remain visible on
+  #     the host and across container restarts.
+  # ──────────────────────────────────────────────────────────
+  c12-sandbox:
+    image: ghcr.io/agent-infra/sandbox:latest
+    container_name: C12_sandbox
+    profiles: ["optional"]
+    security_opt:
+      - seccomp:unconfined
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    mem_limit: 1g
+    cpus: 2.0
+    shm_size: 512m
+    ports:
+      - "8080:8080"
+    environment:
+      - WORKSPACE=/home/gem
+      - DISABLE_CODE_SERVER=true
+      - DISABLE_JUPYTER=true
+      - TZ=Africa/Johannesburg
+    volumes:
+      - ./workspace:/home/gem
+    networks:
+      - copilot-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8080/v1/docs >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      start_period: 30s
+      retries: 5
+
+  # ──────────────────────────────────────────────────────────
+  # C12b: Lean coding/test sandbox (optional, host-exposed)
+  #
+  # Lightweight branch-only alternative to the full upstream AIO Sandbox.
+  # Built from python:3.11-slim with Python, pip, uv, Node.js, npm, git,
+  # bash, curl, and a small FastAPI control plane on :8210.
+  #
+  # Purpose:
+  #   - lower memory footprint than the upstream C12 image
+  #   - reusable for coding, testing, and shell/file workflows
+  #   - compatible with the repo's existing sandbox-style /exec + file APIs
+  # ──────────────────────────────────────────────────────────
+  c12b-sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile.c12b-sandbox
+    image: copilot-c12b-sandbox:latest
+    container_name: C12b_sandbox
+    profiles: ["optional"]
+    mem_limit: 768m
+    cpus: 0.5
+    ports:
+      - "8210:8210"
+    environment:
+      - WORKSPACE=/workspace
+    volumes:
+      - ./workspace:/workspace
+    networks:
+      - copilot-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8210/health >/dev/null"]
       interval: 30s
       timeout: 5s
       start_period: 10s

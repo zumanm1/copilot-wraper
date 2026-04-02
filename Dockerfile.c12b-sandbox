@@ -1,0 +1,45 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# C12b: Lean Coding/Test Sandbox
+#
+# Branch-only lightweight alternative to the full upstream AIO Sandbox.
+# Features:
+#   - Non-root user "sandbox" running in /workspace
+#   - Python 3.11, pip, uv, Node.js 20, npm, git, bash, curl
+#   - FastAPI REST API on port 8210
+#   - Resource limits enforced via docker-compose (mem: 768m, cpus: 1.0)
+#
+# API endpoints: /health /tooling /exec /file/write /file/read /file/ls
+#                /file/delete /workspace/reset
+# ──────────────────────────────────────────────────────────────────────────────
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    curl \
+    git \
+    gcc \
+    g++ \
+    make \
+    ca-certificates \
+    gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m -s /bin/bash sandbox \
+    && mkdir -p /workspace \
+    && chown sandbox:sandbox /workspace
+
+COPY c12b_sandbox/requirements.txt /tmp/c12b_requirements.txt
+RUN pip install --no-cache-dir uv -r /tmp/c12b_requirements.txt
+
+COPY c12b_sandbox/app.py /app/app.py
+RUN chown sandbox:sandbox /app/app.py
+
+USER sandbox
+WORKDIR /workspace
+
+ENV WORKSPACE=/workspace
+
+EXPOSE 8210
+CMD ["uvicorn", "app:app", "--app-dir", "/app", "--host", "0.0.0.0", "--port", "8210"]

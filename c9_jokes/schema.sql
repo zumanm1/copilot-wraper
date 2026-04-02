@@ -108,8 +108,18 @@ CREATE TABLE IF NOT EXISTS task_definitions (
     active INTEGER DEFAULT 1,
     tabs_required INTEGER DEFAULT 1,
     template_key TEXT DEFAULT '',
+    executor_target TEXT DEFAULT '',
+    workspace_dir TEXT DEFAULT '',
     planner_prompt TEXT DEFAULT '',
     executor_prompt TEXT DEFAULT '',
+    validation_command TEXT DEFAULT '',
+    test_command TEXT DEFAULT '',
+    sandbox_assist INTEGER DEFAULT 0,
+    sandbox_assist_target TEXT DEFAULT '',
+    sandbox_assist_workspace_dir TEXT DEFAULT '',
+    sandbox_assist_command TEXT DEFAULT '',
+    sandbox_assist_validation_command TEXT DEFAULT '',
+    sandbox_assist_test_command TEXT DEFAULT '',
     context_handoff TEXT DEFAULT '',
     trigger_mode TEXT DEFAULT 'json',
     trigger_text TEXT DEFAULT '',
@@ -117,7 +127,11 @@ CREATE TABLE IF NOT EXISTS task_definitions (
     last_run_at TEXT,
     next_run_at TEXT,
     last_status TEXT DEFAULT 'idle',
-    last_result_excerpt TEXT DEFAULT ''
+    last_result_excerpt TEXT DEFAULT '',
+    archived_at TEXT,
+    completion_policy_json TEXT DEFAULT '{}',
+    alert_policy_json TEXT DEFAULT '{}',
+    workflow_version INTEGER DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS task_runs (
@@ -129,13 +143,25 @@ CREATE TABLE IF NOT EXISTS task_runs (
     source TEXT DEFAULT 'manual',
     status TEXT DEFAULT 'queued',
     mode TEXT DEFAULT 'chat',
+    executor_target TEXT DEFAULT '',
+    sandbox_session_id TEXT DEFAULT '',
     output_excerpt TEXT DEFAULT '',
+    validation_status TEXT DEFAULT '',
+    validation_excerpt TEXT DEFAULT '',
+    test_status TEXT DEFAULT '',
+    test_excerpt TEXT DEFAULT '',
     error_text TEXT DEFAULT '',
     alert_id INTEGER,
     launch_url TEXT DEFAULT '',
+    current_step_id TEXT DEFAULT '',
+    terminal_reason TEXT DEFAULT '',
+    trigger_snapshot_json TEXT DEFAULT '{}',
+    completed_at TEXT,
+    parent_run_id TEXT DEFAULT '',
     FOREIGN KEY (task_id) REFERENCES task_definitions(id)
 );
 CREATE INDEX IF NOT EXISTS idx_task_runs_task_created ON task_runs(task_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_task_runs_status_created ON task_runs(status, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS task_events (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -164,10 +190,64 @@ CREATE TABLE IF NOT EXISTS task_alerts (
     acknowledged_at TEXT,
     resolved_at TEXT,
     snoozed_until TEXT,
+    severity TEXT DEFAULT 'info',
+    repeat_key TEXT DEFAULT '',
+    closed_by_run_id TEXT DEFAULT '',
     FOREIGN KEY (task_id) REFERENCES task_definitions(id)
 );
 CREATE INDEX IF NOT EXISTS idx_task_alerts_task_created ON task_alerts(task_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_task_alerts_status ON task_alerts(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_task_alerts_repeat_key ON task_alerts(repeat_key, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS task_workflow_steps (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    position INTEGER NOT NULL DEFAULT 1,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    config_json TEXT DEFAULT '{}',
+    on_success_step_id TEXT DEFAULT '',
+    on_failure_step_id TEXT DEFAULT '',
+    active INTEGER DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES task_definitions(id)
+);
+CREATE INDEX IF NOT EXISTS idx_task_steps_task_position ON task_workflow_steps(task_id, position, active);
+
+CREATE TABLE IF NOT EXISTS task_step_results (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    step_id TEXT NOT NULL,
+    step_name TEXT DEFAULT '',
+    step_kind TEXT DEFAULT '',
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    status TEXT DEFAULT 'queued',
+    output_json TEXT DEFAULT '{}',
+    duration_ms INTEGER DEFAULT 0,
+    error_text TEXT DEFAULT '',
+    FOREIGN KEY (task_id) REFERENCES task_definitions(id)
+);
+CREATE INDEX IF NOT EXISTS idx_task_step_results_run_started ON task_step_results(run_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_task_step_results_task_step ON task_step_results(task_id, step_id, started_at DESC);
+
+CREATE TABLE IF NOT EXISTS task_feedback_events (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    step_id TEXT DEFAULT '',
+    agent_id TEXT NOT NULL,
+    feedback_type TEXT DEFAULT 'result',
+    status TEXT DEFAULT '',
+    payload_json TEXT DEFAULT '{}',
+    summary TEXT DEFAULT '',
+    raw_excerpt TEXT DEFAULT '',
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES task_definitions(id)
+);
+CREATE INDEX IF NOT EXISTS idx_task_feedback_run_created ON task_feedback_events(run_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS task_templates (
     key TEXT PRIMARY KEY,
@@ -179,8 +259,18 @@ CREATE TABLE IF NOT EXISTS task_templates (
     schedule_kind TEXT NOT NULL DEFAULT 'manual',
     interval_minutes INTEGER DEFAULT 0,
     tabs_required INTEGER DEFAULT 1,
+    executor_target TEXT DEFAULT '',
+    workspace_dir TEXT DEFAULT '',
     planner_prompt TEXT DEFAULT '',
     executor_prompt TEXT DEFAULT '',
+    validation_command TEXT DEFAULT '',
+    test_command TEXT DEFAULT '',
+    sandbox_assist INTEGER DEFAULT 0,
+    sandbox_assist_target TEXT DEFAULT '',
+    sandbox_assist_workspace_dir TEXT DEFAULT '',
+    sandbox_assist_command TEXT DEFAULT '',
+    sandbox_assist_validation_command TEXT DEFAULT '',
+    sandbox_assist_test_command TEXT DEFAULT '',
     context_handoff TEXT DEFAULT '',
     trigger_mode TEXT DEFAULT 'json',
     trigger_text TEXT DEFAULT '',

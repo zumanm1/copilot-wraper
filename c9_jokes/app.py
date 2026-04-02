@@ -33,6 +33,9 @@ C10_URL = os.environ.get("C10_URL", "http://c10-sandbox:8100").rstrip("/")
 # ── C11 Sandbox URL (multi-agent /multi-Agento, session-scoped workspace) ────
 C11_URL = os.environ.get("C11_URL", "http://c11-sandbox:8200").rstrip("/")
 
+# ── C12b Sandbox URL (lean coding/test sandbox) ──────────────────────────────
+C12B_URL = os.environ.get("C12B_URL", "http://c12b-sandbox:8210").rstrip("/")
+
 # ── Container targets ─────────────────────────────────────────────────────────
 TARGETS = {
     "c1":  {"env": "C1_URL",  "default": "http://localhost:8000",  "label": "C1 copilot-api",       "health": "/health"},
@@ -45,6 +48,7 @@ TARGETS = {
     "c8":  {"env": "C8_URL",  "default": "http://localhost:8080",  "label": "C8 hermes-agent",      "health": "/health"},
     "c10": {"env": "C10_URL", "default": "http://c10-sandbox:8100", "label": "C10 agent sandbox",  "health": "/health"},
     "c11": {"env": "C11_URL", "default": "http://c11-sandbox:8200", "label": "C11 multi-agent sandbox", "health": "/health"},
+    "c12b": {"env": "C12B_URL", "default": "http://c12b-sandbox:8210", "label": "C12b lean sandbox", "health": "/health"},
 }
 
 # ── AI agents that can chat ───────────────────────────────────────────────────
@@ -59,10 +63,40 @@ AGENTS = [
 
 TASK_MODE_OPTIONS = [
     {"id": "chat", "label": "Chat"},
+    {"id": "sandbox", "label": "Sandbox"},
     {"id": "agent", "label": "Agent"},
     {"id": "multi-agent", "label": "Multi-Agent"},
     {"id": "multi-agento", "label": "multi-Agento"},
 ]
+
+TASK_EXECUTOR_TARGET_OPTIONS = [
+    {"id": "c12b", "label": "C12b Lean Sandbox"},
+]
+
+TASK_WORKFLOW_STEP_KINDS = [
+    {"id": "trigger", "label": "Trigger"},
+    {"id": "condition", "label": "Condition"},
+    {"id": "chat", "label": "Chat"},
+    {"id": "sandbox", "label": "Sandbox"},
+    {"id": "agent", "label": "Agent"},
+    {"id": "multi-agent", "label": "Multi-Agent"},
+    {"id": "multi-agento", "label": "multi-Agento"},
+    {"id": "alert", "label": "Alert"},
+    {"id": "complete", "label": "Complete"},
+]
+
+TASK_AGENT_TARGET_OPTIONS = [
+    {"id": "c2-aider", "label": "C2"},
+    {"id": "c5-claude-code", "label": "C5"},
+    {"id": "c6-kilocode", "label": "C6"},
+    {"id": "c7-openclaw", "label": "C7b"},
+    {"id": "c8-hermes", "label": "C8"},
+    {"id": "c9-jokes", "label": "C9 Generic"},
+]
+
+TASK_SANDBOX_DEFAULTS = {
+    "c12b": "/workspace",
+}
 
 TASK_TEMPLATES = [
     {
@@ -161,16 +195,49 @@ TASK_TEMPLATES = [
         "trigger_mode": "json",
         "trigger_text": "",
     },
+    {
+        "key": "sandbox-python-validate",
+        "name": "Sandbox Python validate/test",
+        "description": "Run code in C12b, validate syntax, run tests, and raise an alert if execution or tests fail.",
+        "mode": "sandbox",
+        "schedule_kind": "manual",
+        "interval_minutes": 0,
+        "tabs_required": 1,
+        "executor_target": "c12b",
+        "workspace_dir": "/workspace",
+        "planner_prompt": "Write or update code in the sandbox workspace, then validate and test it before raising an alert.",
+        "executor_prompt": "printf 'def add(a, b):\\n    return a + b\\n' > app.py && printf 'from app import add\\nprint(add(2, 3))\\n' > smoke.py && python3 smoke.py",
+        "validation_command": "python3 -m py_compile app.py smoke.py",
+        "test_command": "python3 smoke.py",
+        "context_handoff": "Tasked stores the command plan. piplinetask logs each sandbox stage. Alerts show failures or requested summaries.",
+        "trigger_mode": "always",
+        "trigger_text": "sandbox execution",
+    },
 ]
 
 TASK_EXAMPLE_SPECS = [
     {
+        "id": "task_example_jhb_nvidia",
+        "template_key": "weather-dublin",
+        "name": "Example 1: Johannesburg weather + Nvidia market cap",
+        "trigger": "Johannesburg weather and Nvidia market cap rule",
+        "title": "Example Johannesburg + Nvidia rule matched",
+        "summary": "Every 12 minutes, Johannesburg weather and Nvidia market cap were checked. The condition matched, so a repeating alert cadence of every 5 minutes was armed.",
+        "details": {
+            "city": "Johannesburg",
+            "temp_c": 18.4,
+            "market_cap_usd": 2120000000000,
+            "repeat_every_minutes": 5,
+        },
+        "acknowledged": False,
+    },
+    {
         "id": "task_example_gmail_sender",
         "template_key": "gmail-sender",
-        "name": "Example 1: Email from sampelexample",
+        "name": "Example 2: Email from sampelexample",
         "trigger": "incoming email from sampelexample",
         "title": "Example email detected from sampelexample",
-        "summary": "A new email from sampelexample@example.com was detected and copied into the second tab for alert creation.",
+        "summary": "A new email from sampelexample@example.com was detected, extracted, then copied into a second tab before the alert was created.",
         "details": {
             "sender": "sampelexample@example.com",
             "subject": "Project handoff update",
@@ -181,28 +248,15 @@ TASK_EXAMPLE_SPECS = [
     {
         "id": "task_example_sharepoint_file",
         "template_key": "sharepoint-new-file",
-        "name": "Example 2: New SharePoint file",
+        "name": "Example 3: New SharePoint file via C6",
         "trigger": "new SharePoint file event",
         "title": "Example SharePoint file detected",
-        "summary": "A newly added SharePoint file was detected, its folder path was copied across tabs, and an alert was raised.",
+        "summary": "A C6 agent-style run detected a new SharePoint file, returned structured feedback, and advanced the pipeline into alert creation.",
         "details": {
             "file_name": "Quarterly-Forecast.xlsx",
             "folder": "/Shared Documents/Finance/Forecasts",
             "detected_at": "2026-04-01T08:20:00Z",
-        },
-        "acknowledged": False,
-    },
-    {
-        "id": "task_example_outlook_alert",
-        "template_key": "m365-outlook-alert",
-        "name": "Example 3: M365 Outlook alert email",
-        "trigger": "M365 Outlook email",
-        "title": "Example Outlook alert received",
-        "summary": "A new M365 Outlook email from alerts@company.com was detected and sent to the alert page with sender and subject details.",
-        "details": {
-            "sender": "alerts@company.com",
-            "subject": "Service health warning",
-            "received_at": "2026-04-01T08:30:00Z",
+            "agent_id": "c6-kilocode",
         },
         "acknowledged": False,
     },
@@ -485,8 +539,18 @@ def _ensure_db() -> None:
                     active INTEGER DEFAULT 1,
                     tabs_required INTEGER DEFAULT 1,
                     template_key TEXT DEFAULT '',
+                    executor_target TEXT DEFAULT '',
+                    workspace_dir TEXT DEFAULT '',
                     planner_prompt TEXT DEFAULT '',
                     executor_prompt TEXT DEFAULT '',
+                    validation_command TEXT DEFAULT '',
+                    test_command TEXT DEFAULT '',
+                    sandbox_assist INTEGER DEFAULT 0,
+                    sandbox_assist_target TEXT DEFAULT '',
+                    sandbox_assist_workspace_dir TEXT DEFAULT '',
+                    sandbox_assist_command TEXT DEFAULT '',
+                    sandbox_assist_validation_command TEXT DEFAULT '',
+                    sandbox_assist_test_command TEXT DEFAULT '',
                     context_handoff TEXT DEFAULT '',
                     trigger_mode TEXT DEFAULT 'json',
                     trigger_text TEXT DEFAULT '',
@@ -494,7 +558,11 @@ def _ensure_db() -> None:
                     last_run_at TEXT,
                     next_run_at TEXT,
                     last_status TEXT DEFAULT 'idle',
-                    last_result_excerpt TEXT DEFAULT ''
+                    last_result_excerpt TEXT DEFAULT '',
+                    archived_at TEXT,
+                    completion_policy_json TEXT DEFAULT '{}',
+                    alert_policy_json TEXT DEFAULT '{}',
+                    workflow_version INTEGER DEFAULT 1
                 )
             """)
             conn.execute("""
@@ -507,10 +575,21 @@ def _ensure_db() -> None:
                     source TEXT DEFAULT 'manual',
                     status TEXT DEFAULT 'queued',
                     mode TEXT DEFAULT 'chat',
+                    executor_target TEXT DEFAULT '',
+                    sandbox_session_id TEXT DEFAULT '',
                     output_excerpt TEXT DEFAULT '',
+                    validation_status TEXT DEFAULT '',
+                    validation_excerpt TEXT DEFAULT '',
+                    test_status TEXT DEFAULT '',
+                    test_excerpt TEXT DEFAULT '',
                     error_text TEXT DEFAULT '',
                     alert_id INTEGER,
                     launch_url TEXT DEFAULT '',
+                    current_step_id TEXT DEFAULT '',
+                    terminal_reason TEXT DEFAULT '',
+                    trigger_snapshot_json TEXT DEFAULT '{}',
+                    completed_at TEXT,
+                    parent_run_id TEXT DEFAULT '',
                     FOREIGN KEY (task_id) REFERENCES task_definitions(id)
                 )
             """)
@@ -539,6 +618,61 @@ def _ensure_db() -> None:
                     summary TEXT DEFAULT '',
                     payload_json TEXT DEFAULT '',
                     acknowledged_at TEXT,
+                    updated_at TEXT,
+                    resolved_at TEXT,
+                    snoozed_until TEXT,
+                    severity TEXT DEFAULT 'info',
+                    repeat_key TEXT DEFAULT '',
+                    closed_by_run_id TEXT DEFAULT '',
+                    FOREIGN KEY (task_id) REFERENCES task_definitions(id)
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS task_workflow_steps (
+                    id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    position INTEGER NOT NULL DEFAULT 1,
+                    name TEXT NOT NULL,
+                    kind TEXT NOT NULL,
+                    config_json TEXT DEFAULT '{}',
+                    on_success_step_id TEXT DEFAULT '',
+                    on_failure_step_id TEXT DEFAULT '',
+                    active INTEGER DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (task_id) REFERENCES task_definitions(id)
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS task_step_results (
+                    id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    task_id TEXT NOT NULL,
+                    step_id TEXT NOT NULL,
+                    step_name TEXT DEFAULT '',
+                    step_kind TEXT DEFAULT '',
+                    started_at TEXT NOT NULL,
+                    finished_at TEXT,
+                    status TEXT DEFAULT 'queued',
+                    output_json TEXT DEFAULT '{}',
+                    duration_ms INTEGER DEFAULT 0,
+                    error_text TEXT DEFAULT '',
+                    FOREIGN KEY (task_id) REFERENCES task_definitions(id)
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS task_feedback_events (
+                    id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    run_id TEXT NOT NULL,
+                    step_id TEXT DEFAULT '',
+                    agent_id TEXT NOT NULL,
+                    feedback_type TEXT DEFAULT 'result',
+                    status TEXT DEFAULT '',
+                    payload_json TEXT DEFAULT '{}',
+                    summary TEXT DEFAULT '',
+                    raw_excerpt TEXT DEFAULT '',
+                    created_at TEXT NOT NULL,
                     FOREIGN KEY (task_id) REFERENCES task_definitions(id)
                 )
             """)
@@ -553,8 +687,18 @@ def _ensure_db() -> None:
                     schedule_kind TEXT NOT NULL DEFAULT 'manual',
                     interval_minutes INTEGER DEFAULT 0,
                     tabs_required INTEGER DEFAULT 1,
+                    executor_target TEXT DEFAULT '',
+                    workspace_dir TEXT DEFAULT '',
                     planner_prompt TEXT DEFAULT '',
                     executor_prompt TEXT DEFAULT '',
+                    validation_command TEXT DEFAULT '',
+                    test_command TEXT DEFAULT '',
+                    sandbox_assist INTEGER DEFAULT 0,
+                    sandbox_assist_target TEXT DEFAULT '',
+                    sandbox_assist_workspace_dir TEXT DEFAULT '',
+                    sandbox_assist_command TEXT DEFAULT '',
+                    sandbox_assist_validation_command TEXT DEFAULT '',
+                    sandbox_assist_test_command TEXT DEFAULT '',
                     context_handoff TEXT DEFAULT '',
                     trigger_mode TEXT DEFAULT 'json',
                     trigger_text TEXT DEFAULT '',
@@ -575,17 +719,61 @@ def _ensure_db() -> None:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_task_def_next ON task_definitions(next_run_at)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_task_def_due ON task_definitions(active, schedule_kind, next_run_at)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_task_runs_task ON task_runs(task_id, created_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_task_runs_status_created ON task_runs(status, created_at DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events(task_id, created_at)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_task_alerts_task ON task_alerts(task_id, created_at)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_task_alerts_status ON task_alerts(status, created_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_task_alerts_repeat_key ON task_alerts(repeat_key, created_at DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_task_templates_active ON task_templates(active, updated_at)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_task_claims_exp ON task_run_claims(expires_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_task_steps_task_position ON task_workflow_steps(task_id, position, active)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_task_step_results_run_started ON task_step_results(run_id, started_at DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_task_step_results_task_step ON task_step_results(task_id, step_id, started_at DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_task_feedback_run_created ON task_feedback_events(run_id, created_at DESC)")
     except sqlite3.Error:
         pass
     for statement in (
+        "ALTER TABLE task_definitions ADD COLUMN executor_target TEXT DEFAULT ''",
+        "ALTER TABLE task_definitions ADD COLUMN workspace_dir TEXT DEFAULT ''",
+        "ALTER TABLE task_definitions ADD COLUMN validation_command TEXT DEFAULT ''",
+        "ALTER TABLE task_definitions ADD COLUMN test_command TEXT DEFAULT ''",
+        "ALTER TABLE task_definitions ADD COLUMN sandbox_assist INTEGER DEFAULT 0",
+        "ALTER TABLE task_definitions ADD COLUMN sandbox_assist_target TEXT DEFAULT ''",
+        "ALTER TABLE task_definitions ADD COLUMN sandbox_assist_workspace_dir TEXT DEFAULT ''",
+        "ALTER TABLE task_definitions ADD COLUMN sandbox_assist_command TEXT DEFAULT ''",
+        "ALTER TABLE task_definitions ADD COLUMN sandbox_assist_validation_command TEXT DEFAULT ''",
+        "ALTER TABLE task_definitions ADD COLUMN sandbox_assist_test_command TEXT DEFAULT ''",
+        "ALTER TABLE task_runs ADD COLUMN executor_target TEXT DEFAULT ''",
+        "ALTER TABLE task_runs ADD COLUMN sandbox_session_id TEXT DEFAULT ''",
+        "ALTER TABLE task_runs ADD COLUMN validation_status TEXT DEFAULT ''",
+        "ALTER TABLE task_runs ADD COLUMN validation_excerpt TEXT DEFAULT ''",
+        "ALTER TABLE task_runs ADD COLUMN test_status TEXT DEFAULT ''",
+        "ALTER TABLE task_runs ADD COLUMN test_excerpt TEXT DEFAULT ''",
+        "ALTER TABLE task_templates ADD COLUMN executor_target TEXT DEFAULT ''",
+        "ALTER TABLE task_templates ADD COLUMN workspace_dir TEXT DEFAULT ''",
+        "ALTER TABLE task_templates ADD COLUMN validation_command TEXT DEFAULT ''",
+        "ALTER TABLE task_templates ADD COLUMN test_command TEXT DEFAULT ''",
+        "ALTER TABLE task_templates ADD COLUMN sandbox_assist INTEGER DEFAULT 0",
+        "ALTER TABLE task_templates ADD COLUMN sandbox_assist_target TEXT DEFAULT ''",
+        "ALTER TABLE task_templates ADD COLUMN sandbox_assist_workspace_dir TEXT DEFAULT ''",
+        "ALTER TABLE task_templates ADD COLUMN sandbox_assist_command TEXT DEFAULT ''",
+        "ALTER TABLE task_templates ADD COLUMN sandbox_assist_validation_command TEXT DEFAULT ''",
+        "ALTER TABLE task_templates ADD COLUMN sandbox_assist_test_command TEXT DEFAULT ''",
         "ALTER TABLE task_alerts ADD COLUMN updated_at TEXT",
         "ALTER TABLE task_alerts ADD COLUMN resolved_at TEXT",
         "ALTER TABLE task_alerts ADD COLUMN snoozed_until TEXT",
+        "ALTER TABLE task_definitions ADD COLUMN archived_at TEXT",
+        "ALTER TABLE task_definitions ADD COLUMN completion_policy_json TEXT DEFAULT '{}'",
+        "ALTER TABLE task_definitions ADD COLUMN alert_policy_json TEXT DEFAULT '{}'",
+        "ALTER TABLE task_definitions ADD COLUMN workflow_version INTEGER DEFAULT 1",
+        "ALTER TABLE task_runs ADD COLUMN current_step_id TEXT DEFAULT ''",
+        "ALTER TABLE task_runs ADD COLUMN terminal_reason TEXT DEFAULT ''",
+        "ALTER TABLE task_runs ADD COLUMN trigger_snapshot_json TEXT DEFAULT '{}'",
+        "ALTER TABLE task_runs ADD COLUMN completed_at TEXT",
+        "ALTER TABLE task_runs ADD COLUMN parent_run_id TEXT DEFAULT ''",
+        "ALTER TABLE task_alerts ADD COLUMN severity TEXT DEFAULT 'info'",
+        "ALTER TABLE task_alerts ADD COLUMN repeat_key TEXT DEFAULT ''",
+        "ALTER TABLE task_alerts ADD COLUMN closed_by_run_id TEXT DEFAULT ''",
     ):
         try:
             with sqlite3.connect(DEFAULT_DB) as conn:
@@ -780,6 +968,65 @@ async def _c11_sessions() -> dict:
         return r.json() if r.status_code == 200 else {"ok": False, "sessions": [], "error": r.text[:200]}
     except Exception as exc:
         return {"ok": False, "sessions": [], "error": str(exc)}
+
+
+def _task_sandbox_target(value: str | None) -> str:
+    target = (value or "c12b").strip().lower()
+    return "c12b"
+
+
+def _task_sandbox_workspace(value: str | None, target: str) -> str:
+    raw = (value or "").strip()
+    if raw:
+        return raw
+    return TASK_SANDBOX_DEFAULTS.get(target, "/workspace")
+
+
+def _task_sandbox_assist_enabled(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _task_sandbox_assist_values(payload: dict, *, mode: str) -> dict:
+    enabled = mode != "sandbox" and _task_sandbox_assist_enabled(payload.get("sandbox_assist"))
+    target = _task_sandbox_target(payload.get("sandbox_assist_target") or "c12b") if enabled else ""
+    return {
+        "sandbox_assist": enabled,
+        "sandbox_assist_target": target,
+        "sandbox_assist_workspace_dir": _task_sandbox_workspace(payload.get("sandbox_assist_workspace_dir"), target) if enabled else "",
+        "sandbox_assist_command": (payload.get("sandbox_assist_command") or "").strip() if enabled else "",
+        "sandbox_assist_validation_command": (payload.get("sandbox_assist_validation_command") or "").strip() if enabled else "",
+        "sandbox_assist_test_command": (payload.get("sandbox_assist_test_command") or "").strip() if enabled else "",
+    }
+
+
+def _task_c12b_cwd(workspace_dir: str) -> str:
+    value = (workspace_dir or "/workspace").strip() or "/workspace"
+    if value == "/workspace":
+        return "."
+    if value.startswith("/workspace/"):
+        return value[len("/workspace/"):]
+    if value.startswith("/"):
+        return "."
+    return value
+
+
+# ── C12b Sandbox helpers (lean host-exposed sandbox) ─────────────────────────
+
+async def _c12b_exec(command: str, timeout: int = 30, cwd: str = ".") -> dict:
+    client = _get_http()
+    try:
+        r = await client.post(
+            f"{C12B_URL}/exec",
+            json={"command": command, "timeout": timeout, "cwd": cwd},
+            timeout=timeout + 10,
+        )
+        return r.json()
+    except Exception as exc:
+        return {"stdout": "", "stderr": str(exc), "exit_code": -1, "timed_out": False}
 
 
 # ── Agentic loop — system prompt ──────────────────────────────────────────────
@@ -1272,6 +1519,7 @@ def _build_runtime_status_payload(probes: dict[str, dict], session_probe: dict) 
         "c3": _component_from_probe("C3 browser-auth", probes.get("c3")),
         "c10": _component_from_probe("C10 sandbox", probes.get("c10")),
         "c11": _component_from_probe("C11 sandbox", probes.get("c11")),
+        "c12b": _component_from_probe("C12b lean sandbox", probes.get("c12b")),
         "c3_pool": _classify_c3_pool(probes.get("c3-status")),
         "m365": {
             "state": session_state,
@@ -1318,6 +1566,8 @@ def _build_runtime_status_payload(probes: dict[str, dict], session_probe: dict) 
         add_issue("c10", "c10_down", "warn", "C10 sandbox unavailable")
     if components["c11"]["state"] == "down":
         add_issue("c11", "c11_down", "warn", "C11 sandbox unavailable")
+    if components["c12b"]["state"] == "down":
+        add_issue("c12b", "c12b_down", "warn", "C12b lean sandbox unavailable")
 
     c3_pool = components["c3_pool"]
     if c3_pool["state"] == "saturated":
@@ -1350,6 +1600,8 @@ def _build_runtime_status_payload(probes: dict[str, dict], session_probe: dict) 
             badge_label = "C10 Down"
         elif issues[0]["component"] == "c11":
             badge_label = "C11 Down"
+        elif issues[0]["component"] == "c12b":
+            badge_label = "C12b Down"
         else:
             badge_label = "Runtime Degraded"
     elif components["m365"]["state"] != "active":
@@ -1369,7 +1621,7 @@ def _build_runtime_status_payload(probes: dict[str, dict], session_probe: dict) 
 async def _collect_runtime_status(client: httpx.AsyncClient | None = None) -> dict:
     urls = _urls()
     client = client or _get_http()
-    keys = ("c1", "c3", "c10", "c11")
+    keys = ("c1", "c3", "c10", "c11", "c12b")
     health_tasks = [
         _probe_health(client, TARGETS[key]["label"], urls[key], TARGETS[key]["health"])
         for key in keys
@@ -1830,7 +2082,294 @@ def _task_schedule_label(schedule_kind: str, interval_minutes: int, active: bool
     return "Once-off / manual"
 
 
+def _json_load_object(raw: object, default: dict | None = None) -> dict:
+    if isinstance(raw, dict):
+        return dict(raw)
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, dict):
+                return parsed
+        except Exception:
+            pass
+    return dict(default or {})
+
+
+def _json_load_list(raw: object) -> list:
+    if isinstance(raw, list):
+        return list(raw)
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+            if isinstance(parsed, list):
+                return parsed
+        except Exception:
+            pass
+    return []
+
+
+def _task_default_alert_policy() -> dict:
+    return {
+        "repeat_every_minutes": 0,
+        "dedupe_key_template": "",
+        "severity": "info",
+        "while_condition_true": False,
+    }
+
+
+def _task_default_completion_policy() -> dict:
+    return {
+        "mark_completed_on": "step-complete",
+        "archive_on_complete": False,
+        "terminal_statuses": ["completed", "failed", "cancelled"],
+    }
+
+
+def _task_step_kinds() -> set[str]:
+    return {item["id"] for item in TASK_WORKFLOW_STEP_KINDS}
+
+
+def _task_steps_fetch(task_id: str) -> list[dict]:
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                "SELECT * FROM task_workflow_steps WHERE task_id=? AND active=1 ORDER BY position ASC, created_at ASC",
+                (task_id,),
+            ).fetchall()
+        return [_task_step_to_dict(row) for row in rows]
+    except sqlite3.Error:
+        return []
+
+
+def _task_step_to_dict(row: sqlite3.Row | dict) -> dict:
+    raw = dict(row)
+    raw["position"] = int(raw.get("position") or 1)
+    raw["active"] = bool(raw.get("active"))
+    raw["config"] = _json_load_object(raw.get("config_json"))
+    raw["config_json"] = json.dumps(raw["config"], ensure_ascii=False)
+    raw["name"] = raw.get("name") or f"Step {raw['position']}"
+    raw["kind_label"] = next((item["label"] for item in TASK_WORKFLOW_STEP_KINDS if item["id"] == raw.get("kind")), raw.get("kind") or "Step")
+    return raw
+
+
+def _task_step_result_to_dict(row: sqlite3.Row | dict) -> dict:
+    raw = dict(row)
+    raw["output"] = _json_load_object(raw.get("output_json"))
+    raw["duration_ms"] = int(raw.get("duration_ms") or 0)
+    raw["duration_label"] = _duration_label(raw["duration_ms"])
+    raw["finished"] = bool(raw.get("finished_at"))
+    return raw
+
+
+def _task_feedback_to_dict(row: sqlite3.Row | dict) -> dict:
+    raw = dict(row)
+    raw["payload"] = _json_load_object(raw.get("payload_json"))
+    return raw
+
+
+def _task_build_default_steps(task: dict) -> list[dict]:
+    task_id = str(task.get("id") or "")
+    base_name = task.get("name") or "Task"
+    mode = (task.get("mode") or "chat").strip().lower()
+    steps: list[dict] = []
+    if task.get("schedule_kind") in {"recurring", "continuous"}:
+        steps.append({
+            "id": f"{task_id}_trigger",
+            "task_id": task_id,
+            "position": len(steps) + 1,
+            "name": "Trigger",
+            "kind": "trigger",
+            "config": {
+                "schedule_kind": task.get("schedule_kind") or "manual",
+                "interval_minutes": int(task.get("interval_minutes") or 0),
+            },
+            "active": True,
+            "on_success_step_id": "",
+            "on_failure_step_id": "",
+        })
+    if mode == "sandbox":
+        steps.append({
+            "id": f"{task_id}_sandbox",
+            "task_id": task_id,
+            "position": len(steps) + 1,
+            "name": f"{base_name} sandbox",
+            "kind": "sandbox",
+            "config": {
+                "executor_target": task.get("executor_target") or "c12b",
+                "workspace_dir": task.get("workspace_dir") or "/workspace",
+                "command": task.get("executor_prompt") or "",
+                "validation_command": task.get("validation_command") or "",
+                "test_command": task.get("test_command") or "",
+            },
+            "active": True,
+            "on_success_step_id": "",
+            "on_failure_step_id": "",
+        })
+    else:
+        steps.append({
+            "id": f"{task_id}_{mode or 'chat'}",
+            "task_id": task_id,
+            "position": len(steps) + 1,
+            "name": f"{base_name} {mode or 'chat'}",
+            "kind": mode or "chat",
+            "config": {
+                "prompt": task.get("executor_prompt") or task.get("planner_prompt") or "",
+                "agent_id": "c6-kilocode",
+                "sandbox_assist": bool(task.get("sandbox_assist")),
+                "sandbox_assist_target": task.get("sandbox_assist_target") or "c12b",
+                "sandbox_assist_workspace_dir": task.get("sandbox_assist_workspace_dir") or "/workspace",
+                "sandbox_assist_command": task.get("sandbox_assist_command") or "",
+                "sandbox_assist_validation_command": task.get("sandbox_assist_validation_command") or "",
+                "sandbox_assist_test_command": task.get("sandbox_assist_test_command") or "",
+            },
+            "active": True,
+            "on_success_step_id": "",
+            "on_failure_step_id": "",
+        })
+    steps.append({
+        "id": f"{task_id}_alert",
+        "task_id": task_id,
+        "position": len(steps) + 1,
+        "name": "Alert",
+        "kind": "alert",
+        "config": {
+            "trigger_mode": task.get("trigger_mode") or "json",
+            "trigger_text": task.get("trigger_text") or "",
+        },
+        "active": True,
+        "on_success_step_id": "",
+        "on_failure_step_id": "",
+    })
+    steps.append({
+        "id": f"{task_id}_complete",
+        "task_id": task_id,
+        "position": len(steps) + 1,
+        "name": "Complete",
+        "kind": "complete",
+        "config": {},
+        "active": True,
+        "on_success_step_id": "",
+        "on_failure_step_id": "",
+    })
+    return steps
+
+
+def _task_normalize_step(task_id: str, step: dict, position: int) -> dict:
+    kind = (step.get("kind") or "chat").strip().lower()
+    if kind not in _task_step_kinds():
+        raise ValueError(f"invalid step kind: {kind}")
+    step_id = (step.get("id") or f"{task_id}_step_{position}").strip()
+    cfg = _json_load_object(step.get("config"))
+    return {
+        "id": step_id,
+        "task_id": task_id,
+        "position": position,
+        "name": (step.get("name") or f"Step {position}").strip(),
+        "kind": kind,
+        "config": cfg,
+        "config_json": json.dumps(cfg, ensure_ascii=False),
+        "on_success_step_id": (step.get("on_success_step_id") or "").strip(),
+        "on_failure_step_id": (step.get("on_failure_step_id") or "").strip(),
+        "active": 1 if step.get("active", True) else 0,
+    }
+
+
+def _task_save_steps(conn: sqlite3.Connection, task_id: str, steps: list[dict]) -> list[dict]:
+    normalized = [_task_normalize_step(task_id, step, idx + 1) for idx, step in enumerate(steps) if step]
+    conn.execute("DELETE FROM task_workflow_steps WHERE task_id=?", (task_id,))
+    now = _iso_now()
+    for item in normalized:
+        conn.execute(
+            "INSERT INTO task_workflow_steps (id, task_id, position, name, kind, config_json, on_success_step_id, on_failure_step_id, active, created_at, updated_at) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                item["id"], task_id, item["position"], item["name"], item["kind"], item["config_json"],
+                item["on_success_step_id"], item["on_failure_step_id"], item["active"], now, now,
+            ),
+        )
+    return normalized
+
+
+def _task_clone_steps(task_id: str, steps: list[dict]) -> list[dict]:
+    normalized = [_task_normalize_step(task_id, step, idx + 1) for idx, step in enumerate(steps) if step]
+    mapping: dict[str, str] = {}
+    cloned: list[dict] = []
+    for idx, step in enumerate(normalized, start=1):
+        old_id = step.get("id") or f"{task_id}_step_{idx}"
+        new_id = f"{task_id}_step_{idx}"
+        mapping[old_id] = new_id
+        cloned.append({**step, "id": new_id, "task_id": task_id})
+    for step in cloned:
+        on_success = step.get("on_success_step_id") or ""
+        on_failure = step.get("on_failure_step_id") or ""
+        step["on_success_step_id"] = mapping.get(on_success, "")
+        step["on_failure_step_id"] = mapping.get(on_failure, "")
+    return cloned
+
+
+def _task_fetch_step_results(run_id: str) -> list[dict]:
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                "SELECT * FROM task_step_results WHERE run_id=? ORDER BY started_at ASC, id ASC",
+                (run_id,),
+            ).fetchall()
+        return [_task_step_result_to_dict(row) for row in rows]
+    except sqlite3.Error:
+        return []
+
+
+def _task_fetch_feedback(run_id: str) -> list[dict]:
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                "SELECT * FROM task_feedback_events WHERE run_id=? ORDER BY created_at ASC",
+                (run_id,),
+            ).fetchall()
+        return [_task_feedback_to_dict(row) for row in rows]
+    except sqlite3.Error:
+        return []
+
+
+def _task_insert_step_result(task_id: str, run_id: str, step: dict, *, status: str = "running", output: dict | None = None, error_text: str = "") -> str:
+    result_id = "tsr_" + uuid.uuid4().hex[:10]
+    now = _iso_now()
+    with _db() as conn:
+        conn.execute(
+            "INSERT INTO task_step_results (id, run_id, task_id, step_id, step_name, step_kind, started_at, status, output_json, error_text) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (
+                result_id, run_id, task_id, step.get("id") or "", step.get("name") or "", step.get("kind") or "",
+                now, status, json.dumps(output or {}, ensure_ascii=False), error_text[:1500],
+            ),
+        )
+    return result_id
+
+
+def _task_finish_step_result(result_id: str, *, status: str, output: dict | None = None, error_text: str = "", finished_at: str | None = None) -> None:
+    finished_at = finished_at or _iso_now()
+    try:
+        with _db() as conn:
+            row = conn.execute("SELECT started_at FROM task_step_results WHERE id=?", (result_id,)).fetchone()
+            started_at = row["started_at"] if row else finished_at
+            conn.execute(
+                "UPDATE task_step_results SET finished_at=?, status=?, output_json=?, duration_ms=?, error_text=? WHERE id=?",
+                (
+                    finished_at,
+                    status,
+                    json.dumps(output or {}, ensure_ascii=False),
+                    _duration_ms(started_at, finished_at) or 0,
+                    error_text[:1500],
+                    result_id,
+                ),
+            )
+    except sqlite3.Error:
+        return
+
+
 def _task_lifecycle_state(task: dict) -> str:
+    if (task.get("archived_at") or "").strip():
+        return "archived"
     schedule_kind = (task.get("schedule_kind") or "manual").strip().lower()
     active = bool(task.get("active"))
     last_status = (task.get("last_status") or "idle").strip().lower()
@@ -1858,6 +2397,16 @@ def _task_template_row_to_dict(row: sqlite3.Row | dict) -> dict:
     raw["active"] = bool(raw.get("active"))
     raw["interval_minutes"] = int(raw.get("interval_minutes") or 0)
     raw["tabs_required"] = int(raw.get("tabs_required") or 1)
+    raw["executor_target"] = _task_sandbox_target(raw.get("executor_target")) if (raw.get("mode") == "sandbox" or raw.get("executor_target")) else ""
+    raw["workspace_dir"] = _task_sandbox_workspace(raw.get("workspace_dir"), raw["executor_target"] or "c12b") if raw["executor_target"] else ""
+    raw["validation_command"] = raw.get("validation_command") or ""
+    raw["test_command"] = raw.get("test_command") or ""
+    raw["sandbox_assist"] = _task_sandbox_assist_enabled(raw.get("sandbox_assist"))
+    raw["sandbox_assist_target"] = _task_sandbox_target(raw.get("sandbox_assist_target")) if raw["sandbox_assist"] else ""
+    raw["sandbox_assist_workspace_dir"] = _task_sandbox_workspace(raw.get("sandbox_assist_workspace_dir"), raw["sandbox_assist_target"] or "c12b") if raw["sandbox_assist"] else ""
+    raw["sandbox_assist_command"] = raw.get("sandbox_assist_command") or ""
+    raw["sandbox_assist_validation_command"] = raw.get("sandbox_assist_validation_command") or ""
+    raw["sandbox_assist_test_command"] = raw.get("sandbox_assist_test_command") or ""
     raw["source"] = raw.get("source") or "user"
     return raw
 
@@ -1866,10 +2415,13 @@ def _ensure_task_templates_seeded() -> None:
     now = _iso_now()
     with _db() as conn:
         for tpl in TASK_TEMPLATES:
+            assist = _task_sandbox_assist_values(tpl, mode=tpl.get("mode") or "chat")
             conn.execute(
                 "INSERT OR IGNORE INTO task_templates (key, created_at, updated_at, name, description, mode, schedule_kind, interval_minutes, "
-                "tabs_required, planner_prompt, executor_prompt, context_handoff, trigger_mode, trigger_text, active, source) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "tabs_required, executor_target, workspace_dir, planner_prompt, executor_prompt, validation_command, test_command, "
+                "sandbox_assist, sandbox_assist_target, sandbox_assist_workspace_dir, sandbox_assist_command, "
+                "sandbox_assist_validation_command, sandbox_assist_test_command, context_handoff, trigger_mode, trigger_text, active, source) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     tpl["key"],
                     now,
@@ -1880,8 +2432,18 @@ def _ensure_task_templates_seeded() -> None:
                     tpl.get("schedule_kind") or "manual",
                     int(tpl.get("interval_minutes") or 0),
                     int(tpl.get("tabs_required") or 1),
+                    _task_sandbox_target(tpl.get("executor_target") or "c12b"),
+                    _task_sandbox_workspace(tpl.get("workspace_dir"), _task_sandbox_target(tpl.get("executor_target") or "c12b")),
                     tpl.get("planner_prompt") or "",
                     tpl.get("executor_prompt") or "",
+                    tpl.get("validation_command") or "",
+                    tpl.get("test_command") or "",
+                    1 if assist["sandbox_assist"] else 0,
+                    assist["sandbox_assist_target"],
+                    assist["sandbox_assist_workspace_dir"],
+                    assist["sandbox_assist_command"],
+                    assist["sandbox_assist_validation_command"],
+                    assist["sandbox_assist_test_command"],
                     tpl.get("context_handoff") or "",
                     tpl.get("trigger_mode") or "json",
                     tpl.get("trigger_text") or "",
@@ -1909,12 +2471,24 @@ def _task_templates_payload(active_only: bool = True) -> list[dict]:
 
 def _task_run_to_dict(row: sqlite3.Row | dict) -> dict:
     raw = dict(row)
+    raw["executor_target"] = _task_sandbox_target(raw.get("executor_target")) if raw.get("executor_target") else ""
+    raw["sandbox_session_id"] = raw.get("sandbox_session_id") or ""
+    raw["validation_status"] = raw.get("validation_status") or ""
+    raw["validation_excerpt"] = raw.get("validation_excerpt") or ""
+    raw["test_status"] = raw.get("test_status") or ""
+    raw["test_excerpt"] = raw.get("test_excerpt") or ""
     raw["trace_id"] = raw.get("task_id") or ""
     raw["task_url"] = f"/tasked?task_id={quote(str(raw.get('task_id') or ''))}" if raw.get("task_id") else "/tasked"
     raw["pipeline_url"] = f"/piplinetask?task_id={quote(str(raw.get('task_id') or ''))}" if raw.get("task_id") else "/piplinetask"
+    raw["completed_url"] = f"/task-completed?task_id={quote(str(raw.get('task_id') or ''))}" if raw.get("task_id") else "/task-completed"
     raw["is_running"] = (raw.get("status") or "").lower() == "running" and not raw.get("finished_at")
     raw["duration_ms"] = _duration_ms(raw.get("started_at") or raw.get("created_at"), raw.get("finished_at"))
     raw["duration_label"] = _duration_label(raw.get("duration_ms"))
+    raw["current_step_id"] = raw.get("current_step_id") or ""
+    raw["terminal_reason"] = raw.get("terminal_reason") or ""
+    raw["trigger_snapshot"] = _json_load_object(raw.get("trigger_snapshot_json"))
+    raw["completed_at"] = raw.get("completed_at") or raw.get("finished_at") or ""
+    raw["parent_run_id"] = raw.get("parent_run_id") or ""
     return raw
 
 
@@ -1923,13 +2497,22 @@ def _task_alert_to_dict(row: sqlite3.Row | dict) -> dict:
     raw["interval_minutes"] = int(raw.get("interval_minutes") or 0)
     raw["tabs_required"] = int(raw.get("tabs_required") or 0)
     raw["active"] = bool(raw.get("active"))
+    raw["executor_target"] = _task_sandbox_target(raw.get("executor_target")) if raw.get("executor_target") else ""
+    raw["workspace_dir"] = raw.get("workspace_dir") or (TASK_SANDBOX_DEFAULTS.get(raw["executor_target"], "") if raw["executor_target"] else "")
+    raw["sandbox_assist"] = _task_sandbox_assist_enabled(raw.get("sandbox_assist"))
+    raw["sandbox_assist_target"] = _task_sandbox_target(raw.get("sandbox_assist_target")) if raw["sandbox_assist"] else ""
+    raw["sandbox_assist_workspace_dir"] = _task_sandbox_workspace(raw.get("sandbox_assist_workspace_dir"), raw["sandbox_assist_target"] or "c12b") if raw["sandbox_assist"] else ""
     raw["updated_at"] = raw.get("updated_at") or raw.get("created_at")
     raw["resolved_at"] = raw.get("resolved_at") or ""
     raw["snoozed_until"] = raw.get("snoozed_until") or ""
     raw["trace_id"] = raw.get("task_id") or ""
     raw["task_url"] = f"/tasked?task_id={quote(str(raw.get('task_id') or ''))}" if raw.get("task_id") else "/tasked"
     raw["pipeline_url"] = f"/piplinetask?task_id={quote(str(raw.get('task_id') or ''))}" if raw.get("task_id") else "/piplinetask"
+    raw["completed_url"] = f"/task-completed?task_id={quote(str(raw.get('task_id') or ''))}" if raw.get("task_id") else "/task-completed"
     raw["schedule_label"] = _task_schedule_label(raw.get("schedule_kind") or "manual", raw.get("interval_minutes") or 0, raw.get("active"))
+    raw["severity"] = raw.get("severity") or "info"
+    raw["repeat_key"] = raw.get("repeat_key") or ""
+    raw["closed_by_run_id"] = raw.get("closed_by_run_id") or ""
     return raw
 
 
@@ -1943,6 +2526,9 @@ def _task_trace_payload(task: dict, latest_run: dict | None = None, latest_alert
             "mode": task.get("mode") or "",
             "task_url": task.get("task_url") or "/tasked",
             "pipeline_url": task.get("pipeline_url") or "/piplinetask",
+            "completed_url": task.get("completed_url") or "/task-completed",
+            "executor_target": task.get("executor_target") or "",
+            "sandbox_assist": bool(task.get("sandbox_assist")),
         },
         "planner": {
             "prompt": task.get("planner_prompt") or "",
@@ -1957,19 +2543,45 @@ def _task_trace_payload(task: dict, latest_run: dict | None = None, latest_alert
         },
         "executor": {
             "prompt": task.get("executor_prompt") or "",
+            "target": task.get("executor_target") or "",
+            "workspace_dir": task.get("workspace_dir") or "",
+            "validation_command": task.get("validation_command") or "",
+            "test_command": task.get("test_command") or "",
             "last_status": (latest_run or {}).get("status") or task.get("last_status") or "idle",
             "duration_label": (latest_run or {}).get("duration_label") or "—",
+            "validation_status": (latest_run or {}).get("validation_status") or "",
+            "test_status": (latest_run or {}).get("test_status") or "",
+            "sandbox_session_id": (latest_run or {}).get("sandbox_session_id") or "",
+        },
+        "sandbox_assist": {
+            "enabled": bool(task.get("sandbox_assist")),
+            "target": task.get("sandbox_assist_target") or "",
+            "workspace_dir": task.get("sandbox_assist_workspace_dir") or "",
+            "command": task.get("sandbox_assist_command") or "",
+            "validation_command": task.get("sandbox_assist_validation_command") or "",
+            "test_command": task.get("sandbox_assist_test_command") or "",
+            "last_status": (latest_run or {}).get("status") or "",
+            "sandbox_session_id": (latest_run or {}).get("sandbox_session_id") or "",
+            "validation_status": (latest_run or {}).get("validation_status") or "",
+            "test_status": (latest_run or {}).get("test_status") or "",
         },
         "alert_generator": {
             "trigger_mode": task.get("trigger_mode") or "json",
             "trigger_text": task.get("trigger_text") or "",
             "latest_alert_status": (latest_alert or {}).get("status") or "",
             "latest_alert_title": (latest_alert or {}).get("title") or "",
+            "severity": (latest_alert or {}).get("severity") or task.get("alert_policy", {}).get("severity") or "info",
+        },
+        "completion": {
+            "last_status": (latest_run or {}).get("status") or task.get("last_status") or "idle",
+            "terminal_reason": (latest_run or {}).get("terminal_reason") or "",
+            "completed_at": (latest_run or {}).get("completed_at") or "",
+            "current_step_id": (latest_run or {}).get("current_step_id") or "",
         },
     }
 
 
-def _task_launch_url(mode: str, prompt: str, *, task_id: str = "", run_id: str = "") -> str:
+def _task_launch_url(mode: str, prompt: str, *, task_id: str = "", run_id: str = "", extra_params: dict | None = None) -> str:
     prompt = (prompt or "").strip()
     if not prompt:
         return "/tasked"
@@ -1985,6 +2597,9 @@ def _task_launch_url(mode: str, prompt: str, *, task_id: str = "", run_id: str =
     if run_id:
         params["task_run_id"] = run_id
     params["source"] = "tasked"
+    for key, value in (extra_params or {}).items():
+        if value not in {None, ""}:
+            params[str(key)] = str(value)
     return f"{path}?{urlencode(params)}"
 
 
@@ -1993,14 +2608,29 @@ def _task_row_to_dict(row: sqlite3.Row | dict) -> dict:
     raw["active"] = bool(raw.get("active"))
     raw["interval_minutes"] = int(raw.get("interval_minutes") or 0)
     raw["tabs_required"] = int(raw.get("tabs_required") or 1)
-    raw["background_supported"] = raw.get("mode") == "chat"
-    raw["launch_url"] = _task_launch_url(
+    raw["executor_target"] = _task_sandbox_target(raw.get("executor_target")) if (raw.get("mode") == "sandbox" or raw.get("executor_target")) else ""
+    raw["workspace_dir"] = _task_sandbox_workspace(raw.get("workspace_dir"), raw["executor_target"] or "c12b") if raw["executor_target"] else ""
+    raw["validation_command"] = raw.get("validation_command") or ""
+    raw["test_command"] = raw.get("test_command") or ""
+    raw["sandbox_assist"] = _task_sandbox_assist_enabled(raw.get("sandbox_assist"))
+    raw["sandbox_assist_target"] = _task_sandbox_target(raw.get("sandbox_assist_target")) if raw["sandbox_assist"] else ""
+    raw["sandbox_assist_workspace_dir"] = _task_sandbox_workspace(raw.get("sandbox_assist_workspace_dir"), raw["sandbox_assist_target"] or "c12b") if raw["sandbox_assist"] else ""
+    raw["sandbox_assist_command"] = raw.get("sandbox_assist_command") or ""
+    raw["sandbox_assist_validation_command"] = raw.get("sandbox_assist_validation_command") or ""
+    raw["sandbox_assist_test_command"] = raw.get("sandbox_assist_test_command") or ""
+    raw["archived_at"] = raw.get("archived_at") or ""
+    raw["completion_policy"] = _json_load_object(raw.get("completion_policy_json"), _task_default_completion_policy())
+    raw["alert_policy"] = _json_load_object(raw.get("alert_policy_json"), _task_default_alert_policy())
+    raw["workflow_version"] = int(raw.get("workflow_version") or 1)
+    raw["background_supported"] = raw.get("mode") in {"chat", "sandbox"}
+    raw["launch_url"] = "" if raw.get("mode") == "sandbox" else _task_launch_url(
         raw.get("mode") or "chat",
         raw.get("executor_prompt") or raw.get("planner_prompt") or "",
         task_id=str(raw.get("id") or ""),
     )
     raw["task_url"] = f"/tasked?task_id={quote(str(raw.get('id') or ''))}" if raw.get("id") else "/tasked"
     raw["pipeline_url"] = f"/piplinetask?task_id={quote(str(raw.get('id') or ''))}" if raw.get("id") else "/piplinetask"
+    raw["completed_url"] = f"/task-completed?task_id={quote(str(raw.get('id') or ''))}" if raw.get("id") else "/task-completed"
     raw["alerts_url"] = "/alerts"
     raw["trace_id"] = raw.get("id") or ""
     raw["schedule_label"] = _task_schedule_label(raw.get("schedule_kind") or "manual", raw.get("interval_minutes") or 0, raw.get("active"))
@@ -2015,6 +2645,10 @@ def _task_mode_label(mode: str) -> str:
     return next((item["label"] for item in TASK_MODE_OPTIONS if item["id"] == mode), mode or "Unknown")
 
 
+def _task_executor_target_label(target: str) -> str:
+    return next((item["label"] for item in TASK_EXECUTOR_TARGET_OPTIONS if item["id"] == target), target or "Unknown")
+
+
 def _task_template_label(template_key: str) -> str:
     return next((item["name"] for item in _task_templates_payload(active_only=False) if item["key"] == template_key), template_key or "custom")
 
@@ -2024,6 +2658,9 @@ def _task_pipeline_build(
     runs: list[sqlite3.Row | dict],
     alerts: list[sqlite3.Row | dict],
     task_events: list[sqlite3.Row | dict] | None = None,
+    step_results: list[sqlite3.Row | dict] | None = None,
+    feedback_events: list[sqlite3.Row | dict] | None = None,
+    selected_run_id: str = "",
 ) -> dict:
     task = _task_row_to_dict(task_row)
     task["mode_label"] = _task_mode_label(task.get("mode") or "")
@@ -2031,11 +2668,22 @@ def _task_pipeline_build(
     task["task_url"] = f"/tasked?task_id={quote(str(task.get('id') or ''))}" if task.get("id") else "/tasked"
     task["alerts_url"] = "/alerts"
     task["pipeline_url"] = f"/piplinetask?task_id={quote(str(task.get('id') or ''))}" if task.get("id") else "/piplinetask"
+    task["completed_url"] = f"/task-completed?task_id={quote(str(task.get('id') or ''))}" if task.get("id") else "/task-completed"
 
     run_items = [_task_run_to_dict(r) for r in runs]
-    alert_items = [_task_alert_to_dict(a) for a in alerts]
-    latest_run = run_items[-1] if run_items else None
+    selected_run = next((item for item in run_items if item.get("id") == selected_run_id), None) if selected_run_id else None
+    selected_run = selected_run or (run_items[-1] if run_items else None)
+    run_id = str((selected_run or {}).get("id") or "")
+    alert_items = [
+        _task_alert_to_dict(a) for a in alerts
+        if not run_id or str(dict(a).get("run_id") or "") == run_id
+    ]
+    if not alert_items:
+        alert_items = [_task_alert_to_dict(a) for a in alerts]
     latest_alert = alert_items[-1] if alert_items else None
+    step_items = [_task_step_result_to_dict(r) for r in (step_results or [])]
+    feedback_items = [_task_feedback_to_dict(r) for r in (feedback_events or [])]
+    task["current_step_id"] = (selected_run or {}).get("current_step_id") or ""
 
     events: list[dict] = []
 
@@ -2076,40 +2724,90 @@ def _task_pipeline_build(
             f"{task.get('schedule_label')} task is scheduled for the next run. Active={task.get('active')}.",
             status="scheduled",
         )
+    if task.get("archived_at"):
+        add_event(
+            task.get("archived_at"),
+            "task-archived",
+            "Task archived",
+            f"{task.get('name') or 'Tasked'} was archived and removed from active schedules.",
+            status="archived",
+            level="warn",
+        )
 
-    for event in sorted((dict(e) for e in (task_events or [])), key=lambda item: item.get("created_at") or ""):
+    filtered_task_events = []
+    for raw_event in (task_events or []):
+        event = dict(raw_event)
+        event_run_id = str(event.get("run_id") or "")
+        if run_id and event_run_id and event_run_id != run_id:
+            continue
+        filtered_task_events.append(event)
+    for event in sorted(filtered_task_events, key=lambda item: item.get("created_at") or ""):
         add_event(
             event.get("created_at"),
             event.get("event_type") or "task-event",
             (event.get("event_type") or "task-event").replace("-", " ").title(),
             event.get("detail") or "Task event recorded.",
             status=event.get("status") or "",
-            level="warn" if (event.get("status") or "") in {"paused", "launch-required", "manual-only"} else "info",
+            level="warn" if (event.get("status") or "") in {"paused", "launch-required", "manual-only", "launch-pending", "waiting-feedback"} else "info",
             run_id=event.get("run_id") or "",
             alert_id=event.get("alert_id"),
         )
 
-    for run in sorted(run_items, key=lambda item: item.get("created_at") or ""):
-        run_status = run.get("status") or "queued"
+    if selected_run:
+        run_status = selected_run.get("status") or "queued"
         add_event(
-            run.get("started_at") or run.get("created_at"),
+            selected_run.get("started_at") or selected_run.get("created_at"),
             "run-started",
             "Task run started",
-            f"Source={run.get('source') or 'manual'} · Mode={_task_mode_label(run.get('mode') or '')} · Duration={run.get('duration_label') or '—'}",
+            f"Source={selected_run.get('source') or 'manual'} · Mode={_task_mode_label(selected_run.get('mode') or '')} · Duration={selected_run.get('duration_label') or '—'}",
             status=run_status,
-            level="warn" if run_status in {"launch-required", "manual-only"} else "info",
-            run_id=run.get("id"),
+            level="warn" if run_status in {"launch-required", "manual-only", "launch-pending", "waiting-feedback"} else "info",
+            run_id=selected_run.get("id"),
         )
-        detail = run.get("launch_url") or run.get("output_excerpt") or run.get("error_text") or "Run completed."
+        detail = selected_run.get("launch_url") or selected_run.get("output_excerpt") or selected_run.get("error_text") or "Run completed."
         add_event(
-            run.get("finished_at") or run.get("created_at"),
+            selected_run.get("finished_at") or selected_run.get("created_at"),
             "run-finished",
             f"Task run {run_status}",
             detail,
             status=run_status,
-            level="error" if run_status == "failed" else ("warn" if run_status in {"launch-required", "manual-only"} else "ok"),
-            run_id=run.get("id"),
-            alert_id=run.get("alert_id"),
+            level="error" if run_status == "failed" else ("warn" if run_status in {"launch-required", "manual-only", "launch-pending", "waiting-feedback"} else "ok"),
+            run_id=selected_run.get("id"),
+            alert_id=selected_run.get("alert_id"),
+        )
+
+    for step in step_items:
+        add_event(
+            step.get("started_at"),
+            "step-started",
+            step.get("step_name") or step.get("step_id") or "Step started",
+            f"{(step.get('step_kind') or 'step').replace('-', ' ')} started.",
+            status="running",
+            level="info",
+            run_id=run_id,
+            step_id=step.get("step_id") or "",
+        )
+        add_event(
+            step.get("finished_at") or step.get("started_at"),
+            "step-finished",
+            f"{step.get('step_name') or step.get('step_id') or 'Step'} {step.get('status') or 'finished'}",
+            json.dumps(step.get("output") or {}, ensure_ascii=False)[:1500] or step.get("error_text") or "Step finished.",
+            status=step.get("status") or "",
+            level="error" if (step.get("status") or "") in {"failed", "cancelled"} else ("warn" if (step.get("status") or "") in {"waiting-feedback", "launch-pending", "skipped"} else "ok"),
+            run_id=run_id,
+            step_id=step.get("step_id") or "",
+        )
+
+    for feedback in feedback_items:
+        add_event(
+            feedback.get("created_at"),
+            "agent-feedback",
+            f"{(feedback.get('agent_id') or 'Agent').upper()} feedback",
+            feedback.get("summary") or json.dumps(feedback.get("payload") or {}, ensure_ascii=False)[:1500] or "Feedback received.",
+            status=feedback.get("status") or "",
+            level="error" if (feedback.get("status") or "") in {"failed", "cancelled", "error"} else "ok",
+            run_id=feedback.get("run_id") or run_id,
+            step_id=feedback.get("step_id") or "",
         )
 
     for alert in sorted(alert_items, key=lambda item: item.get("created_at") or ""):
@@ -2177,35 +2875,38 @@ def _task_pipeline_build(
         "alerts_total": len(alert_items),
         "open_alerts": sum(1 for a in alert_items if (a.get("status") or "open") == "open"),
         "last_status": task.get("lifecycle_state") or task.get("last_status") or "idle",
-        "latest_run_duration_label": (latest_run or {}).get("duration_label") or "—",
+        "latest_run_duration_label": (selected_run or {}).get("duration_label") or "—",
         "trace_id": task.get("id") or "",
+        "run_status": (selected_run or {}).get("status") or "",
+        "current_step_id": (selected_run or {}).get("current_step_id") or "",
+        "terminal_reason": (selected_run or {}).get("terminal_reason") or "",
+        "feedback_total": len(feedback_items),
+        "steps_total": len(step_items),
     }
     return {
         "task": task,
+        "run": selected_run,
+        "alerts": alert_items,
+        "feedback": feedback_items,
+        "steps": step_items,
         "summary": summary,
-        "trace": _task_trace_payload(task, latest_run, latest_alert),
+        "trace": _task_trace_payload(task, selected_run, latest_alert),
         "events": events,
     }
 
 
 def _seed_tasked_examples() -> dict:
-    template_map = {item["key"]: item for item in TASK_TEMPLATES}
     created_ids: list[str] = []
     base = datetime.now(timezone.utc) - timedelta(minutes=40)
 
     with _db() as conn:
         for idx, spec in enumerate(TASK_EXAMPLE_SPECS):
-            tpl = template_map.get(spec["template_key"])
-            if not tpl:
-                continue
-
             task_id = spec["id"]
             run_id = f"trun_example_{idx + 1}"
             created_at = (base + timedelta(minutes=idx * 3)).isoformat()
             started_at = (base + timedelta(minutes=idx * 3 + 1)).isoformat()
             finished_at = (base + timedelta(minutes=idx * 3 + 2)).isoformat()
             acknowledged_at = (base + timedelta(minutes=idx * 3 + 3)).isoformat() if spec.get("acknowledged") else None
-            next_run_at = _task_next_run_at(tpl.get("schedule_kind") or "manual", int(tpl.get("interval_minutes") or 0), base=base + timedelta(minutes=idx * 3 + 2))
             payload = {
                 "triggered": True,
                 "trigger": spec["trigger"],
@@ -2215,70 +2916,277 @@ def _seed_tasked_examples() -> dict:
             }
             excerpt = json.dumps(payload, ensure_ascii=False)
 
+            if task_id == "task_example_jhb_nvidia":
+                mode = "chat"
+                schedule_kind = "recurring"
+                interval_minutes = 12
+                active = 1
+                tabs_required = 2
+                planner_prompt = "Check Johannesburg weather, then check Nvidia market cap, evaluate the combined condition, and repeat the alert every 5 minutes while the condition remains true."
+                executor_prompt = "Use structured steps instead of a single prompt."
+                context_handoff = "Tab 1 checks Johannesburg weather. Tab 2 checks Nvidia market cap. The combined condition is evaluated before the alert cadence is armed."
+                trigger_mode = "always"
+                trigger_text = "Johannesburg weather and Nvidia market cap rule"
+                alert_policy = {"repeat_every_minutes": 5, "dedupe_key_template": "jhb-nvidia-{task_id}", "severity": "warning", "while_condition_true": True}
+                completion_policy = _task_default_completion_policy()
+                steps = [
+                    {"id": f"{task_id}_trigger", "name": "Trigger", "kind": "trigger", "config": {"schedule_kind": "recurring", "interval_minutes": 12}},
+                    {"id": f"{task_id}_weather", "name": "Fetch Johannesburg weather", "kind": "chat", "config": {"prompt": "Fetch Johannesburg weather and return JSON."}},
+                    {"id": f"{task_id}_market", "name": "Fetch Nvidia market cap", "kind": "chat", "config": {"prompt": "Fetch Nvidia market cap and return JSON."}},
+                    {"id": f"{task_id}_condition", "name": "Evaluate combined condition", "kind": "condition", "config": {"operator": "AND", "rules": [
+                        {"source": f"{task_id}_weather", "field": "parsed.temp_c", "comparator": "gt", "value": 14},
+                        {"source": f"{task_id}_market", "field": "parsed.market_cap_usd", "comparator": "gt", "value": 2000000000000},
+                    ]}},
+                    {"id": f"{task_id}_alert", "name": "Raise repeating alert", "kind": "alert", "config": {"title": spec["title"], "trigger_text": spec["trigger"], "severity": "warning", "repeat_every_minutes": 5, "dedupe_key": "jhb-nvidia-{task_id}", "summary": spec["summary"]}},
+                    {"id": f"{task_id}_complete", "name": "Complete", "kind": "complete", "config": {}},
+                ]
+                step_outputs = [
+                    ("task_example_jhb_nvidia_trigger", "Trigger", "trigger", {"schedule_kind": "recurring", "interval_minutes": 12}),
+                    ("task_example_jhb_nvidia_weather", "Fetch Johannesburg weather", "chat", {"text": '{"triggered": true, "city": "Johannesburg", "temp_c": 18.4}', "parsed": {"triggered": True, "city": "Johannesburg", "temp_c": 18.4}, "ok": True}),
+                    ("task_example_jhb_nvidia_market", "Fetch Nvidia market cap", "chat", {"text": '{"triggered": true, "company": "Nvidia", "market_cap_usd": 2120000000000}', "parsed": {"triggered": True, "company": "Nvidia", "market_cap_usd": 2120000000000}, "ok": True}),
+                    ("task_example_jhb_nvidia_condition", "Evaluate combined condition", "condition", {"matched": True, "operator": "AND", "details": [
+                        {"source": f"{task_id}_weather", "field": "parsed.temp_c", "comparator": "gt", "expected": 14, "actual": 18.4, "passed": True},
+                        {"source": f"{task_id}_market", "field": "parsed.market_cap_usd", "comparator": "gt", "expected": 2000000000000, "actual": 2120000000000, "passed": True},
+                    ]}),
+                    ("task_example_jhb_nvidia_alert", "Raise repeating alert", "alert", {"title": spec["title"], "severity": "warning"}),
+                    ("task_example_jhb_nvidia_complete", "Complete", "complete", {"completed": True, "summary": spec["summary"]}),
+                ]
+                feedback_rows: list[tuple[str, str, str, str, str, str, str, str, str]] = []
+            elif task_id == "task_example_gmail_sender":
+                mode = "chat"
+                schedule_kind = "recurring"
+                interval_minutes = 10
+                active = 1
+                tabs_required = 2
+                planner_prompt = "Check Gmail or Outlook for a new email from sampelexample@example.com, extract sender and subject, then create an alert."
+                executor_prompt = "Detect sender, extract subject, and copy the context into a second tab."
+                context_handoff = "Tab 1 detects the sender and subject. Tab 2 receives the extracted metadata before the alert is created."
+                trigger_mode = "json"
+                trigger_text = "incoming email from sampelexample"
+                alert_policy = {"repeat_every_minutes": 0, "dedupe_key_template": "gmail-{task_id}", "severity": "info", "while_condition_true": False}
+                completion_policy = _task_default_completion_policy()
+                steps = [
+                    {"id": f"{task_id}_trigger", "name": "Trigger", "kind": "trigger", "config": {"schedule_kind": "recurring", "interval_minutes": 10}},
+                    {"id": f"{task_id}_email", "name": "Detect email", "kind": "chat", "config": {"prompt": "Detect email from sampelexample@example.com and return JSON."}},
+                    {"id": f"{task_id}_alert", "name": "Create alert", "kind": "alert", "config": {"title": spec["title"], "trigger_text": spec["trigger"], "summary": spec["summary"]}},
+                    {"id": f"{task_id}_complete", "name": "Complete", "kind": "complete", "config": {}},
+                ]
+                step_outputs = [
+                    (f"{task_id}_trigger", "Trigger", "trigger", {"schedule_kind": "recurring", "interval_minutes": 10}),
+                    (f"{task_id}_email", "Detect email", "chat", {"text": '{"triggered": true, "sender": "sampelexample@example.com", "subject": "Project handoff update"}', "parsed": {"triggered": True, "sender": "sampelexample@example.com", "subject": "Project handoff update"}, "ok": True}),
+                    (f"{task_id}_alert", "Create alert", "alert", {"title": spec["title"], "severity": "info"}),
+                    (f"{task_id}_complete", "Complete", "complete", {"completed": True, "summary": spec["summary"]}),
+                ]
+                feedback_rows = []
+            elif task_id == "task_example_sharepoint_file":
+                mode = "agent"
+                schedule_kind = "recurring"
+                interval_minutes = 10
+                active = 1
+                tabs_required = 2
+                planner_prompt = "Launch C6 to inspect SharePoint, then wait for structured feedback before creating the alert."
+                executor_prompt = "Find a newly added SharePoint file and return folder path plus file name."
+                context_handoff = "C6 returns structured file metadata, then the alert stage uses that feedback to complete the workflow."
+                trigger_mode = "always"
+                trigger_text = "new SharePoint file event"
+                alert_policy = {"repeat_every_minutes": 0, "dedupe_key_template": "sharepoint-{task_id}", "severity": "info", "while_condition_true": False}
+                completion_policy = _task_default_completion_policy()
+                steps = [
+                    {"id": f"{task_id}_trigger", "name": "Trigger", "kind": "trigger", "config": {"schedule_kind": "recurring", "interval_minutes": 10}},
+                    {"id": f"{task_id}_agent", "name": "C6 SharePoint check", "kind": "agent", "config": {"prompt": "Check SharePoint for a newly added file and return structured feedback.", "agent_id": "c6-kilocode"}},
+                    {"id": f"{task_id}_alert", "name": "Create alert", "kind": "alert", "config": {"title": spec["title"], "trigger_text": spec["trigger"], "summary": spec["summary"]}},
+                    {"id": f"{task_id}_complete", "name": "Complete", "kind": "complete", "config": {}},
+                ]
+                step_outputs = [
+                    (f"{task_id}_trigger", "Trigger", "trigger", {"schedule_kind": "recurring", "interval_minutes": 10}),
+                    (f"{task_id}_agent", "C6 SharePoint check", "agent", {"launch_url": f"/agent?task={quote('Check SharePoint for a new file')}", "agent_id": "c6-kilocode", "prompt": "Check SharePoint for a new file"}),
+                    (f"{task_id}_alert", "Create alert", "alert", {"title": spec["title"], "severity": "info"}),
+                    (f"{task_id}_complete", "Complete", "complete", {"completed": True, "summary": spec["summary"]}),
+                ]
+                feedback_rows = [
+                    (
+                        f"tfb_example_{idx + 1}",
+                        task_id,
+                        run_id,
+                        f"{task_id}_agent",
+                        "c6-kilocode",
+                        "result",
+                        "completed",
+                        json.dumps({"sub_task": True, "file_name": spec["details"]["file_name"], "folder": spec["details"]["folder"]}, ensure_ascii=False),
+                        "C6 found the new SharePoint file and returned structured metadata.",
+                        "SharePoint file matched and passed back to Tasked.",
+                    ),
+                ]
+            else:
+                mode = "chat"
+                schedule_kind = "recurring"
+                interval_minutes = 10
+                active = 1
+                tabs_required = 2
+                planner_prompt = "Check Outlook, extract the linked SharePoint file, verify the document, then create a combined alert."
+                executor_prompt = "Use two tabs to merge Outlook and SharePoint context."
+                context_handoff = "Outlook email context is copied into the second tab, where SharePoint verification completes the task."
+                trigger_mode = "always"
+                trigger_text = "email and linked SharePoint document"
+                alert_policy = {"repeat_every_minutes": 0, "dedupe_key_template": "outlook-sp-{task_id}", "severity": "info", "while_condition_true": False}
+                completion_policy = _task_default_completion_policy()
+                steps = [
+                    {"id": f"{task_id}_trigger", "name": "Trigger", "kind": "trigger", "config": {"schedule_kind": "recurring", "interval_minutes": 10}},
+                    {"id": f"{task_id}_email", "name": "Detect Outlook email", "kind": "chat", "config": {"prompt": "Detect the Outlook email and extract its metadata."}},
+                    {"id": f"{task_id}_file", "name": "Match SharePoint file", "kind": "chat", "config": {"prompt": "Check SharePoint for the related file and return JSON."}},
+                    {"id": f"{task_id}_alert", "name": "Create combined alert", "kind": "alert", "config": {"title": spec["title"], "trigger_text": spec["trigger"], "summary": spec["summary"]}},
+                    {"id": f"{task_id}_complete", "name": "Complete", "kind": "complete", "config": {}},
+                ]
+                step_outputs = [
+                    (f"{task_id}_trigger", "Trigger", "trigger", {"schedule_kind": "recurring", "interval_minutes": 10}),
+                    (f"{task_id}_email", "Detect Outlook email", "chat", {"text": '{"triggered": true, "sender": "sampelexample@example.com", "subject": "Updated project timeline"}', "parsed": {"triggered": True, "sender": "sampelexample@example.com", "subject": "Updated project timeline"}, "ok": True}),
+                    (f"{task_id}_file", "Match SharePoint file", "chat", {"text": '{"triggered": true, "file_name": "Project-Timeline.docx"}', "parsed": {"triggered": True, "file_name": "Project-Timeline.docx"}, "ok": True}),
+                    (f"{task_id}_alert", "Create combined alert", "alert", {"title": spec["title"], "severity": "info"}),
+                    (f"{task_id}_complete", "Complete", "complete", {"completed": True, "summary": spec["summary"]}),
+                ]
+                feedback_rows = []
+
+            next_run_at = _task_next_run_at(schedule_kind, interval_minutes, base=base + timedelta(minutes=idx * 3 + 2)) if active else None
+
+            conn.execute("DELETE FROM task_alerts WHERE run_id=?", (run_id,))
+            conn.execute("DELETE FROM task_feedback_events WHERE run_id=?", (run_id,))
+            conn.execute("DELETE FROM task_step_results WHERE run_id=?", (run_id,))
+            conn.execute("DELETE FROM task_events WHERE run_id=?", (run_id,))
+            conn.execute("DELETE FROM task_runs WHERE id=?", (run_id,))
             conn.execute("DELETE FROM task_alerts WHERE task_id=?", (task_id,))
+            conn.execute("DELETE FROM task_feedback_events WHERE task_id=?", (task_id,))
+            conn.execute("DELETE FROM task_step_results WHERE task_id=?", (task_id,))
+            conn.execute("DELETE FROM task_workflow_steps WHERE task_id=?", (task_id,))
+            conn.execute("DELETE FROM task_events WHERE task_id=?", (task_id,))
             conn.execute("DELETE FROM task_runs WHERE task_id=?", (task_id,))
             conn.execute("DELETE FROM task_definitions WHERE id=?", (task_id,))
 
             conn.execute(
                 "INSERT INTO task_definitions (id, created_at, updated_at, name, mode, schedule_kind, interval_minutes, active, tabs_required, "
                 "template_key, planner_prompt, executor_prompt, context_handoff, trigger_mode, trigger_text, notes, last_run_at, next_run_at, "
-                "last_status, last_result_excerpt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "last_status, last_result_excerpt, completion_policy_json, alert_policy_json, workflow_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     task_id,
                     created_at,
                     finished_at,
                     spec["name"],
-                    tpl.get("mode") or "chat",
-                    tpl.get("schedule_kind") or "manual",
-                    int(tpl.get("interval_minutes") or 0),
-                    1,
-                    int(tpl.get("tabs_required") or 2),
-                    tpl.get("template_key") or spec["template_key"],
-                    tpl.get("planner_prompt") or "",
-                    tpl.get("executor_prompt") or "",
-                    tpl.get("context_handoff") or "",
-                    "json",
-                    "",
+                    mode,
+                    schedule_kind,
+                    interval_minutes,
+                    active,
+                    tabs_required,
+                    spec["template_key"],
+                    planner_prompt,
+                    executor_prompt,
+                    context_handoff,
+                    trigger_mode,
+                    trigger_text,
                     "Seeded Tasked example row for Tasked → piplinetask → Alerts validation.",
                     finished_at,
                     next_run_at,
                     "completed",
                     excerpt[:500],
+                    json.dumps(completion_policy, ensure_ascii=False),
+                    json.dumps(alert_policy, ensure_ascii=False),
+                    1,
                 ),
             )
+            _task_save_steps(conn, task_id, steps)
 
             conn.execute(
-                "INSERT INTO task_runs (id, task_id, created_at, started_at, finished_at, source, status, mode, output_excerpt, error_text, alert_id, launch_url) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO task_runs (id, task_id, created_at, started_at, finished_at, completed_at, source, status, mode, output_excerpt, error_text, alert_id, launch_url, current_step_id, terminal_reason, trigger_snapshot_json) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     run_id,
                     task_id,
                     created_at,
                     started_at,
                     finished_at,
+                    finished_at,
                     "seeded-example",
                     "completed",
-                    tpl.get("mode") or "chat",
+                    mode,
                     excerpt[:2000],
                     "",
                     None,
                     "",
+                    f"{task_id}_complete",
+                    "workflow-complete",
+                    json.dumps({"seeded": True, "task_id": task_id}, ensure_ascii=False),
                 ),
             )
 
+            for offset, (step_id, step_name, step_kind, output) in enumerate(step_outputs):
+                step_started = (base + timedelta(minutes=idx * 3 + 1, seconds=offset * 4)).isoformat()
+                step_finished = (base + timedelta(minutes=idx * 3 + 1, seconds=offset * 4 + 2)).isoformat()
+                conn.execute(
+                    "INSERT INTO task_step_results (id, run_id, task_id, step_id, step_name, step_kind, started_at, finished_at, status, output_json, duration_ms, error_text) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        f"tsr_example_{idx + 1}_{offset + 1}",
+                        run_id,
+                        task_id,
+                        step_id,
+                        step_name,
+                        step_kind,
+                        step_started,
+                        step_finished,
+                        "completed",
+                        json.dumps(output, ensure_ascii=False),
+                        _duration_ms(step_started, step_finished) or 0,
+                        "",
+                    ),
+                )
+
+            for feedback_id, task_fk, run_fk, step_id, agent_id, feedback_type, feedback_status, payload_json, summary, raw_excerpt in feedback_rows:
+                conn.execute(
+                    "INSERT INTO task_feedback_events (id, task_id, run_id, step_id, agent_id, feedback_type, status, payload_json, summary, raw_excerpt, created_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        feedback_id,
+                        task_fk,
+                        run_fk,
+                        step_id,
+                        agent_id,
+                        feedback_type,
+                        feedback_status,
+                        payload_json,
+                        summary,
+                        raw_excerpt,
+                        (base + timedelta(minutes=idx * 3 + 1, seconds=12)).isoformat(),
+                    ),
+                )
+
+            event_rows = [
+                (task_id, created_at, "task-created", "completed", f"Seeded workflow created for {spec['name']}.", "", None),
+                (task_id, started_at, "task-run-started", "running", f"Seeded example run {run_id} started.", run_id, None),
+                (task_id, finished_at, "task-run-finished", "completed", spec["summary"], run_id, None),
+            ]
+            if task_id == "task_example_sharepoint_file":
+                event_rows.insert(2, (task_id, (base + timedelta(minutes=idx * 3 + 1, seconds=8)).isoformat(), "agent-launch", "launch-pending", "C6 task launched from Tasked and awaited feedback.", run_id, None))
+                event_rows.insert(3, (task_id, (base + timedelta(minutes=idx * 3 + 1, seconds=12)).isoformat(), "agent-feedback", "completed", "C6 returned the SharePoint file metadata.", run_id, None))
+            for task_fk, ts, event_type, event_status, detail, event_run_id, alert_fk in event_rows:
+                conn.execute(
+                    "INSERT INTO task_events (task_id, created_at, event_type, status, detail, run_id, alert_id) VALUES (?,?,?,?,?,?,?)",
+                    (task_fk, ts, event_type, event_status, detail[:1500], event_run_id, alert_fk),
+                )
+
             cur = conn.execute(
-                "INSERT INTO task_alerts (task_id, run_id, created_at, status, title, trigger_text, summary, payload_json, acknowledged_at) "
-                "VALUES (?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO task_alerts (task_id, run_id, created_at, updated_at, status, title, trigger_text, summary, payload_json, acknowledged_at, severity, repeat_key) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     task_id,
                     run_id,
                     finished_at,
+                    acknowledged_at or finished_at,
                     "acknowledged" if acknowledged_at else "open",
                     spec["title"][:160],
                     spec["trigger"][:240],
                     spec["summary"][:1500],
                     json.dumps(payload, ensure_ascii=False),
                     acknowledged_at,
+                    (alert_policy.get("severity") or "info"),
+                    (alert_policy.get("dedupe_key_template") or "").format(task_id=task_id),
                 ),
             )
             conn.execute("UPDATE task_runs SET alert_id=? WHERE id=?", (cur.lastrowid, run_id))
@@ -2346,10 +3254,21 @@ def _task_alert_from_result(task_row: dict, response_text: str) -> dict | None:
 def _insert_task_alert(task_id: str, run_id: str, alert: dict) -> int | None:
     try:
         now = _iso_now()
+        severity = (alert.get("severity") or "info").strip().lower() or "info"
+        repeat_key = (alert.get("repeat_key") or "").strip()
+        repeat_minutes = max(0, int(alert.get("repeat_every_minutes") or 0))
         with _db() as conn:
+            if repeat_key and repeat_minutes > 0:
+                cutoff = (datetime.now(timezone.utc) - timedelta(minutes=repeat_minutes)).isoformat()
+                existing = conn.execute(
+                    "SELECT id FROM task_alerts WHERE task_id=? AND repeat_key=? AND created_at>=? ORDER BY created_at DESC LIMIT 1",
+                    (task_id, repeat_key, cutoff),
+                ).fetchone()
+                if existing:
+                    return int(existing["id"])
             cur = conn.execute(
-                "INSERT INTO task_alerts (task_id, run_id, created_at, updated_at, status, title, trigger_text, summary, payload_json) "
-                "VALUES (?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO task_alerts (task_id, run_id, created_at, updated_at, status, title, trigger_text, summary, payload_json, severity, repeat_key, closed_by_run_id) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     task_id,
                     run_id,
@@ -2360,6 +3279,9 @@ def _insert_task_alert(task_id: str, run_id: str, alert: dict) -> int | None:
                     (alert.get("trigger_text") or "")[:240],
                     (alert.get("summary") or "")[:1500],
                     alert.get("payload_json") or "{}",
+                    severity[:24],
+                    repeat_key[:200],
+                    (alert.get("closed_by_run_id") or "")[:80],
                 ),
             )
             return cur.lastrowid
@@ -2376,6 +3298,616 @@ def _record_task_event(task_id: str, event_type: str, detail: str, *, status: st
             )
     except sqlite3.Error:
         return
+
+
+def _task_sandbox_stage_status(result: dict | None) -> str:
+    if not result:
+        return ""
+    if result.get("timed_out"):
+        return "timed-out"
+    return "completed" if int(result.get("exit_code") or 0) == 0 else "failed"
+
+
+def _task_sandbox_excerpt(result: dict | None, limit: int = 500) -> str:
+    if not result:
+        return ""
+    text = (result.get("stdout") or "").strip()
+    if not text:
+        text = (result.get("stderr") or "").strip()
+    return text[:limit]
+
+
+def _task_append_alert_metadata(alert: dict | None, extra_details: dict, *, extra_summary: str = "") -> dict | None:
+    if not alert:
+        return None
+    merged = dict(alert)
+    try:
+        payload = json.loads(merged.get("payload_json") or "{}")
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {"value": payload}
+    details = payload.get("details")
+    if not isinstance(details, dict):
+        details = {}
+    details.update(extra_details)
+    payload["details"] = details
+    merged["payload_json"] = json.dumps(payload, ensure_ascii=False)
+    if extra_summary:
+        summary = (merged.get("summary") or "").strip()
+        merged["summary"] = ((summary + "\n\n" + extra_summary).strip())[:1500]
+    return merged
+
+
+async def _task_execute_sandbox_plan(
+    *,
+    task_id: str,
+    run_id: str,
+    source: str,
+    target: str,
+    workspace_dir: str,
+    command: str,
+    validation_command: str = "",
+    test_command: str = "",
+    task_name: str = "Sandbox task",
+    label: str = "Sandbox",
+    event_prefix: str = "sandbox",
+    trigger_mode: str = "json",
+    trigger_text: str = "",
+    alert_on_success: bool = True,
+) -> dict:
+    timeout = 120
+    if not command:
+        return {
+            "ok": False,
+            "status": "failed",
+            "text": "",
+            "error": f"{label} requires an execution command",
+            "alert": None,
+            "executor_target": target,
+            "workspace_dir": workspace_dir,
+            "sandbox_session_id": "",
+            "validation_status": "",
+            "validation_excerpt": "",
+            "test_status": "",
+            "test_excerpt": "",
+            "summary_text": "",
+        }
+
+    async def run_stage(stage_command: str, stage: str, prior_session_id: str = "") -> dict:
+        result = await _c12b_exec(stage_command, timeout=timeout, cwd=_task_c12b_cwd(workspace_dir), session_id=prior_session_id)
+        status = _task_sandbox_stage_status(result)
+        excerpt = _task_sandbox_excerpt(result)
+        _record_task_event(
+            task_id,
+            f"{event_prefix}-{stage}",
+            f"{label} {stage} on {_task_executor_target_label(target)}\nWorkspace: {workspace_dir}\nCommand: {stage_command}\nStatus: {status or 'unknown'}\n{excerpt}",
+            status=status or "unknown",
+            run_id=run_id,
+        )
+        return result | {"stage_status": status, "excerpt": excerpt}
+
+    exec_result = await run_stage(command, "exec")
+    session_id = exec_result.get("session_id") or ""
+    validation_result = None
+    test_result = None
+    if exec_result.get("stage_status") == "completed" and validation_command:
+        validation_result = await run_stage(validation_command, "validate", session_id)
+        session_id = validation_result.get("session_id") or session_id
+    if exec_result.get("stage_status") == "completed" and (validation_result is None or validation_result.get("stage_status") == "completed") and test_command:
+        test_result = await run_stage(test_command, "test", session_id)
+        session_id = test_result.get("session_id") or session_id
+
+    failures = [item for item in (exec_result, validation_result, test_result) if item and item.get("stage_status") != "completed"]
+    overall_ok = not failures
+    parsed_output = _task_parse_json_payload(exec_result.get("stdout") or "") or _task_parse_json_payload(exec_result.get("stderr") or "") or {}
+
+    sandbox_label = "Sandbox assist" if event_prefix == "sandbox-assist" else "Sandbox"
+    summary_lines = [
+        f"{sandbox_label} target: {_task_executor_target_label(target)}",
+        f"Workspace: {workspace_dir}",
+        f"Execution: {exec_result.get('stage_status') or 'unknown'}",
+    ]
+    if validation_command:
+        summary_lines.append(f"Validation: {(validation_result or {}).get('stage_status') or 'skipped'}")
+    if test_command:
+        summary_lines.append(f"Test: {(test_result or {}).get('stage_status') or 'skipped'}")
+
+    combined_text = "\n\n".join(
+        part for part in [
+            "\n".join(summary_lines),
+            _task_sandbox_excerpt(exec_result, 1200),
+            _task_sandbox_excerpt(validation_result, 800),
+            _task_sandbox_excerpt(test_result, 800),
+        ] if part
+    )
+
+    alert_triggered = bool(failures)
+    if not alert_triggered and alert_on_success:
+        if trigger_mode == "always":
+            alert_triggered = True
+        elif trigger_mode == "contains" and trigger_text:
+            alert_triggered = trigger_text.lower() in combined_text.lower()
+        elif trigger_mode == "json":
+            parsed = _task_parse_json_payload(exec_result.get("stdout") or combined_text)
+            if parsed is not None and parsed.get("triggered") is True:
+                alert_triggered = True
+
+    payload = {
+        "triggered": alert_triggered,
+        "trigger": trigger_text or (f"{_task_executor_target_label(target)} {label.lower()} failure" if failures else f"{_task_executor_target_label(target)} {label.lower()} summary"),
+        "title": f"{task_name} {'failed' if failures else 'completed'}",
+        "summary": combined_text[:1500],
+        "details": {
+            "executor_target": target,
+            "workspace_dir": workspace_dir,
+            "session_id": session_id,
+            "label": label,
+            "executor": {
+                "command": command,
+                "status": exec_result.get("stage_status"),
+                "exit_code": exec_result.get("exit_code"),
+                "output": (exec_result.get("stdout") or "")[:4000],
+                "error": (exec_result.get("stderr") or "")[:2000],
+            },
+            "validation": {
+                "command": validation_command,
+                "status": (validation_result or {}).get("stage_status") or "",
+                "exit_code": (validation_result or {}).get("exit_code"),
+                "output": ((validation_result or {}).get("stdout") or "")[:4000],
+                "error": ((validation_result or {}).get("stderr") or "")[:2000],
+            },
+            "test": {
+                "command": test_command,
+                "status": (test_result or {}).get("stage_status") or "",
+                "exit_code": (test_result or {}).get("exit_code"),
+                "output": ((test_result or {}).get("stdout") or "")[:4000],
+                "error": ((test_result or {}).get("stderr") or "")[:2000],
+            },
+            "source": source,
+        },
+    }
+
+    return {
+        "ok": overall_ok,
+        "status": "completed" if overall_ok else "failed",
+        "text": combined_text,
+        "error": "" if overall_ok else combined_text[:1500],
+        "alert": _task_alert_from_result({"name": task_name, "trigger_mode": trigger_mode, "trigger_text": trigger_text}, json.dumps(payload, ensure_ascii=False)) if alert_triggered else None,
+        "executor_target": target,
+        "workspace_dir": workspace_dir,
+        "sandbox_session_id": session_id,
+        "validation_status": (validation_result or {}).get("stage_status") or "",
+        "validation_excerpt": _task_sandbox_excerpt(validation_result),
+        "test_status": (test_result or {}).get("stage_status") or "",
+        "test_excerpt": _task_sandbox_excerpt(test_result),
+        "summary_text": combined_text,
+        "parsed": parsed_output,
+    }
+
+
+async def _task_execute_sandbox(task_row: dict, *, task_id: str, run_id: str, source: str) -> dict:
+    target = _task_sandbox_target(task_row.get("executor_target") or "c12b")
+    workspace_dir = _task_sandbox_workspace(task_row.get("workspace_dir"), target)
+    prompt = (task_row.get("executor_prompt") or task_row.get("planner_prompt") or "").strip()
+    return await _task_execute_sandbox_plan(
+        task_id=task_id,
+        run_id=run_id,
+        source=source,
+        target=target,
+        workspace_dir=workspace_dir,
+        command=prompt,
+        validation_command=(task_row.get("validation_command") or "").strip(),
+        test_command=(task_row.get("test_command") or "").strip(),
+        task_name=task_row.get("name") or "Sandbox task",
+        label="Sandbox",
+        event_prefix="sandbox",
+        trigger_mode=(task_row.get("trigger_mode") or "json").strip().lower(),
+        trigger_text=(task_row.get("trigger_text") or "").strip(),
+        alert_on_success=True,
+    )
+
+
+async def _task_execute_sandbox_assist(task_row: dict, *, task_id: str, run_id: str, source: str) -> dict | None:
+    if not task_row.get("sandbox_assist") or not (task_row.get("sandbox_assist_command") or "").strip():
+        return None
+    target = _task_sandbox_target(task_row.get("sandbox_assist_target") or "c12b")
+    workspace_dir = _task_sandbox_workspace(task_row.get("sandbox_assist_workspace_dir"), target)
+    return await _task_execute_sandbox_plan(
+        task_id=task_id,
+        run_id=run_id,
+        source=source,
+        target=target,
+        workspace_dir=workspace_dir,
+        command=(task_row.get("sandbox_assist_command") or "").strip(),
+        validation_command=(task_row.get("sandbox_assist_validation_command") or "").strip(),
+        test_command=(task_row.get("sandbox_assist_test_command") or "").strip(),
+        task_name=f"{task_row.get('name') or 'Task'} sandbox assist",
+        label="Sandbox assist",
+        event_prefix="sandbox-assist",
+        trigger_mode="always",
+        trigger_text="sandbox assist failure",
+        alert_on_success=False,
+    )
+
+
+def _task_steps_for_task(task_row: dict) -> list[dict]:
+    steps = _task_steps_fetch(str(task_row.get("id") or ""))
+    if not steps:
+        steps = _task_build_default_steps(task_row)
+    normalized = []
+    for idx, step in enumerate(steps, start=1):
+        item = _task_normalize_step(str(task_row.get("id") or ""), step, idx)
+        normalized.append(item)
+    return normalized
+
+
+def _task_context_from_history(task_row: dict, run_id: str) -> dict:
+    context = {
+        "task": {
+            "id": task_row.get("id") or "",
+            "name": task_row.get("name") or "",
+            "mode": task_row.get("mode") or "",
+            "schedule_kind": task_row.get("schedule_kind") or "",
+            "interval_minutes": int(task_row.get("interval_minutes") or 0),
+            "trigger_mode": task_row.get("trigger_mode") or "",
+            "trigger_text": task_row.get("trigger_text") or "",
+        },
+        "steps": {},
+        "feedback": {},
+        "last_text": "",
+        "alert_candidate": None,
+        "condition_passed": None,
+    }
+    for result in _task_fetch_step_results(run_id):
+        context["steps"][result.get("step_id") or ""] = result.get("output") or {}
+        excerpt = str((result.get("output") or {}).get("text") or "")
+        if excerpt:
+            context["last_text"] = excerpt
+    for feedback in _task_fetch_feedback(run_id):
+        context["feedback"][feedback.get("step_id") or feedback.get("id") or ""] = feedback.get("payload") or {}
+        summary = (feedback.get("summary") or "").strip()
+        if summary:
+            context["last_text"] = summary
+    return context
+
+
+def _task_context_value(context: dict, source: str, field: str) -> object:
+    bucket: object
+    if source in {"task", "feedback"}:
+        bucket = context.get(source) or {}
+    else:
+        bucket = (context.get("steps") or {}).get(source) or (context.get("feedback") or {}).get(source) or {}
+    current = bucket
+    for part in [p for p in str(field or "").split(".") if p]:
+        if isinstance(current, dict):
+            current = current.get(part)
+        else:
+            return None
+    return current
+
+
+def _task_compare_rule(actual: object, comparator: str, expected: object) -> bool:
+    comparator = (comparator or "eq").strip().lower()
+    if comparator == "exists":
+        return actual not in {None, "", []}
+    if comparator == "contains":
+        return str(expected or "").lower() in str(actual or "").lower()
+    if comparator in {"gt", "gte", "lt", "lte"}:
+        try:
+            actual_num = float(actual)
+            expected_num = float(expected)
+        except Exception:
+            return False
+        if comparator == "gt":
+            return actual_num > expected_num
+        if comparator == "gte":
+            return actual_num >= expected_num
+        if comparator == "lt":
+            return actual_num < expected_num
+        return actual_num <= expected_num
+    if comparator == "neq":
+        return actual != expected
+    return actual == expected
+
+
+def _task_evaluate_condition_step(context: dict, step: dict) -> dict:
+    config = _json_load_object(step.get("config"))
+    operator = (config.get("operator") or "AND").strip().upper()
+    rules = config.get("rules") if isinstance(config.get("rules"), list) else []
+    if not rules:
+        return {"matched": False, "details": [], "operator": operator}
+    details = []
+    matches = []
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        source = (rule.get("source") or "task").strip()
+        field = (rule.get("field") or "").strip()
+        comparator = (rule.get("comparator") or "eq").strip().lower()
+        expected = rule.get("value")
+        actual = _task_context_value(context, source, field)
+        passed = _task_compare_rule(actual, comparator, expected)
+        matches.append(passed)
+        details.append({
+            "source": source,
+            "field": field,
+            "comparator": comparator,
+            "expected": expected,
+            "actual": actual,
+            "passed": passed,
+        })
+    matched = all(matches) if operator != "OR" else any(matches)
+    return {"matched": matched, "details": details, "operator": operator}
+
+
+def _task_resolve_next_step_id(steps: list[dict], current_index: int, step: dict, *, success: bool) -> str:
+    explicit = (step.get("on_success_step_id") if success else step.get("on_failure_step_id")) or ""
+    if explicit:
+        return explicit
+    next_index = current_index + 1
+    return steps[next_index]["id"] if next_index < len(steps) else ""
+
+
+def _task_step_index_map(steps: list[dict]) -> dict[str, int]:
+    return {step["id"]: idx for idx, step in enumerate(steps)}
+
+
+def _task_step_alert_payload(task_row: dict, step: dict, context: dict) -> dict:
+    cfg = _json_load_object(step.get("config"))
+    candidate = context.get("alert_candidate")
+    alert = dict(candidate or {})
+    text = (cfg.get("summary") or context.get("last_text") or task_row.get("last_result_excerpt") or "").strip()
+    alert.setdefault("title", str(cfg.get("title") or task_row.get("name") or step.get("name") or "Task alert")[:160])
+    alert.setdefault("trigger_text", str(cfg.get("trigger_text") or task_row.get("trigger_text") or step.get("name") or "task trigger")[:240])
+    alert.setdefault("summary", text[:1500] or alert["title"])
+    payload = _json_load_object(alert.get("payload_json"), {})
+    payload.setdefault("step_id", step.get("id") or "")
+    payload.setdefault("task_id", task_row.get("id") or "")
+    alert["payload_json"] = json.dumps(payload, ensure_ascii=False)
+    policy = _json_load_object(task_row.get("alert_policy"), _task_default_alert_policy())
+    alert["severity"] = str(cfg.get("severity") or policy.get("severity") or "info")
+    alert["repeat_every_minutes"] = int(cfg.get("repeat_every_minutes") or policy.get("repeat_every_minutes") or 0)
+    repeat_key_template = str(cfg.get("dedupe_key") or policy.get("dedupe_key_template") or "").strip()
+    if repeat_key_template:
+        alert["repeat_key"] = repeat_key_template.format(task_id=task_row.get("id") or "", step_id=step.get("id") or "")
+    return alert
+
+
+def _task_update_run_tracking(run_id: str, **fields: object) -> None:
+    if not fields:
+        return
+    cols = []
+    values = []
+    for key, value in fields.items():
+        cols.append(f"{key}=?")
+        values.append(value)
+    values.append(run_id)
+    try:
+        with _db() as conn:
+            conn.execute(f"UPDATE task_runs SET {', '.join(cols)} WHERE id=?", values)
+    except sqlite3.Error:
+        return
+
+
+def _task_mark_terminal(task_row: dict, run_id: str, *, status: str, text: str = "", error_text: str = "", alert_id: int | None = None, current_step_id: str = "", terminal_reason: str = "", next_run_at: str | None = None) -> dict:
+    finished_at = _iso_now()
+    excerpt = (text or error_text or "No output")[:500]
+    completion_policy = _json_load_object(task_row.get("completion_policy"), _task_default_completion_policy())
+    archive_on_complete = bool(completion_policy.get("archive_on_complete")) and status == "completed"
+    _task_update_run_tracking(
+        run_id,
+        finished_at=finished_at,
+        completed_at=finished_at,
+        status=status,
+        output_excerpt=text[:2000],
+        error_text=error_text[:1500],
+        alert_id=alert_id,
+        current_step_id=current_step_id,
+        terminal_reason=terminal_reason[:240],
+    )
+    try:
+        with _db() as conn:
+            conn.execute(
+                "UPDATE task_definitions SET updated_at=?, last_run_at=?, next_run_at=?, last_status=?, last_result_excerpt=?, archived_at=CASE WHEN ? THEN ? ELSE archived_at END, active=CASE WHEN ? THEN 0 ELSE active END WHERE id=?",
+                (finished_at, finished_at, next_run_at, status, excerpt, 1 if archive_on_complete else 0, finished_at, 1 if archive_on_complete else 0, task_row.get("id")),
+            )
+    except sqlite3.Error:
+        pass
+    _record_task_event(
+        str(task_row.get("id") or ""),
+        "task-run-finished",
+        text[:1500] if status == "completed" else (error_text or text or "Task run finished"),
+        status=status,
+        run_id=run_id,
+        alert_id=alert_id,
+    )
+    return {
+        "ok": status == "completed",
+        "task_id": task_row.get("id"),
+        "run_id": run_id,
+        "status": status,
+        "text": text,
+        "error": error_text,
+        "alert_id": alert_id,
+        "current_step_id": current_step_id,
+        "terminal_reason": terminal_reason,
+    }
+
+
+async def _task_execute_chat_step(task_row: dict, step: dict, context: dict) -> dict:
+    prompt = str(_json_load_object(step.get("config")).get("prompt") or task_row.get("executor_prompt") or task_row.get("planner_prompt") or "").strip()
+    if not prompt:
+        return {"ok": False, "error": "chat prompt required", "text": ""}
+    return await _chat_one("c9-jokes-task", prompt, _urls()["c1"], chat_mode="deep", work_mode="work")
+
+
+def _task_launch_url_for_step(task_row: dict, step: dict, run_id: str) -> str:
+    config = _json_load_object(step.get("config"))
+    prompt = str(config.get("prompt") or task_row.get("executor_prompt") or task_row.get("planner_prompt") or "").strip()
+    mode = step.get("kind") or task_row.get("mode") or "agent"
+    params = {"step_id": str(step.get("id") or "")}
+    if mode == "agent":
+        params["agent_id"] = str(config.get("agent_id") or "c6-kilocode")
+    return _task_launch_url(mode, prompt, task_id=str(task_row.get("id") or ""), run_id=run_id, extra_params=params)
+
+
+async def _task_resume_workflow(task_row: dict, run_id: str, *, source: str, start_step_id: str = "", parent_run_id: str = "", context: dict | None = None) -> dict:
+    steps = _task_steps_for_task(task_row)
+    step_index = _task_step_index_map(steps)
+    next_run_at = _task_next_run_at(task_row.get("schedule_kind") or "manual", task_row.get("interval_minutes") or 0)
+    if not steps:
+        return _task_mark_terminal(task_row, run_id, status="failed", error_text="No workflow steps configured", terminal_reason="no-steps", next_run_at=next_run_at)
+    context = context or _task_context_from_history(task_row, run_id)
+    idx = 0
+    if start_step_id and start_step_id in step_index:
+        idx = step_index[start_step_id]
+    while idx < len(steps):
+        step = steps[idx]
+        current_step_id = step.get("id") or ""
+        _task_update_run_tracking(run_id, status="running", current_step_id=current_step_id)
+        _record_task_event(str(task_row.get("id") or ""), "step-started", f"{step.get('name') or current_step_id} ({step.get('kind')}) started.", status="running", run_id=run_id)
+        result_id = _task_insert_step_result(str(task_row.get("id") or ""), run_id, step, status="running")
+        cfg = _json_load_object(step.get("config"))
+        kind = step.get("kind")
+        if kind == "trigger":
+            out = {"schedule_kind": cfg.get("schedule_kind") or task_row.get("schedule_kind") or "manual", "interval_minutes": int(cfg.get("interval_minutes") or task_row.get("interval_minutes") or 0), "ts": _iso_now()}
+            _task_finish_step_result(result_id, status="completed", output=out)
+            context["steps"][current_step_id] = out
+            idx += 1
+            continue
+        if kind == "condition":
+            evaluated = _task_evaluate_condition_step(context, step)
+            context["condition_passed"] = bool(evaluated.get("matched"))
+            context["steps"][current_step_id] = evaluated
+            _task_finish_step_result(result_id, status="completed" if evaluated.get("matched") else "skipped", output=evaluated)
+            _record_task_event(str(task_row.get("id") or ""), "condition-evaluated", json.dumps(evaluated, ensure_ascii=False)[:1500], status="completed" if evaluated.get("matched") else "skipped", run_id=run_id)
+            next_step_id = _task_resolve_next_step_id(steps, idx, step, success=bool(evaluated.get("matched")))
+            if not evaluated.get("matched") and not next_step_id:
+                return _task_mark_terminal(task_row, run_id, status="completed", text="Condition was false; workflow finished without alert.", current_step_id=current_step_id, terminal_reason="condition-false", next_run_at=next_run_at)
+            idx = step_index.get(next_step_id, idx + 1) if next_step_id else idx + 1
+            continue
+        if kind == "sandbox":
+            sandbox_result = await _task_execute_sandbox_plan(
+                task_id=str(task_row.get("id") or ""),
+                run_id=run_id,
+                source=source,
+                target=_task_sandbox_target(cfg.get("executor_target") or task_row.get("executor_target") or "c12b"),
+                workspace_dir=_task_sandbox_workspace(cfg.get("workspace_dir"), "c12b"),
+                command=str(cfg.get("command") or task_row.get("executor_prompt") or "").strip(),
+                validation_command=str(cfg.get("validation_command") or task_row.get("validation_command") or "").strip(),
+                test_command=str(cfg.get("test_command") or task_row.get("test_command") or "").strip(),
+                task_name=task_row.get("name") or "Sandbox task",
+                label=step.get("name") or "Sandbox",
+                event_prefix="sandbox",
+                trigger_mode=(task_row.get("trigger_mode") or "json").strip().lower(),
+                trigger_text=(task_row.get("trigger_text") or "").strip(),
+                alert_on_success=False,
+            )
+            out = {
+                "text": sandbox_result.get("text") or "",
+                "ok": bool(sandbox_result.get("ok")),
+                "executor_target": sandbox_result.get("executor_target") or "c12b",
+                "workspace_dir": sandbox_result.get("workspace_dir") or "/workspace",
+                "validation_status": sandbox_result.get("validation_status") or "",
+                "test_status": sandbox_result.get("test_status") or "",
+                "parsed": sandbox_result.get("parsed") or {},
+            }
+            context["steps"][current_step_id] = out
+            context["last_text"] = out["text"]
+            context["alert_candidate"] = sandbox_result.get("alert")
+            _task_finish_step_result(result_id, status="completed" if sandbox_result.get("ok") else "failed", output=out, error_text=(sandbox_result.get("error") or ""))
+            _task_update_run_tracking(
+                run_id,
+                sandbox_session_id=sandbox_result.get("sandbox_session_id") or "",
+                validation_status=sandbox_result.get("validation_status") or "",
+                validation_excerpt=(sandbox_result.get("validation_excerpt") or "")[:1500],
+                test_status=sandbox_result.get("test_status") or "",
+                test_excerpt=(sandbox_result.get("test_excerpt") or "")[:1500],
+                output_excerpt=(sandbox_result.get("text") or "")[:2000],
+                trigger_snapshot_json=json.dumps(context, ensure_ascii=False),
+            )
+            if not sandbox_result.get("ok"):
+                alert_id = _insert_task_alert(str(task_row.get("id") or ""), run_id, sandbox_result.get("alert") or _task_step_alert_payload(task_row, step, context))
+                return _task_mark_terminal(task_row, run_id, status="failed", text=sandbox_result.get("text") or "", error_text=sandbox_result.get("error") or "Sandbox step failed", alert_id=alert_id, current_step_id=current_step_id, terminal_reason="sandbox-failed", next_run_at=next_run_at)
+            idx += 1
+            continue
+        if kind == "chat":
+            chat_result = await _task_execute_chat_step(task_row, step, context)
+            text = (chat_result.get("text") or "").strip()
+            parsed = _task_parse_json_payload(text)
+            out = {"text": text, "parsed": parsed or {}, "ok": bool(chat_result.get("ok") and text)}
+            context["steps"][current_step_id] = out
+            context["last_text"] = text
+            context["alert_candidate"] = _task_alert_from_result(task_row, text)
+            _task_finish_step_result(result_id, status="completed" if out["ok"] else "failed", output=out, error_text=(chat_result.get("error") or ""))
+            _task_update_run_tracking(run_id, output_excerpt=text[:2000], trigger_snapshot_json=json.dumps(context, ensure_ascii=False))
+            if not out["ok"]:
+                return _task_mark_terminal(task_row, run_id, status="failed", text=text, error_text=chat_result.get("error") or "Chat step failed", current_step_id=current_step_id, terminal_reason="chat-failed", next_run_at=next_run_at)
+            idx += 1
+            continue
+        if kind in {"agent", "multi-agent", "multi-agento"}:
+            launch_url = _task_launch_url_for_step(task_row, step, run_id)
+            out = {"launch_url": launch_url, "agent_id": str(cfg.get("agent_id") or "c6-kilocode"), "prompt": str(cfg.get("prompt") or "")}
+            context["steps"][current_step_id] = out
+            launch_text = launch_url
+            if context.get("sandbox_assist"):
+                launch_text = f"Sandbox assist completed. Launch required:\n{launch_url}"
+            _task_finish_step_result(result_id, status="launch-pending", output=out)
+            _task_update_run_tracking(
+                run_id,
+                status="launch-pending",
+                launch_url=launch_url,
+                current_step_id=current_step_id,
+                trigger_snapshot_json=json.dumps(context, ensure_ascii=False),
+            )
+            try:
+                with _db() as conn:
+                    conn.execute(
+                        "UPDATE task_definitions SET updated_at=?, last_run_at=?, next_run_at=?, last_status=?, last_result_excerpt=? WHERE id=?",
+                        (_iso_now(), _iso_now(), next_run_at, "launch-pending", launch_url[:500], task_row.get("id")),
+                    )
+            except sqlite3.Error:
+                pass
+            _record_task_event(str(task_row.get("id") or ""), "agent-launch", f"{step.get('kind')} launched. {launch_url}", status="launch-pending", run_id=run_id)
+            return {
+                "ok": True,
+                "task_id": task_row.get("id"),
+                "run_id": run_id,
+                "status": "launch-pending",
+                "text": launch_text,
+                "launch_url": launch_url,
+                "background_supported": False,
+                "current_step_id": current_step_id,
+            }
+        if kind == "alert":
+            alert = _task_step_alert_payload(task_row, step, context)
+            if context.get("condition_passed") is False and not alert.get("summary"):
+                _task_finish_step_result(result_id, status="skipped", output={"skipped": True})
+                idx += 1
+                continue
+            alert_id = _insert_task_alert(str(task_row.get("id") or ""), run_id, alert)
+            out = {"alert_id": alert_id, "title": alert.get("title") or "", "severity": alert.get("severity") or "info"}
+            context["steps"][current_step_id] = out
+            _task_finish_step_result(result_id, status="completed", output=out)
+            _record_task_event(str(task_row.get("id") or ""), "alert-created", (alert.get("summary") or alert.get("title") or "Alert created")[:1500], status="alert-open", run_id=run_id, alert_id=alert_id)
+            idx += 1
+            continue
+        if kind == "complete":
+            out = {"completed": True, "summary": context.get("last_text") or "Workflow completed"}
+            context["steps"][current_step_id] = out
+            _task_finish_step_result(result_id, status="completed", output=out)
+            latest_alerts = []
+            try:
+                with _db() as conn:
+                    rows = conn.execute("SELECT * FROM task_alerts WHERE run_id=? ORDER BY created_at DESC LIMIT 1", (run_id,)).fetchall()
+                latest_alerts = [_task_alert_to_dict(r) for r in rows]
+            except sqlite3.Error:
+                latest_alerts = []
+            return _task_mark_terminal(task_row, run_id, status="completed", text=context.get("last_text") or "Workflow completed", alert_id=(latest_alerts[0]["id"] if latest_alerts else None), current_step_id=current_step_id, terminal_reason="workflow-complete", next_run_at=next_run_at)
+        _task_finish_step_result(result_id, status="failed", output={}, error_text=f"Unsupported step kind: {kind}")
+        return _task_mark_terminal(task_row, run_id, status="failed", error_text=f"Unsupported step kind: {kind}", current_step_id=current_step_id, terminal_reason="unsupported-step", next_run_at=next_run_at)
+    return _task_mark_terminal(task_row, run_id, status="completed", text=context.get("last_text") or "Workflow completed", current_step_id=steps[-1]["id"], terminal_reason="workflow-complete", next_run_at=next_run_at)
 
 
 def _task_claim(task_id: str, run_id: str, *, source: str, ttl_seconds: int = 900) -> bool:
@@ -2409,16 +3941,24 @@ def _task_release_claim(task_id: str, run_id: str = "") -> None:
 def _task_template_upsert(payload: dict, *, template_key: str = "") -> dict:
     now = _iso_now()
     key = (template_key or payload.get("key") or "").strip() or _slugify(payload.get("name") or "template", prefix="template")
+    mode = (payload.get("mode") or "chat").strip().lower()
+    executor_target = _task_sandbox_target(payload.get("executor_target") or ("c12b" if mode == "sandbox" else ""))
+    sandbox_assist = _task_sandbox_assist_values(payload, mode=mode)
     row_payload = {
         "key": key,
         "name": (payload.get("name") or "").strip(),
         "description": (payload.get("description") or payload.get("notes") or "").strip(),
-        "mode": (payload.get("mode") or "chat").strip().lower(),
+        "mode": mode,
         "schedule_kind": (payload.get("schedule_kind") or "manual").strip().lower(),
         "interval_minutes": max(0, int(payload.get("interval_minutes") or 0)),
         "tabs_required": max(1, min(12, int(payload.get("tabs_required") or 1))),
+        "executor_target": executor_target if mode == "sandbox" else "",
+        "workspace_dir": _task_sandbox_workspace(payload.get("workspace_dir"), executor_target) if mode == "sandbox" else "",
         "planner_prompt": (payload.get("planner_prompt") or "").strip(),
         "executor_prompt": (payload.get("executor_prompt") or "").strip(),
+        "validation_command": (payload.get("validation_command") or "").strip() if mode == "sandbox" else "",
+        "test_command": (payload.get("test_command") or "").strip() if mode == "sandbox" else "",
+        **sandbox_assist,
         "context_handoff": (payload.get("context_handoff") or "").strip(),
         "trigger_mode": (payload.get("trigger_mode") or "json").strip().lower(),
         "trigger_text": (payload.get("trigger_text") or "").strip(),
@@ -2427,28 +3967,40 @@ def _task_template_upsert(payload: dict, *, template_key: str = "") -> dict:
     }
     if not row_payload["name"]:
         return {"ok": False, "error": "template name required"}
+    if row_payload["sandbox_assist"] and not row_payload["sandbox_assist_command"]:
+        return {"ok": False, "error": "sandbox_assist_command required when AIO sandbox assist is enabled"}
     with _db() as conn:
         existing = conn.execute("SELECT key, created_at FROM task_templates WHERE key=?", (key,)).fetchone()
         created_at = existing["created_at"] if existing else now
         if existing:
             conn.execute(
                 "UPDATE task_templates SET updated_at=?, name=?, description=?, mode=?, schedule_kind=?, interval_minutes=?, tabs_required=?, "
-                "planner_prompt=?, executor_prompt=?, context_handoff=?, trigger_mode=?, trigger_text=?, active=?, source=? WHERE key=?",
+                "executor_target=?, workspace_dir=?, planner_prompt=?, executor_prompt=?, validation_command=?, test_command=?, "
+                "sandbox_assist=?, sandbox_assist_target=?, sandbox_assist_workspace_dir=?, sandbox_assist_command=?, "
+                "sandbox_assist_validation_command=?, sandbox_assist_test_command=?, context_handoff=?, trigger_mode=?, trigger_text=?, active=?, source=? WHERE key=?",
                 (
                     now, row_payload["name"], row_payload["description"], row_payload["mode"], row_payload["schedule_kind"],
-                    row_payload["interval_minutes"], row_payload["tabs_required"], row_payload["planner_prompt"],
-                    row_payload["executor_prompt"], row_payload["context_handoff"], row_payload["trigger_mode"],
-                    row_payload["trigger_text"], row_payload["active"], row_payload["source"], key,
+                    row_payload["interval_minutes"], row_payload["tabs_required"], row_payload["executor_target"], row_payload["workspace_dir"],
+                    row_payload["planner_prompt"], row_payload["executor_prompt"], row_payload["validation_command"], row_payload["test_command"],
+                    1 if row_payload["sandbox_assist"] else 0, row_payload["sandbox_assist_target"], row_payload["sandbox_assist_workspace_dir"],
+                    row_payload["sandbox_assist_command"], row_payload["sandbox_assist_validation_command"], row_payload["sandbox_assist_test_command"],
+                    row_payload["context_handoff"], row_payload["trigger_mode"], row_payload["trigger_text"], row_payload["active"],
+                    row_payload["source"], key,
                 ),
             )
         else:
             conn.execute(
                 "INSERT INTO task_templates (key, created_at, updated_at, name, description, mode, schedule_kind, interval_minutes, tabs_required, "
-                "planner_prompt, executor_prompt, context_handoff, trigger_mode, trigger_text, active, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "executor_target, workspace_dir, planner_prompt, executor_prompt, validation_command, test_command, sandbox_assist, "
+                "sandbox_assist_target, sandbox_assist_workspace_dir, sandbox_assist_command, sandbox_assist_validation_command, "
+                "sandbox_assist_test_command, context_handoff, trigger_mode, trigger_text, active, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     key, created_at, now, row_payload["name"], row_payload["description"], row_payload["mode"],
-                    row_payload["schedule_kind"], row_payload["interval_minutes"], row_payload["tabs_required"],
-                    row_payload["planner_prompt"], row_payload["executor_prompt"], row_payload["context_handoff"],
+                    row_payload["schedule_kind"], row_payload["interval_minutes"], row_payload["tabs_required"], row_payload["executor_target"],
+                    row_payload["workspace_dir"], row_payload["planner_prompt"], row_payload["executor_prompt"],
+                    row_payload["validation_command"], row_payload["test_command"], 1 if row_payload["sandbox_assist"] else 0,
+                    row_payload["sandbox_assist_target"], row_payload["sandbox_assist_workspace_dir"], row_payload["sandbox_assist_command"],
+                    row_payload["sandbox_assist_validation_command"], row_payload["sandbox_assist_test_command"], row_payload["context_handoff"],
                     row_payload["trigger_mode"], row_payload["trigger_text"], row_payload["active"], row_payload["source"],
                 ),
             )
@@ -2474,13 +4026,27 @@ async def _execute_task_record(task_id: str, *, source: str = "manual") -> dict:
         if not _task_claim(task_id, run_id, source=source):
             return {"ok": False, "error": "Task is already running", "task_id": task_id}
         created_at = _iso_now()
-        prompt = (task_row.get("executor_prompt") or task_row.get("planner_prompt") or "").strip()
-        next_run_at = _task_next_run_at(task_row.get("schedule_kind") or "manual", task_row.get("interval_minutes") or 0)
+        run_executor_target = (
+            task_row.get("executor_target")
+            or (task_row.get("sandbox_assist_target") if task_row.get("sandbox_assist") else "")
+            or ""
+        )
 
         with _db() as conn:
             conn.execute(
-                "INSERT INTO task_runs (id, task_id, created_at, started_at, source, status, mode) VALUES (?,?,?,?,?,?,?)",
-                (run_id, task_id, created_at, created_at, source, "running", task_row.get("mode") or "chat"),
+                "INSERT INTO task_runs (id, task_id, created_at, started_at, source, status, mode, executor_target, trigger_snapshot_json, parent_run_id) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (
+                    run_id,
+                    task_id,
+                    created_at,
+                    created_at,
+                    source,
+                    "running",
+                    task_row.get("mode") or "chat",
+                    run_executor_target,
+                    json.dumps({"source": source}, ensure_ascii=False),
+                    "",
+                ),
             )
             conn.execute(
                 "UPDATE task_definitions SET updated_at=?, last_status=? WHERE id=?",
@@ -2493,75 +4059,47 @@ async def _execute_task_record(task_id: str, *, source: str = "manual") -> dict:
             status="running",
             run_id=run_id,
         )
-
-        if task_row.get("mode") != "chat":
-            launch_url = _task_launch_url(task_row.get("mode") or "chat", prompt, task_id=task_id, run_id=run_id)
-            finished_at = _iso_now()
-            status = "launch-pending"
-            with _db() as conn:
-                conn.execute(
-                    "UPDATE task_runs SET finished_at=?, status=?, launch_url=?, output_excerpt=? WHERE id=?",
-                    (finished_at, status, launch_url, launch_url, run_id),
+        context = _task_context_from_history(task_row, run_id)
+        if task_row.get("mode") != "sandbox" and task_row.get("sandbox_assist"):
+            assist_result = await _task_execute_sandbox_assist(task_row, task_id=task_id, run_id=run_id, source=source)
+            if assist_result:
+                context["sandbox_assist"] = {
+                    "target": assist_result.get("executor_target") or "c12b",
+                    "workspace_dir": assist_result.get("workspace_dir") or "/workspace",
+                    "text": assist_result.get("text") or "",
+                    "ok": bool(assist_result.get("ok")),
+                }
+                context["last_text"] = assist_result.get("text") or context.get("last_text") or ""
+                _task_update_run_tracking(
+                    run_id,
+                    sandbox_session_id=assist_result.get("sandbox_session_id") or "",
+                    validation_status=assist_result.get("validation_status") or "",
+                    validation_excerpt=(assist_result.get("validation_excerpt") or "")[:1500],
+                    test_status=assist_result.get("test_status") or "",
+                    test_excerpt=(assist_result.get("test_excerpt") or "")[:1500],
+                    output_excerpt=(assist_result.get("text") or "")[:2000],
+                    trigger_snapshot_json=json.dumps(context, ensure_ascii=False),
                 )
-                conn.execute(
-                    "UPDATE task_definitions SET updated_at=?, last_run_at=?, next_run_at=?, last_status=?, last_result_excerpt=? WHERE id=?",
-                    (finished_at, finished_at, next_run_at, status, launch_url[:500], task_id),
-                )
-            _record_task_event(
-                task_id,
-                "task-run-finished",
-                f"Task executor requires the dedicated page. Launch URL: {launch_url}",
-                status=status,
-                run_id=run_id,
-            )
-            return {
-                "ok": True,
-                "task_id": task_id,
-                "run_id": run_id,
-                "status": status,
-                "launch_url": launch_url,
-                "background_supported": False,
-            }
-
-        result = await _chat_one("c9-jokes-task", prompt, _urls()["c1"], chat_mode="deep", work_mode="work")
-        finished_at = _iso_now()
-        text = (result.get("text") or "").strip()
-        error_text = (result.get("error") or "").strip()
-        ok = bool(result.get("ok") and text)
-        alert_id = None
-        if ok:
-            alert = _task_alert_from_result(task_row, text)
-            if alert:
-                alert_id = _insert_task_alert(task_id, run_id, alert)
-        status = "completed" if ok else "failed"
-        excerpt = (text or error_text or "No output")[:500]
-        with _db() as conn:
-            conn.execute(
-                "UPDATE task_runs SET finished_at=?, status=?, output_excerpt=?, error_text=?, alert_id=? WHERE id=?",
-                (finished_at, status, text[:2000], error_text[:1500], alert_id, run_id),
-            )
-            conn.execute(
-                "UPDATE task_definitions SET updated_at=?, last_run_at=?, next_run_at=?, last_status=?, last_result_excerpt=? WHERE id=?",
-                (finished_at, finished_at, next_run_at, status, excerpt, task_id),
-            )
-        _record_task_event(
-            task_id,
-            "task-run-finished",
-            text[:1500] if ok else (error_text or "Task run failed"),
-            status=status,
-            run_id=run_id,
-            alert_id=alert_id,
-        )
-        return {
-            "ok": ok,
-            "task_id": task_id,
-            "run_id": run_id,
-            "status": status,
-            "text": text,
-            "error": error_text,
-            "alert_id": alert_id,
-            "background_supported": True,
-        }
+                if not assist_result.get("ok"):
+                    alert = assist_result.get("alert") or {
+                        "title": f"{task_row.get('name') or 'Task'} sandbox assist failed",
+                        "trigger_text": "sandbox assist failure",
+                        "summary": (assist_result.get("error") or assist_result.get("text") or "Sandbox assist failed")[:1500],
+                        "payload_json": json.dumps({"assistant": "sandbox", "task_id": task_id}, ensure_ascii=False),
+                        "severity": task_row.get("alert_policy", {}).get("severity") or "error",
+                    }
+                    alert_id = _insert_task_alert(task_id, run_id, alert)
+                    return _task_mark_terminal(
+                        task_row,
+                        run_id,
+                        status="failed",
+                        text=assist_result.get("text") or "",
+                        error_text=assist_result.get("error") or "Sandbox assist failed",
+                        alert_id=alert_id,
+                        terminal_reason="sandbox-assist-failed",
+                        next_run_at=_task_next_run_at(task_row.get("schedule_kind") or "manual", task_row.get("interval_minutes") or 0),
+                    )
+        return await _task_resume_workflow(task_row, run_id, source=source, context=context)
     finally:
         _task_release_claim(task_id, run_id if "run_id" in locals() else "")
         async with _get_task_runner_lock():
@@ -2574,7 +4112,7 @@ async def _run_due_tasks_once() -> None:
         with _db() as conn:
             conn.execute("DELETE FROM task_run_claims WHERE expires_at<=?", (now,))
             rows = conn.execute(
-                "SELECT id FROM task_definitions WHERE active=1 AND mode='chat' AND schedule_kind IN ('recurring','continuous') "
+                "SELECT id FROM task_definitions WHERE active=1 AND mode IN ('chat','sandbox') AND schedule_kind IN ('recurring','continuous') "
                 "AND next_run_at IS NOT NULL AND next_run_at<>'' AND next_run_at<=? ORDER BY next_run_at ASC LIMIT 4",
                 (now,),
             ).fetchall()
@@ -2673,6 +4211,9 @@ async def page_task_legacy(request: Request):
 async def page_tasked(request: Request):
     return templates.TemplateResponse(request, "tasked.html", {
         "task_modes": TASK_MODE_OPTIONS,
+        "task_executor_targets": json.dumps(TASK_EXECUTOR_TARGET_OPTIONS, ensure_ascii=False),
+        "task_step_kinds": json.dumps(TASK_WORKFLOW_STEP_KINDS, ensure_ascii=False),
+        "task_agent_targets": json.dumps(TASK_AGENT_TARGET_OPTIONS, ensure_ascii=False),
         "task_templates": json.dumps(_task_templates_payload(), ensure_ascii=False),
     })
 
@@ -2681,7 +4222,18 @@ async def page_tasked(request: Request):
 async def page_alerts(request: Request):
     return templates.TemplateResponse(request, "alerts.html", {
         "task_modes": json.dumps(TASK_MODE_OPTIONS, ensure_ascii=False),
+        "task_executor_targets": json.dumps(TASK_EXECUTOR_TARGET_OPTIONS, ensure_ascii=False),
+        "task_agent_targets": json.dumps(TASK_AGENT_TARGET_OPTIONS, ensure_ascii=False),
         "task_templates": json.dumps(_task_templates_payload(), ensure_ascii=False),
+    })
+
+
+@app.get("/task-completed", response_class=HTMLResponse, name="page_task_completed")
+async def page_task_completed(request: Request):
+    return templates.TemplateResponse(request, "task_completed.html", {
+        "task_modes": json.dumps(TASK_MODE_OPTIONS, ensure_ascii=False),
+        "task_executor_targets": json.dumps(TASK_EXECUTOR_TARGET_OPTIONS, ensure_ascii=False),
+        "task_agent_targets": json.dumps(TASK_AGENT_TARGET_OPTIONS, ensure_ascii=False),
     })
 
 
@@ -2689,6 +4241,9 @@ async def page_alerts(request: Request):
 async def page_piplinetask(request: Request):
     return templates.TemplateResponse(request, "piplinetask.html", {
         "task_modes": json.dumps(TASK_MODE_OPTIONS, ensure_ascii=False),
+        "task_executor_targets": json.dumps(TASK_EXECUTOR_TARGET_OPTIONS, ensure_ascii=False),
+        "task_agent_targets": json.dumps(TASK_AGENT_TARGET_OPTIONS, ensure_ascii=False),
+        "task_step_kinds": json.dumps(TASK_WORKFLOW_STEP_KINDS, ensure_ascii=False),
         "task_templates": json.dumps(_task_templates_payload(), ensure_ascii=False),
     })
 
@@ -2786,6 +4341,8 @@ async def page_agent(
     task_id: str = "",
     task_run_id: str = "",
     source: str = "",
+    agent_id: str = "",
+    step_id: str = "",
 ):
     """AI Agent Workspace — IDE-like agentic task execution via C10 sandbox."""
     return templates.TemplateResponse(request, "agent.html", {
@@ -2796,6 +4353,8 @@ async def page_agent(
             "task_id": task_id,
             "task_run_id": task_run_id,
             "source": source,
+            "agent_id": agent_id,
+            "step_id": step_id,
         },
     })
 
@@ -2874,12 +4433,13 @@ async def api_c3_auth_progress_run():
 
 
 @app.get("/api/tasks", name="api_tasks")
-async def api_tasks():
+async def api_tasks(include_archived: bool = False):
     try:
         with _db() as conn:
-            rows = conn.execute(
-                "SELECT * FROM task_definitions ORDER BY created_at DESC"
-            ).fetchall()
+            if include_archived:
+                rows = conn.execute("SELECT * FROM task_definitions ORDER BY created_at DESC").fetchall()
+            else:
+                rows = conn.execute("SELECT * FROM task_definitions WHERE archived_at IS NULL OR archived_at='' ORDER BY created_at DESC").fetchall()
             tasks = []
             for row in rows:
                 task = _task_row_to_dict(row)
@@ -2889,13 +4449,22 @@ async def api_tasks():
                 ).fetchone()
                 latest_alert_row = conn.execute(
                     "SELECT a.*, t.mode AS task_mode, t.template_key AS template_key, t.schedule_kind AS schedule_kind, "
-                    "t.interval_minutes AS interval_minutes, t.tabs_required AS tabs_required, t.active AS active "
+                    "t.interval_minutes AS interval_minutes, t.tabs_required AS tabs_required, t.active AS active, "
+                    "t.executor_target AS executor_target, t.workspace_dir AS workspace_dir, "
+                    "t.sandbox_assist AS sandbox_assist, t.sandbox_assist_target AS sandbox_assist_target, "
+                    "t.sandbox_assist_workspace_dir AS sandbox_assist_workspace_dir "
                     "FROM task_alerts a LEFT JOIN task_definitions t ON t.id=a.task_id "
                     "WHERE a.task_id=? ORDER BY a.created_at DESC LIMIT 1",
                     (task["id"],),
                 ).fetchone()
+                step_rows = conn.execute(
+                    "SELECT * FROM task_workflow_steps WHERE task_id=? AND active=1 ORDER BY position ASC, created_at ASC",
+                    (task["id"],),
+                ).fetchall()
                 latest_run = _task_run_to_dict(latest_run_row) if latest_run_row else None
                 latest_alert = _task_alert_to_dict(latest_alert_row) if latest_alert_row else None
+                task["steps"] = [_task_step_to_dict(step_row) for step_row in step_rows] or _task_build_default_steps(task)
+                task["current_step_id"] = (latest_run or {}).get("current_step_id") or ""
                 task["latest_run"] = latest_run
                 task["latest_alert"] = latest_alert
                 task["trace"] = _task_trace_payload(task, latest_run, latest_alert)
@@ -2988,12 +4557,20 @@ async def api_tasks_upsert(request: Request):
     mode = (body.get("mode") or "chat").strip().lower()
     schedule_kind = (body.get("schedule_kind") or "manual").strip().lower()
     template_key = (body.get("template_key") or "").strip()
+    executor_target = _task_sandbox_target(body.get("executor_target") or ("c12b" if mode == "sandbox" else ""))
+    workspace_dir = _task_sandbox_workspace(body.get("workspace_dir"), executor_target) if mode == "sandbox" else ""
+    sandbox_assist = _task_sandbox_assist_values(body, mode=mode)
     planner_prompt = (body.get("planner_prompt") or "").strip()
     executor_prompt = (body.get("executor_prompt") or "").strip()
+    validation_command = (body.get("validation_command") or "").strip() if mode == "sandbox" else ""
+    test_command = (body.get("test_command") or "").strip() if mode == "sandbox" else ""
     context_handoff = (body.get("context_handoff") or "").strip()
     trigger_mode = (body.get("trigger_mode") or "json").strip().lower()
     trigger_text = (body.get("trigger_text") or "").strip()
     notes = (body.get("notes") or "").strip()
+    steps_payload = body.get("steps") if isinstance(body.get("steps"), list) else []
+    alert_policy = {**_task_default_alert_policy(), **_json_load_object(body.get("alert_policy"))}
+    completion_policy = {**_task_default_completion_policy(), **_json_load_object(body.get("completion_policy"))}
     try:
         interval_minutes = max(0, int(body.get("interval_minutes") or 0))
     except Exception:
@@ -3012,6 +4589,28 @@ async def api_tasks_upsert(request: Request):
         return JSONResponse({"ok": False, "error": "invalid schedule_kind"}, status_code=400)
     if schedule_kind in {"recurring", "continuous"} and interval_minutes <= 0:
         return JSONResponse({"ok": False, "error": "interval_minutes must be > 0 for repeating or live tasks"}, status_code=400)
+    if sandbox_assist["sandbox_assist"] and not sandbox_assist["sandbox_assist_command"]:
+        return JSONResponse({"ok": False, "error": "sandbox_assist_command required when AIO sandbox assist is enabled"}, status_code=400)
+    try:
+        steps_to_save = steps_payload or _task_build_default_steps({
+            "id": task_id,
+            "name": name,
+            "mode": mode,
+            "schedule_kind": schedule_kind,
+            "interval_minutes": interval_minutes,
+            "executor_target": executor_target,
+            "workspace_dir": workspace_dir,
+            "executor_prompt": executor_prompt,
+            "planner_prompt": planner_prompt,
+            "validation_command": validation_command,
+            "test_command": test_command,
+            "trigger_mode": trigger_mode,
+            "trigger_text": trigger_text,
+            **sandbox_assist,
+        })
+        normalized_steps = [_task_normalize_step(task_id, item, idx + 1) for idx, item in enumerate(steps_to_save)]
+    except ValueError as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 
     next_run_at = _task_next_run_at(schedule_kind, interval_minutes) if active else None
     try:
@@ -3020,26 +4619,41 @@ async def api_tasks_upsert(request: Request):
             if existing:
                 conn.execute(
                     "UPDATE task_definitions SET updated_at=?, name=?, mode=?, schedule_kind=?, interval_minutes=?, active=?, tabs_required=?, "
-                    "template_key=?, planner_prompt=?, executor_prompt=?, context_handoff=?, trigger_mode=?, trigger_text=?, notes=?, "
-                    "next_run_at=CASE WHEN ?=1 THEN ? ELSE NULL END WHERE id=?",
+                    "template_key=?, executor_target=?, workspace_dir=?, planner_prompt=?, executor_prompt=?, validation_command=?, test_command=?, "
+                    "sandbox_assist=?, sandbox_assist_target=?, sandbox_assist_workspace_dir=?, sandbox_assist_command=?, "
+                    "sandbox_assist_validation_command=?, sandbox_assist_test_command=?, context_handoff=?, trigger_mode=?, trigger_text=?, notes=?, "
+                    "next_run_at=CASE WHEN ?=1 THEN ? ELSE NULL END, completion_policy_json=?, alert_policy_json=?, workflow_version=?, archived_at=NULL WHERE id=?",
                     (
                         now, name, mode, schedule_kind, interval_minutes, active, tabs_required,
-                        template_key, planner_prompt, executor_prompt, context_handoff, trigger_mode, trigger_text, notes,
-                        active, next_run_at, task_id,
+                        template_key, executor_target if mode == "sandbox" else "", workspace_dir, planner_prompt, executor_prompt,
+                        validation_command, test_command, 1 if sandbox_assist["sandbox_assist"] else 0, sandbox_assist["sandbox_assist_target"],
+                        sandbox_assist["sandbox_assist_workspace_dir"], sandbox_assist["sandbox_assist_command"],
+                        sandbox_assist["sandbox_assist_validation_command"], sandbox_assist["sandbox_assist_test_command"],
+                        context_handoff, trigger_mode, trigger_text, notes,
+                        active, next_run_at, json.dumps(completion_policy, ensure_ascii=False), json.dumps(alert_policy, ensure_ascii=False), 1, task_id,
                     ),
                 )
             else:
                 conn.execute(
                     "INSERT INTO task_definitions (id, created_at, updated_at, name, mode, schedule_kind, interval_minutes, active, tabs_required, "
-                    "template_key, planner_prompt, executor_prompt, context_handoff, trigger_mode, trigger_text, notes, next_run_at) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "template_key, executor_target, workspace_dir, planner_prompt, executor_prompt, validation_command, test_command, "
+                    "sandbox_assist, sandbox_assist_target, sandbox_assist_workspace_dir, sandbox_assist_command, sandbox_assist_validation_command, "
+                    "sandbox_assist_test_command, context_handoff, trigger_mode, trigger_text, notes, next_run_at, completion_policy_json, alert_policy_json, workflow_version) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
                         task_id, now, now, name, mode, schedule_kind, interval_minutes, active, tabs_required,
-                        template_key, planner_prompt, executor_prompt, context_handoff, trigger_mode, trigger_text, notes, next_run_at,
+                        template_key, executor_target if mode == "sandbox" else "", workspace_dir, planner_prompt, executor_prompt,
+                        validation_command, test_command, 1 if sandbox_assist["sandbox_assist"] else 0, sandbox_assist["sandbox_assist_target"],
+                        sandbox_assist["sandbox_assist_workspace_dir"], sandbox_assist["sandbox_assist_command"],
+                        sandbox_assist["sandbox_assist_validation_command"], sandbox_assist["sandbox_assist_test_command"],
+                        context_handoff, trigger_mode, trigger_text, notes, next_run_at,
+                        json.dumps(completion_policy, ensure_ascii=False), json.dumps(alert_policy, ensure_ascii=False), 1,
                     ),
                 )
+            _task_save_steps(conn, task_id, normalized_steps)
             row = conn.execute("SELECT * FROM task_definitions WHERE id=?", (task_id,)).fetchone()
         task = _task_row_to_dict(row)
+        task["steps"] = normalized_steps
         _record_task_event(
             task_id,
             "task-edited" if existing else "task-created",
@@ -3088,14 +4702,23 @@ def _task_state_response(task_id: str) -> dict | None:
             ).fetchone()
             latest_alert_row = conn.execute(
                 "SELECT a.*, t.mode AS task_mode, t.template_key AS template_key, t.schedule_kind AS schedule_kind, "
-                "t.interval_minutes AS interval_minutes, t.tabs_required AS tabs_required, t.active AS active "
+                "t.interval_minutes AS interval_minutes, t.tabs_required AS tabs_required, t.active AS active, "
+                "t.executor_target AS executor_target, t.workspace_dir AS workspace_dir, "
+                "t.sandbox_assist AS sandbox_assist, t.sandbox_assist_target AS sandbox_assist_target, "
+                "t.sandbox_assist_workspace_dir AS sandbox_assist_workspace_dir "
                 "FROM task_alerts a LEFT JOIN task_definitions t ON t.id=a.task_id "
                 "WHERE a.task_id=? ORDER BY a.created_at DESC LIMIT 1",
                 (task_id,),
             ).fetchone()
+            step_rows = conn.execute(
+                "SELECT * FROM task_workflow_steps WHERE task_id=? AND active=1 ORDER BY position ASC, created_at ASC",
+                (task_id,),
+            ).fetchall()
         task = _task_row_to_dict(task_row)
         latest_run = _task_run_to_dict(latest_run_row) if latest_run_row else None
         latest_alert = _task_alert_to_dict(latest_alert_row) if latest_alert_row else None
+        task["steps"] = [_task_step_to_dict(step_row) for step_row in step_rows] or _task_build_default_steps(task)
+        task["current_step_id"] = (latest_run or {}).get("current_step_id") or ""
         task["latest_run"] = latest_run
         task["latest_alert"] = latest_alert
         task["trace"] = _task_trace_payload(task, latest_run, latest_alert)
@@ -3133,19 +4756,46 @@ def _task_clone_definition(task_id: str) -> dict:
     with _db() as conn:
         conn.execute(
             "INSERT INTO task_definitions (id, created_at, updated_at, name, mode, schedule_kind, interval_minutes, active, tabs_required, "
-            "template_key, planner_prompt, executor_prompt, context_handoff, trigger_mode, trigger_text, notes, next_run_at, last_status, last_result_excerpt) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "template_key, executor_target, workspace_dir, planner_prompt, executor_prompt, validation_command, test_command, "
+            "sandbox_assist, sandbox_assist_target, sandbox_assist_workspace_dir, sandbox_assist_command, sandbox_assist_validation_command, "
+            "sandbox_assist_test_command, context_handoff, trigger_mode, trigger_text, notes, next_run_at, last_status, last_result_excerpt, "
+            "completion_policy_json, alert_policy_json, workflow_version) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 cloned_id, now, now, clone_name, source.get("mode") or "chat", source.get("schedule_kind") or "manual",
                 source.get("interval_minutes") or 0, 1 if source.get("active") else 0, source.get("tabs_required") or 1,
-                source.get("template_key") or "", source.get("planner_prompt") or "", source.get("executor_prompt") or "",
-                source.get("context_handoff") or "", source.get("trigger_mode") or "json", source.get("trigger_text") or "",
-                (source.get("notes") or "")[:1200] + f"\n\nCloned from {task_id}.", next_run_at, "idle", "",
+                source.get("template_key") or "", source.get("executor_target") or "", source.get("workspace_dir") or "",
+                source.get("planner_prompt") or "", source.get("executor_prompt") or "", source.get("validation_command") or "",
+                source.get("test_command") or "", 1 if source.get("sandbox_assist") else 0, source.get("sandbox_assist_target") or "",
+                source.get("sandbox_assist_workspace_dir") or "", source.get("sandbox_assist_command") or "",
+                source.get("sandbox_assist_validation_command") or "", source.get("sandbox_assist_test_command") or "",
+                source.get("context_handoff") or "", source.get("trigger_mode") or "json",
+                source.get("trigger_text") or "", (source.get("notes") or "")[:1200] + f"\n\nCloned from {task_id}.",
+                next_run_at, "idle", "", json.dumps(source.get("completion_policy") or _task_default_completion_policy(), ensure_ascii=False),
+                json.dumps(source.get("alert_policy") or _task_default_alert_policy(), ensure_ascii=False), int(source.get("workflow_version") or 1),
             ),
         )
+        _task_save_steps(conn, cloned_id, _task_clone_steps(cloned_id, source.get("steps") or _task_steps_fetch(task_id) or _task_build_default_steps(source)))
     _record_task_event(cloned_id, "task-cloned", f"Task cloned from {task_id}.", status="idle")
     cloned = _task_state_response(cloned_id)
     return {"ok": True, "task": cloned, "source_task_id": task_id}
+
+
+def _task_archive_definition(task_id: str) -> dict:
+    row = _task_fetch_row(task_id)
+    if not row:
+        return {"ok": False, "error": "Task not found", "task_id": task_id}
+    now = _iso_now()
+    try:
+        with _db() as conn:
+            conn.execute(
+                "UPDATE task_definitions SET archived_at=?, active=0, next_run_at=NULL, updated_at=?, last_status=? WHERE id=?",
+                (now, now, "archived", task_id),
+            )
+        _record_task_event(task_id, "task-archived", f"Task {task_id} archived.", status="archived")
+        return {"ok": True, "task": _task_state_response(task_id)}
+    except sqlite3.Error as exc:
+        return {"ok": False, "error": str(exc), "task_id": task_id}
 
 
 def _update_alert_status_record(alert_id: int, *, status: str, snooze_minutes: int = 0) -> tuple[dict, int]:
@@ -3182,6 +4832,63 @@ def _update_alert_status_record(alert_id: int, *, status: str, snooze_minutes: i
         return {"ok": True, "alert": updated_alert}, 200
     except sqlite3.Error as exc:
         return {"ok": False, "error": str(exc)}, 500
+
+
+async def _task_apply_feedback(task_id: str, run_id: str, step_id: str, *, agent_id: str, status: str, signals: dict, summary: str, raw_excerpt: str) -> dict:
+    row = _task_fetch_row(task_id)
+    if not row:
+        return {"ok": False, "error": "Task not found", "task_id": task_id}
+    task_row = _task_row_to_dict(row)
+    steps = _task_steps_for_task(task_row)
+    step_index = _task_step_index_map(steps)
+    if step_id and step_id not in step_index:
+        return {"ok": False, "error": "Step not found", "task_id": task_id, "run_id": run_id}
+    try:
+        with _db() as conn:
+            run_row = conn.execute("SELECT * FROM task_runs WHERE id=? AND task_id=?", (run_id, task_id)).fetchone()
+            if not run_row:
+                return {"ok": False, "error": "Run not found", "task_id": task_id, "run_id": run_id}
+            current_result = conn.execute(
+                "SELECT * FROM task_step_results WHERE run_id=? AND step_id=? ORDER BY started_at DESC LIMIT 1",
+                (run_id, step_id),
+            ).fetchone()
+            feedback_id = "tfb_" + uuid.uuid4().hex[:10]
+            conn.execute(
+                "INSERT INTO task_feedback_events (id, task_id, run_id, step_id, agent_id, feedback_type, status, payload_json, summary, raw_excerpt, created_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    feedback_id, task_id, run_id, step_id, agent_id,
+                    "result", status, json.dumps(signals or {}, ensure_ascii=False),
+                    summary[:1500], raw_excerpt[:3000], _iso_now(),
+                ),
+            )
+            if current_result:
+                conn.execute(
+                    "UPDATE task_step_results SET finished_at=?, status=?, output_json=?, error_text=?, duration_ms=? WHERE id=?",
+                    (
+                        _iso_now(),
+                        status,
+                        json.dumps({"signals": signals or {}, "summary": summary, "raw_excerpt": raw_excerpt}, ensure_ascii=False),
+                        "" if status in {"completed", "ok"} else raw_excerpt[:1500],
+                        _duration_ms(current_result["started_at"], _iso_now()) or 0,
+                        current_result["id"],
+                    ),
+                )
+    except sqlite3.Error as exc:
+        return {"ok": False, "error": str(exc), "task_id": task_id, "run_id": run_id}
+    _record_task_event(task_id, "agent-feedback", f"{agent_id} feedback for {step_id}: {summary or status}", status=status, run_id=run_id)
+    if status in {"waiting-feedback", "launch-pending", "pending"}:
+        _task_update_run_tracking(run_id, status="waiting-feedback", output_excerpt=(summary or raw_excerpt)[:2000])
+        return {"ok": True, "task_id": task_id, "run_id": run_id, "status": "waiting-feedback"}
+    if status in {"failed", "cancelled", "error"}:
+        return _task_mark_terminal(task_row, run_id, status="failed" if status != "cancelled" else "cancelled", text=summary, error_text=raw_excerpt or summary, current_step_id=step_id, terminal_reason=f"feedback-{status}", next_run_at=_task_next_run_at(task_row.get("schedule_kind") or "manual", task_row.get("interval_minutes") or 0))
+    context = _task_context_from_history(task_row, run_id)
+    next_step_id = ""
+    if step_id in step_index:
+        next_step_id = _task_resolve_next_step_id(steps, step_index[step_id], steps[step_index[step_id]], success=True)
+    if not next_step_id:
+        return _task_mark_terminal(task_row, run_id, status="completed", text=summary or "Feedback completed the workflow", current_step_id=step_id, terminal_reason="feedback-complete", next_run_at=_task_next_run_at(task_row.get("schedule_kind") or "manual", task_row.get("interval_minutes") or 0))
+    return await _task_resume_workflow(task_row, run_id, source="feedback", start_step_id=next_step_id, parent_run_id=run_id, context=context)
 
 
 @app.post("/api/tasks/{task_id}/run", name="api_task_run")
@@ -3250,6 +4957,97 @@ async def api_task_clone(task_id: str):
     return JSONResponse(result, status_code=200 if result.get("ok") else 404)
 
 
+@app.post("/api/tasks/{task_id}/redo", name="api_task_redo")
+async def api_task_redo(task_id: str):
+    _record_task_event(task_id, "task-redo-requested", "Completed task requested a redo run.", status="requested")
+    result = await _execute_task_record(task_id, source="redo")
+    status_code = 200 if result.get("ok") else (409 if "already running" in (result.get("error") or "").lower() else 400)
+    return JSONResponse(result, status_code=status_code)
+
+
+@app.post("/api/tasks/{task_id}/archive", name="api_task_archive")
+async def api_task_archive(task_id: str):
+    result = _task_archive_definition(task_id)
+    return JSONResponse(result, status_code=200 if result.get("ok") else 404)
+
+
+@app.post("/api/task-feedback", name="api_task_feedback")
+async def api_task_feedback(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    task_id = (body.get("task_id") or "").strip()
+    run_id = (body.get("run_id") or "").strip()
+    step_id = (body.get("step_id") or "").strip()
+    agent_id = (body.get("agent_id") or "").strip()
+    status = (body.get("status") or "completed").strip().lower()
+    signals = body.get("signals") if isinstance(body.get("signals"), dict) else {}
+    summary = (body.get("summary") or "").strip()
+    raw_excerpt = (body.get("raw_excerpt") or "").strip()
+    if not task_id or not run_id or not step_id or not agent_id:
+        return JSONResponse({"ok": False, "error": "task_id, run_id, step_id, and agent_id are required"}, status_code=400)
+    result = await _task_apply_feedback(task_id, run_id, step_id, agent_id=agent_id, status=status, signals=signals, summary=summary, raw_excerpt=raw_excerpt)
+    return JSONResponse(result, status_code=200 if result.get("ok") else 400)
+
+
+@app.get("/api/task-completed", name="api_task_completed")
+async def api_task_completed(task_id: str = "", status: str = "completed,failed,cancelled", limit: int = 100):
+    statuses = [item.strip().lower() for item in str(status).split(",") if item.strip()]
+    if not statuses:
+        statuses = ["completed", "failed", "cancelled"]
+    limit = max(1, min(200, limit))
+    try:
+        with _db() as conn:
+            params: list[object] = []
+            where = [f"r.status IN ({','.join(['?'] * len(statuses))})"]
+            params.extend(statuses)
+            if task_id:
+                where.append("r.task_id=?")
+                params.append(task_id)
+            rows = conn.execute(
+                "SELECT r.*, t.name AS task_name, t.mode AS task_mode, t.executor_target AS task_executor_target, "
+                "t.archived_at AS task_archived_at, t.alert_policy_json AS task_alert_policy_json "
+                "FROM task_runs r LEFT JOIN task_definitions t ON t.id=r.task_id "
+                f"WHERE {' AND '.join(where)} ORDER BY COALESCE(r.completed_at, r.finished_at, r.created_at) DESC LIMIT ?",
+                (*params, limit),
+            ).fetchall()
+            items = []
+            for row in rows:
+                run = _task_run_to_dict(row)
+                latest_alert_row = conn.execute(
+                    "SELECT a.*, t.mode AS task_mode, t.template_key AS template_key, t.schedule_kind AS schedule_kind, "
+                    "t.interval_minutes AS interval_minutes, t.tabs_required AS tabs_required, t.active AS active, "
+                    "t.executor_target AS executor_target, t.workspace_dir AS workspace_dir, "
+                    "t.sandbox_assist AS sandbox_assist, t.sandbox_assist_target AS sandbox_assist_target, "
+                    "t.sandbox_assist_workspace_dir AS sandbox_assist_workspace_dir "
+                    "FROM task_alerts a LEFT JOIN task_definitions t ON t.id=a.task_id WHERE a.run_id=? ORDER BY a.created_at DESC LIMIT 1",
+                    (run["id"],),
+                ).fetchone()
+                feedback_rows = conn.execute(
+                    "SELECT * FROM task_feedback_events WHERE run_id=? ORDER BY created_at ASC",
+                    (run["id"],),
+                ).fetchall()
+                step_rows = conn.execute(
+                    "SELECT * FROM task_step_results WHERE run_id=? ORDER BY started_at ASC",
+                    (run["id"],),
+                ).fetchall()
+                items.append({
+                    "run": run,
+                    "task_name": row["task_name"] or run.get("task_id") or "Tasked",
+                    "task_mode": row["task_mode"] or run.get("mode") or "chat",
+                    "task_executor_target": _task_sandbox_target(row["task_executor_target"]) if row["task_executor_target"] else "",
+                    "task_archived": bool(row["task_archived_at"]),
+                    "latest_alert": _task_alert_to_dict(latest_alert_row) if latest_alert_row else None,
+                    "feedback": [_task_feedback_to_dict(item) for item in feedback_rows],
+                    "steps": [_task_step_result_to_dict(item) for item in step_rows],
+                    "completed_url": f"/task-completed?task_id={quote(str(run.get('task_id') or ''))}",
+                })
+        return JSONResponse({"ok": True, "items": items})
+    except sqlite3.Error as exc:
+        return JSONResponse({"ok": False, "error": str(exc), "items": []}, status_code=500)
+
+
 @app.get("/api/alerts", name="api_alerts")
 async def api_alerts(limit: int = 100):
     limit = max(1, min(500, limit))
@@ -3263,9 +5061,19 @@ async def api_alerts(limit: int = 100):
                 "t.schedule_kind AS schedule_kind, "
                 "t.interval_minutes AS interval_minutes, "
                 "t.tabs_required AS tabs_required, "
-                "t.active AS active "
+                "t.active AS active, "
+                "t.executor_target AS executor_target, "
+                "t.workspace_dir AS workspace_dir, "
+                "t.sandbox_assist AS sandbox_assist, "
+                "t.sandbox_assist_target AS sandbox_assist_target, "
+                "t.sandbox_assist_workspace_dir AS sandbox_assist_workspace_dir, "
+                "r.status AS run_status, "
+                "r.current_step_id AS current_step_id, "
+                "r.terminal_reason AS terminal_reason, "
+                "r.completed_at AS completed_at "
                 "FROM task_alerts a "
                 "LEFT JOIN task_definitions t ON t.id=a.task_id "
+                "LEFT JOIN task_runs r ON r.id=a.run_id "
                 "ORDER BY a.created_at DESC LIMIT ?",
                 (limit,),
             ).fetchall()
@@ -3290,36 +5098,91 @@ async def api_alert_status(alert_id: int, request: Request):
 
 
 @app.get("/api/task-pipelines", name="api_task_pipelines")
-async def api_task_pipelines(task_id: str = "", limit: int = 100):
+async def api_task_pipelines(task_id: str = "", run_id: str = "", status: str = "", limit: int = 100):
     limit = max(1, min(200, limit))
     try:
         with _db() as conn:
-            if task_id:
-                task_rows = conn.execute(
+            pipelines = []
+            if run_id:
+                run_rows = conn.execute(
+                    "SELECT * FROM task_runs WHERE id=? ORDER BY created_at DESC LIMIT 1",
+                    (run_id,),
+                ).fetchall()
+            elif task_id:
+                query = "SELECT * FROM task_runs WHERE task_id=?"
+                params: list[object] = [task_id]
+                if status:
+                    query += " AND status=?"
+                    params.append(status.strip().lower())
+                query += " ORDER BY created_at DESC LIMIT ?"
+                params.append(limit)
+                run_rows = conn.execute(query, tuple(params)).fetchall()
+            else:
+                query = "SELECT * FROM task_runs"
+                params = []
+                if status:
+                    query += " WHERE status=?"
+                    params.append(status.strip().lower())
+                query += " ORDER BY COALESCE(completed_at, finished_at, created_at) DESC LIMIT ?"
+                params.append(limit)
+                run_rows = conn.execute(query, tuple(params)).fetchall()
+
+            if run_rows:
+                for run_row in run_rows:
+                    task_row = conn.execute(
+                        "SELECT * FROM task_definitions WHERE id=? LIMIT 1",
+                        (run_row["task_id"],),
+                    ).fetchone()
+                    if not task_row:
+                        continue
+                    all_task_runs = conn.execute(
+                        "SELECT * FROM task_runs WHERE task_id=? ORDER BY created_at ASC",
+                        (task_row["id"],),
+                    ).fetchall()
+                    task_alerts = conn.execute(
+                        "SELECT a.*, t.mode AS task_mode, t.template_key AS template_key, t.schedule_kind AS schedule_kind, "
+                        "t.interval_minutes AS interval_minutes, t.tabs_required AS tabs_required, t.active AS active, "
+                        "t.executor_target AS executor_target, t.workspace_dir AS workspace_dir, "
+                        "t.sandbox_assist AS sandbox_assist, t.sandbox_assist_target AS sandbox_assist_target, "
+                        "t.sandbox_assist_workspace_dir AS sandbox_assist_workspace_dir "
+                        "FROM task_alerts a LEFT JOIN task_definitions t ON t.id=a.task_id "
+                        "WHERE a.task_id=? ORDER BY a.created_at ASC",
+                        (task_row["id"],),
+                    ).fetchall()
+                    task_events = conn.execute(
+                        "SELECT * FROM task_events WHERE task_id=? AND (run_id='' OR run_id IS NULL OR run_id=?) ORDER BY created_at ASC",
+                        (task_row["id"], run_row["id"]),
+                    ).fetchall()
+                    step_rows = conn.execute(
+                        "SELECT * FROM task_step_results WHERE run_id=? ORDER BY started_at ASC, id ASC",
+                        (run_row["id"],),
+                    ).fetchall()
+                    feedback_rows = conn.execute(
+                        "SELECT * FROM task_feedback_events WHERE run_id=? ORDER BY created_at ASC",
+                        (run_row["id"],),
+                    ).fetchall()
+                    pipelines.append(_task_pipeline_build(dict(task_row), all_task_runs, task_alerts, task_events, step_rows, feedback_rows, selected_run_id=str(run_row["id"])))
+            elif task_id:
+                task_row = conn.execute(
                     "SELECT * FROM task_definitions WHERE id=? ORDER BY created_at DESC LIMIT 1",
                     (task_id,),
-                ).fetchall()
-            else:
-                task_rows = conn.execute(
-                    "SELECT * FROM task_definitions ORDER BY created_at DESC LIMIT ?",
-                    (limit,),
-                ).fetchall()
-
-            pipelines = []
-            for task_row in task_rows:
-                task_runs = conn.execute(
-                    "SELECT * FROM task_runs WHERE task_id=? ORDER BY created_at ASC",
-                    (task_row["id"],),
-                ).fetchall()
-                task_alerts = conn.execute(
-                    "SELECT * FROM task_alerts WHERE task_id=? ORDER BY created_at ASC",
-                    (task_row["id"],),
-                ).fetchall()
-                task_events = conn.execute(
-                    "SELECT * FROM task_events WHERE task_id=? ORDER BY created_at ASC",
-                    (task_row["id"],),
-                ).fetchall()
-                pipelines.append(_task_pipeline_build(dict(task_row), task_runs, task_alerts, task_events))
+                ).fetchone()
+                if task_row:
+                    task_alerts = conn.execute(
+                        "SELECT a.*, t.mode AS task_mode, t.template_key AS template_key, t.schedule_kind AS schedule_kind, "
+                        "t.interval_minutes AS interval_minutes, t.tabs_required AS tabs_required, t.active AS active, "
+                        "t.executor_target AS executor_target, t.workspace_dir AS workspace_dir, "
+                        "t.sandbox_assist AS sandbox_assist, t.sandbox_assist_target AS sandbox_assist_target, "
+                        "t.sandbox_assist_workspace_dir AS sandbox_assist_workspace_dir "
+                        "FROM task_alerts a LEFT JOIN task_definitions t ON t.id=a.task_id "
+                        "WHERE a.task_id=? ORDER BY a.created_at ASC",
+                        (task_row["id"],),
+                    ).fetchall()
+                    task_events = conn.execute(
+                        "SELECT * FROM task_events WHERE task_id=? ORDER BY created_at ASC",
+                        (task_row["id"],),
+                    ).fetchall()
+                    pipelines.append(_task_pipeline_build(dict(task_row), [], task_alerts, task_events, [], [], selected_run_id=""))
 
         return JSONResponse({"ok": True, "pipelines": pipelines})
     except sqlite3.Error as exc:
@@ -4945,8 +6808,8 @@ async def api_agent_upload_workspace(file: UploadFile = File(...)):
 
 @app.post("/api/sandbox/exec", name="api_sandbox_exec")
 async def api_sandbox_exec(request: Request):
-    """Execute a shell command in C10 (agent) or C11 (multi-agento) sandbox.
-    Body: {command: str, sandbox: "c10"|"c11", timeout?: int, cwd?: str, session_id?: str}
+    """Execute a shell command in C10, C11, or C12b sandbox.
+    Body: {command: str, sandbox: "c10"|"c11"|"c12b", timeout?: int, cwd?: str, session_id?: str}
     Returns: {stdout, stderr, exit_code, timed_out}
     """
     try:
@@ -4962,6 +6825,8 @@ async def api_sandbox_exec(request: Request):
     session_id = body.get("session_id", "")
     if sandbox == "c11":
         result = await _c11_exec(command, timeout=timeout, cwd=cwd, session_id=session_id)
+    elif sandbox == "c12b":
+        result = await _c12b_exec(command, timeout=timeout, cwd=cwd)
     else:
         result = await _c10_exec(command, timeout=timeout, cwd=cwd)
     return JSONResponse(result)
@@ -4970,7 +6835,7 @@ async def api_sandbox_exec(request: Request):
 # ── Container control API (start/stop optional containers) ───────────────────
 
 # Containers that can be toggled on/off to save resources
-_OPTIONAL_CONTAINERS = {"C2_agent-terminal", "C5_claude-code", "C7a_openclaw-gateway", "C7b_openclaw-cli", "C8_hermes-agent"}
+_OPTIONAL_CONTAINERS = {"C2_agent-terminal", "C5_claude-code", "C7a_openclaw-gateway", "C7b_openclaw-cli", "C8_hermes-agent", "C12_sandbox", "C12b_sandbox"}
 # Containers that must stay running
 _CORE_CONTAINERS = {"C1_copilot-api", "C3_browser-auth", "C6_kilocode", "C9_jokes", "C10_sandbox", "C11_sandbox"}
 
@@ -5777,7 +7642,7 @@ async def _ma_role_loop_c11(
 # ── /multi-Agento routes ──────────────────────────────────────────────────────
 
 @app.get("/multi-agento", response_class=HTMLResponse, include_in_schema=False)
-async def page_multi_agento_lower(request: Request, task: str = "", task_id: str = "", task_run_id: str = "", source: str = ""):
+async def page_multi_agento_lower(request: Request, task: str = "", task_id: str = "", task_run_id: str = "", source: str = "", step_id: str = ""):
     from fastapi.responses import RedirectResponse
     return RedirectResponse(url="/multi-Agento" + (f"?{request.url.query}" if request.url.query else ""), status_code=301)
 
@@ -5788,6 +7653,7 @@ async def page_multi_agento(
     task_id: str = "",
     task_run_id: str = "",
     source: str = "",
+    step_id: str = "",
 ):
     """Full-featured multi-agent IDE with C11 session-scoped workspace."""
     return templates.TemplateResponse(request, "multi_agento.html", {
@@ -5799,6 +7665,7 @@ async def page_multi_agento(
             "task_id": task_id,
             "task_run_id": task_run_id,
             "source": source,
+            "step_id": step_id,
         },
     })
 

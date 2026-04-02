@@ -250,6 +250,8 @@ class TestC9PageRoutes:
         assert "Pause" in r.text
         assert "Resume" in r.text
         assert "Restart" in r.text
+        assert "Archive" in r.text
+        assert "Workflow steps" in r.text
         assert "Traceability" in r.text
         assert "Live / continuous monitor" in r.text
 
@@ -257,6 +259,17 @@ class TestC9PageRoutes:
         r = c9_app.get("/tasked?task_id=task_123")
         assert r.status_code == 200
         assert "task_id" in r.text
+
+    def test_tasked_page_supports_sandbox_builder(self, c9_app):
+        r = c9_app.get("/tasked")
+        assert r.status_code == 200
+        assert "Sandbox (C12b)" in r.text
+        assert "Validation command" in r.text
+        assert "Test command" in r.text
+        assert "Enable AIO sandbox assist" in r.text
+        assert "Sandbox Runtime" in r.text
+        assert "C12b Lean Sandbox" in r.text
+        assert "C12 AIO Sandbox" not in r.text
 
     def test_task_legacy_redirects_to_tasked(self, c9_app):
         r = c9_app.get("/task", follow_redirects=False)
@@ -270,8 +283,17 @@ class TestC9PageRoutes:
         assert "/api/alerts" in r.text
         assert "Open Tasked" in r.text
         assert "Open Pipeline" in r.text
+        assert "Open Completed" in r.text
         assert "Tasked alerts auto-refresh every 15 seconds" in r.text
         assert "Snooze 30m" in r.text
+
+    def test_task_completed_page_returns_200(self, c9_app):
+        r = c9_app.get("/task-completed")
+        assert r.status_code == 200
+        assert "TaskCompleted" in r.text
+        assert "/api/task-completed" in r.text
+        assert "Redo" in r.text
+        assert "Clone Task" in r.text
 
     def test_piplinetask_page_returns_200(self, c9_app):
         r = c9_app.get("/piplinetask")
@@ -280,7 +302,8 @@ class TestC9PageRoutes:
         assert "/api/task-pipelines" in r.text
         assert "Open Tasked" in r.text
         assert "Open Alerts" in r.text
-        assert "Live monitor every 15s" in r.text
+        assert "TaskCompleted" in r.text
+        assert "Active runs refresh every 5 seconds" in r.text
 
     def test_agent_page_supports_tasked_launch_context(self, c9_app):
         r = c9_app.get("/agent?task=Build+app&task_id=task_123&task_run_id=trun_456&source=tasked")
@@ -729,9 +752,9 @@ class TestC9Tasks:
         assert r_tasks.status_code == 200
         task_ids = {task["id"] for task in r_tasks.json()["tasks"]}
         assert {
+            "task_example_jhb_nvidia",
             "task_example_gmail_sender",
             "task_example_sharepoint_file",
-            "task_example_outlook_alert",
             "task_example_outlook_sharepoint",
         }.issubset(task_ids)
 
@@ -740,15 +763,16 @@ class TestC9Tasks:
         alerts = r_alerts.json()["alerts"]
         alert_task_ids = {alert["task_id"] for alert in alerts}
         assert {
+            "task_example_jhb_nvidia",
             "task_example_gmail_sender",
             "task_example_sharepoint_file",
-            "task_example_outlook_alert",
             "task_example_outlook_sharepoint",
         }.issubset(alert_task_ids)
 
         r_pipelines = c9_app.get("/api/task-pipelines")
         assert r_pipelines.status_code == 200
         pipelines = {item["task"]["id"]: item for item in r_pipelines.json()["pipelines"]}
+        assert "task_example_jhb_nvidia" in pipelines
         assert "task_example_gmail_sender" in pipelines
         assert "task_example_outlook_sharepoint" in pipelines
         example_pipeline = pipelines["task_example_outlook_sharepoint"]
@@ -859,6 +883,171 @@ class TestC9Tasks:
         runs = r_runs.json()["runs"]
         assert len(runs) == 3
         assert all(run["duration_label"] != "—" for run in runs)
+
+    def test_manual_sandbox_task_run_executes_validate_and_test(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        r_save = c9_app.post("/api/tasks", json={
+            "name": "Sandbox Smoke",
+            "mode": "sandbox",
+            "schedule_kind": "manual",
+            "executor_target": "c12b",
+            "workspace_dir": "/workspace",
+            "trigger_mode": "always",
+            "executor_prompt": "python3 build.py",
+            "validation_command": "python3 -m py_compile build.py",
+            "test_command": "python3 -m pytest -q",
+        })
+        assert r_save.status_code == 200
+        task = r_save.json()["task"]
+        assert task["executor_target"] == "c12b"
+        assert task["background_supported"] is True
+
+        async def fake_c12b_exec(command, timeout=30, cwd=".", session_id=""):
+            if command == "python3 build.py":
+                return {"stdout": "build ok", "stderr": "", "exit_code": 0, "timed_out": False, "session_id": "sess_c12b"}
+            if command == "python3 -m py_compile build.py":
+                return {"stdout": "", "stderr": "", "exit_code": 0, "timed_out": False, "session_id": session_id or "sess_c12b"}
+            if command == "python3 -m pytest -q":
+                return {"stdout": "1 passed", "stderr": "", "exit_code": 0, "timed_out": False, "session_id": session_id or "sess_c12b"}
+            raise AssertionError(f"unexpected command {command}")
+
+        with patch.object(c9_mod, "_c12b_exec", AsyncMock(side_effect=fake_c12b_exec)):
+            r_run = c9_app.post(f"/api/tasks/{task['id']}/run")
+
+        assert r_run.status_code == 200
+        body = r_run.json()
+        assert body["ok"] is True
+        assert body["status"] == "completed"
+        assert body["alert_id"] is not None
+        assert "Sandbox target: C12b Lean Sandbox" in body["text"]
+
+        r_runs = c9_app.get(f"/api/task-runs?task_id={task['id']}")
+        runs = r_runs.json()["runs"]
+        assert runs[0]["executor_target"] == "c12b"
+        assert runs[0]["sandbox_session_id"] == "sess_c12b"
+        assert runs[0]["validation_status"] == "completed"
+        assert runs[0]["test_status"] == "completed"
+
+        r_alerts = c9_app.get("/api/alerts")
+        alerts = r_alerts.json()["alerts"]
+        assert alerts[0]["task_id"] == task["id"]
+        assert alerts[0]["executor_target"] == "c12b"
+        assert alerts[0]["workspace_dir"] == "/workspace"
+
+        r_pipeline = c9_app.get(f"/api/task-pipelines?task_id={task['id']}")
+        pipeline = r_pipeline.json()["pipelines"][0]
+        event_kinds = [event["kind"] for event in pipeline["events"]]
+        assert "sandbox-exec" in event_kinds
+        assert "sandbox-validate" in event_kinds
+        assert "sandbox-test" in event_kinds
+
+    def test_chat_task_can_use_aio_sandbox_assist(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        r_save = c9_app.post("/api/tasks", json={
+            "name": "Chat With Sandbox Assist",
+            "mode": "chat",
+            "schedule_kind": "manual",
+            "trigger_mode": "always",
+            "executor_prompt": "Summarize the prepared data.",
+            "sandbox_assist": True,
+            "sandbox_assist_target": "c12b",
+            "sandbox_assist_workspace_dir": "/workspace",
+            "sandbox_assist_command": "python3 prepare.py",
+            "sandbox_assist_validation_command": "python3 -m py_compile prepare.py",
+            "sandbox_assist_test_command": "python3 -m pytest -q",
+        })
+        assert r_save.status_code == 200
+        task = r_save.json()["task"]
+        assert task["sandbox_assist"] is True
+        assert task["sandbox_assist_target"] == "c12b"
+
+        async def fake_c12b_exec(command, timeout=30, cwd=".", session_id=""):
+            if command == "python3 prepare.py":
+                return {"stdout": "prepared", "stderr": "", "exit_code": 0, "timed_out": False, "session_id": "assist_123"}
+            if command == "python3 -m py_compile prepare.py":
+                return {"stdout": "", "stderr": "", "exit_code": 0, "timed_out": False, "session_id": session_id or "assist_123"}
+            if command == "python3 -m pytest -q":
+                return {"stdout": "2 passed", "stderr": "", "exit_code": 0, "timed_out": False, "session_id": session_id or "assist_123"}
+            raise AssertionError(f"unexpected command {command}")
+
+        with patch.object(c9_mod, "_c12b_exec", AsyncMock(side_effect=fake_c12b_exec)):
+            with patch.object(c9_mod, "_chat_one", AsyncMock(return_value={"ok": True, "text": "Prepared summary complete."})):
+                r_run = c9_app.post(f"/api/tasks/{task['id']}/run")
+
+        assert r_run.status_code == 200
+        body = r_run.json()
+        assert body["ok"] is True
+        assert body["status"] == "completed"
+        assert body["alert_id"] is not None
+
+        r_runs = c9_app.get(f"/api/task-runs?task_id={task['id']}")
+        runs = r_runs.json()["runs"]
+        assert runs[0]["executor_target"] == "c12b"
+        assert runs[0]["sandbox_session_id"] == "assist_123"
+        assert runs[0]["validation_status"] == "completed"
+        assert runs[0]["test_status"] == "completed"
+
+        r_alerts = c9_app.get("/api/alerts")
+        alerts = r_alerts.json()["alerts"]
+        assert alerts[0]["task_id"] == task["id"]
+        assert alerts[0]["sandbox_assist"] is True
+        assert alerts[0]["sandbox_assist_target"] == "c12b"
+
+        r_pipeline = c9_app.get(f"/api/task-pipelines?task_id={task['id']}")
+        pipeline = r_pipeline.json()["pipelines"][0]
+        event_kinds = [event["kind"] for event in pipeline["events"]]
+        assert "sandbox-assist-exec" in event_kinds
+        assert "sandbox-assist-validate" in event_kinds
+        assert "sandbox-assist-test" in event_kinds
+        assert "task-run-finished" in event_kinds
+
+    def test_launch_task_can_use_aio_sandbox_assist_before_launch(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        r_save = c9_app.post("/api/tasks", json={
+            "name": "Agent With Sandbox Assist",
+            "mode": "agent",
+            "schedule_kind": "manual",
+            "executor_prompt": "Implement the feature.",
+            "sandbox_assist": True,
+            "sandbox_assist_target": "c12b",
+            "sandbox_assist_workspace_dir": "/workspace",
+            "sandbox_assist_command": "python3 bootstrap.py",
+            "sandbox_assist_validation_command": "python3 -m py_compile bootstrap.py",
+        })
+        assert r_save.status_code == 200
+        task = r_save.json()["task"]
+
+        async def fake_c12b_exec(command, timeout=30, cwd=".", session_id=""):
+            if command == "python3 bootstrap.py":
+                return {"stdout": "bootstrap ok", "stderr": "", "exit_code": 0, "timed_out": False, "session_id": "assist_launch"}
+            if command == "python3 -m py_compile bootstrap.py":
+                return {"stdout": "", "stderr": "", "exit_code": 0, "timed_out": False, "session_id": session_id or "assist_launch"}
+            raise AssertionError(f"unexpected command {command}")
+
+        with patch.object(c9_mod, "_c12b_exec", AsyncMock(side_effect=fake_c12b_exec)):
+            r_run = c9_app.post(f"/api/tasks/{task['id']}/run")
+
+        assert r_run.status_code == 200
+        body = r_run.json()
+        assert body["ok"] is True
+        assert body["status"] == "launch-pending"
+        assert body["launch_url"].startswith("/agent?task=")
+        assert "assist" in body["text"].lower()
+
+        r_runs = c9_app.get(f"/api/task-runs?task_id={task['id']}")
+        runs = r_runs.json()["runs"]
+        assert runs[0]["executor_target"] == "c12b"
+        assert runs[0]["sandbox_session_id"] == "assist_launch"
+        assert runs[0]["validation_status"] == "completed"
+
+        r_pipeline = c9_app.get(f"/api/task-pipelines?task_id={task['id']}")
+        pipeline = r_pipeline.json()["pipelines"][0]
+        event_kinds = [event["kind"] for event in pipeline["events"]]
+        assert "sandbox-assist-exec" in event_kinds
+        assert "sandbox-assist-validate" in event_kinds
 
     def test_alert_acknowledge_updates_status(self, c9_app):
         import c9_jokes.app as c9_mod
@@ -1124,6 +1313,8 @@ class TestC9ApiStatus:
         async def fake_get(url, timeout=None, **kwargs):
             if url.endswith("/session-health"):
                 return _json_response({"session": "active", "profile": "m365_hub", "chat_mode": "work"})
+            if url.endswith("/v1/docs"):
+                return _json_response({"ok": True})
             if url.endswith("/status"):
                 return _json_response({"status": "ok", "pool_size": 6, "pool_available": 0, "pool_initialized": True})
             if url.endswith("/health"):
@@ -1140,9 +1331,32 @@ class TestC9ApiStatus:
         assert r.status_code == 200
         body = r.json()
         assert body["level"] == "warn"
-        assert body["badge_label"] == "C3 Pool Busy"
         assert body["components"]["c3_pool"]["state"] == "saturated"
-        assert "saturated" in body["summary"].lower()
+        assert "c12b" in body["components"]
+        assert "c12" not in body["components"]
+        assert body["components"]["c12b"]["ok"] is True
+        assert body["components"]["c12b"]["state"] == "ok"
+        assert body["components"]["c3_pool"]["message"]
+
+
+class TestC9SandboxExec:
+    def test_sandbox_exec_supports_c12b(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        with patch.object(
+            c9_mod,
+            "_c12b_exec",
+            AsyncMock(return_value={"stdout": "Python 3.11\nv20.0.0\nuv 0.1", "stderr": "", "exit_code": 0, "timed_out": False}),
+        ):
+            r = c9_app.post(
+                "/api/sandbox/exec",
+                json={"command": "python3 --version && node --version && uv --version", "sandbox": "c12b", "timeout": 10},
+            )
+
+        assert r.status_code == 200
+        body = r.json()
+        assert body["exit_code"] == 0
+        assert "Python 3.11" in body["stdout"]
 
     def test_chat_timeout_is_classified_when_runtime_is_otherwise_healthy(self, c9_app):
         import httpx

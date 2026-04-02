@@ -1028,6 +1028,8 @@
   let _lastPromptAt = 0;
   let _cooldownUntil = 0;
   let _cooldownTimer = null;
+  let _taskFeedbackConnected = false;
+  let _taskFeedbackFinalSent = false;
 
   // ── Elapsed timer state ───────────────────────────────────────────────────
   let _taskStartTime = null;
@@ -1686,6 +1688,10 @@
       appendEntry('step_info', '<span class="stream-label">🔗 Session</span> Resuming session ' + escapeHtml(currentSessId));
     }
     renderTaskContext();
+    if (!_taskFeedbackConnected && currentSessId) {
+      _taskFeedbackConnected = true;
+      postTaskFeedback('waiting-feedback', 'Agent session connected and is still running.', 'Session ' + currentSessId + ' connected.', { session_id: currentSessId, connected: true });
+    }
   }
 
   function handleWebServer(data) {
@@ -1734,12 +1740,28 @@
     refreshFiles();
     refreshHistory();
     renderTaskContext();
+    if (!_taskFeedbackFinalSent) {
+      _taskFeedbackFinalSent = true;
+      postTaskFeedback('completed', summary, summary, {
+        session_id: currentSessId || data.session_id || '',
+        files_created: files,
+        steps_taken: steps,
+        summary: summary,
+      });
+    }
   }
 
   function handleError(data) {
     markRunActivity();
     appendEntry('error', '<span class="stream-label">❌ Error</span> ' + escapeHtml(data.message || 'Unknown error'));
     setIdle(false);
+    if (!_taskFeedbackFinalSent) {
+      _taskFeedbackFinalSent = true;
+      postTaskFeedback('failed', data.message || 'Agent task failed.', data.message || 'Unknown error', {
+        session_id: currentSessId || '',
+        failed: true,
+      });
+    }
   }
 
   function handleTokenEstimate(data) {
@@ -1860,6 +1882,7 @@
     if (!taskContextEl) return;
     const taskId = taskLaunch.task_id || '';
     const runId = taskLaunch.task_run_id || '';
+    const stepId = taskLaunch.step_id || '';
     const source = taskLaunch.source || '';
     const hasContext = !!(taskId || runId || source || currentSessId);
     if (!hasContext) {
@@ -1880,9 +1903,34 @@
       '<strong>Tasked launch context</strong>' +
       '<div class="launch-context-meta">Task ID: ' + escapeHtml(taskId || '—') +
       ' · Run ID: ' + escapeHtml(runId || '—') +
+      ' · Step ID: ' + escapeHtml(stepId || '—') +
       ' · Source: ' + escapeHtml(source || 'manual') +
       ' · Session: ' + escapeHtml(currentSessId || 'pending') + '</div>' +
       (links.length ? '<div class="launch-context-links">' + links.join('') + '</div>' : '');
+  }
+
+  function canPostTaskFeedback() {
+    return !!(taskLaunch.task_id && taskLaunch.task_run_id && taskLaunch.step_id);
+  }
+
+  async function postTaskFeedback(status, summary, rawExcerpt, signals) {
+    if (!canPostTaskFeedback()) return;
+    try {
+      await fetch('/api/task-feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          task_id: taskLaunch.task_id || '',
+          run_id: taskLaunch.task_run_id || '',
+          step_id: taskLaunch.step_id || '',
+          agent_id: (agentSelect && agentSelect.value) || taskLaunch.agent_id || 'c6-kilocode',
+          status: status,
+          summary: summary || '',
+          raw_excerpt: rawExcerpt || '',
+          signals: signals || {},
+        }),
+      });
+    } catch (_) {}
   }
 
   // ── Compare mode ───────────────────────────────────────────────────────────
@@ -2100,6 +2148,8 @@
     }
     hideEmpty();
     currentStep = 0;
+    _taskFeedbackConnected = false;
+    _taskFeedbackFinalSent = false;
     setRunning();
 
     const agentId = agentSelect.value || 'c9-jokes';

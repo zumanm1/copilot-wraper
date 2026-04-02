@@ -3,25 +3,26 @@
 {% block content %}
 <style>
 .alerts-card{background:var(--card, rgba(255,255,255,0.04));border:1px solid var(--border, rgba(255,255,255,0.08));border-radius:14px;padding:1rem}
-.alerts-head{display:flex;justify-content:space-between;align-items:center;gap:1rem;margin-bottom:.8rem}
-.alerts-note{font-size:.82rem;color:var(--muted)}
+.alerts-head{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;margin-bottom:.8rem;flex-wrap:wrap}
+.alerts-note{font-size:.82rem;color:var(--muted);line-height:1.55}
 .alerts-toolbar{display:flex;gap:.65rem;flex-wrap:wrap;align-items:end}
 .alerts-toolbar label{display:grid;gap:.35rem;font-size:.8rem;color:var(--muted)}
-.alerts-toolbar input,.alerts-toolbar select{background:#111;border:1px solid var(--border,#333);border-radius:10px;color:var(--fg,#f5f5f7);padding:.58rem .7rem;font:inherit;min-width:180px}
+.alerts-toolbar input,.alerts-toolbar select{background:#111;border:1px solid var(--border,#333);border-radius:10px;color:var(--fg,#f5f5f7);padding:.58rem .7rem;font:inherit;min-width:170px}
 .alerts-table{width:100%;border-collapse:collapse}
 .alerts-table th,.alerts-table td{padding:.6rem .5rem;border-bottom:1px solid var(--border,#333);text-align:left;vertical-align:top;font-size:.84rem}
-.alerts-badge{display:inline-block;border-radius:999px;padding:.12rem .5rem;border:1px solid var(--border,#333);font-size:.72rem}
+.alerts-badge,.alerts-pill{display:inline-flex;align-items:center;gap:.35rem;border-radius:999px;padding:.12rem .5rem;border:1px solid var(--border,#333);font-size:.72rem;background:#111}
 .alerts-badge.open{color:#ff453a}.alerts-badge.acknowledged{color:#30d158}.alerts-badge.resolved{color:#64d2ff}.alerts-badge.snoozed{color:#ffd60a}
-.alerts-pill{display:inline-flex;align-items:center;gap:.35rem;border:1px solid var(--border,#333);border-radius:999px;padding:.12rem .45rem;font-size:.72rem;color:var(--muted);background:#111}
 .alerts-actions{display:flex;gap:.45rem;flex-wrap:wrap}
-.ack-btn,.open-btn{background:var(--accent,#0a84ff);color:white;border:none;border-radius:9px;padding:.4rem .7rem;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
-.open-btn{background:transparent;border:1px solid var(--border,#333);color:var(--fg,#f5f5f7)}
+.alerts-btn,.alerts-link{background:var(--accent,#0a84ff);color:white;border:none;border-radius:9px;padding:.4rem .7rem;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
+.alerts-link{background:transparent;border:1px solid var(--border,#333);color:var(--fg,#f5f5f7)}
+.alerts-runtime{display:flex;gap:.65rem;flex-wrap:wrap;margin-bottom:.85rem}
+.alerts-meta{font-size:.75rem;color:var(--muted);line-height:1.45}
 </style>
 <section class="alerts-card">
   <div class="alerts-head">
     <div>
       <h2 style="margin:0">Alerts</h2>
-      <div class="alerts-note">Tasked alerts are listed here. Each row links back to the originating Tasked definition so the alert and the builder stay aligned.</div>
+      <div class="alerts-note">Tasked alerts are operational signals. Each row preserves traceability across Tasked, piplinetask, and TaskCompleted with run status, current step, repeat cadence, and executor details.</div>
     </div>
     <div class="alerts-toolbar">
       <label>
@@ -35,52 +36,84 @@
         </select>
       </label>
       <label>
-        Search
-        <input id="alerts-search" placeholder="Task, trigger, summary">
+        Severity
+        <select id="alerts-severity-filter">
+          <option value="">All severities</option>
+          <option value="info">Info</option>
+          <option value="warning">Warning</option>
+          <option value="critical">Critical</option>
+          <option value="error">Error</option>
+        </select>
       </label>
-      <button class="ack-btn" id="alerts-refresh">Refresh</button>
+      <label>
+        Run status
+        <select id="alerts-run-filter">
+          <option value="">All run states</option>
+          <option value="running">Running</option>
+          <option value="launch-pending">Launch pending</option>
+          <option value="waiting-feedback">Waiting feedback</option>
+          <option value="completed">Completed</option>
+          <option value="failed">Failed</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+      </label>
+      <label>
+        Search
+        <input id="alerts-search" placeholder="Task, trigger, summary, run ID">
+      </label>
+      <button class="alerts-btn" id="alerts-refresh">Refresh</button>
     </div>
+  </div>
+  <div class="alerts-runtime" id="alerts-runtime">
+    <span class="alerts-pill">Loading C12b runtime…</span>
   </div>
   <div class="alerts-note" id="alerts-monitor-note" style="margin-bottom:.85rem;">Tasked alerts auto-refresh every 15 seconds while this page stays visible.</div>
   <table class="alerts-table">
     <thead>
-      <tr><th>When</th><th>Tasked</th><th>Mode</th><th>Template</th><th>Schedule</th><th>Tabs</th><th>Trigger</th><th>Summary</th><th>Status</th><th>Actions</th></tr>
+      <tr><th>When</th><th>Tasked</th><th>Run / step</th><th>Severity / repeat</th><th>Trigger</th><th>Summary</th><th>Status</th><th>Actions</th></tr>
     </thead>
-    <tbody id="alerts-body"><tr><td colspan="10" class="alerts-note">Loading…</td></tr></tbody>
+    <tbody id="alerts-body"><tr><td colspan="8" class="alerts-note">Loading…</td></tr></tbody>
   </table>
 </section>
 
 <script>
 (function(){
   var MODE_LABELS = Object.fromEntries(({{ task_modes|safe }} || []).map(function(item){ return [item.id, item.label]; }));
+  var EXECUTOR_TARGET_LABELS = Object.fromEntries(({{ task_executor_targets|safe }} || []).map(function(item){ return [item.id, item.label]; }));
   var TEMPLATE_LABELS = Object.fromEntries(({{ task_templates|safe }} || []).map(function(item){ return [item.key, item.name]; }));
   var body = document.getElementById('alerts-body');
   var noteEl = document.getElementById('alerts-monitor-note');
+  var runtimeEl = document.getElementById('alerts-runtime');
   var statusFilterEl = document.getElementById('alerts-status-filter');
+  var severityFilterEl = document.getElementById('alerts-severity-filter');
+  var runFilterEl = document.getElementById('alerts-run-filter');
   var searchEl = document.getElementById('alerts-search');
   function esc(v){ return String(v == null ? '' : v).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
   function fmtTs(ts){ if(!ts) return '—'; try { return new Date(ts).toLocaleString(); } catch(_) { return ts; } }
   function fmtSchedule(a){
     var kind = (a.schedule_kind || 'manual');
-    var base = 'Manual / one-off';
-    if (kind === 'recurring') base = 'Recurring / ' + (a.interval_minutes || 0) + 'm';
-    if (kind === 'continuous') base = 'Live / every ' + (a.interval_minutes || 0) + 'm';
-    return base + ((a.active && (kind === 'recurring' || kind === 'continuous')) ? ' / active' : '');
+    if (kind === 'recurring') return 'Recurring / ' + (a.interval_minutes || 0) + 'm';
+    if (kind === 'continuous') return 'Live / every ' + (a.interval_minutes || 0) + 'm';
+    return 'Manual / one-off';
   }
+  function targetLabel(id){ return EXECUTOR_TARGET_LABELS[id] || id || '—'; }
   function alertMatches(a) {
     var statusFilter = (statusFilterEl.value || '').trim();
+    var severityFilter = (severityFilterEl.value || '').trim();
+    var runFilter = (runFilterEl.value || '').trim();
     var search = (searchEl.value || '').trim().toLowerCase();
     if (statusFilter && (a.status || 'open') !== statusFilter) return false;
+    if (severityFilter && (a.severity || 'info') !== severityFilter) return false;
+    if (runFilter && (a.run_status || '') !== runFilter) return false;
     if (!search) return true;
     var haystack = [
-      a.task_name, a.trigger_text, a.summary, a.title, a.task_mode, a.template_key, a.trace_id, a.run_id
+      a.task_name, a.trigger_text, a.summary, a.title, a.task_mode, a.template_key, a.trace_id, a.run_id,
+      a.executor_target, a.workspace_dir, a.sandbox_assist_target, a.sandbox_assist_workspace_dir, a.current_step_id, a.repeat_key, a.terminal_reason
     ].join(' ').toLowerCase();
     return haystack.indexOf(search) >= 0;
   }
   async function updateAlertStatus(alertId, status, snoozeMinutes) {
-    var url = status === 'acknowledged'
-      ? '/api/alerts/' + encodeURIComponent(alertId) + '/ack'
-      : '/api/alerts/' + encodeURIComponent(alertId) + '/status';
+    var url = status === 'acknowledged' ? '/api/alerts/' + encodeURIComponent(alertId) + '/ack' : '/api/alerts/' + encodeURIComponent(alertId) + '/status';
     var opts = { method: 'POST' };
     if (status !== 'acknowledged') {
       opts.headers = { 'Content-Type': 'application/json' };
@@ -92,35 +125,34 @@
     return data;
   }
   async function loadAlerts() {
-    var res = await fetch('/api/alerts?limit=200', { cache: 'no-store' });
+    var res = await fetch('/api/alerts?limit=250', { cache: 'no-store' });
     var data = await res.json();
     var rows = (data.alerts || []).filter(alertMatches);
     if (noteEl) noteEl.textContent = 'Tasked alerts auto-refresh every 15 seconds while this page stays visible. Last refresh: ' + new Date().toLocaleTimeString() + '.';
     if (!rows.length) {
-      body.innerHTML = '<tr><td colspan="10" class="alerts-note">No Tasked alerts yet.</td></tr>';
+      body.innerHTML = '<tr><td colspan="8" class="alerts-note">No Tasked alerts yet.</td></tr>';
       return;
     }
     body.innerHTML = rows.map(function(a) {
       var modeLabel = MODE_LABELS[a.task_mode] || a.task_mode || '—';
       var templateLabel = TEMPLATE_LABELS[a.template_key] || a.template_key || 'custom';
+      var cadence = (a.repeat_key || a.interval_minutes) ? (fmtSchedule(a) + ' · repeat key: ' + (a.repeat_key || '—')) : fmtSchedule(a);
       return '<tr data-id="' + esc(a.id) + '">' +
         '<td>' + esc(fmtTs(a.created_at)) + '</td>' +
-        '<td><strong>' + esc(a.task_name || a.task_id || 'Tasked') + '</strong><div class="alerts-note">' + esc(a.title || '') + '</div><div class="alerts-note">Trace: ' + esc(a.trace_id || a.task_id || '—') + ' · Run: ' + esc(a.run_id || '—') + ' · Alert: ' + esc(a.id || '—') + '</div></td>' +
-        '<td><span class="alerts-pill">' + esc(modeLabel) + '</span></td>' +
-        '<td>' + esc(templateLabel) + '</td>' +
-        '<td>' + esc(fmtSchedule(a)) + '</td>' +
-        '<td>' + esc(a.tabs_required || 0) + '</td>' +
+        '<td><strong>' + esc(a.task_name || a.task_id || 'Tasked') + '</strong><div class="alerts-meta">' + esc(modeLabel) + ' · ' + esc(templateLabel) + '</div><div class="alerts-meta">Trace: ' + esc(a.trace_id || a.task_id || '—') + '</div><div class="alerts-meta">Executor: ' + esc(targetLabel(a.executor_target)) + ' · Workspace: ' + esc(a.workspace_dir || '—') + '</div></td>' +
+        '<td><span class="alerts-pill">' + esc(a.run_status || '—') + '</span><div class="alerts-meta">Run: ' + esc(a.run_id || '—') + '</div><div class="alerts-meta">Current step: ' + esc(a.current_step_id || '—') + '</div><div class="alerts-meta">Terminal: ' + esc(a.terminal_reason || '—') + '</div></td>' +
+        '<td><span class="alerts-pill">' + esc(a.severity || 'info') + '</span><div class="alerts-meta">' + esc(cadence) + '</div><div class="alerts-meta">Assist: ' + esc(a.sandbox_assist ? targetLabel(a.sandbox_assist_target) : 'disabled') + '</div></td>' +
         '<td>' + esc(a.trigger_text || '—') + '</td>' +
         '<td>' + esc((a.summary || '').slice(0, 240)) + '</td>' +
-        '<td><span class="alerts-badge ' + esc(a.status || 'open') + '">' + esc(a.status || 'open') + '</span>' +
-          '<div class="alerts-note">' + esc(a.snoozed_until ? ('Snoozed until ' + fmtTs(a.snoozed_until)) : (a.resolved_at ? ('Resolved ' + fmtTs(a.resolved_at)) : '')) + '</div></td>' +
+        '<td><span class="alerts-badge ' + esc(a.status || 'open') + '">' + esc(a.status || 'open') + '</span><div class="alerts-meta">' + esc(a.snoozed_until ? ('Snoozed until ' + fmtTs(a.snoozed_until)) : (a.resolved_at ? ('Resolved ' + fmtTs(a.resolved_at)) : '')) + '</div></td>' +
         '<td class="alerts-actions">' +
-          '<a class="open-btn" href="' + esc(a.task_url || '/tasked') + '">Open Tasked</a>' +
-          '<a class="open-btn" href="' + esc(a.pipeline_url || '/piplinetask') + '">Open Pipeline</a>' +
-          ((a.status || 'open') === 'open' ? '<button class="ack-btn" data-action="acknowledged" data-id="' + esc(a.id) + '">Acknowledge</button>' : '') +
-          ((a.status || 'open') !== 'resolved' ? '<button class="ack-btn" data-action="resolved" data-id="' + esc(a.id) + '">Resolve</button>' : '') +
-          ((a.status || 'open') === 'open' ? '<button class="ack-btn" data-action="snoozed" data-id="' + esc(a.id) + '" data-snooze="30">Snooze 30m</button>' : '') +
-          ((a.status || 'open') !== 'open' ? '<button class="ack-btn" data-action="open" data-id="' + esc(a.id) + '">Reopen</button>' : '') +
+          '<a class="alerts-link" href="' + esc(a.task_url || '/tasked') + '">Open Tasked</a>' +
+          '<a class="alerts-link" href="' + esc(a.pipeline_url || '/piplinetask') + '">Open Pipeline</a>' +
+          ((a.run_status || '') && ['completed','failed','cancelled'].indexOf(a.run_status) >= 0 ? '<a class="alerts-link" href="' + esc(a.completed_url || '/task-completed') + '">Open Completed</a>' : '') +
+          ((a.status || 'open') === 'open' ? '<button class="alerts-btn" data-action="acknowledged" data-id="' + esc(a.id) + '">Acknowledge</button>' : '') +
+          ((a.status || 'open') !== 'resolved' ? '<button class="alerts-btn" data-action="resolved" data-id="' + esc(a.id) + '">Resolve</button>' : '') +
+          ((a.status || 'open') === 'open' ? '<button class="alerts-btn" data-action="snoozed" data-id="' + esc(a.id) + '" data-snooze="30">Snooze 30m</button>' : '') +
+          ((a.status || 'open') !== 'open' ? '<button class="alerts-btn" data-action="open" data-id="' + esc(a.id) + '">Reopen</button>' : '') +
         '</td>' +
       '</tr>';
     }).join('');
@@ -135,14 +167,22 @@
       });
     });
   }
+  async function loadRuntime() {
+    var res = await fetch('/api/runtime-status?force=true', { cache: 'no-store' });
+    var data = await res.json();
+    var item = (data.components || {}).c12b || {};
+    runtimeEl.innerHTML = '<span class="alerts-pill">C12b: ' + esc(item.state || 'unknown') + ' · ' + esc(item.message || 'Unavailable') + '</span>';
+  }
   document.getElementById('alerts-refresh').addEventListener('click', loadAlerts);
-  statusFilterEl.addEventListener('change', loadAlerts);
+  [statusFilterEl, severityFilterEl, runFilterEl].forEach(function(el){ el.addEventListener('change', loadAlerts); });
   searchEl.addEventListener('input', function(){
     clearTimeout(searchEl._debounce);
     searchEl._debounce = setTimeout(function(){ loadAlerts().catch(function(){}); }, 180);
   });
-  loadAlerts().catch(function(){ body.innerHTML = '<tr><td colspan="10" class="alerts-note">Failed to load Tasked alerts.</td></tr>'; });
+  loadAlerts().catch(function(){ body.innerHTML = '<tr><td colspan="8" class="alerts-note">Failed to load Tasked alerts.</td></tr>'; });
+  loadRuntime().catch(function(){ runtimeEl.innerHTML = '<span class="alerts-pill">Sandbox runtime unavailable.</span>'; });
   setInterval(function(){ if (!document.hidden) loadAlerts().catch(function(){}); }, 15000);
+  setInterval(function(){ if (!document.hidden) loadRuntime().catch(function(){}); }, 30000);
 })();
 </script>
 {% endblock %}

@@ -243,12 +243,19 @@
   var TOKEN_DANGER = 30000;  // show red danger + auto-summarize prompt
   var TOKEN_AUTO_COMPRESS = 38000; // trigger background summarize
   var STORAGE_SESSION_KEY = 'chatSessionId';
+  var STREAM_SETTLE_MS = 20000;
+  var PROMPT_GAP_MS = 25000;
+  var LONG_STREAM_MAX_MS = 180000;
 
   /* ── State ────────────────────────────────────────────────────────────── */
   var chatHistory = [];   // [{role:'user'|'assistant', content:string}]
   var currentSessionId = localStorage.getItem(STORAGE_SESSION_KEY) || '';
   var busy = false;
   var pendingAttachments = [];
+  var lastStreamActivityAt = 0;
+  var lastPromptStartedAt = 0;
+  var cooldownUntil = 0;
+  var cooldownTimer = null;
 
   /* ── DOM refs ─────────────────────────────────────────────────────────── */
   var chatWindow   = document.getElementById('chat-window');
@@ -515,6 +522,43 @@
     }
   }
 
+  function markStreamActivity() {
+    lastStreamActivityAt = Date.now();
+  }
+
+  function applySendState() {
+    if (cooldownTimer) {
+      clearTimeout(cooldownTimer);
+      cooldownTimer = null;
+    }
+    if (busy) {
+      sendBtn.disabled = true;
+      return;
+    }
+    var remain = Math.max(0, cooldownUntil - Date.now());
+    if (remain > 0) {
+      sendBtn.disabled = true;
+      sendBtn.textContent = 'Wait ' + Math.ceil(remain / 1000) + 's';
+      cooldownTimer = setTimeout(applySendState, Math.min(remain, 1000));
+      return;
+    }
+    sendBtn.disabled = false;
+    sendBtn.textContent = 'Send';
+  }
+
+  function guardPromptStart() {
+    var remain = Math.max(0, cooldownUntil - Date.now());
+    if (busy) {
+      appendBubble('error', 'Previous streaming output is still active. Wait for it to settle before sending another prompt.', null, false);
+      return false;
+    }
+    if (remain > 0) {
+      appendBubble('error', 'Previous response is still settling. Wait ' + Math.ceil(remain / 1000) + 's before sending the next prompt.', null, false);
+      return false;
+    }
+    return true;
+  }
+
   /* ── Session management ──────────────────────────────────────────────── */
   function startNewSession() {
     currentSessionId = '';
@@ -666,10 +710,12 @@
 
   /* ── Send ────────────────────────────────────────────────────────────── */
   async function send(promptText) {
-    if (busy || !promptText) return;
+    if (!promptText || !guardPromptStart()) return;
     busy = true;
-    sendBtn.disabled = true;
     sendBtn.textContent = 'Sending…';
+    lastPromptStartedAt = Date.now();
+    markStreamActivity();
+    applySendState();
     var agent_id = agentEl.value;
 
     // Add user turn to history
@@ -728,11 +774,18 @@
       var streamDone = null;
       var streamError = '';
       await readChatStream(res, function(event) {
+        markStreamActivity();
         if (event.type === 'token') {
           fullText += event.text || '';
           loader.className = 'bubble assistant';
           loaderBody.innerHTML = fullText ? esc(fullText).replace(/\n/g, '<br>') : 'Thinking…';
           chatWindow.scrollTop = chatWindow.scrollHeight;
+        } else if (event.type === 'status') {
+          if (!fullText) {
+            loader.className = 'bubble assistant';
+            loaderBody.innerHTML = esc(event.text || 'Working on the response... Please wait.');
+            chatWindow.scrollTop = chatWindow.scrollHeight;
+          }
         } else if (event.type === 'done') {
           streamDone = event;
           if (event.text && !fullText) fullText = event.text;
@@ -773,9 +826,10 @@
       appendBubble('error', e.message || 'Streaming failed',
         'HTTP ' + httpStatus + ' · ' + elapsed + 's', false);
     }
+    cooldownUntil = Math.max(lastPromptStartedAt + PROMPT_GAP_MS, lastStreamActivityAt + STREAM_SETTLE_MS);
+    if ((Date.now() - lastPromptStartedAt) > LONG_STREAM_MAX_MS) cooldownUntil = Math.max(cooldownUntil, Date.now() + 1000);
     busy = false;
-    sendBtn.disabled = false;
-    sendBtn.textContent = 'Send';
+    applySendState();
     promptEl.focus();
   }
 
@@ -816,6 +870,11 @@
   });
 
   /* ── On load: offer to resume last session ───────────────────────────── */
+  (function applyUrlTaskPrefill() {
+    var urlTask = new URLSearchParams(window.location.search).get('task');
+    if (urlTask && !promptEl.value.trim()) promptEl.value = urlTask;
+  })();
+
   (function checkLastSession() {
     if (!currentSessionId) return;
     fetch('/api/chat/session/' + encodeURIComponent(currentSessionId))
