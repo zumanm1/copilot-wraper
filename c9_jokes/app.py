@@ -277,6 +277,32 @@ TASK_EXAMPLE_SPECS = [
     },
 ]
 
+TASKED_AUTHORING_EXAMPLES = [
+    {
+        "id": "existing-template-weather",
+        "label": "Existing template: Dublin weather",
+        "strategy": "existing-template",
+        "prompt": (
+            "Every 10 minutes, daily, check the weather in Dublin, Ireland. "
+            "If the temperature is above 10C, create an alert visible on the Alerts page. "
+            "Use 2 tabs and copy the weather result from one tab into the other."
+        ),
+    },
+    {
+        "id": "freehand-sandbox-jhb-nvda",
+        "label": "Free-hand: Johannesburg + Nvidia via C12b",
+        "strategy": "freehand",
+        "prompt": (
+            "Every 12 minutes from now, use C12b to run Python code that checks the weather in Johannesburg and Nvidia market cap. "
+            "If Johannesburg is above 14 degrees C and Nvidia market cap is above 2 trillion USD, "
+            "raise a warning alert every 5 minutes while true, then complete the run."
+        ),
+    },
+]
+
+TASKED_AUTHORING_PROMPT_PATH = BASE_DIR / "prompts" / "tasked_authoring.md"
+TASKED_AUTHOR_ENABLE_LLM = str(os.environ.get("C9_TASKED_AUTHOR_ENABLE_LLM", "")).strip().lower() in {"1", "true", "yes", "on"}
+
 
 # ── Shared async HTTP client ─────────────────────────────────────────────────
 _http: httpx.AsyncClient | None = None
@@ -2290,6 +2316,16 @@ def _task_save_steps(conn: sqlite3.Connection, task_id: str, steps: list[dict]) 
     return normalized
 
 
+def _task_rewrite_step_refs(value, mapping: dict[str, str]):
+    if isinstance(value, dict):
+        return {k: _task_rewrite_step_refs(v, mapping) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_task_rewrite_step_refs(item, mapping) for item in value]
+    if isinstance(value, str):
+        return mapping.get(value, value)
+    return value
+
+
 def _task_clone_steps(task_id: str, steps: list[dict]) -> list[dict]:
     normalized = [_task_normalize_step(task_id, step, idx + 1) for idx, step in enumerate(steps) if step]
     mapping: dict[str, str] = {}
@@ -2304,6 +2340,9 @@ def _task_clone_steps(task_id: str, steps: list[dict]) -> list[dict]:
         on_failure = step.get("on_failure_step_id") or ""
         step["on_success_step_id"] = mapping.get(on_success, "")
         step["on_failure_step_id"] = mapping.get(on_failure, "")
+        rewritten_cfg = _task_rewrite_step_refs(step.get("config") or {}, mapping)
+        step["config"] = rewritten_cfg
+        step["config_json"] = json.dumps(rewritten_cfg, ensure_ascii=False)
     return cloned
 
 
@@ -3220,6 +3259,711 @@ def _task_parse_json_payload(text: str) -> dict | None:
         return parsed if isinstance(parsed, dict) else None
     except Exception:
         return None
+
+
+def _tasked_author_examples_payload() -> list[dict]:
+    return [dict(item) for item in TASKED_AUTHORING_EXAMPLES]
+
+
+def _tasked_authoring_prompt_markdown() -> str:
+    try:
+        return TASKED_AUTHORING_PROMPT_PATH.read_text(encoding="utf-8")
+    except Exception:
+        return (
+            "Translate a plain-English task request into a Tasked JSON draft. "
+            "Prefer an existing template when the request closely matches one. "
+            "Otherwise return a free-hand draft with a linear steps array. "
+            "Use C12b as the only sandbox target. Return JSON only."
+        )
+
+
+def _tasked_author_template_catalog() -> list[dict]:
+    catalog: list[dict] = []
+    for item in _task_templates_payload():
+        catalog.append({
+            "key": item.get("key") or "",
+            "name": item.get("name") or "",
+            "description": item.get("description") or "",
+            "mode": item.get("mode") or "chat",
+            "schedule_kind": item.get("schedule_kind") or "manual",
+            "interval_minutes": int(item.get("interval_minutes") or 0),
+            "tabs_required": int(item.get("tabs_required") or 1),
+            "trigger_mode": item.get("trigger_mode") or "json",
+            "trigger_text": item.get("trigger_text") or "",
+        })
+    return catalog
+
+
+def _tasked_author_find_template_by_key(template_key: str, templates: list[dict] | None = None) -> dict | None:
+    key = (template_key or "").strip()
+    if not key:
+        return None
+    templates = templates or _task_templates_payload()
+    return next((item for item in templates if item.get("key") == key), None)
+
+
+def _tasked_author_parse_word_number(token: str) -> int | None:
+    words = {
+        "one": 1,
+        "two": 2,
+        "three": 3,
+        "four": 4,
+        "five": 5,
+        "six": 6,
+        "seven": 7,
+        "eight": 8,
+        "nine": 9,
+        "ten": 10,
+        "eleven": 11,
+        "twelve": 12,
+    }
+    cleaned = (token or "").strip().lower()
+    if cleaned.isdigit():
+        return int(cleaned)
+    return words.get(cleaned)
+
+
+def _tasked_author_guess_interval_minutes(prompt: str) -> int:
+    text = (prompt or "").strip().lower()
+    match = re.search(r"\bevery\s+(\d+)\s+minutes?\b", text)
+    if match:
+        return max(0, int(match.group(1)))
+    match = re.search(r"\bevery\s+(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+minutes?\b", text)
+    if match:
+        return max(0, _tasked_author_parse_word_number(match.group(1)) or 0)
+    return 0
+
+
+def _tasked_author_guess_tabs_required(prompt: str) -> int:
+    text = (prompt or "").strip().lower()
+    match = re.search(r"\b(\d+)\s+tabs?\b", text)
+    if match:
+        return max(1, min(12, int(match.group(1))))
+    match = re.search(r"\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+tabs?\b", text)
+    if match:
+        return max(1, min(12, _tasked_author_parse_word_number(match.group(1)) or 1))
+    if "tab to tab" in text or "two tabs" in text or "2 tabs" in text:
+        return 2
+    return 1
+
+
+def _tasked_author_guess_schedule_kind(prompt: str, interval_minutes: int) -> str:
+    text = (prompt or "").strip().lower()
+    if any(phrase in text for phrase in ("continuous", "live monitor", "live / continuous", "watch continuously")):
+        return "continuous"
+    if interval_minutes > 0 or "every " in text:
+        return "recurring"
+    return "manual"
+
+
+def _tasked_author_guess_mode(prompt: str, mode_hint: str = "") -> str:
+    hint = (mode_hint or "").strip().lower()
+    if hint in {item["id"] for item in TASK_MODE_OPTIONS}:
+        return hint
+    text = (prompt or "").strip().lower()
+    if "multi-agento" in text:
+        return "multi-agento"
+    if "multi-agent" in text or "multi agent" in text:
+        return "multi-agent"
+    if re.search(r"\bagent\b", text):
+        return "agent"
+    if any(term in text for term in ("c12b", "sandbox", "python", "pytest", "node", "npm", "javascript", "write code", "run code", "shell command")):
+        return "sandbox"
+    return "chat"
+
+
+def _tasked_author_guess_name(prompt: str) -> str:
+    cleaned = re.sub(r"\s+", " ", (prompt or "").strip())
+    if not cleaned:
+        return "Generated Tasked"
+    cleaned = re.sub(r"^\s*every\s+\d+\s+minutes?,?\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = cleaned[:88].strip(" .,:;")
+    if not cleaned:
+        return "Generated Tasked"
+    return cleaned[0].upper() + cleaned[1:]
+
+
+def _tasked_author_guess_temperature_threshold(prompt: str) -> float | None:
+    text = (prompt or "").lower()
+    if "weather" not in text and "temperature" not in text:
+        return None
+    match = re.search(r"(?:temperature|weather).*?\babove\s+(\d+(?:\.\d+)?)", text)
+    if match:
+        return float(match.group(1))
+    match = re.search(r"\babove\s+(\d+(?:\.\d+)?)\s*(?:degrees?|c|celsius)\b", text)
+    if match:
+        return float(match.group(1))
+    return None
+
+
+def _tasked_author_guess_market_cap_threshold(prompt: str) -> float | None:
+    text = (prompt or "").lower()
+    if "market cap" not in text:
+        return None
+    match = re.search(r"\babove\s+(\d+(?:\.\d+)?)\s*(trillion|billion|million)\b", text)
+    if not match:
+        return None
+    value = float(match.group(1))
+    unit = match.group(2)
+    multiplier = {
+        "million": 1_000_000,
+        "billion": 1_000_000_000,
+        "trillion": 1_000_000_000_000,
+    }.get(unit, 1)
+    return value * multiplier
+
+
+def _tasked_author_match_template(prompt: str, templates: list[dict] | None = None, preferred_key: str = "") -> dict | None:
+    templates = templates or _task_templates_payload()
+    preferred = _tasked_author_find_template_by_key(preferred_key, templates)
+    if preferred:
+        return preferred
+    text = (prompt or "").strip().lower()
+    if not text:
+        return None
+    if "johannesburg" in text or "nvidia" in text or "market cap" in text:
+        return None
+    if "dublin" in text and ("weather" in text or "temperature" in text):
+        return _tasked_author_find_template_by_key("weather-dublin", templates)
+    if "sharepoint" in text and any(term in text for term in ("email", "outlook", "attachment", "document link", "linked file")):
+        return _tasked_author_find_template_by_key("outlook-sharepoint-linked", templates)
+    if "alerts@company.com" in text or ("m365 outlook" in text and "email" in text):
+        return _tasked_author_find_template_by_key("m365-outlook-alert", templates)
+    if "sampelexample@example.com" in text and any(term in text for term in ("gmail", "outlook", "email")):
+        return _tasked_author_find_template_by_key("gmail-sender", templates)
+    if "sharepoint" in text and "file" in text:
+        return _tasked_author_find_template_by_key("sharepoint-new-file", templates)
+    if any(term in text for term in ("sandbox", "pytest", "py_compile", "python code")):
+        return _tasked_author_find_template_by_key("sandbox-python-validate", templates)
+    return None
+
+
+def _tasked_author_template_seed_draft(template: dict) -> dict:
+    mode = (template.get("mode") or "chat").strip().lower()
+    draft = {
+        "id": "",
+        "template_key": template.get("key") or "",
+        "name": template.get("name") or "Generated Tasked",
+        "mode": mode,
+        "schedule_kind": template.get("schedule_kind") or "manual",
+        "interval_minutes": int(template.get("interval_minutes") or 0),
+        "tabs_required": int(template.get("tabs_required") or 1),
+        "active": True,
+        "planner_prompt": template.get("planner_prompt") or "",
+        "executor_prompt": template.get("executor_prompt") or "",
+        "executor_target": "c12b" if mode == "sandbox" else "",
+        "workspace_dir": _task_sandbox_workspace(template.get("workspace_dir"), "c12b") if mode == "sandbox" else "",
+        "validation_command": template.get("validation_command") or "",
+        "test_command": template.get("test_command") or "",
+        "sandbox_assist": bool(template.get("sandbox_assist")) if mode != "sandbox" else False,
+        "sandbox_assist_target": "c12b" if template.get("sandbox_assist") and mode != "sandbox" else "",
+        "sandbox_assist_workspace_dir": _task_sandbox_workspace(template.get("sandbox_assist_workspace_dir"), "c12b") if template.get("sandbox_assist") and mode != "sandbox" else "",
+        "sandbox_assist_command": template.get("sandbox_assist_command") or "",
+        "sandbox_assist_validation_command": template.get("sandbox_assist_validation_command") or "",
+        "sandbox_assist_test_command": template.get("sandbox_assist_test_command") or "",
+        "context_handoff": template.get("context_handoff") or "",
+        "trigger_mode": template.get("trigger_mode") or "json",
+        "trigger_text": template.get("trigger_text") or "",
+        "notes": template.get("description") or "",
+        "alert_policy": _task_default_alert_policy(),
+        "completion_policy": _task_default_completion_policy(),
+    }
+    draft["steps"] = _task_build_default_steps({**draft, "id": "task_draft"})
+    return draft
+
+
+def _tasked_author_condition_rules(prompt: str, execute_step_id: str) -> list[dict]:
+    text = (prompt or "").strip().lower()
+    rules: list[dict] = []
+    temp_threshold = _tasked_author_guess_temperature_threshold(prompt)
+    if temp_threshold is not None:
+        rules.append({
+            "source": execute_step_id,
+            "field": "parsed.temp_c",
+            "comparator": "gt",
+            "value": temp_threshold,
+        })
+    market_cap_threshold = _tasked_author_guess_market_cap_threshold(prompt)
+    if market_cap_threshold is not None:
+        rules.append({
+            "source": execute_step_id,
+            "field": "parsed.market_cap_usd",
+            "comparator": "gt",
+            "value": market_cap_threshold,
+        })
+    if "{sub task}" in text or "sub task" in text or "sub_task" in text:
+        rules.append({
+            "source": execute_step_id,
+            "field": "sub_task",
+            "comparator": "eq",
+            "value": True,
+        })
+    if "{x}" in text or re.search(r"\breturn another\s+x\b", text) or re.search(r"\bx exists\b", text):
+        rules.append({
+            "source": execute_step_id,
+            "field": "x",
+            "comparator": "exists",
+            "value": True,
+        })
+    return rules
+
+
+def _tasked_author_freehand_scaffold(prompt: str, mode_hint: str = "") -> dict:
+    interval_minutes = _tasked_author_guess_interval_minutes(prompt)
+    schedule_kind = _tasked_author_guess_schedule_kind(prompt, interval_minutes)
+    mode = _tasked_author_guess_mode(prompt, mode_hint=mode_hint)
+    tabs_required = _tasked_author_guess_tabs_required(prompt)
+    trigger_text = "task trigger"
+    text = (prompt or "").lower()
+    if "weather" in text and "johannesburg" in text and "nvidia" in text:
+        trigger_text = "Johannesburg weather and Nvidia market cap rule"
+    elif "sharepoint" in text:
+        trigger_text = "SharePoint task trigger"
+    elif "email" in text or "outlook" in text or "gmail" in text:
+        trigger_text = "Email task trigger"
+    alert_repeat = 0
+    alert_repeat_match = re.search(r"\balert(?:\s+\w+){0,4}\s+every\s+(\d+)\s+minutes?\b", text)
+    if alert_repeat_match:
+        alert_repeat = int(alert_repeat_match.group(1))
+    elif re.search(r"\bevery\s+5\s+minutes?\b.*?\bwhile true\b", text):
+        alert_repeat = 5
+    else:
+        alert_repeat_match = re.search(r"\brepeat(?:ing)?\s+alert(?:s)?(?:\s+\w+){0,4}\s+every\s+(\d+)\s+minutes?\b", text)
+    if alert_repeat_match and not alert_repeat:
+        alert_repeat = int(alert_repeat_match.group(1))
+    if not alert_repeat:
+        alert_repeat_match = re.search(r"\bevery\s+(\d+)\s+minutes?\b.*?\bwhile true\b", text)
+    if alert_repeat_match:
+        alert_repeat = int(alert_repeat_match.group(1))
+    elif "alert every 5 minutes" in text or "every 5 minutes while true" in text:
+        alert_repeat = 5
+    notes = "Generated from the Tasked chat planner. Review and edit this free-hand draft before saving."
+    executor_prompt = (prompt or "").strip()
+    validation_command = ""
+    test_command = ""
+    workspace_dir = ""
+    executor_target = ""
+    if mode == "sandbox":
+        executor_target = "c12b"
+        workspace_dir = "/workspace"
+        if "weather" in text and "johannesburg" in text and "nvidia" in text:
+            executor_prompt = (
+                "cat > task_payload.py <<'PY'\n"
+                "import json\n"
+                "# Replace these mock values with real fetch logic for Johannesburg weather and Nvidia market cap.\n"
+                "payload = {\n"
+                "    'triggered': True,\n"
+                "    'temp_c': 18.4,\n"
+                "    'market_cap_usd': 2100000000000,\n"
+                "    'trigger': 'Johannesburg weather and Nvidia market cap rule',\n"
+                "    'summary': 'Mock values matched; replace this scaffold with live API calls.'\n"
+                "}\n"
+                "print(json.dumps(payload))\n"
+                "PY\n"
+                "python3 task_payload.py"
+            )
+            validation_command = "python3 -m py_compile task_payload.py"
+            test_command = (
+                "python3 - <<'PY'\n"
+                "import json, subprocess\n"
+                "raw = subprocess.check_output(['python3', 'task_payload.py'], text=True)\n"
+                "payload = json.loads(raw)\n"
+                "assert 'temp_c' in payload\n"
+                "assert 'market_cap_usd' in payload\n"
+                "print('sandbox payload ok')\n"
+                "PY"
+            )
+        else:
+            executor_prompt = (
+                "cat > task_payload.py <<'PY'\n"
+                "import json\n"
+                "payload = {\n"
+                "    'triggered': False,\n"
+                "    'summary': 'Replace this scaffold with your custom task logic.',\n"
+                "    'task_prompt': " + json.dumps((prompt or "").strip()) + "\n"
+                "}\n"
+                "print(json.dumps(payload))\n"
+                "PY\n"
+                "python3 task_payload.py"
+            )
+            validation_command = "python3 -m py_compile task_payload.py"
+            test_command = "python3 task_payload.py"
+    return {
+        "id": "",
+        "template_key": "",
+        "name": _tasked_author_guess_name(prompt),
+        "mode": mode,
+        "schedule_kind": schedule_kind,
+        "interval_minutes": interval_minutes,
+        "tabs_required": tabs_required,
+        "active": True,
+        "planner_prompt": "Translate the plain-English task into a linear workflow with explicit alerts, traceability, and completion states.",
+        "executor_prompt": executor_prompt,
+        "executor_target": executor_target,
+        "workspace_dir": workspace_dir,
+        "validation_command": validation_command,
+        "test_command": test_command,
+        "sandbox_assist": False,
+        "sandbox_assist_target": "",
+        "sandbox_assist_workspace_dir": "",
+        "sandbox_assist_command": "",
+        "sandbox_assist_validation_command": "",
+        "sandbox_assist_test_command": "",
+        "context_handoff": "Keep the execution context explicit. If multiple tabs or lanes are required, copy the extracted result into the next lane before continuing.",
+        "trigger_mode": "always" if mode == "sandbox" else "json",
+        "trigger_text": trigger_text,
+        "notes": notes,
+        "alert_policy": {
+            "repeat_every_minutes": alert_repeat,
+            "dedupe_key_template": "",
+            "severity": "warning" if alert_repeat else "info",
+            "while_condition_true": bool(alert_repeat),
+        },
+        "completion_policy": _task_default_completion_policy(),
+    }
+
+
+def _tasked_author_build_linear_steps(draft: dict, prompt: str, *, raw: dict | None = None) -> list[dict]:
+    task_id = "task_draft"
+    schedule_kind = draft.get("schedule_kind") or "manual"
+    mode = draft.get("mode") or "chat"
+    steps: list[dict] = []
+    if schedule_kind in {"recurring", "continuous"}:
+        steps.append({
+            "id": f"{task_id}_trigger",
+            "position": len(steps) + 1,
+            "name": "Trigger",
+            "kind": "trigger",
+            "config": {
+                "schedule_kind": schedule_kind,
+                "interval_minutes": int(draft.get("interval_minutes") or 0),
+            },
+            "on_success_step_id": "",
+            "on_failure_step_id": "",
+            "active": True,
+        })
+    execute_step_id = f"{task_id}_{'execute' if mode != 'sandbox' else 'sandbox'}"
+    execute_step = {
+        "id": execute_step_id,
+        "position": len(steps) + 1,
+        "name": "Execute",
+        "kind": mode,
+        "config": {},
+        "on_success_step_id": "",
+        "on_failure_step_id": "",
+        "active": True,
+    }
+    if mode == "sandbox":
+        execute_step["name"] = "Sandbox execution"
+        execute_step["config"] = {
+            "executor_target": "c12b",
+            "workspace_dir": draft.get("workspace_dir") or "/workspace",
+            "command": draft.get("executor_prompt") or "",
+            "validation_command": draft.get("validation_command") or "",
+            "test_command": draft.get("test_command") or "",
+        }
+    elif mode in {"agent", "multi-agent", "multi-agento"}:
+        execute_step["name"] = "Launch " + mode
+        execute_step["config"] = {
+            "prompt": draft.get("executor_prompt") or draft.get("planner_prompt") or "",
+            "agent_id": str(_json_load_object(raw or {}).get("agent_id") or "c6-kilocode"),
+            "sandbox_assist": bool(draft.get("sandbox_assist")),
+            "sandbox_assist_target": draft.get("sandbox_assist_target") or "",
+            "sandbox_assist_workspace_dir": draft.get("sandbox_assist_workspace_dir") or "",
+            "sandbox_assist_command": draft.get("sandbox_assist_command") or "",
+            "sandbox_assist_validation_command": draft.get("sandbox_assist_validation_command") or "",
+            "sandbox_assist_test_command": draft.get("sandbox_assist_test_command") or "",
+        }
+    else:
+        execute_step["name"] = "Execute prompt"
+        execute_step["config"] = {
+            "prompt": draft.get("executor_prompt") or draft.get("planner_prompt") or "",
+        }
+    steps.append(execute_step)
+
+    rules = _tasked_author_condition_rules(prompt, execute_step_id)
+    if isinstance(_json_load_object(raw or {}).get("condition"), dict):
+        cfg = _json_load_object(raw.get("condition"))
+        if isinstance(cfg.get("rules"), list) and cfg.get("rules"):
+            rules = cfg.get("rules")
+    condition_step_id = ""
+    if rules:
+        condition_step_id = f"{task_id}_condition"
+        steps.append({
+            "id": condition_step_id,
+            "position": len(steps) + 1,
+            "name": "Condition gate",
+            "kind": "condition",
+            "config": {
+                "operator": str(_json_load_object(raw or {}).get("condition", {}).get("operator") or "AND").upper(),
+                "rules": rules,
+            },
+            "on_success_step_id": "",
+            "on_failure_step_id": "",
+            "active": True,
+        })
+
+    alert_step_id = f"{task_id}_alert"
+    complete_step_id = f"{task_id}_complete"
+    steps.append({
+        "id": alert_step_id,
+        "position": len(steps) + 1,
+        "name": "Create alert",
+        "kind": "alert",
+        "config": {
+            "title": draft.get("name") or "Task alert",
+            "trigger_text": draft.get("trigger_text") or "task trigger",
+            "repeat_every_minutes": int((draft.get("alert_policy") or {}).get("repeat_every_minutes") or 0),
+            "dedupe_key": str((draft.get("alert_policy") or {}).get("dedupe_key_template") or "").strip(),
+            "severity": str((draft.get("alert_policy") or {}).get("severity") or "info"),
+        },
+        "on_success_step_id": "",
+        "on_failure_step_id": "",
+        "active": True,
+    })
+    steps.append({
+        "id": complete_step_id,
+        "position": len(steps) + 1,
+        "name": "Complete",
+        "kind": "complete",
+        "config": {},
+        "on_success_step_id": "",
+        "on_failure_step_id": "",
+        "active": True,
+    })
+    if condition_step_id:
+        steps[-3]["on_success_step_id"] = alert_step_id
+        steps[-3]["on_failure_step_id"] = complete_step_id
+        execute_step["on_success_step_id"] = condition_step_id
+    else:
+        execute_step["on_success_step_id"] = alert_step_id
+    steps[-2]["on_success_step_id"] = complete_step_id
+    return [_task_normalize_step(task_id, step, idx + 1) for idx, step in enumerate(steps)]
+
+
+def _tasked_author_normalize_draft(raw: dict | None, *, prompt: str, requested_strategy: str, mode_hint: str = "", matched_template: dict | None = None) -> dict:
+    raw = dict(raw or {})
+    if matched_template:
+        draft = _tasked_author_template_seed_draft(matched_template)
+    else:
+        draft = _tasked_author_freehand_scaffold(prompt, mode_hint=mode_hint)
+
+    strategy = (raw.get("strategy") or requested_strategy or "auto").strip().lower()
+    if strategy not in {"auto", "existing-template", "freehand"}:
+        strategy = requested_strategy if requested_strategy in {"auto", "existing-template", "freehand"} else "auto"
+
+    raw_template_key = (raw.get("template_key") or "").strip()
+    if raw_template_key:
+        maybe_template = _tasked_author_find_template_by_key(raw_template_key)
+        if maybe_template:
+            matched_template = maybe_template
+            draft = _tasked_author_template_seed_draft(maybe_template)
+    if strategy == "existing-template" and matched_template:
+        draft["template_key"] = matched_template.get("key") or ""
+    elif strategy == "freehand":
+        draft["template_key"] = ""
+
+    if (raw.get("name") or "").strip():
+        draft["name"] = str(raw.get("name") or "").strip()[:160]
+    if (raw.get("planner_prompt") or "").strip():
+        draft["planner_prompt"] = str(raw.get("planner_prompt") or "").strip()
+    if (raw.get("executor_prompt") or "").strip():
+        draft["executor_prompt"] = str(raw.get("executor_prompt") or "").strip()
+    if (raw.get("context_handoff") or "").strip():
+        draft["context_handoff"] = str(raw.get("context_handoff") or "").strip()
+    if (raw.get("trigger_text") or "").strip():
+        draft["trigger_text"] = str(raw.get("trigger_text") or "").strip()
+    if (raw.get("notes") or "").strip():
+        draft["notes"] = str(raw.get("notes") or "").strip()
+
+    mode = (raw.get("mode") or draft.get("mode") or _tasked_author_guess_mode(prompt, mode_hint=mode_hint)).strip().lower()
+    if mode not in {item["id"] for item in TASK_MODE_OPTIONS}:
+        mode = _tasked_author_guess_mode(prompt, mode_hint=mode_hint)
+    draft["mode"] = mode
+
+    interval_minutes = int(raw.get("interval_minutes") or draft.get("interval_minutes") or _tasked_author_guess_interval_minutes(prompt) or 0)
+    schedule_kind = (raw.get("schedule_kind") or draft.get("schedule_kind") or _tasked_author_guess_schedule_kind(prompt, interval_minutes)).strip().lower()
+    if schedule_kind not in {"manual", "recurring", "continuous"}:
+        schedule_kind = _tasked_author_guess_schedule_kind(prompt, interval_minutes)
+    if schedule_kind in {"recurring", "continuous"} and interval_minutes <= 0:
+        interval_minutes = _tasked_author_guess_interval_minutes(prompt) or 10
+    draft["schedule_kind"] = schedule_kind
+    draft["interval_minutes"] = interval_minutes
+    draft["tabs_required"] = max(1, min(12, int(raw.get("tabs_required") or draft.get("tabs_required") or _tasked_author_guess_tabs_required(prompt) or 1)))
+    draft["active"] = bool(raw.get("active", draft.get("active", True)))
+    draft["trigger_mode"] = str(raw.get("trigger_mode") or draft.get("trigger_mode") or ("always" if mode == "sandbox" else "json")).strip().lower()
+    if draft["trigger_mode"] not in {"json", "contains", "always"}:
+        draft["trigger_mode"] = "always" if mode == "sandbox" else "json"
+
+    alert_policy = {**_task_default_alert_policy(), **_json_load_object(draft.get("alert_policy")), **_json_load_object(raw.get("alert_policy"))}
+    completion_policy = {**_task_default_completion_policy(), **_json_load_object(draft.get("completion_policy")), **_json_load_object(raw.get("completion_policy"))}
+    if not alert_policy.get("dedupe_key_template") and int(alert_policy.get("repeat_every_minutes") or 0) > 0:
+        alert_policy["dedupe_key_template"] = _slugify(draft.get("name") or "tasked", prefix="tasked") + "-{task_id}"
+    draft["alert_policy"] = alert_policy
+    draft["completion_policy"] = completion_policy
+
+    if mode == "sandbox":
+        draft["executor_target"] = "c12b"
+        draft["workspace_dir"] = _task_sandbox_workspace(raw.get("workspace_dir") or draft.get("workspace_dir"), "c12b")
+        draft["validation_command"] = str(raw.get("validation_command") or draft.get("validation_command") or "").strip()
+        draft["test_command"] = str(raw.get("test_command") or draft.get("test_command") or "").strip()
+        draft["sandbox_assist"] = False
+        draft["sandbox_assist_target"] = ""
+        draft["sandbox_assist_workspace_dir"] = ""
+        draft["sandbox_assist_command"] = ""
+        draft["sandbox_assist_validation_command"] = ""
+        draft["sandbox_assist_test_command"] = ""
+    else:
+        assist = _task_sandbox_assist_values({**draft, **raw}, mode=mode)
+        draft["executor_target"] = ""
+        draft["workspace_dir"] = ""
+        draft["validation_command"] = ""
+        draft["test_command"] = ""
+        draft["sandbox_assist"] = assist["sandbox_assist"]
+        draft["sandbox_assist_target"] = assist["sandbox_assist_target"]
+        draft["sandbox_assist_workspace_dir"] = assist["sandbox_assist_workspace_dir"]
+        draft["sandbox_assist_command"] = assist["sandbox_assist_command"]
+        draft["sandbox_assist_validation_command"] = assist["sandbox_assist_validation_command"]
+        draft["sandbox_assist_test_command"] = assist["sandbox_assist_test_command"]
+
+    raw_steps = raw.get("steps") if isinstance(raw.get("steps"), list) else []
+    if raw_steps:
+        draft["steps"] = [_task_normalize_step("task_draft", item, idx + 1) for idx, item in enumerate(raw_steps)]
+    else:
+        draft["steps"] = _tasked_author_build_linear_steps(draft, prompt, raw=raw)
+
+    if requested_strategy == "existing-template" and matched_template:
+        draft["template_key"] = matched_template.get("key") or ""
+        strategy = "existing-template"
+    elif requested_strategy == "freehand":
+        draft["template_key"] = ""
+        strategy = "freehand"
+    elif draft.get("template_key"):
+        strategy = "existing-template"
+    else:
+        strategy = "freehand"
+    draft["strategy"] = strategy
+    draft["explanation"] = str(raw.get("explanation") or "").strip()
+    return draft
+
+
+def _tasked_author_fallback_draft(prompt: str, *, requested_strategy: str, mode_hint: str = "", matched_template: dict | None = None) -> tuple[dict, str]:
+    if requested_strategy != "freehand" and matched_template:
+        draft = _tasked_author_normalize_draft({}, prompt=prompt, requested_strategy="existing-template", mode_hint=mode_hint, matched_template=matched_template)
+        explanation = f'Matched the existing template "{matched_template.get("name") or matched_template.get("key")}".'
+        return draft, explanation
+    draft = _tasked_author_normalize_draft({}, prompt=prompt, requested_strategy="freehand", mode_hint=mode_hint, matched_template=None)
+    return draft, "Built a free-hand Tasked draft because no existing template fit the request cleanly."
+
+
+async def _tasked_author_draft_from_text(prompt: str, *, strategy: str = "auto", mode_hint: str = "", template_key: str = "") -> dict:
+    cleaned_prompt = re.sub(r"\s+", " ", (prompt or "").strip())
+    if not cleaned_prompt:
+        return {"ok": False, "error": "prompt required"}
+    requested_strategy = (strategy or "auto").strip().lower()
+    if requested_strategy not in {"auto", "existing-template", "freehand"}:
+        requested_strategy = "auto"
+    templates = _task_templates_payload()
+    matched_template = _tasked_author_match_template(cleaned_prompt, templates, preferred_key=template_key)
+    if matched_template and requested_strategy in {"auto", "existing-template"}:
+        draft, explanation = _tasked_author_fallback_draft(
+            cleaned_prompt,
+            requested_strategy="existing-template",
+            mode_hint=mode_hint,
+            matched_template=matched_template,
+        )
+        return {
+            "ok": True,
+            "requested_strategy": requested_strategy,
+            "strategy_used": "existing-template",
+            "matched_template": {
+                "key": matched_template.get("key") or "",
+                "name": matched_template.get("name") or "",
+                "description": matched_template.get("description") or "",
+            },
+            "explanation": explanation,
+            "source": "heuristic-template",
+            "authoring_engine": "local" if not TASKED_AUTHOR_ENABLE_LLM else "llm",
+            "draft": {key: value for key, value in draft.items() if key != "explanation"},
+        }
+    llm_payload = None
+    llm_error = ""
+    llm_response = ""
+    source = "heuristic"
+    if TASKED_AUTHOR_ENABLE_LLM:
+        preferred_template_key = matched_template.get("key") if matched_template else ""
+        prompt_text = (
+            _tasked_authoring_prompt_markdown()
+            + "\n\nActive Tasked templates:\n"
+            + json.dumps(_tasked_author_template_catalog(), ensure_ascii=False, indent=2)
+            + "\n\nRequested strategy: "
+            + requested_strategy
+            + "\nPreferred template key: "
+            + (preferred_template_key or "(none)")
+            + "\nMode hint: "
+            + ((mode_hint or "").strip() or "(none)")
+            + "\n\nUser task request:\n"
+            + cleaned_prompt
+        )
+        try:
+            chat_result = await asyncio.wait_for(
+                _chat_one("c9-jokes-task-author", prompt_text, _urls()["c1"], chat_mode="deep", work_mode="work"),
+                timeout=20,
+            )
+            llm_response = (chat_result or {}).get("text") or ""
+            llm_payload = _task_parse_json_payload(llm_response)
+        except Exception as exc:
+            llm_error = str(exc)
+
+    if llm_payload:
+        draft = _tasked_author_normalize_draft(
+            llm_payload,
+            prompt=cleaned_prompt,
+            requested_strategy=requested_strategy,
+            mode_hint=mode_hint,
+            matched_template=matched_template,
+        )
+        explanation = str(llm_payload.get("explanation") or "").strip()
+        if not explanation:
+            explanation = (
+                f'Used the existing template "{draft.get("template_key")}".'
+                if draft.get("strategy") == "existing-template" and draft.get("template_key")
+                else "Built a free-hand Tasked draft from the English task prompt."
+            )
+        source = "llm"
+    else:
+        draft, explanation = _tasked_author_fallback_draft(
+            cleaned_prompt,
+            requested_strategy=requested_strategy,
+            mode_hint=mode_hint,
+            matched_template=matched_template,
+        )
+        if requested_strategy == "existing-template" and matched_template:
+            source = "heuristic-template"
+        else:
+            source = "heuristic-freehand"
+
+    resolved_template = _tasked_author_find_template_by_key(draft.get("template_key") or "", templates)
+    response: dict = {
+        "ok": True,
+        "requested_strategy": requested_strategy,
+        "strategy_used": draft.get("strategy") or ("existing-template" if resolved_template else "freehand"),
+        "matched_template": {
+            "key": resolved_template.get("key") or "",
+            "name": resolved_template.get("name") or "",
+            "description": resolved_template.get("description") or "",
+        } if resolved_template else None,
+        "explanation": explanation,
+        "source": source,
+        "draft": {key: value for key, value in draft.items() if key != "explanation"},
+    }
+    if llm_error:
+        response["llm_error"] = llm_error
+    if llm_response and source.startswith("heuristic"):
+        response["llm_response_excerpt"] = llm_response[:500]
+    if not TASKED_AUTHOR_ENABLE_LLM:
+        response["authoring_engine"] = "local"
+    return response
 
 
 def _task_alert_from_result(task_row: dict, response_text: str) -> dict | None:
@@ -4225,6 +4969,7 @@ async def page_tasked(request: Request):
         "task_step_kinds": json.dumps(TASK_WORKFLOW_STEP_KINDS, ensure_ascii=False),
         "task_agent_targets": json.dumps(TASK_AGENT_TARGET_OPTIONS, ensure_ascii=False),
         "task_templates": json.dumps(_task_templates_payload(), ensure_ascii=False),
+        "tasked_author_examples": json.dumps(_tasked_author_examples_payload(), ensure_ascii=False),
     })
 
 
@@ -4555,6 +5300,27 @@ async def api_tasks_seed_examples():
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
 
+@app.post("/api/tasks/draft-from-text", name="api_tasks_draft_from_text")
+async def api_tasks_draft_from_text(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    prompt = re.sub(r"\s+", " ", str(body.get("prompt") or "").strip())
+    strategy = (body.get("strategy") or "auto").strip().lower()
+    mode_hint = (body.get("mode_hint") or "").strip().lower()
+    template_key = (body.get("template_key") or "").strip()
+    if not prompt:
+        return JSONResponse({"ok": False, "error": "prompt required"}, status_code=400)
+    result = await _tasked_author_draft_from_text(
+        prompt,
+        strategy=strategy,
+        mode_hint=mode_hint,
+        template_key=template_key,
+    )
+    return JSONResponse(result, status_code=200 if result.get("ok") else 400)
+
+
 @app.post("/api/tasks", name="api_tasks_upsert")
 async def api_tasks_upsert(request: Request):
     try:
@@ -4618,7 +5384,14 @@ async def api_tasks_upsert(request: Request):
             "trigger_text": trigger_text,
             **sandbox_assist,
         })
-        normalized_steps = [_task_normalize_step(task_id, item, idx + 1) for idx, item in enumerate(steps_to_save)]
+        needs_rebase = any(
+            isinstance(item, dict) and (
+                str(item.get("id") or "").startswith("task_draft")
+                or (item.get("task_id") and str(item.get("task_id") or "") not in {"", task_id})
+            )
+            for item in steps_to_save
+        )
+        normalized_steps = _task_clone_steps(task_id, steps_to_save) if needs_rebase else [_task_normalize_step(task_id, item, idx + 1) for idx, item in enumerate(steps_to_save)]
     except ValueError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 

@@ -62,8 +62,15 @@
 .tasked-kv-grid label{display:grid;gap:.35rem;font-size:.84rem}
 .tasked-json-hint{font-family:monospace;font-size:.74rem;background:#111;border:1px solid var(--border,#333);border-radius:12px;padding:.7rem;white-space:pre-wrap;color:var(--muted)}
 .tasked-row-meta{font-size:.76rem;color:var(--muted);line-height:1.45}
+.tasked-author-grid{display:grid;grid-template-columns:minmax(280px,1.2fr) minmax(260px,.8fr);gap:1rem;align-items:start}
+.tasked-author-side{display:grid;gap:.75rem}
+.tasked-example-list{display:flex;gap:.5rem;flex-wrap:wrap}
+.tasked-example-btn{background:#111;border:1px solid var(--border,#333);color:var(--fg,#f5f5f7);border-radius:999px;padding:.42rem .72rem;font:inherit;cursor:pointer;font-size:.78rem}
+.tasked-draft-preview{display:grid;gap:.55rem}
+.tasked-draft-kv{font-size:.8rem;color:var(--muted);line-height:1.5}
+.tasked-draft-steps{margin:0;padding-left:1rem;color:var(--muted);font-size:.78rem;line-height:1.45}
 @media (max-width: 980px){.tasked-grid{grid-template-columns:1fr}.tasked-row{grid-template-columns:1fr}}
-@media (max-width: 980px){.tasked-subgrid{grid-template-columns:1fr}}
+@media (max-width: 980px){.tasked-subgrid,.tasked-author-grid{grid-template-columns:1fr}}
 </style>
 
 <div class="tasked-shell">
@@ -138,6 +145,40 @@
     </div>
     <div class="tasked-note" id="tasked-template-note">Templates are DB-backed. Built-in and user-created templates can both be loaded here; archiving removes them from the active picker.</div>
     <div class="tasked-template-grid" id="tasked-template-grid"></div>
+  </section>
+
+  <section class="tasked-card">
+    <h2 style="margin:0 0 .45rem 0;font-size:1rem;">Tasked Chat Planner</h2>
+    <div class="tasked-note" style="margin-bottom:.8rem;">
+      Write the task in English and Tasked will turn it into a normal Tasked draft. It will either match an existing editable template or build a template-less free-hand workflow that still flows into piplinetask, Alerts, and TaskCompleted.
+      This planner runs locally inside C9b and does not send the authoring prompt into the M365 auth tabs.
+    </div>
+    <div class="tasked-author-grid">
+      <label>
+        English task request
+        <textarea id="tasked-author-prompt" placeholder="Describe the automation in plain English, including schedule, tabs, conditions, alerts, and whether it needs sandbox code or agent feedback."></textarea>
+      </label>
+      <div class="tasked-author-side">
+        <label>
+          Draft strategy
+          <select id="tasked-author-strategy">
+            <option value="auto">Auto: prefer an existing template, else free-hand</option>
+            <option value="existing-template">Force existing template match</option>
+            <option value="freehand">Force free-hand custom template</option>
+          </select>
+        </label>
+        <div>
+          <div class="tasked-note" style="margin-bottom:.45rem;">Two lifecycle examples</div>
+          <div class="tasked-example-list" id="tasked-author-examples"></div>
+        </div>
+        <div class="tasked-actions">
+          <button class="tasked-btn" type="button" id="tasked-author-generate-btn">Generate Task Draft</button>
+          <button class="tasked-btn secondary" type="button" id="tasked-author-apply-btn">Apply Draft To Builder</button>
+          <button class="tasked-btn secondary" type="button" id="tasked-author-clear-btn">Clear Draft</button>
+        </div>
+      </div>
+    </div>
+    <div class="tasked-result tasked-draft-preview" id="tasked-author-result">No Tasked draft yet.</div>
   </section>
 
   <div class="tasked-grid">
@@ -391,7 +432,8 @@ Alert config example:
   var EXECUTOR_TARGETS = {{ task_executor_targets|safe }};
   var STEP_KINDS = {{ task_step_kinds|safe }};
   var AGENT_TARGETS = {{ task_agent_targets|safe }};
-  var state = { tasks: [], selectedId: '', formDirty: false, lastLoadedAt: '', steps: [] };
+  var TASKED_AUTHOR_EXAMPLES = {{ tasked_author_examples|safe }};
+  var state = { tasks: [], selectedId: '', formDirty: false, lastLoadedAt: '', steps: [], authorDraft: null };
   var initialTaskId = new URLSearchParams(window.location.search).get('task_id') || '';
   var form = document.getElementById('task-form');
   var templateEl = document.getElementById('task-template');
@@ -407,6 +449,10 @@ Alert config example:
   var sandboxAssistFieldsEl = document.getElementById('task-sandbox-assist-fields');
   var runtimeGridEl = document.getElementById('tasked-runtime-grid');
   var stepsListEl = document.getElementById('task-steps-list');
+  var authorPromptEl = document.getElementById('tasked-author-prompt');
+  var authorStrategyEl = document.getElementById('tasked-author-strategy');
+  var authorResultEl = document.getElementById('tasked-author-result');
+  var authorExamplesEl = document.getElementById('tasked-author-examples');
   var fields = {
     id: document.getElementById('task-id'),
     name: document.getElementById('task-name'),
@@ -626,6 +672,109 @@ Alert config example:
     if (monitorNoteEl) monitorNoteEl.textContent = 'Unsaved builder edits are preserved. Click Save Tasked when ready.';
   }
 
+  function renderAuthorExamples() {
+    authorExamplesEl.innerHTML = (TASKED_AUTHOR_EXAMPLES || []).map(function(item) {
+      return '<button class="tasked-example-btn" type="button" data-author-example="' + esc(item.id || '') + '">' + esc(item.label || 'Example') + '</button>';
+    }).join('');
+    authorExamplesEl.querySelectorAll('[data-author-example]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var hit = (TASKED_AUTHOR_EXAMPLES || []).find(function(item){ return item.id === btn.dataset.authorExample; });
+        if (!hit) return;
+        authorPromptEl.value = hit.prompt || '';
+        authorStrategyEl.value = hit.strategy || 'auto';
+      });
+    });
+  }
+
+  function renderAuthorDraft(payload) {
+    state.authorDraft = payload || null;
+    if (!payload || !payload.draft) {
+      authorResultEl.textContent = 'No Tasked draft yet.';
+      return;
+    }
+    var draft = payload.draft || {};
+    var matched = payload.matched_template || null;
+    var steps = draft.steps || [];
+    authorResultEl.innerHTML =
+      '<div><strong>Draft strategy:</strong> ' + esc(payload.strategy_used || draft.strategy || 'freehand') + '</div>' +
+      '<div class="tasked-draft-kv"><strong>Explanation:</strong> ' + esc(payload.explanation || 'Draft ready.') + '</div>' +
+      '<div class="tasked-draft-kv"><strong>Template:</strong> ' + esc(matched ? matched.name : 'Free-hand custom draft') + '</div>' +
+      '<div class="tasked-draft-kv"><strong>Mode:</strong> ' + esc(draft.mode || 'chat') + ' · <strong>Schedule:</strong> ' + esc(draft.schedule_kind || 'manual') + (((draft.interval_minutes || 0) > 0) ? (' / ' + esc(draft.interval_minutes) + 'm') : '') + ' · <strong>Tabs:</strong> ' + esc(draft.tabs_required || 1) + '</div>' +
+      '<div class="tasked-draft-kv"><strong>Planner:</strong> ' + esc(draft.planner_prompt || '—') + '</div>' +
+      '<div class="tasked-draft-kv"><strong>Executor:</strong> ' + esc((draft.executor_prompt || '').slice(0, 260) || '—') + (((draft.executor_prompt || '').length > 260) ? '…' : '') + '</div>' +
+      '<div class="tasked-draft-kv"><strong>Lifecycle path:</strong> Tasked → piplinetask → Alerts → TaskCompleted</div>' +
+      '<div class="tasked-draft-kv"><strong>Steps:</strong></div>' +
+      '<ul class="tasked-draft-steps">' + steps.map(function(step, index) {
+        return '<li>' + esc((index + 1) + '. ' + (step.name || step.kind || 'step') + ' [' + (step.kind || 'step') + ']') + '</li>';
+      }).join('') + '</ul>';
+  }
+
+  function hydrateForm(task, options) {
+    options = options || {};
+    var asDraft = !!options.asDraft;
+    fields.id.value = asDraft ? '' : (task.id || '');
+    fields.name.value = task.name || '';
+    fields.mode.value = task.mode || 'chat';
+    fields.scheduleKind.value = task.schedule_kind || 'manual';
+    fields.interval.value = task.interval_minutes || 0;
+    fields.tabs.value = task.tabs_required || 1;
+    fields.active.checked = ('active' in task) ? !!task.active : true;
+    fields.planner.value = task.planner_prompt || '';
+    fields.executor.value = task.executor_prompt || '';
+    fields.executorTarget.value = task.executor_target || 'c12b';
+    fields.workspaceDir.value = task.workspace_dir || sandboxDefaultWorkspace(fields.executorTarget.value);
+    fields.validateCommand.value = task.validation_command || '';
+    fields.testCommand.value = task.test_command || '';
+    fields.sandboxAssist.checked = !!task.sandbox_assist;
+    fields.sandboxAssistTarget.value = task.sandbox_assist_target || 'c12b';
+    fields.sandboxAssistWorkspaceDir.value = task.sandbox_assist_workspace_dir || sandboxDefaultWorkspace(fields.sandboxAssistTarget.value);
+    fields.sandboxAssistCommand.value = task.sandbox_assist_command || '';
+    fields.sandboxAssistValidationCommand.value = task.sandbox_assist_validation_command || '';
+    fields.sandboxAssistTestCommand.value = task.sandbox_assist_test_command || '';
+    fields.context.value = task.context_handoff || '';
+    fields.triggerMode.value = task.trigger_mode || 'json';
+    fields.triggerText.value = task.trigger_text || '';
+    fields.notes.value = task.notes || '';
+    fields.alertRepeat.value = ((task.alert_policy || {}).repeat_every_minutes || 0);
+    fields.alertDedupe.value = ((task.alert_policy || {}).dedupe_key_template || '');
+    fields.alertSeverity.value = ((task.alert_policy || {}).severity || 'info');
+    fields.alertWhileTrue.checked = !!((task.alert_policy || {}).while_condition_true);
+    fields.completionMark.value = ((task.completion_policy || {}).mark_completed_on || 'step-complete');
+    fields.completionArchive.checked = !!((task.completion_policy || {}).archive_on_complete);
+    templateEl.value = task.template_key || '';
+    templatePickerEl.value = task.template_key || '';
+    state.selectedId = asDraft ? '' : (task.id || '');
+    state.formDirty = !!asDraft;
+    state.steps = (task.steps || []).map(function(step) {
+      return {
+        id: step.id || '',
+        name: step.name || '',
+        kind: step.kind || 'chat',
+        config: step.config || {},
+        on_success_step_id: step.on_success_step_id || '',
+        on_failure_step_id: step.on_failure_step_id || '',
+        active: step.active !== false
+      };
+    });
+    resultEl.textContent = options.resultText || ((task.last_result_excerpt || 'No run yet.') + (task.launch_url ? '\n\nLaunch: ' + task.launch_url : ''));
+    if (asDraft) {
+      traceBox.innerHTML =
+        '<div><strong>Draft trace preview</strong></div>' +
+        '<div class="tasked-trace-grid">' +
+          '<div class="tasked-trace-item"><strong>Task orchestration</strong><span>Draft name: ' + esc(task.name || 'Draft') + '\nMode: ' + esc(task.mode || 'chat') + '\nTemplate: ' + esc(task.template_key || 'freehand') + '</span></div>' +
+          '<div class="tasked-trace-item"><strong>Task planner</strong><span>' + esc(task.planner_prompt || '—') + '</span></div>' +
+          '<div class="tasked-trace-item"><strong>Task timer</strong><span>Schedule: ' + esc(task.schedule_kind || 'manual') + (((task.interval_minutes || 0) > 0) ? (' / ' + esc(task.interval_minutes) + 'm') : '') + '</span></div>' +
+          '<div class="tasked-trace-item"><strong>Task executor</strong><span>' + esc(task.mode === 'sandbox' ? 'C12b Lean Sandbox' : (task.mode || 'chat')) + '\nPrompt/command prepared for save.</span></div>' +
+          '<div class="tasked-trace-item"><strong>Task alert generator</strong><span>Severity: ' + esc((task.alert_policy || {}).severity || 'info') + '\nRepeat: ' + esc((task.alert_policy || {}).repeat_every_minutes || 0) + 'm</span></div>' +
+          '<div class="tasked-trace-item"><strong>Task completion</strong><span>This draft will flow into piplinetask, Alerts, and TaskCompleted after it is saved and run.</span></div>' +
+        '</div>';
+    } else {
+      renderTrace(task);
+    }
+    toggleSandboxFields();
+    renderStepCards();
+  }
+
   function resetForm() {
     fields.id.value = '';
     fields.name.value = '';
@@ -662,6 +811,7 @@ Alert config example:
     state.steps = [];
     resultEl.textContent = 'No run yet.';
     traceBox.textContent = 'Select or save a Tasked row to inspect its unique trace ID, latest run, latest alert, and role-by-role visibility from orchestration through alerts.';
+    state.authorDraft = null;
     toggleSandboxFields();
     buildDefaultStepsForMode('chat');
   }
@@ -729,54 +879,7 @@ Alert config example:
   }
 
   function fillForm(task) {
-    fields.id.value = task.id || '';
-    fields.name.value = task.name || '';
-    fields.mode.value = task.mode || 'chat';
-    fields.scheduleKind.value = task.schedule_kind || 'manual';
-    fields.interval.value = task.interval_minutes || 0;
-    fields.tabs.value = task.tabs_required || 1;
-    fields.active.checked = !!task.active;
-    fields.planner.value = task.planner_prompt || '';
-    fields.executor.value = task.executor_prompt || '';
-    fields.executorTarget.value = task.executor_target || 'c12b';
-    fields.workspaceDir.value = task.workspace_dir || sandboxDefaultWorkspace(fields.executorTarget.value);
-    fields.validateCommand.value = task.validation_command || '';
-    fields.testCommand.value = task.test_command || '';
-    fields.sandboxAssist.checked = !!task.sandbox_assist;
-    fields.sandboxAssistTarget.value = task.sandbox_assist_target || 'c12b';
-    fields.sandboxAssistWorkspaceDir.value = task.sandbox_assist_workspace_dir || sandboxDefaultWorkspace(fields.sandboxAssistTarget.value);
-    fields.sandboxAssistCommand.value = task.sandbox_assist_command || '';
-    fields.sandboxAssistValidationCommand.value = task.sandbox_assist_validation_command || '';
-    fields.sandboxAssistTestCommand.value = task.sandbox_assist_test_command || '';
-    fields.context.value = task.context_handoff || '';
-    fields.triggerMode.value = task.trigger_mode || 'json';
-    fields.triggerText.value = task.trigger_text || '';
-    fields.notes.value = task.notes || '';
-    fields.alertRepeat.value = ((task.alert_policy || {}).repeat_every_minutes || 0);
-    fields.alertDedupe.value = ((task.alert_policy || {}).dedupe_key_template || '');
-    fields.alertSeverity.value = ((task.alert_policy || {}).severity || 'info');
-    fields.alertWhileTrue.checked = !!((task.alert_policy || {}).while_condition_true);
-    fields.completionMark.value = ((task.completion_policy || {}).mark_completed_on || 'step-complete');
-    fields.completionArchive.checked = !!((task.completion_policy || {}).archive_on_complete);
-    templateEl.value = task.template_key || '';
-    templatePickerEl.value = task.template_key || '';
-    state.selectedId = task.id || '';
-    state.formDirty = false;
-    state.steps = (task.steps || []).map(function(step) {
-      return {
-        id: step.id || '',
-        name: step.name || '',
-        kind: step.kind || 'chat',
-        config: step.config || {},
-        on_success_step_id: step.on_success_step_id || '',
-        on_failure_step_id: step.on_failure_step_id || '',
-        active: step.active !== false
-      };
-    });
-    resultEl.textContent = (task.last_result_excerpt || 'No run yet.') + (task.launch_url ? '\n\nLaunch: ' + task.launch_url : '');
-    renderTrace(task);
-    toggleSandboxFields();
-    renderStepCards();
+    hydrateForm(task, { asDraft: false });
   }
 
   function collectPayload() {
@@ -1046,6 +1149,48 @@ Alert config example:
     await loadRuns();
   });
 
+  document.getElementById('tasked-author-generate-btn').addEventListener('click', async function() {
+    var prompt = (authorPromptEl.value || '').trim();
+    if (!prompt) {
+      authorResultEl.textContent = 'Write the task in English first.';
+      return;
+    }
+    authorResultEl.textContent = 'Generating Tasked draft…';
+    var res = await fetch('/api/tasks/draft-from-text', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        prompt: prompt,
+        strategy: authorStrategyEl.value || 'auto',
+        mode_hint: fields.mode.value || 'chat'
+      })
+    });
+    var data = await res.json();
+    if (!data.ok) {
+      authorResultEl.textContent = data.error || 'Tasked draft generation failed.';
+      return;
+    }
+    renderAuthorDraft(data);
+    resultEl.textContent = 'Tasked draft generated. Review it, then apply it into the builder.';
+  });
+
+  document.getElementById('tasked-author-apply-btn').addEventListener('click', function() {
+    if (!state.authorDraft || !state.authorDraft.draft) {
+      authorResultEl.textContent = 'Generate a Tasked draft first.';
+      return;
+    }
+    hydrateForm(state.authorDraft.draft, {
+      asDraft: true,
+      resultText: 'Tasked draft loaded into the builder. Review, edit, then save it as a normal Tasked row.'
+    });
+  });
+
+  document.getElementById('tasked-author-clear-btn').addEventListener('click', function() {
+    state.authorDraft = null;
+    authorPromptEl.value = '';
+    authorResultEl.textContent = 'No Tasked draft yet.';
+  });
+
   document.getElementById('tasked-refresh-btn').addEventListener('click', async function() {
     await loadTasks();
     await loadRuns();
@@ -1148,6 +1293,7 @@ Alert config example:
   });
 
   resetForm();
+  renderAuthorExamples();
   loadTasks().catch(function(){ tasksBody.innerHTML = '<tr><td colspan="7" class="tasked-note">Failed to load Tasked rows.</td></tr>'; });
   loadRuns().catch(function(){ runsBody.innerHTML = '<tr><td colspan="5" class="tasked-note">Failed to load Tasked runs.</td></tr>'; });
   loadSandboxRuntime().catch(function(){

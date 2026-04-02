@@ -235,6 +235,10 @@ class TestC9PageRoutes:
         r = c9_app.get("/tasked")
         assert r.status_code == 200
         assert "Tasked Orchestrator" in r.text
+        assert "Tasked Chat Planner" in r.text
+        assert "/api/tasks/draft-from-text" in r.text
+        assert "Generate Task Draft" in r.text
+        assert "Apply Draft To Builder" in r.text
         assert "/api/tasks" in r.text
         assert "/api/task-runs" in r.text
         assert "/api/task-templates" in r.text
@@ -604,6 +608,54 @@ class TestC9Tasks:
         assert "weather-dublin" in template_keys
         assert "outlook-sharepoint-linked" in template_keys
 
+    def test_task_draft_from_text_matches_existing_template(self, c9_app):
+        r = c9_app.post("/api/tasks/draft-from-text", json={
+            "prompt": (
+                "Every 10 minutes, daily, check the weather in Dublin, Ireland. "
+                "If the temperature is above 10C, create an alert visible on the Alerts page. "
+                "Use 2 tabs and copy the weather result from one tab into the other."
+            ),
+            "strategy": "existing-template",
+        })
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body["strategy_used"] == "existing-template"
+        assert body["matched_template"]["key"] == "weather-dublin"
+        assert body["draft"]["template_key"] == "weather-dublin"
+        assert body["draft"]["mode"] == "chat"
+        assert body["draft"]["schedule_kind"] == "recurring"
+        assert body["authoring_engine"] == "local"
+        assert body["draft"]["steps"]
+
+    def test_task_draft_from_text_builds_freehand_sandbox_workflow(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        chat_mock = AsyncMock(return_value={"ok": True, "text": json.dumps({"bad": "payload"})})
+        with patch.object(c9_mod, "_chat_one", chat_mock):
+            r = c9_app.post("/api/tasks/draft-from-text", json={
+                "prompt": (
+                    "Every 12 minutes from now, use C12b to run Python code that checks the weather in Johannesburg and Nvidia market cap. "
+                    "If Johannesburg is above 14C and Nvidia market cap is above 2 trillion USD, "
+                    "raise a warning alert every 5 minutes while true, then complete the run."
+                ),
+                "strategy": "freehand",
+            })
+
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body["strategy_used"] == "freehand"
+        assert body["matched_template"] is None
+        assert body["draft"]["mode"] == "sandbox"
+        assert body["draft"]["executor_target"] == "c12b"
+        assert body["draft"]["alert_policy"]["repeat_every_minutes"] == 5
+        assert body["authoring_engine"] == "local"
+        assert body["source"] == "heuristic-freehand"
+        step_kinds = [step["kind"] for step in body["draft"]["steps"]]
+        assert step_kinds == ["trigger", "sandbox", "condition", "alert", "complete"]
+        chat_mock.assert_not_awaited()
+
     def test_task_template_create_clone_and_archive(self, c9_app):
         r_create = c9_app.post("/api/task-templates", json={
             "name": "User Workflow Template",
@@ -883,6 +935,115 @@ class TestC9Tasks:
         runs = r_runs.json()["runs"]
         assert len(runs) == 3
         assert all(run["duration_label"] != "—" for run in runs)
+
+    def test_new_tasks_rebase_task_draft_step_ids_on_save(self, c9_app):
+        draft_steps = [
+            {
+                "id": "task_draft_execute",
+                "position": 1,
+                "name": "Execute prompt",
+                "kind": "chat",
+                "config": {"prompt": "Reply with READY only."},
+                "on_success_step_id": "task_draft_complete",
+                "on_failure_step_id": "",
+                "active": True,
+            },
+            {
+                "id": "task_draft_complete",
+                "position": 2,
+                "name": "Complete",
+                "kind": "complete",
+                "config": {},
+                "on_success_step_id": "",
+                "on_failure_step_id": "",
+                "active": True,
+            },
+        ]
+        r_one = c9_app.post("/api/tasks", json={
+            "name": "Draft Save One",
+            "mode": "chat",
+            "schedule_kind": "manual",
+            "executor_prompt": "Reply with READY only.",
+            "steps": draft_steps,
+        })
+        assert r_one.status_code == 200
+        first = r_one.json()["task"]
+        assert first["steps"][0]["id"].startswith(first["id"] + "_step_")
+
+        r_two = c9_app.post("/api/tasks", json={
+            "name": "Draft Save Two",
+            "mode": "chat",
+            "schedule_kind": "manual",
+            "executor_prompt": "Reply with READY only.",
+            "steps": draft_steps,
+        })
+        assert r_two.status_code == 200
+        second = r_two.json()["task"]
+        assert second["steps"][0]["id"].startswith(second["id"] + "_step_")
+        assert second["steps"][0]["id"] != first["steps"][0]["id"]
+
+    def test_new_tasks_rebase_condition_rule_sources_on_save(self, c9_app):
+        draft_steps = [
+            {
+                "id": "task_draft_execute",
+                "position": 1,
+                "name": "Execute prompt",
+                "kind": "agent",
+                "config": {"prompt": "Check SharePoint", "agent_id": "c6-kilocode"},
+                "on_success_step_id": "task_draft_condition",
+                "on_failure_step_id": "",
+                "active": True,
+            },
+            {
+                "id": "task_draft_condition",
+                "position": 2,
+                "name": "Condition gate",
+                "kind": "condition",
+                "config": {
+                    "operator": "AND",
+                    "rules": [
+                        {"source": "task_draft_execute", "field": "sub_task", "comparator": "eq", "value": True},
+                        {"source": "task_draft_execute", "field": "x", "comparator": "exists", "value": True},
+                    ],
+                },
+                "on_success_step_id": "task_draft_alert",
+                "on_failure_step_id": "task_draft_complete",
+                "active": True,
+            },
+            {
+                "id": "task_draft_alert",
+                "position": 3,
+                "name": "Alert",
+                "kind": "alert",
+                "config": {"title": "SharePoint matched", "trigger_text": "SharePoint matched"},
+                "on_success_step_id": "task_draft_complete",
+                "on_failure_step_id": "",
+                "active": True,
+            },
+            {
+                "id": "task_draft_complete",
+                "position": 4,
+                "name": "Complete",
+                "kind": "complete",
+                "config": {},
+                "on_success_step_id": "",
+                "on_failure_step_id": "",
+                "active": True,
+            },
+        ]
+        r = c9_app.post("/api/tasks", json={
+            "name": "Draft Condition Rebase",
+            "mode": "agent",
+            "schedule_kind": "manual",
+            "executor_prompt": "Check SharePoint",
+            "steps": draft_steps,
+        })
+        assert r.status_code == 200
+        task = r.json()["task"]
+        execute_step = task["steps"][0]
+        condition_step = task["steps"][1]
+        rules = condition_step["config"]["rules"]
+        assert all(rule["source"] == execute_step["id"] for rule in rules)
 
     def test_manual_sandbox_task_run_executes_validate_and_test(self, c9_app):
         import c9_jokes.app as c9_mod
