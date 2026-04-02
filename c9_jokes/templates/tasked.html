@@ -1,0 +1,674 @@
+{% extends "base.html" %}
+{% block title %}Tasked{% endblock %}
+{% block content %}
+<style>
+.tasked-shell{display:grid;gap:1rem}
+.tasked-hero,.tasked-card{background:var(--card, rgba(255,255,255,0.04));border:1px solid var(--border, rgba(255,255,255,0.08));border-radius:16px;padding:1rem 1.1rem}
+.tasked-hero h1{margin:0 0 .45rem 0;font-size:1.22rem}
+.tasked-meta{font-size:.84rem;color:var(--muted);line-height:1.55}
+.tasked-pill{display:inline-flex;align-items:center;gap:.35rem;border:1px solid var(--border,#333);border-radius:999px;padding:.22rem .6rem;font-size:.73rem;color:var(--muted);background:#111}
+.tasked-role-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.75rem}
+.tasked-role{background:#111;border:1px solid var(--border,#333);border-radius:14px;padding:.85rem}
+.tasked-role h3{margin:0 0 .35rem 0;font-size:.9rem}
+.tasked-role p{margin:0;font-size:.8rem;color:var(--muted);line-height:1.5}
+.tasked-grid{display:grid;grid-template-columns:minmax(360px,560px) 1fr;gap:1rem;align-items:start}
+.tasked-form{display:grid;gap:.8rem}
+.tasked-form label{display:grid;gap:.35rem;font-size:.84rem}
+.tasked-form input,.tasked-form select,.tasked-form textarea{width:100%;background:#111;border:1px solid var(--border,#333);border-radius:10px;color:var(--fg,#f5f5f7);padding:.68rem .8rem;font:inherit}
+.tasked-form textarea{min-height:92px;resize:vertical}
+.tasked-row{display:grid;grid-template-columns:1fr 1fr;gap:.7rem}
+.tasked-actions{display:flex;gap:.6rem;flex-wrap:wrap}
+.tasked-btn{background:var(--accent,#0a84ff);color:#fff;border:none;border-radius:10px;padding:.68rem .95rem;font:inherit;cursor:pointer}
+.tasked-btn.secondary{background:transparent;border:1px solid var(--border,#333);color:var(--fg,#f5f5f7)}
+.tasked-btn.warn{background:#8b5cf6}
+.tasked-note{font-size:.8rem;color:var(--muted);line-height:1.5}
+.tasked-result{white-space:pre-wrap;word-break:break-word;background:#111;border:1px solid var(--border,#333);border-radius:12px;padding:.8rem;min-height:86px;font-size:.83rem}
+.tasked-table{width:100%;border-collapse:collapse}
+.tasked-table th,.tasked-table td{padding:.55rem .5rem;border-bottom:1px solid var(--border,#333);font-size:.84rem;text-align:left;vertical-align:top}
+.tasked-table tbody tr{cursor:pointer}
+.tasked-table tbody tr:hover{background:rgba(255,255,255,.03)}
+.tasked-status.running{color:#0a84ff}.tasked-status.completed{color:#30d158}.tasked-status.failed{color:#ff453a}.tasked-status.launch-required,.tasked-status.manual-only{color:#ffa000}
+.tasked-template-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.75rem}
+.tasked-template{background:#111;border:1px solid var(--border,#333);border-radius:14px;padding:.9rem;display:grid;gap:.55rem}
+.tasked-template h3{margin:0;font-size:.92rem}
+.tasked-template p{margin:0;font-size:.79rem;color:var(--muted);line-height:1.52}
+.tasked-template ul{margin:0;padding-left:1rem;color:var(--muted);font-size:.76rem;line-height:1.45}
+.tasked-template button{justify-self:start}
+.tasked-template-toolbar{display:flex;gap:.65rem;flex-wrap:wrap;align-items:end;margin-bottom:.9rem}
+.tasked-template-toolbar label{display:grid;gap:.35rem;font-size:.84rem;min-width:min(360px,100%)}
+.tasked-template-toolbar select{width:100%;background:#111;border:1px solid var(--border,#333);border-radius:10px;color:var(--fg,#f5f5f7);padding:.68rem .8rem;font:inherit}
+.tasked-summary-list{display:grid;gap:.45rem;margin-top:.6rem}
+.tasked-summary-item{display:flex;gap:.55rem;align-items:flex-start;font-size:.8rem;color:var(--muted)}
+.tasked-summary-item strong{color:var(--fg)}
+.tasked-trace{background:#111;border:1px solid var(--border,#333);border-radius:14px;padding:.85rem;display:grid;gap:.7rem}
+.tasked-trace-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.65rem}
+.tasked-trace-item{border:1px solid var(--border,#333);border-radius:12px;padding:.65rem;background:#151515}
+.tasked-trace-item strong{display:block;font-size:.82rem;margin-bottom:.2rem}
+.tasked-trace-item span{font-size:.77rem;color:var(--muted);line-height:1.5;white-space:pre-wrap;word-break:break-word}
+@media (max-width: 980px){.tasked-grid{grid-template-columns:1fr}.tasked-row{grid-template-columns:1fr}}
+</style>
+
+<div class="tasked-shell">
+  <section class="tasked-hero">
+    <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.75rem;">
+      <span class="tasked-pill">Tasked</span>
+      <span class="tasked-pill">Recurring or manual</span>
+      <span class="tasked-pill">Chat + Agent + Multi-Agent + multi-Agento</span>
+      <span class="tasked-pill">Alerts integration</span>
+    </div>
+    <h1>Tasked Orchestrator</h1>
+    <div class="tasked-meta">
+      Tasked is a separate orchestration page in C9. It stores recurring or one-off tasks, keeps editable templates,
+      decides which execution surface to use, and raises alerts when a trigger condition is met. Background recurring
+      execution currently runs <code>chat</code> tasks directly. <code>agent</code>, <code>multi-agent</code>, and
+      <code>multi-Agento</code> tasks are saved here and launched into their dedicated pages when you run them.
+    </div>
+    <div class="tasked-summary-list">
+      <div class="tasked-summary-item"><strong>Task orchestration</strong><span>The doer: picks the execution path and holds the saved definition.</span></div>
+      <div class="tasked-summary-item"><strong>Task planner</strong><span>The order of work, cascading actions, and tab-to-tab context handoff.</span></div>
+      <div class="tasked-summary-item"><strong>Task timer</strong><span>The recurrence interval, active state, and next-run scheduling window.</span></div>
+      <div class="tasked-summary-item"><strong>Task executor</strong><span>The exact prompt or code-oriented action executed by chat, agent, or team mode.</span></div>
+      <div class="tasked-summary-item"><strong>Task alert generator</strong><span>Raises an alert on the Alerts page when the trigger condition is satisfied.</span></div>
+    </div>
+    <div class="tasked-actions" style="margin-top:.9rem;">
+      <button class="tasked-btn secondary" type="button" id="task-seed-examples-btn">Load 4 DB examples</button>
+    </div>
+  </section>
+
+  <section class="tasked-card">
+    <h2 style="margin:0 0 .45rem 0;font-size:1rem;">Execution Roles</h2>
+    <div class="tasked-note" style="margin-bottom:.8rem;">These roles are editable through the builder fields below. The templates prefill them for the example flows you gave.</div>
+    <div class="tasked-role-grid">
+      <div class="tasked-role"><h3>Task Orchestrator</h3><p>Selects the mode, keeps the saved task, and decides whether the task runs in background chat mode or launches a larger interactive workspace.</p></div>
+      <div class="tasked-role"><h3>Task Planner</h3><p>Defines the step order, including cascading checks like detect email, inspect attachment, then check SharePoint.</p></div>
+      <div class="tasked-role"><h3>Task Timer</h3><p>Controls recurring frequency, active state, and next-run timing. Use it for every-10-minutes flows and manual one-off launches.</p></div>
+      <div class="tasked-role"><h3>Task Executor</h3><p>Runs the actual prompt or code-oriented action. This is where the detailed task instruction lives.</p></div>
+      <div class="tasked-role"><h3>Task Alert Generator</h3><p>Builds the alert payload that becomes visible on the Alerts page with trigger, summary, and extracted details.</p></div>
+    </div>
+  </section>
+
+  <section class="tasked-card">
+    <h2 style="margin:0 0 .45rem 0;font-size:1rem;">Editable Templates</h2>
+    <div class="tasked-note" style="margin-bottom:.8rem;">
+      These templates are editable. Click <strong>Load template</strong> to prefill the builder, then change the prompts, schedule, tabs, or trigger logic.
+      The current templates cover the weather example, Gmail/Outlook sender watch, SharePoint file watch, Outlook alert watch, and the combined Outlook + SharePoint flow.
+    </div>
+    <div class="tasked-template-toolbar">
+      <label>
+        Select editable template
+        <select id="tasked-template-picker">
+          <option value="">Choose a template to load</option>
+        </select>
+      </label>
+      <button class="tasked-btn secondary" type="button" id="tasked-template-load-btn">Load selected template</button>
+      <button class="tasked-btn secondary" type="button" id="tasked-template-save-btn">Save current as template</button>
+      <button class="tasked-btn secondary" type="button" id="tasked-template-clone-btn">Clone selected template</button>
+      <button class="tasked-btn secondary" type="button" id="tasked-template-archive-btn">Archive selected template</button>
+    </div>
+    <div class="tasked-note" id="tasked-template-note">Templates are DB-backed. Built-in and user-created templates can both be loaded here; archiving removes them from the active picker.</div>
+    <div class="tasked-template-grid" id="tasked-template-grid"></div>
+  </section>
+
+  <div class="tasked-grid">
+    <section class="tasked-card">
+      <h2 style="margin:0 0 .45rem 0;font-size:1rem;">Tasked Builder</h2>
+      <div class="tasked-note" style="margin-bottom:.8rem;">
+        Use this builder for recurring or non-recurring tasks that combine chat, agents, multi-agent, or multi-Agento.
+        Keep <strong>Tabs required</strong> and <strong>Context handoff</strong> explicit when you want one tab to gather data and another tab to continue the flow.
+      </div>
+      <form class="tasked-form" id="task-form">
+        <input type="hidden" id="task-id">
+        <label>
+          Template
+          <select id="task-template">
+            <option value="">Custom</option>
+          </select>
+        </label>
+        <div class="tasked-row">
+          <label>
+            Name
+            <input id="task-name" placeholder="Tasked name">
+          </label>
+          <label>
+            Mode
+            <select id="task-mode">
+              <option value="chat">Chat</option>
+              <option value="agent">Agent</option>
+              <option value="multi-agent">Multi-Agent</option>
+              <option value="multi-agento">multi-Agento</option>
+            </select>
+          </label>
+        </div>
+        <div class="tasked-row">
+          <label>
+            Schedule
+            <select id="task-schedule-kind">
+              <option value="manual">Once-off / manual</option>
+              <option value="recurring">Repeating / recurring</option>
+              <option value="continuous">Live / continuous monitor</option>
+            </select>
+          </label>
+          <label>
+            Every N minutes
+            <input id="task-interval" type="number" min="0" step="1" value="10">
+          </label>
+        </div>
+        <div class="tasked-row">
+          <label>
+            Tabs required
+            <input id="task-tabs" type="number" min="1" max="12" value="2">
+          </label>
+          <label style="align-content:end">
+            <span>Active</span>
+            <input id="task-active" type="checkbox" checked style="width:auto">
+          </label>
+        </div>
+        <label>
+          Planner prompt
+          <textarea id="task-planner" placeholder="The order of task execution and cascading actions"></textarea>
+        </label>
+        <label>
+          Executor prompt
+          <textarea id="task-executor" placeholder="The exact task prompt or code-oriented action to run"></textarea>
+        </label>
+        <label>
+          Context handoff
+          <textarea id="task-context" placeholder="Describe how tab 1 copies context into tab 2 or another execution lane"></textarea>
+        </label>
+        <div class="tasked-row">
+          <label>
+            Trigger mode
+            <select id="task-trigger-mode">
+              <option value="json">JSON triggered flag</option>
+              <option value="contains">Response contains text</option>
+              <option value="always">Always create alert</option>
+            </select>
+          </label>
+          <label>
+            Trigger text
+            <input id="task-trigger-text" placeholder="Used for contains mode">
+          </label>
+        </div>
+        <label>
+          Notes
+          <textarea id="task-notes" placeholder="Extra orchestration notes, code assistance rules, or operational constraints"></textarea>
+        </label>
+        <div class="tasked-actions">
+          <button class="tasked-btn" type="submit">Save Tasked</button>
+          <button class="tasked-btn warn" type="button" id="task-run-btn">Start Task</button>
+          <button class="tasked-btn secondary" type="button" id="task-reset-btn">New Tasked</button>
+        </div>
+        <div class="tasked-actions">
+          <button class="tasked-btn secondary" type="button" id="task-repeat-btn">Repeat</button>
+          <button class="tasked-btn secondary" type="button" id="task-clone-btn">Clone</button>
+          <button class="tasked-btn secondary" type="button" id="task-pause-btn">Pause</button>
+          <button class="tasked-btn secondary" type="button" id="task-resume-btn">Resume</button>
+          <button class="tasked-btn secondary" type="button" id="task-restart-btn">Restart</button>
+        </div>
+        <div class="tasked-note">Saved rows are editable. The saved task definition is the source of truth, not the original template.</div>
+      </form>
+      <div style="margin-top:1rem">
+        <h2 style="margin-bottom:.45rem;font-size:1rem;">Traceability</h2>
+        <div class="tasked-trace" id="task-trace-box">Select or save a Tasked row to inspect its unique trace ID, latest run, latest alert, and role-by-role visibility from orchestration through alerts.</div>
+      </div>
+      <div style="margin-top:1rem">
+        <h2 style="margin-bottom:.45rem;font-size:1rem;">Last run</h2>
+        <div class="tasked-result" id="task-run-result">No run yet.</div>
+      </div>
+    </section>
+
+    <section class="tasked-card">
+      <div style="display:flex;justify-content:space-between;gap:.8rem;align-items:flex-start;flex-wrap:wrap;">
+        <div>
+          <h2 style="margin:0 0 .45rem 0;font-size:1rem;">Saved Tasked Rows</h2>
+          <div class="tasked-note" style="margin-bottom:.8rem;">Click a saved row to edit it. Manual non-chat runs will open their dedicated page with the saved prompt prefilled.</div>
+        </div>
+        <div class="tasked-actions">
+          <button class="tasked-btn secondary" type="button" id="tasked-refresh-btn">Refresh now</button>
+        </div>
+      </div>
+      <div class="tasked-note" id="tasked-monitor-note" style="margin-bottom:.8rem;">Live monitor refreshes every 15 seconds and preserves unsaved builder edits.</div>
+      <table class="tasked-table">
+        <thead>
+          <tr><th>Name</th><th>Mode</th><th>Schedule</th><th>State</th><th>Duration</th><th>Next run</th></tr>
+        </thead>
+        <tbody id="task-table-body"><tr><td colspan="6" class="tasked-note">Loading…</td></tr></tbody>
+      </table>
+      <div style="margin-top:1rem">
+        <h2 style="margin-bottom:.45rem;font-size:1rem;">Recent Runs</h2>
+        <table class="tasked-table">
+          <thead>
+            <tr><th>When</th><th>Task</th><th>Status</th><th>Duration</th><th>Details</th></tr>
+          </thead>
+          <tbody id="task-runs-body"><tr><td colspan="5" class="tasked-note">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+(function(){
+  var TEMPLATES = {{ task_templates|safe }};
+  var state = { tasks: [], selectedId: '', formDirty: false, lastLoadedAt: '' };
+  var initialTaskId = new URLSearchParams(window.location.search).get('task_id') || '';
+  var form = document.getElementById('task-form');
+  var templateEl = document.getElementById('task-template');
+  var templatePickerEl = document.getElementById('tasked-template-picker');
+  var resultEl = document.getElementById('task-run-result');
+  var tasksBody = document.getElementById('task-table-body');
+  var runsBody = document.getElementById('task-runs-body');
+  var traceBox = document.getElementById('task-trace-box');
+  var templateGrid = document.getElementById('tasked-template-grid');
+  var monitorNoteEl = document.getElementById('tasked-monitor-note');
+  var templateNoteEl = document.getElementById('tasked-template-note');
+  var fields = {
+    id: document.getElementById('task-id'),
+    name: document.getElementById('task-name'),
+    mode: document.getElementById('task-mode'),
+    scheduleKind: document.getElementById('task-schedule-kind'),
+    interval: document.getElementById('task-interval'),
+    tabs: document.getElementById('task-tabs'),
+    active: document.getElementById('task-active'),
+    planner: document.getElementById('task-planner'),
+    executor: document.getElementById('task-executor'),
+    context: document.getElementById('task-context'),
+    triggerMode: document.getElementById('task-trigger-mode'),
+    triggerText: document.getElementById('task-trigger-text'),
+    notes: document.getElementById('task-notes')
+  };
+
+  function esc(v){ return String(v == null ? '' : v).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function fmtTs(ts){ if(!ts) return '—'; try { return new Date(ts).toLocaleString(); } catch(_) { return ts; } }
+  function fmtDuration(ms){
+    if (ms == null || ms === '') return '—';
+    var total = Math.max(0, Math.floor(ms / 1000));
+    var h = Math.floor(total / 3600);
+    var m = Math.floor((total % 3600) / 60);
+    var s = total % 60;
+    if (h) return h + 'h ' + m + 'm ' + s + 's';
+    if (m) return m + 'm ' + s + 's';
+    return s + 's';
+  }
+
+  function markDirty() {
+    state.formDirty = true;
+    if (monitorNoteEl) monitorNoteEl.textContent = 'Unsaved builder edits are preserved. Click Save Tasked when ready.';
+  }
+
+  function resetForm() {
+    fields.id.value = '';
+    fields.name.value = '';
+    fields.mode.value = 'chat';
+    fields.scheduleKind.value = 'manual';
+    fields.interval.value = 10;
+    fields.tabs.value = 2;
+    fields.active.checked = true;
+    fields.planner.value = '';
+    fields.executor.value = '';
+    fields.context.value = '';
+    fields.triggerMode.value = 'json';
+    fields.triggerText.value = '';
+    fields.notes.value = '';
+    templatePickerEl.value = '';
+    state.selectedId = '';
+    state.formDirty = false;
+    resultEl.textContent = 'No run yet.';
+    traceBox.textContent = 'Select or save a Tasked row to inspect its unique trace ID, latest run, latest alert, and role-by-role visibility from orchestration through alerts.';
+  }
+
+  function applyTemplate(key) {
+    var tpl = TEMPLATES.find(function(t){ return t.key === key; });
+    if (!tpl) return;
+    templateEl.value = tpl.key;
+    fields.name.value = tpl.name || '';
+    fields.mode.value = tpl.mode || 'chat';
+    fields.scheduleKind.value = tpl.schedule_kind || 'manual';
+    fields.interval.value = tpl.interval_minutes || 10;
+    fields.tabs.value = tpl.tabs_required || 2;
+    fields.planner.value = tpl.planner_prompt || '';
+    fields.executor.value = tpl.executor_prompt || '';
+    fields.context.value = tpl.context_handoff || '';
+    fields.triggerMode.value = tpl.trigger_mode || 'json';
+    fields.triggerText.value = tpl.trigger_text || '';
+    fields.notes.value = (tpl.description || '') + '\n\nCascading task template loaded into Tasked.';
+    templatePickerEl.value = tpl.key;
+    state.formDirty = true;
+  }
+
+  function renderTrace(task) {
+    var trace = task.trace || {};
+    var latestRun = task.latest_run || {};
+    var latestAlert = task.latest_alert || {};
+    traceBox.innerHTML =
+      '<div><strong>Trace ID:</strong> ' + esc(trace.trace_id || task.id || '—') + '</div>' +
+      '<div class="tasked-trace-grid">' +
+        '<div class="tasked-trace-item"><strong>Task orchestration</strong><span>Unique Task ID: ' + esc(trace.task_id || task.id || '—') + '\nMode: ' + esc(task.mode || '—') + '\nState: ' + esc(task.lifecycle_label || task.last_status || '—') + '</span></div>' +
+        '<div class="tasked-trace-item"><strong>Task planner</strong><span>' + esc((trace.planner || {}).prompt || task.planner_prompt || '—') + '</span></div>' +
+        '<div class="tasked-trace-item"><strong>Task timer</strong><span>Schedule: ' + esc((trace.timer || {}).schedule_label || task.schedule_label || '—') + '\nNext run: ' + esc(fmtTs((trace.timer || {}).next_run_at || task.next_run_at)) + '</span></div>' +
+        '<div class="tasked-trace-item"><strong>Task executor</strong><span>Run ID: ' + esc((trace.run_id || latestRun.id || '—')) + '\nStatus: ' + esc((trace.executor || {}).last_status || latestRun.status || '—') + '\nDuration: ' + esc((trace.executor || {}).duration_label || latestRun.duration_label || '—') + '</span></div>' +
+        '<div class="tasked-trace-item"><strong>Task alert generator</strong><span>Alert ID: ' + esc((trace.alert_id || latestAlert.id || '—')) + '\nStatus: ' + esc((trace.alert_generator || {}).latest_alert_status || latestAlert.status || '—') + '\nTitle: ' + esc((trace.alert_generator || {}).latest_alert_title || latestAlert.title || '—') + '</span></div>' +
+        '<div class="tasked-trace-item"><strong>Context handoff</strong><span>' + esc((trace.planner || {}).context_handoff || task.context_handoff || '—') + '</span></div>' +
+      '</div>' +
+      '<div class="tasked-actions">' +
+        '<a class="tasked-btn secondary" href="' + esc(task.pipeline_url || '/piplinetask') + '">Open pipeline trace</a>' +
+        '<a class="tasked-btn secondary" href="' + esc(task.alerts_url || '/alerts') + '">Open alerts</a>' +
+      '</div>';
+  }
+
+  function fillForm(task) {
+    fields.id.value = task.id || '';
+    fields.name.value = task.name || '';
+    fields.mode.value = task.mode || 'chat';
+    fields.scheduleKind.value = task.schedule_kind || 'manual';
+    fields.interval.value = task.interval_minutes || 0;
+    fields.tabs.value = task.tabs_required || 1;
+    fields.active.checked = !!task.active;
+    fields.planner.value = task.planner_prompt || '';
+    fields.executor.value = task.executor_prompt || '';
+    fields.context.value = task.context_handoff || '';
+    fields.triggerMode.value = task.trigger_mode || 'json';
+    fields.triggerText.value = task.trigger_text || '';
+    fields.notes.value = task.notes || '';
+    templateEl.value = task.template_key || '';
+    templatePickerEl.value = task.template_key || '';
+    state.selectedId = task.id || '';
+    state.formDirty = false;
+    resultEl.textContent = (task.last_result_excerpt || 'No run yet.') + (task.launch_url ? '\n\nLaunch: ' + task.launch_url : '');
+    renderTrace(task);
+  }
+
+  function collectPayload() {
+    return {
+      id: fields.id.value.trim(),
+      name: fields.name.value.trim(),
+      mode: fields.mode.value,
+      schedule_kind: fields.scheduleKind.value,
+      interval_minutes: parseInt(fields.interval.value || '0', 10) || 0,
+      tabs_required: parseInt(fields.tabs.value || '1', 10) || 1,
+      active: fields.active.checked,
+      template_key: templateEl.value || '',
+      planner_prompt: fields.planner.value.trim(),
+      executor_prompt: fields.executor.value.trim(),
+      context_handoff: fields.context.value.trim(),
+      trigger_mode: fields.triggerMode.value,
+      trigger_text: fields.triggerText.value.trim(),
+      notes: fields.notes.value.trim()
+    };
+  }
+
+  function renderTemplates(templates) {
+    TEMPLATES = templates || [];
+    templatePickerEl.innerHTML = '<option value="">Choose a template to load</option>';
+    templateEl.innerHTML = '<option value="">Custom</option>';
+    TEMPLATES.forEach(function(tpl) {
+      var opt = document.createElement('option');
+      opt.value = tpl.key;
+      opt.textContent = tpl.name + ((tpl.source && tpl.source !== 'builtin') ? ' · user' : '');
+      templatePickerEl.appendChild(opt);
+      var opt2 = document.createElement('option');
+      opt2.value = tpl.key;
+      opt2.textContent = tpl.name;
+      templateEl.appendChild(opt2);
+    });
+    if (templateNoteEl) templateNoteEl.textContent = 'Templates are DB-backed. Active templates loaded: ' + TEMPLATES.length + '.';
+    templateGrid.innerHTML = (templates || []).map(function(tpl) {
+      return '<article class="tasked-template">' +
+        '<h3>' + esc(tpl.name) + '</h3>' +
+        '<p>' + esc(tpl.description || '') + '</p>' +
+        '<ul>' +
+          '<li>Mode: ' + esc(tpl.mode || 'chat') + '</li>' +
+          '<li>Schedule: ' + esc(tpl.schedule_kind || 'manual') + ((tpl.interval_minutes || 0) ? ' / ' + esc(tpl.interval_minutes) + 'm' : '') + '</li>' +
+          '<li>Tabs required: ' + esc(tpl.tabs_required || 1) + '</li>' +
+        '</ul>' +
+        '<button class="tasked-btn secondary" type="button" data-template-key="' + esc(tpl.key) + '">Load template</button>' +
+      '</article>';
+    }).join('');
+    templateGrid.querySelectorAll('button[data-template-key]').forEach(function(btn) {
+      btn.addEventListener('click', function() { applyTemplate(btn.dataset.templateKey); });
+    });
+  }
+
+  function renderTasks(tasks) {
+    state.tasks = tasks || [];
+    if (!tasks.length) {
+      tasksBody.innerHTML = '<tr><td colspan="6" class="tasked-note">No saved Tasked rows yet.</td></tr>';
+      return;
+    }
+    tasksBody.innerHTML = tasks.map(function(t) {
+      var latestRun = t.latest_run || {};
+      var durationHtml = latestRun.is_running
+        ? '<span data-live-start="' + esc(latestRun.started_at || latestRun.created_at || '') + '">' + esc(latestRun.duration_label || '0s') + '</span>'
+        : esc(latestRun.duration_label || '—');
+      return '<tr data-id="' + esc(t.id) + '">' +
+        '<td><strong>' + esc(t.name) + '</strong><div class="tasked-note">' + esc((t.template_label || t.template_key || 'custom')) + ' · ' + esc(t.id || '') + '</div></td>' +
+        '<td>' + esc(t.mode_label || t.mode) + '</td>' +
+        '<td>' + esc(t.schedule_label || t.schedule_kind || '—') + '</td>' +
+        '<td><span class="tasked-status ' + esc(t.lifecycle_state || t.last_status || 'idle') + '">' + esc(t.lifecycle_label || t.last_status || 'idle') + '</span></td>' +
+        '<td>' + durationHtml + '</td>' +
+        '<td>' + esc(t.next_run_at ? fmtTs(t.next_run_at) : '—') + '</td>' +
+      '</tr>';
+    }).join('');
+    tasksBody.querySelectorAll('tr[data-id]').forEach(function(row) {
+      row.addEventListener('click', function() {
+        var task = state.tasks.find(function(t){ return t.id === row.dataset.id; });
+        if (task) fillForm(task);
+      });
+    });
+  }
+
+  function renderRuns(runs) {
+    if (!runs || !runs.length) {
+      runsBody.innerHTML = '<tr><td colspan="5" class="tasked-note">No runs yet.</td></tr>';
+      return;
+    }
+    runsBody.innerHTML = runs.map(function(r) {
+      var detail = r.launch_url || r.output_excerpt || r.error_text || '—';
+      var durationHtml = r.is_running
+        ? '<span data-live-start="' + esc(r.started_at || r.created_at || '') + '">' + esc(r.duration_label || '0s') + '</span>'
+        : esc(r.duration_label || '—');
+      return '<tr>' +
+        '<td>' + esc(fmtTs(r.created_at)) + '</td>' +
+        '<td>' + esc(r.task_id || '—') + '</td>' +
+        '<td><span class="tasked-status ' + esc(r.status || 'queued') + '">' + esc(r.status || 'queued') + '</span></td>' +
+        '<td>' + durationHtml + '</td>' +
+        '<td>' + esc(String(detail).slice(0, 180)) + '</td>' +
+      '</tr>';
+    }).join('');
+  }
+
+  function tickDurations() {
+    document.querySelectorAll('[data-live-start]').forEach(function(node) {
+      var started = node.getAttribute('data-live-start');
+      if (!started) return;
+      var ms = Date.now() - new Date(started).getTime();
+      if (!isNaN(ms) && ms >= 0) node.textContent = fmtDuration(ms);
+    });
+  }
+
+  async function loadTasks() {
+    var res = await fetch('/api/tasks', { cache: 'no-store' });
+    var data = await res.json();
+    var templates = data.templates || TEMPLATES;
+    renderTasks(data.tasks || []);
+    renderTemplates(templates);
+    state.lastLoadedAt = new Date().toLocaleTimeString();
+    if (monitorNoteEl) monitorNoteEl.textContent = 'Live monitor refreshed at ' + state.lastLoadedAt + '. Unsaved edits are preserved.';
+    var selectedId = state.selectedId || initialTaskId;
+    if (selectedId) {
+      var task = (data.tasks || []).find(function(t){ return t.id === selectedId; });
+      if (task && !state.formDirty) fillForm(task);
+    }
+  }
+
+  async function loadRuns() {
+    var res = await fetch('/api/task-runs?limit=20', { cache: 'no-store' });
+    var data = await res.json();
+    renderRuns(data.runs || []);
+  }
+
+  form.addEventListener('submit', async function(e) {
+    e.preventDefault();
+    resultEl.textContent = 'Saving…';
+    var res = await fetch('/api/tasks', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(collectPayload())
+    });
+    var data = await res.json();
+    if (!data.ok) {
+      resultEl.textContent = data.error || 'Save failed';
+      return;
+    }
+    fillForm(data.task);
+    await loadTasks();
+    resultEl.textContent = 'Saved Tasked row "' + (data.task.name || '') + '".';
+  });
+
+  document.getElementById('task-run-btn').addEventListener('click', async function() {
+    if (!fields.id.value.trim()) {
+      resultEl.textContent = 'Save the Tasked row first.';
+      return;
+    }
+    resultEl.textContent = 'Running…';
+    var res = await fetch('/api/tasks/' + encodeURIComponent(fields.id.value.trim()) + '/start', { method: 'POST' });
+    var data = await res.json();
+    if (data.launch_url) {
+      resultEl.textContent = 'Launch required:\n' + data.launch_url;
+      window.open(data.launch_url, '_blank');
+    } else if (data.ok) {
+      resultEl.textContent = (data.text || 'Tasked run complete.') + (data.alert_id ? '\n\nAlert #' + data.alert_id + ' created.' : '');
+    } else {
+      resultEl.textContent = data.error || 'Run failed';
+    }
+    await loadTasks();
+    await loadRuns();
+  });
+
+  async function taskAction(action, successLabel) {
+    if (!fields.id.value.trim()) {
+      resultEl.textContent = 'Save or select a Tasked row first.';
+      return;
+    }
+    resultEl.textContent = successLabel + '…';
+    var res = await fetch('/api/tasks/' + encodeURIComponent(fields.id.value.trim()) + '/' + action, { method: 'POST' });
+    var data = await res.json();
+    if (!data.ok && !data.task && !data.run_id) {
+      resultEl.textContent = data.error || (successLabel + ' failed');
+      return;
+    }
+    if (data.task) fillForm(data.task);
+    else resultEl.textContent = (data.text || data.status || successLabel + ' complete');
+    if (data.launch_url) {
+      resultEl.textContent = 'Launch required:\n' + data.launch_url;
+      window.open(data.launch_url, '_blank');
+    } else if (data.ok && data.alert_id) {
+      resultEl.textContent = (data.text || successLabel + ' complete.') + '\n\nAlert #' + data.alert_id + ' created.';
+    }
+    await loadTasks();
+    await loadRuns();
+  }
+
+  document.getElementById('task-seed-examples-btn').addEventListener('click', async function() {
+    resultEl.textContent = 'Seeding 4 Tasked examples…';
+    var res = await fetch('/api/tasks/seed-examples', { method: 'POST' });
+    var data = await res.json();
+    if (!data.ok) {
+      resultEl.textContent = data.error || 'Example seed failed';
+      return;
+    }
+    resultEl.textContent = 'Seeded ' + (data.seeded_count || 0) + ' Tasked examples.';
+    await loadTasks();
+    await loadRuns();
+  });
+
+  document.getElementById('tasked-refresh-btn').addEventListener('click', async function() {
+    await loadTasks();
+    await loadRuns();
+  });
+
+  document.getElementById('tasked-template-load-btn').addEventListener('click', function() {
+    if (!templatePickerEl.value) {
+      resultEl.textContent = 'Select an editable template first.';
+      return;
+    }
+    applyTemplate(templatePickerEl.value);
+    resultEl.textContent = 'Loaded editable template "' + templatePickerEl.options[templatePickerEl.selectedIndex].text + '".';
+  });
+
+  document.getElementById('tasked-template-save-btn').addEventListener('click', async function() {
+    var payload = collectPayload();
+    payload.key = templatePickerEl.value || templateEl.value || '';
+    payload.description = (fields.notes.value || payload.name || '').trim();
+    payload.source = 'user';
+    var res = await fetch('/api/task-templates', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    var data = await res.json();
+    if (!data.ok) {
+      resultEl.textContent = data.error || 'Template save failed';
+      return;
+    }
+    templatePickerEl.value = data.template.key;
+    templateEl.value = data.template.key;
+    resultEl.textContent = 'Saved editable template "' + data.template.name + '".';
+    await loadTasks();
+  });
+
+  document.getElementById('tasked-template-clone-btn').addEventListener('click', async function() {
+    if (!templatePickerEl.value) {
+      resultEl.textContent = 'Select a template to clone.';
+      return;
+    }
+    var res = await fetch('/api/task-templates/' + encodeURIComponent(templatePickerEl.value) + '/clone', { method: 'POST' });
+    var data = await res.json();
+    if (!data.ok) {
+      resultEl.textContent = data.error || 'Template clone failed';
+      return;
+    }
+    resultEl.textContent = 'Cloned template into "' + data.template.name + '".';
+    await loadTasks();
+    templatePickerEl.value = data.template.key;
+    applyTemplate(data.template.key);
+  });
+
+  document.getElementById('tasked-template-archive-btn').addEventListener('click', async function() {
+    if (!templatePickerEl.value) {
+      resultEl.textContent = 'Select a template to archive.';
+      return;
+    }
+    var res = await fetch('/api/task-templates/' + encodeURIComponent(templatePickerEl.value) + '/archive', { method: 'POST' });
+    var data = await res.json();
+    if (!data.ok) {
+      resultEl.textContent = data.error || 'Template archive failed';
+      return;
+    }
+    resultEl.textContent = 'Archived template "' + data.template.name + '".';
+    templatePickerEl.value = '';
+    templateEl.value = '';
+    await loadTasks();
+  });
+
+  document.getElementById('task-repeat-btn').addEventListener('click', function() { taskAction('repeat', 'Repeating task'); });
+  document.getElementById('task-clone-btn').addEventListener('click', function() { taskAction('clone', 'Cloning task'); });
+  document.getElementById('task-pause-btn').addEventListener('click', function() { taskAction('pause', 'Pausing task'); });
+  document.getElementById('task-resume-btn').addEventListener('click', function() { taskAction('resume', 'Resuming task'); });
+  document.getElementById('task-restart-btn').addEventListener('click', function() { taskAction('restart', 'Restarting task'); });
+  document.getElementById('task-reset-btn').addEventListener('click', resetForm);
+  templateEl.addEventListener('change', function() { applyTemplate(templateEl.value); });
+  form.querySelectorAll('input,select,textarea').forEach(function(el) {
+    el.addEventListener('input', markDirty);
+    el.addEventListener('change', markDirty);
+  });
+
+  resetForm();
+  loadTasks().catch(function(){ tasksBody.innerHTML = '<tr><td colspan="6" class="tasked-note">Failed to load Tasked rows.</td></tr>'; });
+  loadRuns().catch(function(){ runsBody.innerHTML = '<tr><td colspan="5" class="tasked-note">Failed to load Tasked runs.</td></tr>'; });
+  setInterval(tickDurations, 1000);
+  setInterval(function(){ if (!document.hidden) loadTasks().catch(function(){}); }, 15000);
+  setInterval(loadRuns, 15000);
+})();
+</script>
+{% endblock %}

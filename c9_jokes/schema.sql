@@ -96,3 +96,108 @@ CREATE TABLE IF NOT EXISTS multi_agent_pane_messages (
     content TEXT NOT NULL,
     FOREIGN KEY (session_id) REFERENCES multi_agent_sessions(id)
 );
+
+CREATE TABLE IF NOT EXISTS task_definitions (
+    id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    name TEXT NOT NULL,
+    mode TEXT NOT NULL DEFAULT 'chat',
+    schedule_kind TEXT NOT NULL DEFAULT 'manual',
+    interval_minutes INTEGER DEFAULT 0,
+    active INTEGER DEFAULT 1,
+    tabs_required INTEGER DEFAULT 1,
+    template_key TEXT DEFAULT '',
+    planner_prompt TEXT DEFAULT '',
+    executor_prompt TEXT DEFAULT '',
+    context_handoff TEXT DEFAULT '',
+    trigger_mode TEXT DEFAULT 'json',
+    trigger_text TEXT DEFAULT '',
+    notes TEXT DEFAULT '',
+    last_run_at TEXT,
+    next_run_at TEXT,
+    last_status TEXT DEFAULT 'idle',
+    last_result_excerpt TEXT DEFAULT ''
+);
+
+CREATE TABLE IF NOT EXISTS task_runs (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    started_at TEXT,
+    finished_at TEXT,
+    source TEXT DEFAULT 'manual',
+    status TEXT DEFAULT 'queued',
+    mode TEXT DEFAULT 'chat',
+    output_excerpt TEXT DEFAULT '',
+    error_text TEXT DEFAULT '',
+    alert_id INTEGER,
+    launch_url TEXT DEFAULT '',
+    FOREIGN KEY (task_id) REFERENCES task_definitions(id)
+);
+CREATE INDEX IF NOT EXISTS idx_task_runs_task_created ON task_runs(task_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS task_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    status TEXT DEFAULT '',
+    detail TEXT DEFAULT '',
+    run_id TEXT DEFAULT '',
+    alert_id INTEGER,
+    FOREIGN KEY (task_id) REFERENCES task_definitions(id)
+);
+CREATE INDEX IF NOT EXISTS idx_task_events_task_created ON task_events(task_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS task_alerts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id TEXT,
+    run_id TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT,
+    status TEXT DEFAULT 'open',
+    title TEXT NOT NULL,
+    trigger_text TEXT DEFAULT '',
+    summary TEXT DEFAULT '',
+    payload_json TEXT DEFAULT '',
+    acknowledged_at TEXT,
+    resolved_at TEXT,
+    snoozed_until TEXT,
+    FOREIGN KEY (task_id) REFERENCES task_definitions(id)
+);
+CREATE INDEX IF NOT EXISTS idx_task_alerts_task_created ON task_alerts(task_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_task_alerts_status ON task_alerts(status, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS task_templates (
+    key TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    name TEXT NOT NULL,
+    description TEXT DEFAULT '',
+    mode TEXT NOT NULL DEFAULT 'chat',
+    schedule_kind TEXT NOT NULL DEFAULT 'manual',
+    interval_minutes INTEGER DEFAULT 0,
+    tabs_required INTEGER DEFAULT 1,
+    planner_prompt TEXT DEFAULT '',
+    executor_prompt TEXT DEFAULT '',
+    context_handoff TEXT DEFAULT '',
+    trigger_mode TEXT DEFAULT 'json',
+    trigger_text TEXT DEFAULT '',
+    active INTEGER DEFAULT 1,
+    source TEXT DEFAULT 'user'
+);
+CREATE INDEX IF NOT EXISTS idx_task_templates_active ON task_templates(active, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS task_run_claims (
+    task_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    owner_id TEXT NOT NULL,
+    source TEXT DEFAULT 'manual',
+    claimed_at TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    FOREIGN KEY (task_id) REFERENCES task_definitions(id)
+);
+CREATE INDEX IF NOT EXISTS idx_task_claims_exp ON task_run_claims(expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_task_def_due ON task_definitions(active, schedule_kind, next_run_at);

@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}piplinetask{% endblock %}
+{% block content %}
+<style>
+.pipeline-shell{display:grid;gap:1rem}
+.pipeline-card{background:var(--card, rgba(255,255,255,0.04));border:1px solid var(--border, rgba(255,255,255,0.08));border-radius:16px;padding:1rem 1.1rem}
+.pipeline-hero h1{margin:0 0 .45rem 0;font-size:1.18rem}
+.pipeline-note{font-size:.82rem;color:var(--muted);line-height:1.55}
+.pipeline-toolbar{display:flex;gap:.65rem;flex-wrap:wrap;align-items:center}
+.pipeline-toolbar input{background:#111;border:1px solid var(--border,#333);border-radius:10px;color:var(--fg,#f5f5f7);padding:.62rem .8rem;font:inherit;min-width:240px}
+.pipeline-toolbar label{display:inline-flex;align-items:center;gap:.45rem;font-size:.8rem;color:var(--muted)}
+.pipeline-btn{background:var(--accent,#0a84ff);color:#fff;border:none;border-radius:10px;padding:.62rem .9rem;font:inherit;cursor:pointer}
+.pipeline-btn.secondary{background:transparent;border:1px solid var(--border,#333);color:var(--fg,#f5f5f7)}
+.pipeline-list{display:grid;gap:.8rem}
+.pipeline-item{background:#111;border:1px solid var(--border,#333);border-radius:14px;overflow:hidden}
+.pipeline-summary{display:grid;grid-template-columns:minmax(220px,1.4fr) repeat(4,minmax(90px,.7fr)) minmax(150px,1fr);gap:.7rem;align-items:start;padding:.95rem 1rem;cursor:pointer}
+.pipeline-summary::-webkit-details-marker{display:none}
+.pipeline-head strong{display:block;font-size:.95rem;margin-bottom:.2rem}
+.pipeline-meta{font-size:.76rem;color:var(--muted);line-height:1.45}
+.pipeline-pill{display:inline-flex;align-items:center;gap:.35rem;border:1px solid var(--border,#333);border-radius:999px;padding:.12rem .45rem;font-size:.72rem;color:var(--muted);background:#161616}
+.pipeline-stat{font-size:.78rem;color:var(--muted)}
+.pipeline-stat strong{display:block;color:var(--fg);font-size:.9rem;margin-bottom:.15rem}
+.pipeline-actions{display:flex;gap:.45rem;flex-wrap:wrap;justify-content:flex-end}
+.pipeline-link{display:inline-flex;align-items:center;justify-content:center;background:transparent;border:1px solid var(--border,#333);color:var(--fg,#f5f5f7);border-radius:9px;padding:.4rem .7rem;text-decoration:none;font-size:.8rem}
+.pipeline-events{border-top:1px solid var(--border,#333);padding:.85rem 1rem;display:grid;gap:.65rem}
+.pipeline-trace{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.65rem}
+.pipeline-trace-item{padding:.65rem .75rem;border:1px solid var(--border,#333);border-radius:12px;background:#151515}
+.pipeline-trace-item strong{display:block;font-size:.82rem;margin-bottom:.2rem}
+.pipeline-trace-item span{font-size:.76rem;color:var(--muted);line-height:1.5;white-space:pre-wrap;word-break:break-word}
+.pipeline-event{display:grid;grid-template-columns:160px 180px 1fr;gap:.75rem;padding:.65rem .75rem;border:1px solid var(--border,#333);border-radius:12px;background:#151515}
+.pipeline-ts{font-size:.75rem;color:var(--muted);font-family:monospace}
+.pipeline-kind{display:grid;gap:.2rem}
+.pipeline-kind strong{font-size:.82rem}
+.pipeline-kind span{font-size:.72rem;color:var(--muted)}
+.pipeline-detail{font-size:.78rem;color:var(--fg);line-height:1.5;white-space:pre-wrap;word-break:break-word}
+.pipeline-level-ok .pipeline-kind strong{color:#30d158}
+.pipeline-level-warn .pipeline-kind strong{color:#ffa000}
+.pipeline-level-error .pipeline-kind strong{color:#ff453a}
+.pipeline-empty{font-size:.82rem;color:var(--muted);padding:.8rem}
+@media (max-width: 980px){
+  .pipeline-summary{grid-template-columns:1fr}
+  .pipeline-actions{justify-content:flex-start}
+  .pipeline-event{grid-template-columns:1fr}
+}
+</style>
+
+<div class="pipeline-shell">
+  <section class="pipeline-card pipeline-hero">
+    <h1>piplinetask</h1>
+    <div class="pipeline-note">
+      This page shows the full pipeline from Tasked creation through task runs and alert generation. Each pipeline row can be collapsed or expanded
+      to inspect the timeline and detailed logs for every recorded action.
+    </div>
+    <div class="pipeline-toolbar" style="margin-top:.85rem;">
+      <input id="pipeline-task-id" placeholder="Optional Tasked ID filter">
+      <button class="pipeline-btn" id="pipeline-refresh">Refresh pipeline</button>
+      <button class="pipeline-btn secondary" id="pipeline-clear-filter">Clear filter</button>
+      <label><input id="pipeline-live-toggle" type="checkbox" checked> Live monitor every 15s</label>
+    </div>
+    <div class="pipeline-note" id="pipeline-monitor-note" style="margin-top:.85rem;">Pipeline monitor refreshes every 15 seconds while this page stays visible.</div>
+  </section>
+
+  <section class="pipeline-card">
+    <div class="pipeline-list" id="pipeline-list">
+      <div class="pipeline-empty">Loading task pipelines…</div>
+    </div>
+  </section>
+</div>
+
+<script>
+(function(){
+  var listEl = document.getElementById('pipeline-list');
+  var taskIdEl = document.getElementById('pipeline-task-id');
+  var liveToggleEl = document.getElementById('pipeline-live-toggle');
+  var noteEl = document.getElementById('pipeline-monitor-note');
+  var initialTaskId = new URLSearchParams(window.location.search).get('task_id') || '';
+  function esc(v){ return String(v == null ? '' : v).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function fmtTs(ts){ if(!ts) return '—'; try { return new Date(ts).toLocaleString(); } catch(_) { return ts; } }
+
+  function renderEvents(events) {
+    if (!events || !events.length) return '<div class="pipeline-empty">No timeline events recorded yet.</div>';
+    return events.map(function(ev) {
+      return '<div class="pipeline-event pipeline-level-' + esc(ev.level || 'info') + '">' +
+        '<div class="pipeline-ts">' + esc(fmtTs(ev.ts)) + '</div>' +
+        '<div class="pipeline-kind"><strong>' + esc(ev.title || ev.kind || 'Event') + '</strong><span>' + esc(ev.kind || '') + (ev.status ? ' · ' + esc(ev.status) : '') + '</span></div>' +
+        '<div class="pipeline-detail">' + esc(ev.detail || '—') + '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  function renderPipelineItem(item) {
+    var task = item.task || {};
+    var summary = item.summary || {};
+    var trace = item.trace || {};
+    var traceHtml = '<div class="pipeline-trace">' +
+      '<div class="pipeline-trace-item"><strong>Trace</strong><span>Trace ID: ' + esc(trace.trace_id || task.id || '—') + '\nTask ID: ' + esc(trace.task_id || task.id || '—') + '\nRun ID: ' + esc(trace.run_id || '—') + '\nAlert ID: ' + esc(trace.alert_id || '—') + '</span></div>' +
+      '<div class="pipeline-trace-item"><strong>Task orchestration</strong><span>Mode: ' + esc((trace.orchestration || {}).mode || task.mode || '—') + '\nState: ' + esc(task.lifecycle_label || task.last_status || '—') + '</span></div>' +
+      '<div class="pipeline-trace-item"><strong>Task planner</strong><span>' + esc((trace.planner || {}).prompt || '—') + '</span></div>' +
+      '<div class="pipeline-trace-item"><strong>Task timer</strong><span>' + esc((trace.timer || {}).schedule_label || task.schedule_label || '—') + '\nNext run: ' + esc(fmtTs((trace.timer || {}).next_run_at || task.next_run_at)) + '</span></div>' +
+      '<div class="pipeline-trace-item"><strong>Task executor</strong><span>Status: ' + esc((trace.executor || {}).last_status || summary.last_status || '—') + '\nDuration: ' + esc(summary.latest_run_duration_label || (trace.executor || {}).duration_label || '—') + '</span></div>' +
+      '<div class="pipeline-trace-item"><strong>Task alert generator</strong><span>Trigger mode: ' + esc((trace.alert_generator || {}).trigger_mode || task.trigger_mode || '—') + '\nTrigger text: ' + esc((trace.alert_generator || {}).trigger_text || task.trigger_text || '—') + '\nAlert status: ' + esc((trace.alert_generator || {}).latest_alert_status || '—') + '</span></div>' +
+    '</div>';
+    return '<details class="pipeline-item">' +
+      '<summary class="pipeline-summary">' +
+        '<div class="pipeline-head">' +
+          '<strong>' + esc(task.name || task.id || 'Tasked row') + '</strong>' +
+          '<div class="pipeline-meta">' +
+            '<div><span class="pipeline-pill">' + esc(task.mode_label || task.mode || 'Unknown') + '</span> <span class="pipeline-pill">' + esc(task.template_label || task.template_key || 'custom') + '</span></div>' +
+            '<div>Schedule: ' + esc((task.schedule_kind || 'manual') + ((task.interval_minutes || 0) ? ' / ' + task.interval_minutes + 'm' : '')) + '</div>' +
+            '<div>Tabs required: ' + esc(task.tabs_required || 0) + ' · Active: ' + esc(task.active ? 'yes' : 'no') + '</div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="pipeline-stat"><strong>' + esc(summary.last_status || 'idle') + '</strong><span>Last status</span></div>' +
+        '<div class="pipeline-stat"><strong>' + esc(summary.runs_total || 0) + '</strong><span>Runs</span></div>' +
+        '<div class="pipeline-stat"><strong>' + esc(summary.alerts_total || 0) + '</strong><span>Alerts</span></div>' +
+        '<div class="pipeline-stat"><strong>' + esc(summary.open_alerts || 0) + '</strong><span>Open alerts</span></div>' +
+        '<div class="pipeline-actions">' +
+          '<a class="pipeline-link" href="' + esc(task.task_url || '/tasked') + '">Open Tasked</a>' +
+          '<a class="pipeline-link" href="' + esc(task.alerts_url || '/alerts') + '">Open Alerts</a>' +
+        '</div>' +
+      '</summary>' +
+      '<div class="pipeline-events">' + traceHtml + renderEvents(item.events || []) + '</div>' +
+    '</details>';
+  }
+
+  async function loadPipelines() {
+    listEl.innerHTML = '<div class="pipeline-empty">Loading task pipelines…</div>';
+    var q = taskIdEl.value.trim();
+    var nextUrl = new URL(window.location.href);
+    if (q) nextUrl.searchParams.set('task_id', q);
+    else nextUrl.searchParams.delete('task_id');
+    window.history.replaceState({}, '', nextUrl);
+    var url = '/api/task-pipelines' + (q ? ('?task_id=' + encodeURIComponent(q)) : '');
+    var res = await fetch(url, { cache: 'no-store' });
+    var data = await res.json();
+    var rows = data.pipelines || [];
+    if (noteEl) noteEl.textContent = 'Pipeline monitor refreshed at ' + new Date().toLocaleTimeString() + '. Expand a row to inspect the full task-to-alert timeline.';
+    if (!rows.length) {
+      listEl.innerHTML = '<div class="pipeline-empty">No task pipelines found.</div>';
+      return;
+    }
+    listEl.innerHTML = rows.map(renderPipelineItem).join('');
+  }
+
+  document.getElementById('pipeline-refresh').addEventListener('click', loadPipelines);
+  document.getElementById('pipeline-clear-filter').addEventListener('click', function() {
+    taskIdEl.value = '';
+    loadPipelines();
+  });
+  taskIdEl.addEventListener('keydown', function(e){
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      loadPipelines();
+    }
+  });
+  if (initialTaskId) taskIdEl.value = initialTaskId;
+  loadPipelines().catch(function(){ listEl.innerHTML = '<div class="pipeline-empty">Failed to load task pipelines.</div>'; });
+  setInterval(function(){
+    if (document.hidden || !liveToggleEl.checked) return;
+    loadPipelines().catch(function(){});
+  }, 15000);
+})();
+</script>
+{% endblock %}

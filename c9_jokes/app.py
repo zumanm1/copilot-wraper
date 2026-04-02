@@ -15,6 +15,7 @@ import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
+from urllib.parse import quote, urlencode
 
 import httpx
 from fastapi import Body, FastAPI, Request, UploadFile, File
@@ -56,16 +57,187 @@ AGENTS = [
     {"id": "c9-jokes",       "label": "C9 (generic session)"},
 ]
 
+TASK_MODE_OPTIONS = [
+    {"id": "chat", "label": "Chat"},
+    {"id": "agent", "label": "Agent"},
+    {"id": "multi-agent", "label": "Multi-Agent"},
+    {"id": "multi-agento", "label": "multi-Agento"},
+]
+
+TASK_TEMPLATES = [
+    {
+        "key": "weather-dublin",
+        "name": "Weather in Dublin",
+        "description": "Every 10 minutes, check Dublin weather and raise an alert if temperature is above 10C.",
+        "mode": "chat",
+        "schedule_kind": "recurring",
+        "interval_minutes": 10,
+        "tabs_required": 2,
+        "planner_prompt": "Planner: weather check, threshold evaluation, alert generation, and context handoff between two tabs.",
+        "executor_prompt": (
+            "Check the current weather in Dublin, Ireland. If the temperature is above 10C, return strict JSON only: "
+            "{\"triggered\": true|false, \"trigger\": \"Dublin weather\", \"title\": \"...\", "
+            "\"summary\": \"...\", \"details\": {\"location\": \"Dublin\", \"temperature_c\": number, \"condition\": \"...\"}}. "
+            "If the temperature is not above 10C, still return the same JSON with triggered=false."
+        ),
+        "context_handoff": "Tab 1 checks the weather. Copy the temperature and condition into Tab 2 for alert generation and visibility on the alerts page.",
+        "trigger_mode": "json",
+        "trigger_text": "",
+    },
+    {
+        "key": "gmail-sender",
+        "name": "Email from sampelexample",
+        "description": "Recurring email watch for sampelexample@example.com with alert details.",
+        "mode": "chat",
+        "schedule_kind": "recurring",
+        "interval_minutes": 10,
+        "tabs_required": 2,
+        "planner_prompt": "Planner: detect new email, extract sender/subject/time, create visible alert, and share context across two tabs.",
+        "executor_prompt": (
+            "Check Gmail or Outlook for a new email from sampelexample@example.com. Return strict JSON only: "
+            "{\"triggered\": true|false, \"trigger\": \"incoming email from sampelexample\", "
+            "\"title\": \"...\", \"summary\": \"...\", \"details\": {\"sender\": \"...\", \"subject\": \"...\", "
+            "\"received_at\": \"...\"}}. If no matching email is found, return triggered=false with a summary."
+        ),
+        "context_handoff": "Tab 1 detects the email and extracts sender, subject, and time. Tab 2 creates the alert record using the copied email details.",
+        "trigger_mode": "json",
+        "trigger_text": "",
+    },
+    {
+        "key": "sharepoint-new-file",
+        "name": "New SharePoint file",
+        "description": "Recurring SharePoint folder watcher with alert output.",
+        "mode": "chat",
+        "schedule_kind": "recurring",
+        "interval_minutes": 10,
+        "tabs_required": 2,
+        "planner_prompt": "Planner: detect file, extract path/name/time, generate alert, and hand off details between tabs.",
+        "executor_prompt": (
+            "Check an M365 SharePoint folder for a newly added file. Return strict JSON only: "
+            "{\"triggered\": true|false, \"trigger\": \"new SharePoint file event\", \"title\": \"...\", "
+            "\"summary\": \"...\", \"details\": {\"file_name\": \"...\", \"folder\": \"...\", \"detected_at\": \"...\"}}. "
+            "If no new file is found, return triggered=false with the same schema."
+        ),
+        "context_handoff": "Tab 1 gathers file metadata. Tab 2 uses the copied file name and folder path to create the visible alert.",
+        "trigger_mode": "json",
+        "trigger_text": "",
+    },
+    {
+        "key": "m365-outlook-alert",
+        "name": "M365 Outlook alert email",
+        "description": "Recurring M365 Outlook watcher for alerts@company.com.",
+        "mode": "chat",
+        "schedule_kind": "recurring",
+        "interval_minutes": 10,
+        "tabs_required": 2,
+        "planner_prompt": "Planner: detect matching Outlook email, extract core details, create alert, and share context between tabs.",
+        "executor_prompt": (
+            "Check M365 Outlook for a new email from alerts@company.com. Return strict JSON only: "
+            "{\"triggered\": true|false, \"trigger\": \"M365 Outlook email\", \"title\": \"...\", "
+            "\"summary\": \"...\", \"details\": {\"sender\": \"...\", \"subject\": \"...\", \"received_at\": \"...\"}}. "
+            "If no matching email is found, return triggered=false."
+        ),
+        "context_handoff": "Tab 1 extracts Outlook message details. Tab 2 turns those details into a visible alert and keeps the copied context.",
+        "trigger_mode": "json",
+        "trigger_text": "",
+    },
+    {
+        "key": "outlook-sharepoint-linked",
+        "name": "Outlook plus SharePoint",
+        "description": "Combined email and SharePoint flow with alert output when both signals match.",
+        "mode": "chat",
+        "schedule_kind": "recurring",
+        "interval_minutes": 10,
+        "tabs_required": 2,
+        "planner_prompt": "Planner: detect matching email, extract attachment/link, verify SharePoint file, then create a combined alert with copied context.",
+        "executor_prompt": (
+            "Check M365 Outlook for an email from sampelexample@example.com. If it contains an attachment name or SharePoint link, "
+            "check SharePoint for the related file. Return strict JSON only: {\"triggered\": true|false, "
+            "\"trigger\": \"email and linked SharePoint document\", \"title\": \"...\", \"summary\": \"...\", "
+            "\"details\": {\"sender\": \"...\", \"subject\": \"...\", \"file_name\": \"...\", \"detected_at\": \"...\"}}. "
+            "If the full match is not found, return triggered=false with the same schema."
+        ),
+        "context_handoff": "Tab 1 gathers the email context. Tab 2 verifies the SharePoint match and merges both contexts into the final alert.",
+        "trigger_mode": "json",
+        "trigger_text": "",
+    },
+]
+
+TASK_EXAMPLE_SPECS = [
+    {
+        "id": "task_example_gmail_sender",
+        "template_key": "gmail-sender",
+        "name": "Example 1: Email from sampelexample",
+        "trigger": "incoming email from sampelexample",
+        "title": "Example email detected from sampelexample",
+        "summary": "A new email from sampelexample@example.com was detected and copied into the second tab for alert creation.",
+        "details": {
+            "sender": "sampelexample@example.com",
+            "subject": "Project handoff update",
+            "received_at": "2026-04-01T08:10:00Z",
+        },
+        "acknowledged": False,
+    },
+    {
+        "id": "task_example_sharepoint_file",
+        "template_key": "sharepoint-new-file",
+        "name": "Example 2: New SharePoint file",
+        "trigger": "new SharePoint file event",
+        "title": "Example SharePoint file detected",
+        "summary": "A newly added SharePoint file was detected, its folder path was copied across tabs, and an alert was raised.",
+        "details": {
+            "file_name": "Quarterly-Forecast.xlsx",
+            "folder": "/Shared Documents/Finance/Forecasts",
+            "detected_at": "2026-04-01T08:20:00Z",
+        },
+        "acknowledged": False,
+    },
+    {
+        "id": "task_example_outlook_alert",
+        "template_key": "m365-outlook-alert",
+        "name": "Example 3: M365 Outlook alert email",
+        "trigger": "M365 Outlook email",
+        "title": "Example Outlook alert received",
+        "summary": "A new M365 Outlook email from alerts@company.com was detected and sent to the alert page with sender and subject details.",
+        "details": {
+            "sender": "alerts@company.com",
+            "subject": "Service health warning",
+            "received_at": "2026-04-01T08:30:00Z",
+        },
+        "acknowledged": False,
+    },
+    {
+        "id": "task_example_outlook_sharepoint",
+        "template_key": "outlook-sharepoint-linked",
+        "name": "Example 4: Outlook plus SharePoint",
+        "trigger": "email and linked SharePoint document",
+        "title": "Example linked email and file match",
+        "summary": "A matching Outlook email and SharePoint document were found, merged across two tabs, and the combined alert was acknowledged.",
+        "details": {
+            "sender": "sampelexample@example.com",
+            "subject": "Updated project timeline",
+            "file_name": "Project-Timeline.docx",
+            "detected_at": "2026-04-01T08:40:00Z",
+        },
+        "acknowledged": True,
+    },
+]
+
 
 # ── Shared async HTTP client ─────────────────────────────────────────────────
 _http: httpx.AsyncClient | None = None
 _runtime_cache: dict[str, object] = {"captured_monotonic": 0.0, "data": None}
 _runtime_cache_lock: asyncio.Lock | None = None
+_task_scheduler_task: asyncio.Task | None = None
+_task_runner_ids: set[str] = set()
+_task_runner_lock: asyncio.Lock | None = None
+_task_scheduler_owner = "c9-" + uuid.uuid4().hex[:10]
 
 RUNTIME_SLOW_MS = max(500, int(os.environ.get("C9_RUNTIME_SLOW_MS", "2500")))
 RUNTIME_CACHE_TTL_S = max(1.0, float(os.environ.get("C9_RUNTIME_CACHE_TTL_S", "3")))
 WAIT_HEARTBEAT_S = max(5.0, float(os.environ.get("C9_WAIT_HEARTBEAT_S", "15")))
 POOL_TIGHT_THRESHOLD = max(1, int(os.environ.get("C9_POOL_TIGHT_THRESHOLD", "2")))
+TASK_SCHEDULER_INTERVAL_S = max(15.0, float(os.environ.get("C9_TASK_SCHEDULER_INTERVAL_S", "30")))
 _COPILOT_SERVICE_PHRASES = (
     "something went wrong",
     "please try again later",
@@ -93,6 +265,13 @@ def _get_runtime_lock() -> asyncio.Lock:
     if _runtime_cache_lock is None:
         _runtime_cache_lock = asyncio.Lock()
     return _runtime_cache_lock
+
+
+def _get_task_runner_lock() -> asyncio.Lock:
+    global _task_runner_lock
+    if _task_runner_lock is None:
+        _task_runner_lock = asyncio.Lock()
+    return _task_runner_lock
 
 
 # ── DB helpers ────────────────────────────────────────────────────────────────
@@ -290,6 +469,134 @@ def _ensure_db() -> None:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_tu_agent ON token_usage(agent_id)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_tu_ts    ON token_usage(ts)")
     except sqlite3.Error:
+        pass
+    # Migrate: task automation + alerts foundation
+    try:
+        with sqlite3.connect(DEFAULT_DB) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS task_definitions (
+                    id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    mode TEXT NOT NULL DEFAULT 'chat',
+                    schedule_kind TEXT NOT NULL DEFAULT 'manual',
+                    interval_minutes INTEGER DEFAULT 0,
+                    active INTEGER DEFAULT 1,
+                    tabs_required INTEGER DEFAULT 1,
+                    template_key TEXT DEFAULT '',
+                    planner_prompt TEXT DEFAULT '',
+                    executor_prompt TEXT DEFAULT '',
+                    context_handoff TEXT DEFAULT '',
+                    trigger_mode TEXT DEFAULT 'json',
+                    trigger_text TEXT DEFAULT '',
+                    notes TEXT DEFAULT '',
+                    last_run_at TEXT,
+                    next_run_at TEXT,
+                    last_status TEXT DEFAULT 'idle',
+                    last_result_excerpt TEXT DEFAULT ''
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS task_runs (
+                    id TEXT PRIMARY KEY,
+                    task_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    started_at TEXT,
+                    finished_at TEXT,
+                    source TEXT DEFAULT 'manual',
+                    status TEXT DEFAULT 'queued',
+                    mode TEXT DEFAULT 'chat',
+                    output_excerpt TEXT DEFAULT '',
+                    error_text TEXT DEFAULT '',
+                    alert_id INTEGER,
+                    launch_url TEXT DEFAULT '',
+                    FOREIGN KEY (task_id) REFERENCES task_definitions(id)
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS task_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    event_type TEXT NOT NULL,
+                    status TEXT DEFAULT '',
+                    detail TEXT DEFAULT '',
+                    run_id TEXT DEFAULT '',
+                    alert_id INTEGER,
+                    FOREIGN KEY (task_id) REFERENCES task_definitions(id)
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS task_alerts (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    task_id TEXT,
+                    run_id TEXT,
+                    created_at TEXT NOT NULL,
+                    status TEXT DEFAULT 'open',
+                    title TEXT NOT NULL,
+                    trigger_text TEXT DEFAULT '',
+                    summary TEXT DEFAULT '',
+                    payload_json TEXT DEFAULT '',
+                    acknowledged_at TEXT,
+                    FOREIGN KEY (task_id) REFERENCES task_definitions(id)
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS task_templates (
+                    key TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    description TEXT DEFAULT '',
+                    mode TEXT NOT NULL DEFAULT 'chat',
+                    schedule_kind TEXT NOT NULL DEFAULT 'manual',
+                    interval_minutes INTEGER DEFAULT 0,
+                    tabs_required INTEGER DEFAULT 1,
+                    planner_prompt TEXT DEFAULT '',
+                    executor_prompt TEXT DEFAULT '',
+                    context_handoff TEXT DEFAULT '',
+                    trigger_mode TEXT DEFAULT 'json',
+                    trigger_text TEXT DEFAULT '',
+                    active INTEGER DEFAULT 1,
+                    source TEXT DEFAULT 'user'
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS task_run_claims (
+                    task_id TEXT PRIMARY KEY,
+                    run_id TEXT NOT NULL,
+                    owner_id TEXT NOT NULL,
+                    source TEXT DEFAULT '',
+                    claimed_at TEXT NOT NULL,
+                    expires_at TEXT NOT NULL
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_task_def_next ON task_definitions(next_run_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_task_def_due ON task_definitions(active, schedule_kind, next_run_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_task_runs_task ON task_runs(task_id, created_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_task_events_task ON task_events(task_id, created_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_task_alerts_task ON task_alerts(task_id, created_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_task_alerts_status ON task_alerts(status, created_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_task_templates_active ON task_templates(active, updated_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_task_claims_exp ON task_run_claims(expires_at)")
+    except sqlite3.Error:
+        pass
+    for statement in (
+        "ALTER TABLE task_alerts ADD COLUMN updated_at TEXT",
+        "ALTER TABLE task_alerts ADD COLUMN resolved_at TEXT",
+        "ALTER TABLE task_alerts ADD COLUMN snoozed_until TEXT",
+    ):
+        try:
+            with sqlite3.connect(DEFAULT_DB) as conn:
+                conn.execute(statement)
+        except sqlite3.OperationalError:
+            pass
+        except sqlite3.Error:
+            pass
+    try:
+        _ensure_task_templates_seeded()
+    except Exception:
         pass
 
 
@@ -1468,12 +1775,841 @@ async def _chat_one(agent_id: str, prompt: str, c1_url: str, chat_mode: str = ""
         }
 
 
+def _iso_now() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _parse_iso_ts(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _duration_ms(start: str | None, end: str | None = None) -> int | None:
+    start_dt = _parse_iso_ts(start)
+    if not start_dt:
+        return None
+    end_dt = _parse_iso_ts(end) or datetime.now(timezone.utc)
+    return max(0, int((end_dt - start_dt).total_seconds() * 1000))
+
+
+def _duration_label(ms: int | None) -> str:
+    if ms is None:
+        return "—"
+    total_seconds = max(0, int(ms / 1000))
+    minutes, seconds = divmod(total_seconds, 60)
+    hours, minutes = divmod(minutes, 60)
+    if hours:
+        return f"{hours}h {minutes}m {seconds}s"
+    if minutes:
+        return f"{minutes}m {seconds}s"
+    return f"{seconds}s"
+
+
+def _slugify(value: str, *, prefix: str = "item") -> str:
+    raw = re.sub(r"[^a-z0-9_\-]", "-", (value or "").strip().lower())
+    raw = re.sub(r"-{2,}", "-", raw).strip("-_")
+    return raw or f"{prefix}-{uuid.uuid4().hex[:6]}"
+
+
+def _task_next_run_at(schedule_kind: str, interval_minutes: int, *, base: datetime | None = None) -> str | None:
+    if schedule_kind not in {"recurring", "continuous"} or interval_minutes <= 0:
+        return None
+    base = base or datetime.now(timezone.utc)
+    return (base + timedelta(minutes=interval_minutes)).isoformat()
+
+
+def _task_schedule_label(schedule_kind: str, interval_minutes: int, active: bool) -> str:
+    if schedule_kind == "continuous":
+        return f"Live / every {interval_minutes}m" + ("" if active else " / paused")
+    if schedule_kind == "recurring":
+        return f"Repeating / every {interval_minutes}m" + ("" if active else " / paused")
+    return "Once-off / manual"
+
+
+def _task_lifecycle_state(task: dict) -> str:
+    schedule_kind = (task.get("schedule_kind") or "manual").strip().lower()
+    active = bool(task.get("active"))
+    last_status = (task.get("last_status") or "idle").strip().lower()
+    if last_status == "running" or str(task.get("id") or "") in _task_runner_ids:
+        return "running"
+    if last_status in {"launch-required", "manual-only", "launch-pending"}:
+        return "launch-pending"
+    if last_status in {"waiting-user", "cancelled"}:
+        return last_status
+    if not active and schedule_kind in {"recurring", "continuous"}:
+        return "paused"
+    if schedule_kind == "continuous":
+        return "live"
+    if schedule_kind == "recurring":
+        return "scheduled" if task.get("next_run_at") else "repeating"
+    if last_status in {"completed", "failed", "launch-required", "manual-only"}:
+        return last_status
+    if not (task.get("last_run_at") or "").strip():
+        return "draft"
+    return "once-off"
+
+
+def _task_template_row_to_dict(row: sqlite3.Row | dict) -> dict:
+    raw = dict(row)
+    raw["active"] = bool(raw.get("active"))
+    raw["interval_minutes"] = int(raw.get("interval_minutes") or 0)
+    raw["tabs_required"] = int(raw.get("tabs_required") or 1)
+    raw["source"] = raw.get("source") or "user"
+    return raw
+
+
+def _ensure_task_templates_seeded() -> None:
+    now = _iso_now()
+    with _db() as conn:
+        for tpl in TASK_TEMPLATES:
+            conn.execute(
+                "INSERT OR IGNORE INTO task_templates (key, created_at, updated_at, name, description, mode, schedule_kind, interval_minutes, "
+                "tabs_required, planner_prompt, executor_prompt, context_handoff, trigger_mode, trigger_text, active, source) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    tpl["key"],
+                    now,
+                    now,
+                    tpl["name"],
+                    tpl.get("description") or "",
+                    tpl.get("mode") or "chat",
+                    tpl.get("schedule_kind") or "manual",
+                    int(tpl.get("interval_minutes") or 0),
+                    int(tpl.get("tabs_required") or 1),
+                    tpl.get("planner_prompt") or "",
+                    tpl.get("executor_prompt") or "",
+                    tpl.get("context_handoff") or "",
+                    tpl.get("trigger_mode") or "json",
+                    tpl.get("trigger_text") or "",
+                    1,
+                    "builtin",
+                ),
+            )
+
+
+def _task_templates_payload(active_only: bool = True) -> list[dict]:
+    try:
+        with _db() as conn:
+            if active_only:
+                rows = conn.execute(
+                    "SELECT * FROM task_templates WHERE active=1 ORDER BY CASE source WHEN 'builtin' THEN 0 ELSE 1 END, name ASC"
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM task_templates ORDER BY active DESC, CASE source WHEN 'builtin' THEN 0 ELSE 1 END, name ASC"
+                ).fetchall()
+        return [_task_template_row_to_dict(row) for row in rows]
+    except sqlite3.Error:
+        return [dict(item) | {"active": True, "source": "builtin"} for item in TASK_TEMPLATES]
+
+
+def _task_run_to_dict(row: sqlite3.Row | dict) -> dict:
+    raw = dict(row)
+    raw["trace_id"] = raw.get("task_id") or ""
+    raw["task_url"] = f"/tasked?task_id={quote(str(raw.get('task_id') or ''))}" if raw.get("task_id") else "/tasked"
+    raw["pipeline_url"] = f"/piplinetask?task_id={quote(str(raw.get('task_id') or ''))}" if raw.get("task_id") else "/piplinetask"
+    raw["is_running"] = (raw.get("status") or "").lower() == "running" and not raw.get("finished_at")
+    raw["duration_ms"] = _duration_ms(raw.get("started_at") or raw.get("created_at"), raw.get("finished_at"))
+    raw["duration_label"] = _duration_label(raw.get("duration_ms"))
+    return raw
+
+
+def _task_alert_to_dict(row: sqlite3.Row | dict) -> dict:
+    raw = dict(row)
+    raw["interval_minutes"] = int(raw.get("interval_minutes") or 0)
+    raw["tabs_required"] = int(raw.get("tabs_required") or 0)
+    raw["active"] = bool(raw.get("active"))
+    raw["updated_at"] = raw.get("updated_at") or raw.get("created_at")
+    raw["resolved_at"] = raw.get("resolved_at") or ""
+    raw["snoozed_until"] = raw.get("snoozed_until") or ""
+    raw["trace_id"] = raw.get("task_id") or ""
+    raw["task_url"] = f"/tasked?task_id={quote(str(raw.get('task_id') or ''))}" if raw.get("task_id") else "/tasked"
+    raw["pipeline_url"] = f"/piplinetask?task_id={quote(str(raw.get('task_id') or ''))}" if raw.get("task_id") else "/piplinetask"
+    raw["schedule_label"] = _task_schedule_label(raw.get("schedule_kind") or "manual", raw.get("interval_minutes") or 0, raw.get("active"))
+    return raw
+
+
+def _task_trace_payload(task: dict, latest_run: dict | None = None, latest_alert: dict | None = None) -> dict:
+    return {
+        "trace_id": task.get("id") or "",
+        "task_id": task.get("id") or "",
+        "run_id": (latest_run or {}).get("id") or "",
+        "alert_id": (latest_alert or {}).get("id") or "",
+        "orchestration": {
+            "mode": task.get("mode") or "",
+            "task_url": task.get("task_url") or "/tasked",
+            "pipeline_url": task.get("pipeline_url") or "/piplinetask",
+        },
+        "planner": {
+            "prompt": task.get("planner_prompt") or "",
+            "context_handoff": task.get("context_handoff") or "",
+        },
+        "timer": {
+            "schedule_kind": task.get("schedule_kind") or "manual",
+            "schedule_label": task.get("schedule_label") or "",
+            "interval_minutes": task.get("interval_minutes") or 0,
+            "active": bool(task.get("active")),
+            "next_run_at": task.get("next_run_at") or "",
+        },
+        "executor": {
+            "prompt": task.get("executor_prompt") or "",
+            "last_status": (latest_run or {}).get("status") or task.get("last_status") or "idle",
+            "duration_label": (latest_run or {}).get("duration_label") or "—",
+        },
+        "alert_generator": {
+            "trigger_mode": task.get("trigger_mode") or "json",
+            "trigger_text": task.get("trigger_text") or "",
+            "latest_alert_status": (latest_alert or {}).get("status") or "",
+            "latest_alert_title": (latest_alert or {}).get("title") or "",
+        },
+    }
+
+
+def _task_launch_url(mode: str, prompt: str, *, task_id: str = "", run_id: str = "") -> str:
+    prompt = (prompt or "").strip()
+    if not prompt:
+        return "/tasked"
+    path = {
+        "chat": "/chat",
+        "agent": "/agent",
+        "multi-agent": "/multi-agent",
+        "multi-agento": "/multi-Agento",
+    }.get(mode, "/tasked")
+    params = {"task": prompt}
+    if task_id:
+        params["task_id"] = task_id
+    if run_id:
+        params["task_run_id"] = run_id
+    params["source"] = "tasked"
+    return f"{path}?{urlencode(params)}"
+
+
+def _task_row_to_dict(row: sqlite3.Row | dict) -> dict:
+    raw = dict(row)
+    raw["active"] = bool(raw.get("active"))
+    raw["interval_minutes"] = int(raw.get("interval_minutes") or 0)
+    raw["tabs_required"] = int(raw.get("tabs_required") or 1)
+    raw["background_supported"] = raw.get("mode") == "chat"
+    raw["launch_url"] = _task_launch_url(
+        raw.get("mode") or "chat",
+        raw.get("executor_prompt") or raw.get("planner_prompt") or "",
+        task_id=str(raw.get("id") or ""),
+    )
+    raw["task_url"] = f"/tasked?task_id={quote(str(raw.get('id') or ''))}" if raw.get("id") else "/tasked"
+    raw["pipeline_url"] = f"/piplinetask?task_id={quote(str(raw.get('id') or ''))}" if raw.get("id") else "/piplinetask"
+    raw["alerts_url"] = "/alerts"
+    raw["trace_id"] = raw.get("id") or ""
+    raw["schedule_label"] = _task_schedule_label(raw.get("schedule_kind") or "manual", raw.get("interval_minutes") or 0, raw.get("active"))
+    raw["lifecycle_state"] = _task_lifecycle_state(raw)
+    raw["lifecycle_label"] = raw["lifecycle_state"].replace("-", " ").title()
+    raw["mode_label"] = _task_mode_label(raw.get("mode") or "")
+    raw["template_label"] = _task_template_label(raw.get("template_key") or "")
+    return raw
+
+
+def _task_mode_label(mode: str) -> str:
+    return next((item["label"] for item in TASK_MODE_OPTIONS if item["id"] == mode), mode or "Unknown")
+
+
+def _task_template_label(template_key: str) -> str:
+    return next((item["name"] for item in _task_templates_payload(active_only=False) if item["key"] == template_key), template_key or "custom")
+
+
+def _task_pipeline_build(
+    task_row: dict,
+    runs: list[sqlite3.Row | dict],
+    alerts: list[sqlite3.Row | dict],
+    task_events: list[sqlite3.Row | dict] | None = None,
+) -> dict:
+    task = _task_row_to_dict(task_row)
+    task["mode_label"] = _task_mode_label(task.get("mode") or "")
+    task["template_label"] = _task_template_label(task.get("template_key") or "")
+    task["task_url"] = f"/tasked?task_id={quote(str(task.get('id') or ''))}" if task.get("id") else "/tasked"
+    task["alerts_url"] = "/alerts"
+    task["pipeline_url"] = f"/piplinetask?task_id={quote(str(task.get('id') or ''))}" if task.get("id") else "/piplinetask"
+
+    run_items = [_task_run_to_dict(r) for r in runs]
+    alert_items = [_task_alert_to_dict(a) for a in alerts]
+    latest_run = run_items[-1] if run_items else None
+    latest_alert = alert_items[-1] if alert_items else None
+
+    events: list[dict] = []
+
+    def add_event(ts: str | None, kind: str, title: str, detail: str, status: str = "", level: str = "info", **extra):
+        if not ts:
+            return
+        item = {
+            "ts": ts,
+            "kind": kind,
+            "title": title,
+            "detail": detail[:1500] if detail else "",
+            "status": status,
+            "level": level,
+        }
+        item.update(extra)
+        events.append(item)
+
+    add_event(
+        task.get("created_at"),
+        "task-created",
+        "Tasked created",
+        f"{task.get('name') or 'Tasked'} created in {task.get('mode_label') or task.get('mode')}.",
+        status=task.get("lifecycle_state") or task.get("last_status") or "idle",
+    )
+    if task.get("updated_at") and task.get("updated_at") != task.get("created_at"):
+        add_event(
+            task.get("updated_at"),
+            "task-updated",
+            "Tasked updated",
+            f"Definition updated. Schedule: {task.get('schedule_label')}. Tabs: {task.get('tabs_required')}.",
+            status=task.get("lifecycle_state") or task.get("last_status") or "idle",
+        )
+    if task.get("schedule_kind") in {"recurring", "continuous"} and task.get("next_run_at"):
+        add_event(
+            task.get("next_run_at"),
+            "task-scheduled",
+            "Next run scheduled",
+            f"{task.get('schedule_label')} task is scheduled for the next run. Active={task.get('active')}.",
+            status="scheduled",
+        )
+
+    for event in sorted((dict(e) for e in (task_events or [])), key=lambda item: item.get("created_at") or ""):
+        add_event(
+            event.get("created_at"),
+            event.get("event_type") or "task-event",
+            (event.get("event_type") or "task-event").replace("-", " ").title(),
+            event.get("detail") or "Task event recorded.",
+            status=event.get("status") or "",
+            level="warn" if (event.get("status") or "") in {"paused", "launch-required", "manual-only"} else "info",
+            run_id=event.get("run_id") or "",
+            alert_id=event.get("alert_id"),
+        )
+
+    for run in sorted(run_items, key=lambda item: item.get("created_at") or ""):
+        run_status = run.get("status") or "queued"
+        add_event(
+            run.get("started_at") or run.get("created_at"),
+            "run-started",
+            "Task run started",
+            f"Source={run.get('source') or 'manual'} · Mode={_task_mode_label(run.get('mode') or '')} · Duration={run.get('duration_label') or '—'}",
+            status=run_status,
+            level="warn" if run_status in {"launch-required", "manual-only"} else "info",
+            run_id=run.get("id"),
+        )
+        detail = run.get("launch_url") or run.get("output_excerpt") or run.get("error_text") or "Run completed."
+        add_event(
+            run.get("finished_at") or run.get("created_at"),
+            "run-finished",
+            f"Task run {run_status}",
+            detail,
+            status=run_status,
+            level="error" if run_status == "failed" else ("warn" if run_status in {"launch-required", "manual-only"} else "ok"),
+            run_id=run.get("id"),
+            alert_id=run.get("alert_id"),
+        )
+
+    for alert in sorted(alert_items, key=lambda item: item.get("created_at") or ""):
+        add_event(
+            alert.get("created_at"),
+            "alert-created",
+            "Alert created",
+            f"{alert.get('title') or 'Alert'} · Trigger={alert.get('trigger_text') or '—'} · {alert.get('summary') or ''}",
+            status=alert.get("status") or "open",
+            level="ok",
+            alert_id=alert.get("id"),
+            run_id=alert.get("run_id"),
+        )
+        if alert.get("snoozed_until"):
+            add_event(
+                alert.get("updated_at") or alert.get("created_at"),
+                "alert-snoozed",
+                "Alert snoozed",
+                f"Alert #{alert.get('id')} snoozed until {alert.get('snoozed_until')}.",
+                status=alert.get("status") or "snoozed",
+                level="warn",
+                alert_id=alert.get("id"),
+                run_id=alert.get("run_id"),
+            )
+        if alert.get("resolved_at"):
+            add_event(
+                alert.get("resolved_at"),
+                "alert-resolved",
+                "Alert resolved",
+                f"Alert #{alert.get('id')} was resolved.",
+                status=alert.get("status") or "resolved",
+                level="ok",
+                alert_id=alert.get("id"),
+                run_id=alert.get("run_id"),
+            )
+        if alert.get("acknowledged_at"):
+            add_event(
+                alert.get("acknowledged_at"),
+                "alert-acknowledged",
+                "Alert acknowledged",
+                f"Alert #{alert.get('id')} was acknowledged.",
+                status="acknowledged",
+                level="info",
+                alert_id=alert.get("id"),
+                run_id=alert.get("run_id"),
+            )
+
+    deduped = []
+    seen: set[tuple[str, str, str, str, str]] = set()
+    for item in sorted(events, key=lambda event: (event.get("ts") or "", event.get("kind") or "")):
+        key = (
+            item.get("ts") or "",
+            item.get("kind") or "",
+            item.get("run_id") or "",
+            str(item.get("alert_id") or ""),
+            (item.get("detail") or "")[:120],
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    events = deduped
+    summary = {
+        "runs_total": len(run_items),
+        "alerts_total": len(alert_items),
+        "open_alerts": sum(1 for a in alert_items if (a.get("status") or "open") == "open"),
+        "last_status": task.get("lifecycle_state") or task.get("last_status") or "idle",
+        "latest_run_duration_label": (latest_run or {}).get("duration_label") or "—",
+        "trace_id": task.get("id") or "",
+    }
+    return {
+        "task": task,
+        "summary": summary,
+        "trace": _task_trace_payload(task, latest_run, latest_alert),
+        "events": events,
+    }
+
+
+def _seed_tasked_examples() -> dict:
+    template_map = {item["key"]: item for item in TASK_TEMPLATES}
+    created_ids: list[str] = []
+    base = datetime.now(timezone.utc) - timedelta(minutes=40)
+
+    with _db() as conn:
+        for idx, spec in enumerate(TASK_EXAMPLE_SPECS):
+            tpl = template_map.get(spec["template_key"])
+            if not tpl:
+                continue
+
+            task_id = spec["id"]
+            run_id = f"trun_example_{idx + 1}"
+            created_at = (base + timedelta(minutes=idx * 3)).isoformat()
+            started_at = (base + timedelta(minutes=idx * 3 + 1)).isoformat()
+            finished_at = (base + timedelta(minutes=idx * 3 + 2)).isoformat()
+            acknowledged_at = (base + timedelta(minutes=idx * 3 + 3)).isoformat() if spec.get("acknowledged") else None
+            next_run_at = _task_next_run_at(tpl.get("schedule_kind") or "manual", int(tpl.get("interval_minutes") or 0), base=base + timedelta(minutes=idx * 3 + 2))
+            payload = {
+                "triggered": True,
+                "trigger": spec["trigger"],
+                "title": spec["title"],
+                "summary": spec["summary"],
+                "details": spec["details"],
+            }
+            excerpt = json.dumps(payload, ensure_ascii=False)
+
+            conn.execute("DELETE FROM task_alerts WHERE task_id=?", (task_id,))
+            conn.execute("DELETE FROM task_runs WHERE task_id=?", (task_id,))
+            conn.execute("DELETE FROM task_definitions WHERE id=?", (task_id,))
+
+            conn.execute(
+                "INSERT INTO task_definitions (id, created_at, updated_at, name, mode, schedule_kind, interval_minutes, active, tabs_required, "
+                "template_key, planner_prompt, executor_prompt, context_handoff, trigger_mode, trigger_text, notes, last_run_at, next_run_at, "
+                "last_status, last_result_excerpt) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    task_id,
+                    created_at,
+                    finished_at,
+                    spec["name"],
+                    tpl.get("mode") or "chat",
+                    tpl.get("schedule_kind") or "manual",
+                    int(tpl.get("interval_minutes") or 0),
+                    1,
+                    int(tpl.get("tabs_required") or 2),
+                    tpl.get("template_key") or spec["template_key"],
+                    tpl.get("planner_prompt") or "",
+                    tpl.get("executor_prompt") or "",
+                    tpl.get("context_handoff") or "",
+                    "json",
+                    "",
+                    "Seeded Tasked example row for Tasked → piplinetask → Alerts validation.",
+                    finished_at,
+                    next_run_at,
+                    "completed",
+                    excerpt[:500],
+                ),
+            )
+
+            conn.execute(
+                "INSERT INTO task_runs (id, task_id, created_at, started_at, finished_at, source, status, mode, output_excerpt, error_text, alert_id, launch_url) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    run_id,
+                    task_id,
+                    created_at,
+                    started_at,
+                    finished_at,
+                    "seeded-example",
+                    "completed",
+                    tpl.get("mode") or "chat",
+                    excerpt[:2000],
+                    "",
+                    None,
+                    "",
+                ),
+            )
+
+            cur = conn.execute(
+                "INSERT INTO task_alerts (task_id, run_id, created_at, status, title, trigger_text, summary, payload_json, acknowledged_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (
+                    task_id,
+                    run_id,
+                    finished_at,
+                    "acknowledged" if acknowledged_at else "open",
+                    spec["title"][:160],
+                    spec["trigger"][:240],
+                    spec["summary"][:1500],
+                    json.dumps(payload, ensure_ascii=False),
+                    acknowledged_at,
+                ),
+            )
+            conn.execute("UPDATE task_runs SET alert_id=? WHERE id=?", (cur.lastrowid, run_id))
+            created_ids.append(task_id)
+
+    return {
+        "ok": True,
+        "seeded_count": len(created_ids),
+        "task_ids": created_ids,
+    }
+
+
+def _task_parse_json_payload(text: str) -> dict | None:
+    raw = (text or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        pass
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start == -1 or end <= start:
+        return None
+    try:
+        parsed = json.loads(raw[start:end + 1])
+        return parsed if isinstance(parsed, dict) else None
+    except Exception:
+        return None
+
+
+def _task_alert_from_result(task_row: dict, response_text: str) -> dict | None:
+    parsed = _task_parse_json_payload(response_text)
+    if parsed is not None:
+        triggered = parsed.get("triggered")
+        if isinstance(triggered, bool) and not triggered:
+            return None
+        if triggered is True or "title" in parsed or "summary" in parsed:
+            return {
+                "title": str(parsed.get("title") or task_row.get("name") or "Task alert")[:160],
+                "trigger_text": str(parsed.get("trigger") or task_row.get("trigger_text") or task_row.get("name") or "")[:240],
+                "summary": str(parsed.get("summary") or response_text[:500])[:1500],
+                "payload_json": json.dumps(parsed, ensure_ascii=False),
+            }
+
+    trigger_mode = (task_row.get("trigger_mode") or "json").strip().lower()
+    trigger_text = (task_row.get("trigger_text") or "").strip()
+    lower_text = (response_text or "").lower()
+    matched = False
+    if trigger_mode == "always":
+        matched = True
+    elif trigger_mode == "contains" and trigger_text:
+        matched = trigger_text.lower() in lower_text
+    if not matched:
+        return None
+    return {
+        "title": str(task_row.get("name") or "Task alert")[:160],
+        "trigger_text": trigger_text[:240] or "manual trigger",
+        "summary": response_text[:1500],
+        "payload_json": json.dumps({"response": response_text[:4000]}, ensure_ascii=False),
+    }
+
+
+def _insert_task_alert(task_id: str, run_id: str, alert: dict) -> int | None:
+    try:
+        now = _iso_now()
+        with _db() as conn:
+            cur = conn.execute(
+                "INSERT INTO task_alerts (task_id, run_id, created_at, updated_at, status, title, trigger_text, summary, payload_json) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (
+                    task_id,
+                    run_id,
+                    now,
+                    now,
+                    "open",
+                    (alert.get("title") or "Task alert")[:160],
+                    (alert.get("trigger_text") or "")[:240],
+                    (alert.get("summary") or "")[:1500],
+                    alert.get("payload_json") or "{}",
+                ),
+            )
+            return cur.lastrowid
+    except sqlite3.Error:
+        return None
+
+
+def _record_task_event(task_id: str, event_type: str, detail: str, *, status: str = "", run_id: str = "", alert_id: int | None = None) -> None:
+    try:
+        with _db() as conn:
+            conn.execute(
+                "INSERT INTO task_events (task_id, created_at, event_type, status, detail, run_id, alert_id) VALUES (?,?,?,?,?,?,?)",
+                (task_id, _iso_now(), event_type, status, detail[:1500], run_id, alert_id),
+            )
+    except sqlite3.Error:
+        return
+
+
+def _task_claim(task_id: str, run_id: str, *, source: str, ttl_seconds: int = 900) -> bool:
+    now = datetime.now(timezone.utc)
+    expires_at = (now + timedelta(seconds=max(60, ttl_seconds))).isoformat()
+    try:
+        with _db() as conn:
+            conn.execute("DELETE FROM task_run_claims WHERE expires_at<=?", (now.isoformat(),))
+            conn.execute(
+                "INSERT INTO task_run_claims (task_id, run_id, owner_id, source, claimed_at, expires_at) VALUES (?,?,?,?,?,?)",
+                (task_id, run_id, _task_scheduler_owner, source, now.isoformat(), expires_at),
+            )
+        return True
+    except sqlite3.IntegrityError:
+        return False
+    except sqlite3.Error:
+        return False
+
+
+def _task_release_claim(task_id: str, run_id: str = "") -> None:
+    try:
+        with _db() as conn:
+            if run_id:
+                conn.execute("DELETE FROM task_run_claims WHERE task_id=? AND run_id=?", (task_id, run_id))
+            else:
+                conn.execute("DELETE FROM task_run_claims WHERE task_id=?", (task_id,))
+    except sqlite3.Error:
+        return
+
+
+def _task_template_upsert(payload: dict, *, template_key: str = "") -> dict:
+    now = _iso_now()
+    key = (template_key or payload.get("key") or "").strip() or _slugify(payload.get("name") or "template", prefix="template")
+    row_payload = {
+        "key": key,
+        "name": (payload.get("name") or "").strip(),
+        "description": (payload.get("description") or payload.get("notes") or "").strip(),
+        "mode": (payload.get("mode") or "chat").strip().lower(),
+        "schedule_kind": (payload.get("schedule_kind") or "manual").strip().lower(),
+        "interval_minutes": max(0, int(payload.get("interval_minutes") or 0)),
+        "tabs_required": max(1, min(12, int(payload.get("tabs_required") or 1))),
+        "planner_prompt": (payload.get("planner_prompt") or "").strip(),
+        "executor_prompt": (payload.get("executor_prompt") or "").strip(),
+        "context_handoff": (payload.get("context_handoff") or "").strip(),
+        "trigger_mode": (payload.get("trigger_mode") or "json").strip().lower(),
+        "trigger_text": (payload.get("trigger_text") or "").strip(),
+        "active": 1 if payload.get("active", True) else 0,
+        "source": (payload.get("source") or "user").strip().lower() or "user",
+    }
+    if not row_payload["name"]:
+        return {"ok": False, "error": "template name required"}
+    with _db() as conn:
+        existing = conn.execute("SELECT key, created_at FROM task_templates WHERE key=?", (key,)).fetchone()
+        created_at = existing["created_at"] if existing else now
+        if existing:
+            conn.execute(
+                "UPDATE task_templates SET updated_at=?, name=?, description=?, mode=?, schedule_kind=?, interval_minutes=?, tabs_required=?, "
+                "planner_prompt=?, executor_prompt=?, context_handoff=?, trigger_mode=?, trigger_text=?, active=?, source=? WHERE key=?",
+                (
+                    now, row_payload["name"], row_payload["description"], row_payload["mode"], row_payload["schedule_kind"],
+                    row_payload["interval_minutes"], row_payload["tabs_required"], row_payload["planner_prompt"],
+                    row_payload["executor_prompt"], row_payload["context_handoff"], row_payload["trigger_mode"],
+                    row_payload["trigger_text"], row_payload["active"], row_payload["source"], key,
+                ),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO task_templates (key, created_at, updated_at, name, description, mode, schedule_kind, interval_minutes, tabs_required, "
+                "planner_prompt, executor_prompt, context_handoff, trigger_mode, trigger_text, active, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    key, created_at, now, row_payload["name"], row_payload["description"], row_payload["mode"],
+                    row_payload["schedule_kind"], row_payload["interval_minutes"], row_payload["tabs_required"],
+                    row_payload["planner_prompt"], row_payload["executor_prompt"], row_payload["context_handoff"],
+                    row_payload["trigger_mode"], row_payload["trigger_text"], row_payload["active"], row_payload["source"],
+                ),
+            )
+        row = conn.execute("SELECT * FROM task_templates WHERE key=?", (key,)).fetchone()
+    return {"ok": True, "template": _task_template_row_to_dict(row)}
+
+
+async def _execute_task_record(task_id: str, *, source: str = "manual") -> dict:
+    lock = _get_task_runner_lock()
+    async with lock:
+        if task_id in _task_runner_ids:
+            return {"ok": False, "error": "Task is already running", "task_id": task_id}
+        _task_runner_ids.add(task_id)
+
+    try:
+        with _db() as conn:
+            row = conn.execute("SELECT * FROM task_definitions WHERE id=?", (task_id,)).fetchone()
+        if not row:
+            return {"ok": False, "error": "Task not found", "task_id": task_id}
+
+        task_row = _task_row_to_dict(row)
+        run_id = "trun_" + uuid.uuid4().hex[:8]
+        if not _task_claim(task_id, run_id, source=source):
+            return {"ok": False, "error": "Task is already running", "task_id": task_id}
+        created_at = _iso_now()
+        prompt = (task_row.get("executor_prompt") or task_row.get("planner_prompt") or "").strip()
+        next_run_at = _task_next_run_at(task_row.get("schedule_kind") or "manual", task_row.get("interval_minutes") or 0)
+
+        with _db() as conn:
+            conn.execute(
+                "INSERT INTO task_runs (id, task_id, created_at, started_at, source, status, mode) VALUES (?,?,?,?,?,?,?)",
+                (run_id, task_id, created_at, created_at, source, "running", task_row.get("mode") or "chat"),
+            )
+            conn.execute(
+                "UPDATE task_definitions SET updated_at=?, last_status=? WHERE id=?",
+                (created_at, "running", task_id),
+            )
+        _record_task_event(
+            task_id,
+            "task-run-started",
+            f"Task orchestration started a {task_row.get('mode') or 'chat'} run via {source}.",
+            status="running",
+            run_id=run_id,
+        )
+
+        if task_row.get("mode") != "chat":
+            launch_url = _task_launch_url(task_row.get("mode") or "chat", prompt, task_id=task_id, run_id=run_id)
+            finished_at = _iso_now()
+            status = "launch-pending"
+            with _db() as conn:
+                conn.execute(
+                    "UPDATE task_runs SET finished_at=?, status=?, launch_url=?, output_excerpt=? WHERE id=?",
+                    (finished_at, status, launch_url, launch_url, run_id),
+                )
+                conn.execute(
+                    "UPDATE task_definitions SET updated_at=?, last_run_at=?, next_run_at=?, last_status=?, last_result_excerpt=? WHERE id=?",
+                    (finished_at, finished_at, next_run_at, status, launch_url[:500], task_id),
+                )
+            _record_task_event(
+                task_id,
+                "task-run-finished",
+                f"Task executor requires the dedicated page. Launch URL: {launch_url}",
+                status=status,
+                run_id=run_id,
+            )
+            return {
+                "ok": True,
+                "task_id": task_id,
+                "run_id": run_id,
+                "status": status,
+                "launch_url": launch_url,
+                "background_supported": False,
+            }
+
+        result = await _chat_one("c9-jokes-task", prompt, _urls()["c1"], chat_mode="deep", work_mode="work")
+        finished_at = _iso_now()
+        text = (result.get("text") or "").strip()
+        error_text = (result.get("error") or "").strip()
+        ok = bool(result.get("ok") and text)
+        alert_id = None
+        if ok:
+            alert = _task_alert_from_result(task_row, text)
+            if alert:
+                alert_id = _insert_task_alert(task_id, run_id, alert)
+        status = "completed" if ok else "failed"
+        excerpt = (text or error_text or "No output")[:500]
+        with _db() as conn:
+            conn.execute(
+                "UPDATE task_runs SET finished_at=?, status=?, output_excerpt=?, error_text=?, alert_id=? WHERE id=?",
+                (finished_at, status, text[:2000], error_text[:1500], alert_id, run_id),
+            )
+            conn.execute(
+                "UPDATE task_definitions SET updated_at=?, last_run_at=?, next_run_at=?, last_status=?, last_result_excerpt=? WHERE id=?",
+                (finished_at, finished_at, next_run_at, status, excerpt, task_id),
+            )
+        _record_task_event(
+            task_id,
+            "task-run-finished",
+            text[:1500] if ok else (error_text or "Task run failed"),
+            status=status,
+            run_id=run_id,
+            alert_id=alert_id,
+        )
+        return {
+            "ok": ok,
+            "task_id": task_id,
+            "run_id": run_id,
+            "status": status,
+            "text": text,
+            "error": error_text,
+            "alert_id": alert_id,
+            "background_supported": True,
+        }
+    finally:
+        _task_release_claim(task_id, run_id if "run_id" in locals() else "")
+        async with _get_task_runner_lock():
+            _task_runner_ids.discard(task_id)
+
+
+async def _run_due_tasks_once() -> None:
+    now = _iso_now()
+    try:
+        with _db() as conn:
+            conn.execute("DELETE FROM task_run_claims WHERE expires_at<=?", (now,))
+            rows = conn.execute(
+                "SELECT id FROM task_definitions WHERE active=1 AND mode='chat' AND schedule_kind IN ('recurring','continuous') "
+                "AND next_run_at IS NOT NULL AND next_run_at<>'' AND next_run_at<=? ORDER BY next_run_at ASC LIMIT 4",
+                (now,),
+            ).fetchall()
+    except sqlite3.Error:
+        return
+    for row in rows:
+        await _execute_task_record(row["id"], source="scheduler")
+
+
+async def _task_scheduler_loop() -> None:
+    while True:
+        try:
+            await _run_due_tasks_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            pass
+        await asyncio.sleep(TASK_SCHEDULER_INTERVAL_S)
+
+
 # ── App lifecycle ─────────────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _task_scheduler_task
     _ensure_db()
+    _task_scheduler_task = asyncio.create_task(_task_scheduler_loop())
     yield
+    if _task_scheduler_task:
+        _task_scheduler_task.cancel()
+        try:
+            await _task_scheduler_task
+        except asyncio.CancelledError:
+            pass
+        _task_scheduler_task = None
     client = _http
     if client and not client.is_closed:
         await client.aclose()
@@ -1526,6 +2662,35 @@ async def page_health(request: Request):
 @app.get("/c3-auth", response_class=HTMLResponse, name="page_c3_auth")
 async def page_c3_auth(request: Request):
     return templates.TemplateResponse(request, "c3_auth.html", {})
+
+
+@app.get("/task", response_class=HTMLResponse, include_in_schema=False)
+async def page_task_legacy(request: Request):
+    return RedirectResponse(url="/tasked", status_code=307)
+
+
+@app.get("/tasked", response_class=HTMLResponse, name="page_tasked")
+async def page_tasked(request: Request):
+    return templates.TemplateResponse(request, "tasked.html", {
+        "task_modes": TASK_MODE_OPTIONS,
+        "task_templates": json.dumps(_task_templates_payload(), ensure_ascii=False),
+    })
+
+
+@app.get("/alerts", response_class=HTMLResponse, name="page_alerts")
+async def page_alerts(request: Request):
+    return templates.TemplateResponse(request, "alerts.html", {
+        "task_modes": json.dumps(TASK_MODE_OPTIONS, ensure_ascii=False),
+        "task_templates": json.dumps(_task_templates_payload(), ensure_ascii=False),
+    })
+
+
+@app.get("/piplinetask", response_class=HTMLResponse, name="page_piplinetask")
+async def page_piplinetask(request: Request):
+    return templates.TemplateResponse(request, "piplinetask.html", {
+        "task_modes": json.dumps(TASK_MODE_OPTIONS, ensure_ascii=False),
+        "task_templates": json.dumps(_task_templates_payload(), ensure_ascii=False),
+    })
 
 
 @app.get("/pairs", response_class=HTMLResponse, name="page_pairs")
@@ -1696,6 +2861,465 @@ async def api_c3_auth_progress_run():
         return JSONResponse({"validated": False, "error": str(exc)}, status_code=503)
 
 
+@app.get("/api/tasks", name="api_tasks")
+async def api_tasks():
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                "SELECT * FROM task_definitions ORDER BY created_at DESC"
+            ).fetchall()
+            tasks = []
+            for row in rows:
+                task = _task_row_to_dict(row)
+                latest_run_row = conn.execute(
+                    "SELECT * FROM task_runs WHERE task_id=? ORDER BY created_at DESC LIMIT 1",
+                    (task["id"],),
+                ).fetchone()
+                latest_alert_row = conn.execute(
+                    "SELECT a.*, t.mode AS task_mode, t.template_key AS template_key, t.schedule_kind AS schedule_kind, "
+                    "t.interval_minutes AS interval_minutes, t.tabs_required AS tabs_required, t.active AS active "
+                    "FROM task_alerts a LEFT JOIN task_definitions t ON t.id=a.task_id "
+                    "WHERE a.task_id=? ORDER BY a.created_at DESC LIMIT 1",
+                    (task["id"],),
+                ).fetchone()
+                latest_run = _task_run_to_dict(latest_run_row) if latest_run_row else None
+                latest_alert = _task_alert_to_dict(latest_alert_row) if latest_alert_row else None
+                task["latest_run"] = latest_run
+                task["latest_alert"] = latest_alert
+                task["trace"] = _task_trace_payload(task, latest_run, latest_alert)
+                tasks.append(task)
+        return JSONResponse({
+            "ok": True,
+            "tasks": tasks,
+            "templates": _task_templates_payload(),
+        })
+    except sqlite3.Error as exc:
+        return JSONResponse({"ok": False, "error": str(exc), "tasks": [], "templates": _task_templates_payload()}, status_code=500)
+
+
+@app.get("/api/task-templates", name="api_task_templates")
+async def api_task_templates(include_archived: bool = False):
+    templates = _task_templates_payload(active_only=not include_archived)
+    return JSONResponse({"ok": True, "templates": templates})
+
+
+@app.post("/api/task-templates", name="api_task_templates_upsert")
+async def api_task_templates_upsert(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    try:
+        result = _task_template_upsert(body, template_key=(body.get("key") or "").strip())
+        return JSONResponse(result, status_code=200 if result.get("ok") else 400)
+    except (sqlite3.Error, ValueError) as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+@app.post("/api/task-templates/{template_key}/clone", name="api_task_template_clone")
+async def api_task_template_clone(template_key: str):
+    try:
+        with _db() as conn:
+            row = conn.execute("SELECT * FROM task_templates WHERE key=?", (template_key,)).fetchone()
+        if not row:
+            return JSONResponse({"ok": False, "error": "Template not found"}, status_code=404)
+        source = _task_template_row_to_dict(row)
+        clone_key = _slugify(f"{source['key']}-clone", prefix="template")
+        result = _task_template_upsert({
+            **source,
+            "key": clone_key,
+            "name": f"{source['name']} (Clone)",
+            "source": "user",
+            "active": True,
+        }, template_key=clone_key)
+        if result.get("ok"):
+            result["source_template_key"] = template_key
+        return JSONResponse(result, status_code=200 if result.get("ok") else 400)
+    except sqlite3.Error as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+@app.post("/api/task-templates/{template_key}/archive", name="api_task_template_archive")
+async def api_task_template_archive(template_key: str):
+    try:
+        with _db() as conn:
+            cur = conn.execute(
+                "UPDATE task_templates SET active=0, updated_at=? WHERE key=?",
+                (_iso_now(), template_key),
+            )
+            if cur.rowcount <= 0:
+                return JSONResponse({"ok": False, "error": "Template not found"}, status_code=404)
+            row = conn.execute("SELECT * FROM task_templates WHERE key=?", (template_key,)).fetchone()
+        return JSONResponse({"ok": True, "template": _task_template_row_to_dict(row)})
+    except sqlite3.Error as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+@app.post("/api/tasks/seed-examples", name="api_tasks_seed_examples")
+async def api_tasks_seed_examples():
+    try:
+        result = _seed_tasked_examples()
+        return JSONResponse(result)
+    except sqlite3.Error as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+@app.post("/api/tasks", name="api_tasks_upsert")
+async def api_tasks_upsert(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    now = _iso_now()
+    task_id = (body.get("id") or "").strip() or ("task_" + uuid.uuid4().hex[:8])
+    name = (body.get("name") or "").strip()
+    mode = (body.get("mode") or "chat").strip().lower()
+    schedule_kind = (body.get("schedule_kind") or "manual").strip().lower()
+    template_key = (body.get("template_key") or "").strip()
+    planner_prompt = (body.get("planner_prompt") or "").strip()
+    executor_prompt = (body.get("executor_prompt") or "").strip()
+    context_handoff = (body.get("context_handoff") or "").strip()
+    trigger_mode = (body.get("trigger_mode") or "json").strip().lower()
+    trigger_text = (body.get("trigger_text") or "").strip()
+    notes = (body.get("notes") or "").strip()
+    try:
+        interval_minutes = max(0, int(body.get("interval_minutes") or 0))
+    except Exception:
+        interval_minutes = 0
+    try:
+        tabs_required = max(1, min(12, int(body.get("tabs_required") or 1)))
+    except Exception:
+        tabs_required = 1
+    active = 1 if body.get("active", True) else 0
+
+    if not name:
+        return JSONResponse({"ok": False, "error": "name required"}, status_code=400)
+    if mode not in {m["id"] for m in TASK_MODE_OPTIONS}:
+        return JSONResponse({"ok": False, "error": "invalid mode"}, status_code=400)
+    if schedule_kind not in {"manual", "recurring", "continuous"}:
+        return JSONResponse({"ok": False, "error": "invalid schedule_kind"}, status_code=400)
+    if schedule_kind in {"recurring", "continuous"} and interval_minutes <= 0:
+        return JSONResponse({"ok": False, "error": "interval_minutes must be > 0 for repeating or live tasks"}, status_code=400)
+
+    next_run_at = _task_next_run_at(schedule_kind, interval_minutes) if active else None
+    try:
+        with _db() as conn:
+            existing = conn.execute("SELECT id FROM task_definitions WHERE id=?", (task_id,)).fetchone()
+            if existing:
+                conn.execute(
+                    "UPDATE task_definitions SET updated_at=?, name=?, mode=?, schedule_kind=?, interval_minutes=?, active=?, tabs_required=?, "
+                    "template_key=?, planner_prompt=?, executor_prompt=?, context_handoff=?, trigger_mode=?, trigger_text=?, notes=?, "
+                    "next_run_at=CASE WHEN ?=1 THEN ? ELSE NULL END WHERE id=?",
+                    (
+                        now, name, mode, schedule_kind, interval_minutes, active, tabs_required,
+                        template_key, planner_prompt, executor_prompt, context_handoff, trigger_mode, trigger_text, notes,
+                        active, next_run_at, task_id,
+                    ),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO task_definitions (id, created_at, updated_at, name, mode, schedule_kind, interval_minutes, active, tabs_required, "
+                    "template_key, planner_prompt, executor_prompt, context_handoff, trigger_mode, trigger_text, notes, next_run_at) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        task_id, now, now, name, mode, schedule_kind, interval_minutes, active, tabs_required,
+                        template_key, planner_prompt, executor_prompt, context_handoff, trigger_mode, trigger_text, notes, next_run_at,
+                    ),
+                )
+            row = conn.execute("SELECT * FROM task_definitions WHERE id=?", (task_id,)).fetchone()
+        task = _task_row_to_dict(row)
+        _record_task_event(
+            task_id,
+            "task-edited" if existing else "task-created",
+            f"Task orchestration saved the definition. Mode={mode} · Schedule={task.get('schedule_label')} · Tabs={tabs_required}.",
+            status=task.get("lifecycle_state") or task.get("last_status") or "idle",
+        )
+        return JSONResponse({"ok": True, "task": task})
+    except sqlite3.Error as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+@app.get("/api/task-runs", name="api_task_runs")
+async def api_task_runs(task_id: str = "", limit: int = 30):
+    limit = max(1, min(100, limit))
+    try:
+        with _db() as conn:
+            if task_id:
+                rows = conn.execute(
+                    "SELECT * FROM task_runs WHERE task_id=? ORDER BY created_at DESC LIMIT ?",
+                    (task_id, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT * FROM task_runs ORDER BY created_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+        return JSONResponse({"ok": True, "runs": [_task_run_to_dict(r) for r in rows]})
+    except sqlite3.Error as exc:
+        return JSONResponse({"ok": False, "error": str(exc), "runs": []}, status_code=500)
+
+
+def _task_fetch_row(task_id: str) -> sqlite3.Row | None:
+    with _db() as conn:
+        return conn.execute("SELECT * FROM task_definitions WHERE id=?", (task_id,)).fetchone()
+
+
+def _task_state_response(task_id: str) -> dict | None:
+    try:
+        with _db() as conn:
+            task_row = conn.execute("SELECT * FROM task_definitions WHERE id=?", (task_id,)).fetchone()
+            if not task_row:
+                return None
+            latest_run_row = conn.execute(
+                "SELECT * FROM task_runs WHERE task_id=? ORDER BY created_at DESC LIMIT 1",
+                (task_id,),
+            ).fetchone()
+            latest_alert_row = conn.execute(
+                "SELECT a.*, t.mode AS task_mode, t.template_key AS template_key, t.schedule_kind AS schedule_kind, "
+                "t.interval_minutes AS interval_minutes, t.tabs_required AS tabs_required, t.active AS active "
+                "FROM task_alerts a LEFT JOIN task_definitions t ON t.id=a.task_id "
+                "WHERE a.task_id=? ORDER BY a.created_at DESC LIMIT 1",
+                (task_id,),
+            ).fetchone()
+        task = _task_row_to_dict(task_row)
+        latest_run = _task_run_to_dict(latest_run_row) if latest_run_row else None
+        latest_alert = _task_alert_to_dict(latest_alert_row) if latest_alert_row else None
+        task["latest_run"] = latest_run
+        task["latest_alert"] = latest_alert
+        task["trace"] = _task_trace_payload(task, latest_run, latest_alert)
+        return task
+    except sqlite3.Error:
+        return None
+
+
+def _task_update_activation(task_id: str, *, active: bool, last_status: str, event_type: str, detail: str) -> dict:
+    now = _iso_now()
+    row = _task_fetch_row(task_id)
+    if not row:
+        return {"ok": False, "error": "Task not found", "task_id": task_id}
+    task = _task_row_to_dict(row)
+    next_run_at = _task_next_run_at(task.get("schedule_kind") or "manual", task.get("interval_minutes") or 0) if active else None
+    with _db() as conn:
+        conn.execute(
+            "UPDATE task_definitions SET updated_at=?, active=?, next_run_at=?, last_status=? WHERE id=?",
+            (now, 1 if active else 0, next_run_at, last_status, task_id),
+        )
+    _record_task_event(task_id, event_type, detail, status=last_status)
+    updated = _task_state_response(task_id)
+    return {"ok": True, "task": updated}
+
+
+def _task_clone_definition(task_id: str) -> dict:
+    row = _task_fetch_row(task_id)
+    if not row:
+        return {"ok": False, "error": "Task not found", "task_id": task_id}
+    source = _task_row_to_dict(row)
+    cloned_id = "task_" + uuid.uuid4().hex[:8]
+    now = _iso_now()
+    clone_name = f"{source.get('name') or 'Tasked'} (Clone)"
+    next_run_at = _task_next_run_at(source.get("schedule_kind") or "manual", source.get("interval_minutes") or 0) if source.get("active") else None
+    with _db() as conn:
+        conn.execute(
+            "INSERT INTO task_definitions (id, created_at, updated_at, name, mode, schedule_kind, interval_minutes, active, tabs_required, "
+            "template_key, planner_prompt, executor_prompt, context_handoff, trigger_mode, trigger_text, notes, next_run_at, last_status, last_result_excerpt) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                cloned_id, now, now, clone_name, source.get("mode") or "chat", source.get("schedule_kind") or "manual",
+                source.get("interval_minutes") or 0, 1 if source.get("active") else 0, source.get("tabs_required") or 1,
+                source.get("template_key") or "", source.get("planner_prompt") or "", source.get("executor_prompt") or "",
+                source.get("context_handoff") or "", source.get("trigger_mode") or "json", source.get("trigger_text") or "",
+                (source.get("notes") or "")[:1200] + f"\n\nCloned from {task_id}.", next_run_at, "idle", "",
+            ),
+        )
+    _record_task_event(cloned_id, "task-cloned", f"Task cloned from {task_id}.", status="idle")
+    cloned = _task_state_response(cloned_id)
+    return {"ok": True, "task": cloned, "source_task_id": task_id}
+
+
+def _update_alert_status_record(alert_id: int, *, status: str, snooze_minutes: int = 0) -> tuple[dict, int]:
+    now = _iso_now()
+    snoozed_until = (datetime.now(timezone.utc) + timedelta(minutes=snooze_minutes)).isoformat() if status == "snoozed" and snooze_minutes > 0 else None
+    resolved_at = now if status == "resolved" else None
+    acknowledged_at = now if status == "acknowledged" else None
+    try:
+        with _db() as conn:
+            row = conn.execute("SELECT * FROM task_alerts WHERE id=?", (alert_id,)).fetchone()
+            if not row:
+                return {"ok": False, "error": "Alert not found"}, 404
+            conn.execute(
+                "UPDATE task_alerts SET status=?, updated_at=?, acknowledged_at=?, resolved_at=?, snoozed_until=? WHERE id=?",
+                (status, now, acknowledged_at, resolved_at, snoozed_until, alert_id),
+            )
+            updated = conn.execute("SELECT * FROM task_alerts WHERE id=?", (alert_id,)).fetchone()
+        updated_alert = _task_alert_to_dict(updated)
+        task_id = updated_alert.get("task_id") or ""
+        if task_id:
+            event_type = {
+                "acknowledged": "alert-acknowledged",
+                "resolved": "alert-resolved",
+                "snoozed": "alert-snoozed",
+                "open": "alert-reopened",
+            }[status]
+            detail = {
+                "acknowledged": f"Alert #{alert_id} was acknowledged.",
+                "resolved": f"Alert #{alert_id} was resolved.",
+                "snoozed": f"Alert #{alert_id} was snoozed until {snoozed_until or 'later'}.",
+                "open": f"Alert #{alert_id} was reopened.",
+            }[status]
+            _record_task_event(task_id, event_type, detail, status=status, run_id=str(updated_alert.get("run_id") or ""), alert_id=alert_id)
+        return {"ok": True, "alert": updated_alert}, 200
+    except sqlite3.Error as exc:
+        return {"ok": False, "error": str(exc)}, 500
+
+
+@app.post("/api/tasks/{task_id}/run", name="api_task_run")
+async def api_task_run(task_id: str):
+    result = await _execute_task_record(task_id, source="manual")
+    status_code = 200 if result.get("ok") else (409 if "already running" in (result.get("error") or "").lower() else 400)
+    return JSONResponse(result, status_code=status_code)
+
+
+@app.post("/api/tasks/{task_id}/start", name="api_task_start")
+async def api_task_start(task_id: str):
+    _record_task_event(task_id, "task-start-requested", "Task orchestration requested a task start.", status="requested")
+    result = await _execute_task_record(task_id, source="start")
+    status_code = 200 if result.get("ok") else (409 if "already running" in (result.get("error") or "").lower() else 400)
+    return JSONResponse(result, status_code=status_code)
+
+
+@app.post("/api/tasks/{task_id}/repeat", name="api_task_repeat")
+async def api_task_repeat(task_id: str):
+    _record_task_event(task_id, "task-repeat-requested", "Task timer requested an immediate repeat run.", status="requested")
+    result = await _execute_task_record(task_id, source="repeat")
+    status_code = 200 if result.get("ok") else (409 if "already running" in (result.get("error") or "").lower() else 400)
+    return JSONResponse(result, status_code=status_code)
+
+
+@app.post("/api/tasks/{task_id}/restart", name="api_task_restart")
+async def api_task_restart(task_id: str):
+    _record_task_event(task_id, "task-restart-requested", "Task orchestration requested a restart.", status="requested")
+    result = await _execute_task_record(task_id, source="restart")
+    status_code = 200 if result.get("ok") else (409 if "already running" in (result.get("error") or "").lower() else 400)
+    return JSONResponse(result, status_code=status_code)
+
+
+@app.post("/api/tasks/{task_id}/pause", name="api_task_pause")
+async def api_task_pause(task_id: str):
+    row = _task_fetch_row(task_id)
+    if not row:
+        return JSONResponse({"ok": False, "error": "Task not found", "task_id": task_id}, status_code=404)
+    detail = "Task timer paused future scheduled runs."
+    if task_id in _task_runner_ids:
+        detail += " Current run remains active until it finishes."
+    result = _task_update_activation(task_id, active=False, last_status="paused", event_type="task-paused", detail=detail)
+    return JSONResponse(result, status_code=200 if result.get("ok") else 400)
+
+
+@app.post("/api/tasks/{task_id}/resume", name="api_task_resume")
+async def api_task_resume(task_id: str):
+    row = _task_fetch_row(task_id)
+    if not row:
+        return JSONResponse({"ok": False, "error": "Task not found", "task_id": task_id}, status_code=404)
+    task = _task_row_to_dict(row)
+    last_status = "live" if task.get("schedule_kind") == "continuous" else ("repeating" if task.get("schedule_kind") == "recurring" else "ready")
+    result = _task_update_activation(
+        task_id,
+        active=True,
+        last_status=last_status,
+        event_type="task-resumed",
+        detail=f"Task timer resumed the {task.get('schedule_label')} flow.",
+    )
+    return JSONResponse(result, status_code=200 if result.get("ok") else 400)
+
+
+@app.post("/api/tasks/{task_id}/clone", name="api_task_clone")
+async def api_task_clone(task_id: str):
+    result = _task_clone_definition(task_id)
+    return JSONResponse(result, status_code=200 if result.get("ok") else 404)
+
+
+@app.get("/api/alerts", name="api_alerts")
+async def api_alerts(limit: int = 100):
+    limit = max(1, min(500, limit))
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                "SELECT a.*, "
+                "t.name AS task_name, "
+                "t.mode AS task_mode, "
+                "t.template_key AS template_key, "
+                "t.schedule_kind AS schedule_kind, "
+                "t.interval_minutes AS interval_minutes, "
+                "t.tabs_required AS tabs_required, "
+                "t.active AS active "
+                "FROM task_alerts a "
+                "LEFT JOIN task_definitions t ON t.id=a.task_id "
+                "ORDER BY a.created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        alerts = [_task_alert_to_dict(row) for row in rows]
+        return JSONResponse({"ok": True, "alerts": alerts})
+    except sqlite3.Error as exc:
+        return JSONResponse({"ok": False, "error": str(exc), "alerts": []}, status_code=500)
+
+
+@app.post("/api/alerts/{alert_id}/status", name="api_alert_status")
+async def api_alert_status(alert_id: int, request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    status = (body.get("status") or "").strip().lower()
+    if status not in {"open", "acknowledged", "resolved", "snoozed"}:
+        return JSONResponse({"ok": False, "error": "invalid status"}, status_code=400)
+    snooze_minutes = max(0, int(body.get("snooze_minutes") or 0))
+    payload, status_code = _update_alert_status_record(alert_id, status=status, snooze_minutes=snooze_minutes)
+    return JSONResponse(payload, status_code=status_code)
+
+
+@app.get("/api/task-pipelines", name="api_task_pipelines")
+async def api_task_pipelines(task_id: str = "", limit: int = 100):
+    limit = max(1, min(200, limit))
+    try:
+        with _db() as conn:
+            if task_id:
+                task_rows = conn.execute(
+                    "SELECT * FROM task_definitions WHERE id=? ORDER BY created_at DESC LIMIT 1",
+                    (task_id,),
+                ).fetchall()
+            else:
+                task_rows = conn.execute(
+                    "SELECT * FROM task_definitions ORDER BY created_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+
+            pipelines = []
+            for task_row in task_rows:
+                task_runs = conn.execute(
+                    "SELECT * FROM task_runs WHERE task_id=? ORDER BY created_at ASC",
+                    (task_row["id"],),
+                ).fetchall()
+                task_alerts = conn.execute(
+                    "SELECT * FROM task_alerts WHERE task_id=? ORDER BY created_at ASC",
+                    (task_row["id"],),
+                ).fetchall()
+                task_events = conn.execute(
+                    "SELECT * FROM task_events WHERE task_id=? ORDER BY created_at ASC",
+                    (task_row["id"],),
+                ).fetchall()
+                pipelines.append(_task_pipeline_build(dict(task_row), task_runs, task_alerts, task_events))
+
+        return JSONResponse({"ok": True, "pipelines": pipelines})
+    except sqlite3.Error as exc:
+        return JSONResponse({"ok": False, "error": str(exc), "pipelines": []}, status_code=500)
+
+
+@app.post("/api/alerts/{alert_id}/ack", name="api_alert_ack")
+async def api_alert_ack(alert_id: int):
+    payload, status_code = _update_alert_status_record(alert_id, status="acknowledged")
+    return JSONResponse(payload, status_code=status_code)
+
+
 @app.get("/api/runtime-status", name="api_runtime_status")
 async def api_runtime_status(force: bool = False):
     """Classified runtime status for C1/C3/C10/C11 + C3 pool + M365 session state."""
@@ -1861,7 +3485,26 @@ async def api_chat(request: Request):
                         yield _sse_event({"type": "error", "message": error_text})
                         return
 
-                    async for raw_line in resp.aiter_lines():
+                    line_iter = resp.aiter_lines()
+                    waited_s = 0
+                    while True:
+                        try:
+                            raw_line = await asyncio.wait_for(line_iter.__anext__(), timeout=WAIT_HEARTBEAT_S)
+                        except StopAsyncIteration:
+                            break
+                        except asyncio.TimeoutError:
+                            waited_s += int(WAIT_HEARTBEAT_S)
+                            runtime = None
+                            try:
+                                runtime = await _get_runtime_status_snapshot(client=client)
+                            except Exception:
+                                runtime = None
+                            yield _sse_event({
+                                "type": "status",
+                                "text": f"Working on the response... Please wait. ({waited_s}s) {_runtime_wait_message(runtime)}",
+                                "waited_s": waited_s,
+                            })
+                            continue
                         if not raw_line.startswith("data:"):
                             continue
                         data_str = raw_line[5:].strip()
@@ -2710,7 +4353,7 @@ async def api_agent_run(
                         wait_msg = _runtime_wait_message(item.get("runtime"))
                         yield _sse("thinking", {
                             "step": step,
-                            "text": f"⏳ Waiting on Copilot ({item['waited_s']}s)… {wait_msg}",
+                            "text": f"⏳ Working on the response... Please wait. Waiting on Copilot ({item['waited_s']}s)... {wait_msg}",
                         })
                         continue
                     llm_r = item["response"]
@@ -3511,7 +5154,7 @@ async def _ma_role_loop(
                 if item["kind"] == "heartbeat":
                     _q("pane_thinking", {
                         "step": step,
-                        "text": f"⏳ Waiting on Copilot ({item['waited_s']}s)… {_runtime_wait_message(item.get('runtime'))}",
+                        "text": f"⏳ Working on the response... Please wait. Waiting on Copilot ({item['waited_s']}s)... {_runtime_wait_message(item.get('runtime'))}",
                     })
                     continue
                 llm_r = item["response"]
@@ -3760,7 +5403,7 @@ async def api_multi_agent_run(
                 if item["kind"] == "heartbeat":
                     yield _sse("supervisor", {
                         "step": 0,
-                        "text": f"⏳ Supervisor waiting on Copilot ({item['waited_s']}s)… {_runtime_wait_message(item.get('runtime'))}",
+                        "text": f"⏳ Working on the response... Please wait. Supervisor waiting on Copilot ({item['waited_s']}s)... {_runtime_wait_message(item.get('runtime'))}",
                     })
                     continue
                 sup_r = item["response"]
@@ -4000,7 +5643,7 @@ async def _ma_role_loop_c11(
                 if item["kind"] == "heartbeat":
                     _q("pane_thinking", {
                         "step": step,
-                        "text": f"⏳ Waiting on Copilot ({item['waited_s']}s)… {_runtime_wait_message(item.get('runtime'))}",
+                        "text": f"⏳ Working on the response... Please wait. Waiting on Copilot ({item['waited_s']}s)... {_runtime_wait_message(item.get('runtime'))}",
                     })
                     continue
                 llm_r = item["response"]
@@ -4210,7 +5853,7 @@ async def api_ma_run(
             ):
                 if item["kind"] == "heartbeat":
                     yield _sse("supervisor", {
-                        "text": f"⏳ Supervisor waiting on Copilot ({item['waited_s']}s)… {_runtime_wait_message(item.get('runtime'))}"
+                        "text": f"⏳ Working on the response... Please wait. Supervisor waiting on Copilot ({item['waited_s']}s)... {_runtime_wait_message(item.get('runtime'))}"
                     })
                     continue
                 sup_r = item["response"]

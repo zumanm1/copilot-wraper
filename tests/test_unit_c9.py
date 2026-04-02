@@ -13,6 +13,7 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import sys
 import os
+import sqlite3
 
 # ── Make c9_jokes importable ─────────────────────────────────────────────────
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "c9_jokes"))
@@ -229,6 +230,57 @@ class TestC9PageRoutes:
         assert "25-Step Checklist" in r.text
         assert "Pool Monitor" in r.text
         assert "Min / Avg / Max" not in r.text  # rendered dynamically in JS
+
+    def test_tasked_page_returns_200(self, c9_app):
+        r = c9_app.get("/tasked")
+        assert r.status_code == 200
+        assert "Tasked Orchestrator" in r.text
+        assert "/api/tasks" in r.text
+        assert "/api/task-runs" in r.text
+        assert "/api/task-templates" in r.text
+        assert "Load 4 DB examples" in r.text
+        assert "Select editable template" in r.text
+        assert "Load selected template" in r.text
+        assert "Save current as template" in r.text
+        assert "Clone selected template" in r.text
+        assert "Archive selected template" in r.text
+        assert "Start Task" in r.text
+        assert "Repeat" in r.text
+        assert "Clone" in r.text
+        assert "Pause" in r.text
+        assert "Resume" in r.text
+        assert "Restart" in r.text
+        assert "Traceability" in r.text
+        assert "Live / continuous monitor" in r.text
+
+    def test_tasked_page_supports_task_id_query_param(self, c9_app):
+        r = c9_app.get("/tasked?task_id=task_123")
+        assert r.status_code == 200
+        assert "task_id" in r.text
+
+    def test_task_legacy_redirects_to_tasked(self, c9_app):
+        r = c9_app.get("/task", follow_redirects=False)
+        assert r.status_code == 307
+        assert r.headers["location"] == "/tasked"
+
+    def test_alerts_page_returns_200(self, c9_app):
+        r = c9_app.get("/alerts")
+        assert r.status_code == 200
+        assert "Alerts" in r.text
+        assert "/api/alerts" in r.text
+        assert "Open Tasked" in r.text
+        assert "Open Pipeline" in r.text
+        assert "Tasked alerts auto-refresh every 15 seconds" in r.text
+        assert "Snooze 30m" in r.text
+
+    def test_piplinetask_page_returns_200(self, c9_app):
+        r = c9_app.get("/piplinetask")
+        assert r.status_code == 200
+        assert "piplinetask" in r.text
+        assert "/api/task-pipelines" in r.text
+        assert "Open Tasked" in r.text
+        assert "Open Alerts" in r.text
+        assert "Live monitor every 15s" in r.text
 
     def test_pages_include_runtime_status_badge_polling(self, c9_app):
         r = c9_app.get("/chat")
@@ -478,6 +530,368 @@ class TestC9ApiChat:
         latest = r_logs.json()["rows"][0]
         assert latest["source"] == "chat-stream"
         assert "Upstream timeout" in (latest["response_excerpt"] or "")
+
+
+class TestC9Tasks:
+    def test_task_db_tables_exist(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        c9_mod._ensure_db()
+        with sqlite3.connect(c9_mod.DEFAULT_DB) as conn:
+            rows = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name IN "
+                "('task_definitions','task_runs','task_events','task_alerts','task_templates','task_run_claims')"
+            ).fetchall()
+
+        assert {row[0] for row in rows} == {
+            "task_definitions", "task_runs", "task_events", "task_alerts", "task_templates", "task_run_claims"
+        }
+
+    def test_api_tasks_lists_templates(self, c9_app):
+        r = c9_app.get("/api/tasks")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body["tasks"] == []
+        template_keys = {tpl["key"] for tpl in body["templates"]}
+        assert "weather-dublin" in template_keys
+        assert "outlook-sharepoint-linked" in template_keys
+
+    def test_task_template_create_clone_and_archive(self, c9_app):
+        r_create = c9_app.post("/api/task-templates", json={
+            "name": "User Workflow Template",
+            "mode": "chat",
+            "schedule_kind": "recurring",
+            "interval_minutes": 15,
+            "tabs_required": 2,
+            "planner_prompt": "Plan the workflow",
+            "executor_prompt": "Execute the workflow",
+            "context_handoff": "Copy findings into tab 2",
+            "trigger_mode": "contains",
+            "trigger_text": "workflow ready",
+            "notes": "User-created template",
+            "source": "user",
+        })
+        assert r_create.status_code == 200
+        created = r_create.json()["template"]
+        assert created["source"] == "user"
+        assert created["active"] is True
+
+        r_clone = c9_app.post(f"/api/task-templates/{created['key']}/clone")
+        assert r_clone.status_code == 200
+        cloned = r_clone.json()["template"]
+        assert cloned["key"] != created["key"]
+        assert cloned["name"].endswith("(Clone)")
+
+        r_archive = c9_app.post(f"/api/task-templates/{created['key']}/archive")
+        assert r_archive.status_code == 200
+        assert r_archive.json()["template"]["active"] is False
+
+        r_list = c9_app.get("/api/task-templates?include_archived=true")
+        assert r_list.status_code == 200
+        templates = {item["key"]: item for item in r_list.json()["templates"]}
+        assert created["key"] in templates
+        assert templates[created["key"]]["active"] is False
+        assert cloned["key"] in templates
+
+    def test_manual_chat_task_run_creates_alert(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        r_save = c9_app.post("/api/tasks", json={
+            "name": "Dublin Weather",
+            "mode": "chat",
+            "schedule_kind": "manual",
+            "tabs_required": 2,
+            "template_key": "weather-dublin",
+            "trigger_mode": "contains",
+            "trigger_text": "dublin weather message",
+            "executor_prompt": "Check Dublin weather and alert when above 10C",
+        })
+        assert r_save.status_code == 200
+        task = r_save.json()["task"]
+
+        fake_chat = AsyncMock(return_value={
+            "ok": True,
+            "text": "Dublin weather message: 12C and above threshold.",
+        })
+        with patch.object(c9_mod, "_chat_one", fake_chat):
+            r_run = c9_app.post(f"/api/tasks/{task['id']}/run")
+
+        assert r_run.status_code == 200
+        run_body = r_run.json()
+        assert run_body["ok"] is True
+        assert run_body["status"] == "completed"
+        assert run_body["alert_id"] is not None
+
+        r_alerts = c9_app.get("/api/alerts")
+        assert r_alerts.status_code == 200
+        alerts = r_alerts.json()["alerts"]
+        assert len(alerts) == 1
+        assert alerts[0]["task_name"] == "Dublin Weather"
+        assert alerts[0]["task_mode"] == "chat"
+        assert alerts[0]["template_key"] == "weather-dublin"
+        assert alerts[0]["schedule_kind"] == "manual"
+        assert alerts[0]["interval_minutes"] == 0
+        assert alerts[0]["tabs_required"] == 2
+        assert alerts[0]["active"] is True
+        assert alerts[0]["task_url"] == f"/tasked?task_id={task['id']}"
+        assert alerts[0]["pipeline_url"] == f"/piplinetask?task_id={task['id']}"
+        assert "Dublin weather message" in alerts[0]["summary"]
+
+        r_runs = c9_app.get("/api/task-runs")
+        assert r_runs.status_code == 200
+        assert r_runs.json()["runs"][0]["status"] == "completed"
+
+    def test_task_pipeline_api_returns_task_run_alert_timeline(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        r_save = c9_app.post("/api/tasks", json={
+            "name": "Pipeline Weather",
+            "mode": "chat",
+            "schedule_kind": "manual",
+            "tabs_required": 2,
+            "template_key": "weather-dublin",
+            "trigger_mode": "contains",
+            "trigger_text": "dublin weather message",
+            "executor_prompt": "Check Dublin weather and alert when above 10C",
+        })
+        assert r_save.status_code == 200
+        task = r_save.json()["task"]
+
+        fake_chat = AsyncMock(return_value={
+            "ok": True,
+            "text": "Dublin weather message: 14C and above threshold.",
+        })
+        with patch.object(c9_mod, "_chat_one", fake_chat):
+            r_run = c9_app.post(f"/api/tasks/{task['id']}/run")
+
+        assert r_run.status_code == 200
+        run_body = r_run.json()
+        assert run_body["ok"] is True
+        assert run_body["alert_id"] is not None
+
+        r_ack = c9_app.post(f"/api/alerts/{run_body['alert_id']}/ack")
+        assert r_ack.status_code == 200
+
+        r_pipeline = c9_app.get(f"/api/task-pipelines?task_id={task['id']}")
+        assert r_pipeline.status_code == 200
+        body = r_pipeline.json()
+        assert body["ok"] is True
+        assert len(body["pipelines"]) == 1
+
+        pipeline = body["pipelines"][0]
+        assert pipeline["task"]["id"] == task["id"]
+        assert pipeline["task"]["task_url"] == f"/tasked?task_id={task['id']}"
+        assert pipeline["task"]["alerts_url"] == "/alerts"
+        assert pipeline["summary"]["runs_total"] == 1
+        assert pipeline["summary"]["alerts_total"] == 1
+        assert pipeline["summary"]["open_alerts"] == 0
+
+        kinds = [event["kind"] for event in pipeline["events"]]
+        assert "task-created" in kinds
+        assert "run-started" in kinds
+        assert "run-finished" in kinds
+        assert "alert-created" in kinds
+        assert "alert-acknowledged" in kinds
+
+    def test_seed_examples_populates_tasked_pipeline_and_alerts(self, c9_app):
+        r_seed = c9_app.post("/api/tasks/seed-examples")
+        assert r_seed.status_code == 200
+        seed_body = r_seed.json()
+        assert seed_body["ok"] is True
+        assert seed_body["seeded_count"] == 4
+
+        r_tasks = c9_app.get("/api/tasks")
+        assert r_tasks.status_code == 200
+        task_ids = {task["id"] for task in r_tasks.json()["tasks"]}
+        assert {
+            "task_example_gmail_sender",
+            "task_example_sharepoint_file",
+            "task_example_outlook_alert",
+            "task_example_outlook_sharepoint",
+        }.issubset(task_ids)
+
+        r_alerts = c9_app.get("/api/alerts")
+        assert r_alerts.status_code == 200
+        alerts = r_alerts.json()["alerts"]
+        alert_task_ids = {alert["task_id"] for alert in alerts}
+        assert {
+            "task_example_gmail_sender",
+            "task_example_sharepoint_file",
+            "task_example_outlook_alert",
+            "task_example_outlook_sharepoint",
+        }.issubset(alert_task_ids)
+
+        r_pipelines = c9_app.get("/api/task-pipelines")
+        assert r_pipelines.status_code == 200
+        pipelines = {item["task"]["id"]: item for item in r_pipelines.json()["pipelines"]}
+        assert "task_example_gmail_sender" in pipelines
+        assert "task_example_outlook_sharepoint" in pipelines
+        example_pipeline = pipelines["task_example_outlook_sharepoint"]
+        kinds = [event["kind"] for event in example_pipeline["events"]]
+        assert "task-created" in kinds
+        assert "run-started" in kinds
+        assert "run-finished" in kinds
+        assert "alert-created" in kinds
+        assert "alert-acknowledged" in kinds
+
+    def test_non_chat_task_returns_launch_url(self, c9_app):
+        r_save = c9_app.post("/api/tasks", json={
+            "name": "Build Calculator",
+            "mode": "agent",
+            "schedule_kind": "manual",
+            "executor_prompt": "Create a calculator app",
+        })
+        assert r_save.status_code == 200
+        task = r_save.json()["task"]
+
+        r_run = c9_app.post(f"/api/tasks/{task['id']}/run")
+        assert r_run.status_code == 200
+        body = r_run.json()
+        assert body["ok"] is True
+        assert body["status"] == "launch-pending"
+        assert body["background_supported"] is False
+        assert body["launch_url"].startswith("/agent?task=")
+        assert "task_id=" in body["launch_url"]
+        assert "task_run_id=" in body["launch_url"]
+
+    def test_task_supports_continuous_schedule(self, c9_app):
+        r = c9_app.post("/api/tasks", json={
+            "name": "Live Weather Monitor",
+            "mode": "chat",
+            "schedule_kind": "continuous",
+            "interval_minutes": 10,
+            "executor_prompt": "Monitor weather continuously",
+        })
+        assert r.status_code == 200
+        task = r.json()["task"]
+        assert task["schedule_kind"] == "continuous"
+        assert task["schedule_label"].startswith("Live / every 10m")
+        assert task["lifecycle_state"] == "live"
+
+    def test_task_clone_pause_resume_and_traceability(self, c9_app):
+        r_save = c9_app.post("/api/tasks", json={
+            "name": "Traceable Task",
+            "mode": "chat",
+            "schedule_kind": "recurring",
+            "interval_minutes": 10,
+            "executor_prompt": "Reply with READY only.",
+        })
+        task = r_save.json()["task"]
+
+        r_pause = c9_app.post(f"/api/tasks/{task['id']}/pause")
+        assert r_pause.status_code == 200
+        paused = r_pause.json()["task"]
+        assert paused["active"] is False
+        assert paused["lifecycle_state"] == "paused"
+
+        r_resume = c9_app.post(f"/api/tasks/{task['id']}/resume")
+        assert r_resume.status_code == 200
+        resumed = r_resume.json()["task"]
+        assert resumed["active"] is True
+        assert resumed["lifecycle_state"] == "scheduled"
+        assert resumed["next_run_at"]
+        assert resumed["trace"]["trace_id"] == task["id"]
+
+        r_clone = c9_app.post(f"/api/tasks/{task['id']}/clone")
+        assert r_clone.status_code == 200
+        cloned = r_clone.json()["task"]
+        assert cloned["id"] != task["id"]
+        assert cloned["name"].endswith("(Clone)")
+        assert cloned["trace"]["trace_id"] == cloned["id"]
+
+        r_pipeline = c9_app.get(f"/api/task-pipelines?task_id={task['id']}")
+        assert r_pipeline.status_code == 200
+        kinds = [event["kind"] for event in r_pipeline.json()["pipelines"][0]["events"]]
+        assert "task-paused" in kinds
+        assert "task-resumed" in kinds
+
+    def test_task_start_repeat_restart_actions_create_runs(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        r_save = c9_app.post("/api/tasks", json={
+            "name": "Lifecycle Task",
+            "mode": "chat",
+            "schedule_kind": "manual",
+            "trigger_mode": "always",
+            "executor_prompt": "Reply with READY only.",
+        })
+        task_id = r_save.json()["task"]["id"]
+
+        fake_chat = AsyncMock(return_value={"ok": True, "text": "READY"})
+        with patch.object(c9_mod, "_chat_one", fake_chat):
+            r_start = c9_app.post(f"/api/tasks/{task_id}/start")
+            r_repeat = c9_app.post(f"/api/tasks/{task_id}/repeat")
+            r_restart = c9_app.post(f"/api/tasks/{task_id}/restart")
+
+        assert r_start.status_code == 200
+        assert r_repeat.status_code == 200
+        assert r_restart.status_code == 200
+        assert r_start.json()["status"] == "completed"
+        assert r_repeat.json()["status"] == "completed"
+        assert r_restart.json()["status"] == "completed"
+
+        r_runs = c9_app.get(f"/api/task-runs?task_id={task_id}")
+        runs = r_runs.json()["runs"]
+        assert len(runs) == 3
+        assert all(run["duration_label"] != "—" for run in runs)
+
+    def test_alert_acknowledge_updates_status(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        r_save = c9_app.post("/api/tasks", json={
+            "name": "Email Alert",
+            "mode": "chat",
+            "schedule_kind": "manual",
+            "trigger_mode": "always",
+            "executor_prompt": "Check for a critical email",
+        })
+        task_id = r_save.json()["task"]["id"]
+        with patch.object(c9_mod, "_chat_one", AsyncMock(return_value={"ok": True, "text": "Critical email found."})):
+            r_run = c9_app.post(f"/api/tasks/{task_id}/run")
+        alert_id = r_run.json()["alert_id"]
+        assert alert_id is not None
+
+        r_ack = c9_app.post(f"/api/alerts/{alert_id}/ack")
+        assert r_ack.status_code == 200
+        assert r_ack.json()["alert"]["status"] == "acknowledged"
+
+        r_alerts = c9_app.get("/api/alerts")
+        alerts = r_alerts.json()["alerts"]
+        assert alerts[0]["status"] == "acknowledged"
+
+    def test_alert_status_resolve_snooze_and_reopen(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        r_save = c9_app.post("/api/tasks", json={
+            "name": "Escalation Alert",
+            "mode": "chat",
+            "schedule_kind": "manual",
+            "trigger_mode": "always",
+            "executor_prompt": "Raise an escalation alert",
+        })
+        task_id = r_save.json()["task"]["id"]
+        with patch.object(c9_mod, "_chat_one", AsyncMock(return_value={"ok": True, "text": "Escalation found."})):
+            r_run = c9_app.post(f"/api/tasks/{task_id}/run")
+        alert_id = r_run.json()["alert_id"]
+        assert alert_id is not None
+
+        r_snooze = c9_app.post(f"/api/alerts/{alert_id}/status", json={"status": "snoozed", "snooze_minutes": 30})
+        assert r_snooze.status_code == 200
+        assert r_snooze.json()["alert"]["status"] == "snoozed"
+        assert r_snooze.json()["alert"]["snoozed_until"]
+
+        r_resolve = c9_app.post(f"/api/alerts/{alert_id}/status", json={"status": "resolved"})
+        assert r_resolve.status_code == 200
+        assert r_resolve.json()["alert"]["status"] == "resolved"
+        assert r_resolve.json()["alert"]["resolved_at"]
+
+        r_reopen = c9_app.post(f"/api/alerts/{alert_id}/status", json={"status": "open"})
+        assert r_reopen.status_code == 200
+        assert r_reopen.json()["alert"]["status"] == "open"
+
+        r_missing = c9_app.post("/api/alerts/999999/ack")
+        assert r_missing.status_code == 404
 
 
 # ── /api/validate tests ───────────────────────────────────────────────────────
