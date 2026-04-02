@@ -1064,7 +1064,7 @@ class TestC9Tasks:
         assert task["executor_target"] == "c12b"
         assert task["background_supported"] is True
 
-        async def fake_c12b_exec(command, timeout=30, cwd=".", session_id=""):
+        async def fake_c12b_exec(command, timeout=30, cwd=".", session_id="", **kwargs):
             if command == "python3 build.py":
                 return {"stdout": "build ok", "stderr": "", "exit_code": 0, "timed_out": False, "session_id": "sess_c12b"}
             if command == "python3 -m py_compile build.py":
@@ -1124,7 +1124,7 @@ class TestC9Tasks:
         assert task["sandbox_assist"] is True
         assert task["sandbox_assist_target"] == "c12b"
 
-        async def fake_c12b_exec(command, timeout=30, cwd=".", session_id=""):
+        async def fake_c12b_exec(command, timeout=30, cwd=".", session_id="", **kwargs):
             if command == "python3 prepare.py":
                 return {"stdout": "prepared", "stderr": "", "exit_code": 0, "timed_out": False, "session_id": "assist_123"}
             if command == "python3 -m py_compile prepare.py":
@@ -1181,7 +1181,7 @@ class TestC9Tasks:
         assert r_save.status_code == 200
         task = r_save.json()["task"]
 
-        async def fake_c12b_exec(command, timeout=30, cwd=".", session_id=""):
+        async def fake_c12b_exec(command, timeout=30, cwd=".", session_id="", **kwargs):
             if command == "python3 bootstrap.py":
                 return {"stdout": "bootstrap ok", "stderr": "", "exit_code": 0, "timed_out": False, "session_id": "assist_launch"}
             if command == "python3 -m py_compile bootstrap.py":
@@ -1209,6 +1209,102 @@ class TestC9Tasks:
         event_kinds = [event["kind"] for event in pipeline["events"]]
         assert "sandbox-assist-exec" in event_kinds
         assert "sandbox-assist-validate" in event_kinds
+
+    def test_sandbox_task_timeout_enters_waiting_retry_and_records_recovery_session(self, c9_app):
+        import httpx
+        import c9_jokes.app as c9_mod
+
+        r_save = c9_app.post("/api/tasks", json={
+            "name": "Sandbox Recovery",
+            "mode": "sandbox",
+            "schedule_kind": "manual",
+            "executor_target": "c12b",
+            "workspace_dir": "/workspace",
+            "trigger_mode": "always",
+            "executor_prompt": "python3 recover.py",
+        })
+        assert r_save.status_code == 200
+        task = r_save.json()["task"]
+
+        mock_client = MagicMock()
+        mock_client.post = AsyncMock(side_effect=httpx.ReadTimeout("read timeout"))
+        mock_client.get = AsyncMock(return_value=_json_response({"status": "ok"}))
+        mock_client.is_closed = False
+
+        with patch.object(c9_mod, "_get_http", return_value=mock_client):
+            r_run = c9_app.post(f"/api/tasks/{task['id']}/run")
+
+        assert r_run.status_code == 200
+        body = r_run.json()
+        assert body["status"] == "waiting-retry"
+        assert body["recovery_pending"] is True
+        assert body["session_manager_id"]
+
+        r_sessions = c9_app.get(f"/api/session-manager?scope=task&status=waiting-retry&task_id={task['id']}")
+        assert r_sessions.status_code == 200
+        items = r_sessions.json()["items"]
+        assert items
+        assert items[0]["id"] == body["session_manager_id"]
+        assert items[0]["upstream"] == "c12b"
+        assert items[0]["status"] == "waiting-retry"
+
+    def test_waiting_retry_task_can_resume_via_session_manager(self, c9_app):
+        import httpx
+        import c9_jokes.app as c9_mod
+
+        r_save = c9_app.post("/api/tasks", json={
+            "name": "Sandbox Resume",
+            "mode": "sandbox",
+            "schedule_kind": "manual",
+            "executor_target": "c12b",
+            "workspace_dir": "/workspace",
+            "trigger_mode": "always",
+            "executor_prompt": "python3 recover.py",
+        })
+        assert r_save.status_code == 200
+        task = r_save.json()["task"]
+
+        timeout_client = MagicMock()
+        timeout_client.post = AsyncMock(side_effect=httpx.ReadTimeout("read timeout"))
+        timeout_client.get = AsyncMock(return_value=_json_response({"status": "ok"}))
+        timeout_client.is_closed = False
+
+        with patch.object(c9_mod, "_get_http", return_value=timeout_client):
+            r_run = c9_app.post(f"/api/tasks/{task['id']}/run")
+
+        waiting = r_run.json()
+        assert waiting["status"] == "waiting-retry"
+        recovery_id = waiting["session_manager_id"]
+
+        async def fake_c12b_exec(command, timeout=30, cwd=".", session_id="", **kwargs):
+            assert command == "python3 recover.py"
+            return {
+                "stdout": json.dumps({"ok": True, "result": "resumed"}),
+                "stderr": "",
+                "exit_code": 0,
+                "timed_out": False,
+                "session_id": session_id or "resume_c12b",
+            }
+
+        with patch.object(c9_mod, "_c12b_exec", AsyncMock(side_effect=fake_c12b_exec)):
+            r_resume = c9_app.post(f"/api/session-manager/{recovery_id}/resume")
+
+        assert r_resume.status_code == 200
+        resumed = r_resume.json()
+        assert resumed["status"] == "completed"
+
+        r_runs = c9_app.get(f"/api/task-runs?task_id={task['id']}")
+        runs = r_runs.json()["runs"]
+        assert runs[0]["status"] == "completed"
+
+        r_sm = c9_app.get(f"/api/session-manager?task_id={task['id']}&limit=1")
+        assert r_sm.status_code == 200
+        assert r_sm.json()["items"][0]["status"] == "completed"
+
+        r_completed = c9_app.get(f"/api/task-completed?task_id={task['id']}")
+        completed_items = r_completed.json()["items"]
+        assert completed_items
+        assert completed_items[0]["run"]["task_id"] == task["id"]
 
     def test_alert_acknowledge_updates_status(self, c9_app):
         import c9_jokes.app as c9_mod

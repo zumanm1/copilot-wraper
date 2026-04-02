@@ -290,4 +290,44 @@ CREATE TABLE IF NOT EXISTS task_run_claims (
 );
 CREATE INDEX IF NOT EXISTS idx_task_claims_exp ON task_run_claims(expires_at);
 
+CREATE TABLE IF NOT EXISTS session_manager_sessions (
+    id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    scope TEXT NOT NULL DEFAULT 'task',
+    page TEXT DEFAULT '',
+    owner_id TEXT DEFAULT '',
+    task_id TEXT DEFAULT '',
+    run_id TEXT DEFAULT '',
+    upstream TEXT DEFAULT '',
+    operation TEXT DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'running',
+    timeout_ms INTEGER DEFAULT 0,
+    adaptive_timeout_ms INTEGER DEFAULT 0,
+    last_elapsed_ms INTEGER DEFAULT 0,
+    retry_count INTEGER DEFAULT 0,
+    max_retries INTEGER DEFAULT 2,
+    next_retry_at TEXT,
+    recovered_at TEXT,
+    external_session_id TEXT DEFAULT '',
+    resume_payload_json TEXT DEFAULT '{}',
+    state_json TEXT DEFAULT '{}',
+    last_error TEXT DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS idx_sm_status_retry ON session_manager_sessions(status, next_retry_at);
+CREATE INDEX IF NOT EXISTS idx_sm_task_run ON session_manager_sessions(task_id, run_id, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_sm_page_owner ON session_manager_sessions(page, owner_id, updated_at DESC);
+
+CREATE TABLE IF NOT EXISTS session_manager_metrics (
+    scope TEXT NOT NULL,
+    upstream TEXT NOT NULL,
+    operation TEXT NOT NULL,
+    sample_count INTEGER DEFAULT 0,
+    avg_elapsed_ms REAL DEFAULT 0,
+    max_elapsed_ms INTEGER DEFAULT 0,
+    last_elapsed_ms INTEGER DEFAULT 0,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (scope, upstream, operation)
+);
+
 CREATE INDEX IF NOT EXISTS idx_task_def_due ON task_definitions(active, schedule_kind, next_run_at);

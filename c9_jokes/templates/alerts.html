@@ -50,6 +50,7 @@
         <select id="alerts-run-filter">
           <option value="">All run states</option>
           <option value="running">Running</option>
+          <option value="waiting-retry">Waiting retry</option>
           <option value="launch-pending">Launch pending</option>
           <option value="waiting-feedback">Waiting feedback</option>
           <option value="completed">Completed</option>
@@ -140,7 +141,7 @@
       return '<tr data-id="' + esc(a.id) + '">' +
         '<td>' + esc(fmtTs(a.created_at)) + '</td>' +
         '<td><strong>' + esc(a.task_name || a.task_id || 'Tasked') + '</strong><div class="alerts-meta">' + esc(modeLabel) + ' · ' + esc(templateLabel) + '</div><div class="alerts-meta">Trace: ' + esc(a.trace_id || a.task_id || '—') + '</div><div class="alerts-meta">Executor: ' + esc(targetLabel(a.executor_target)) + ' · Workspace: ' + esc(a.workspace_dir || '—') + '</div></td>' +
-        '<td><span class="alerts-pill">' + esc(a.run_status || '—') + '</span><div class="alerts-meta">Run: ' + esc(a.run_id || '—') + '</div><div class="alerts-meta">Current step: ' + esc(a.current_step_id || '—') + '</div><div class="alerts-meta">Terminal: ' + esc(a.terminal_reason || '—') + '</div></td>' +
+        '<td><span class="alerts-pill">' + esc(a.run_status || '—') + '</span><div class="alerts-meta">Run: ' + esc(a.run_id || '—') + '</div><div class="alerts-meta">Current step: ' + esc(a.current_step_id || '—') + '</div><div class="alerts-meta">Terminal: ' + esc(a.terminal_reason || '—') + '</div><div class="alerts-meta">Recovery: ' + esc(((a.latest_recovery_session || {}).status) || 'steady') + '</div></td>' +
         '<td><span class="alerts-pill">' + esc(a.severity || 'info') + '</span><div class="alerts-meta">' + esc(cadence) + '</div><div class="alerts-meta">Assist: ' + esc(a.sandbox_assist ? targetLabel(a.sandbox_assist_target) : 'disabled') + '</div></td>' +
         '<td>' + esc(a.trigger_text || '—') + '</td>' +
         '<td>' + esc((a.summary || '').slice(0, 240)) + '</td>' +
@@ -171,7 +172,11 @@
     var res = await fetch('/api/runtime-status?force=true', { cache: 'no-store' });
     var data = await res.json();
     var item = (data.components || {}).c12b || {};
-    runtimeEl.innerHTML = '<span class="alerts-pill">C12b: ' + esc(item.state || 'unknown') + ' · ' + esc(item.message || 'Unavailable') + '</span>';
+    var smRes = await fetch('/api/session-manager?scope=task&status=waiting-retry&limit=1', { cache: 'no-store' });
+    var smData = await smRes.json();
+    var recovery = (smData.items || [])[0] || {};
+    runtimeEl.innerHTML = '<span class="alerts-pill">C12b: ' + esc(item.state || 'unknown') + ' · ' + esc(item.message || 'Unavailable') + '</span>' +
+      '<span class="alerts-pill">Recovery: ' + esc(recovery.status || 'steady') + (recovery.upstream ? (' · ' + esc(recovery.upstream)) : '') + '</span>';
   }
   document.getElementById('alerts-refresh').addEventListener('click', loadAlerts);
   [statusFilterEl, severityFilterEl, runFilterEl].forEach(function(el){ el.addEventListener('change', loadAlerts); });

@@ -212,6 +212,7 @@
   </div>
 
   <div class="mao-tracebar" id="mao-tracebar"></div>
+  <div class="mao-tracebar" id="mao-recoverybar"></div>
 
   <!-- SUPERVISOR BAR -->
   <div class="mao-supbar">
@@ -360,6 +361,7 @@ var sumBar=document.getElementById('mao-sumbar');
 var sumText=document.getElementById('mao-sum-text');
 var ftree=document.getElementById('mao-ftree');
 var traceBar=document.getElementById('mao-tracebar');
+var recoveryBar=document.getElementById('mao-recoverybar');
 
 // URL param pre-fill
 (function(){var t=taskLaunch.task||new URLSearchParams(location.search).get('task');if(t&&!taskEl.value)taskEl.value=t;})();
@@ -384,6 +386,70 @@ function renderTraceBar(){
     +'<span>Source: '+esc(source||'manual')+'</span>'
     +'<span>Session: '+esc(_sid||(_resumeRequested?'resume-pending':'new'))+'</span>'
     +(links.length?links.join(''):'');
+}
+
+function maoTransientError(text){
+  var v=String(text||'').toLowerCase();
+  return ['timeout','timed out','readtimeout','connecttimeout','connection','network','disconnected','server disconnected','broken pipe'].some(function(token){return v.indexOf(token)>=0;});
+}
+
+function maoRecoveryOwner(){
+  return _sid||taskLaunch.task_run_id||taskLaunch.task_id||'multi-agento-page';
+}
+
+function reportRecovery(status, extra){
+  return fetch('/api/session-manager/report',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      scope:'page',
+      page:'multi-agento',
+      owner_id:maoRecoveryOwner(),
+      external_session_id:_sid||'',
+      task_id:taskLaunch.task_id||'',
+      run_id:taskLaunch.task_run_id||'',
+      upstream:'c1',
+      operation:'multi-agento-stream',
+      status:status,
+      last_error:(extra&&extra.error)||'',
+      state:extra||{}
+    })
+  }).catch(function(){});
+}
+
+function loadRecoveryBar(){
+  if(!recoveryBar)return;
+  var ownerId=maoRecoveryOwner();
+  if(!ownerId){recoveryBar.style.display='none';recoveryBar.innerHTML='';return;}
+  fetch('/api/session-manager?page=multi-agento&owner_id='+encodeURIComponent(ownerId)+'&limit=1',{cache:'no-store'})
+    .then(function(r){return r.json();})
+    .then(function(data){
+      var session=(data.items||[])[0];
+      if(!session){recoveryBar.style.display='none';recoveryBar.innerHTML='';return;}
+      recoveryBar.style.display='flex';
+      recoveryBar.innerHTML='<strong>Session manager</strong>'
+        +'<span>Status: '+esc(session.status||'steady')+'</span>'
+        +'<span>Upstream: '+esc(session.upstream||'—')+'</span>'
+        +'<span>Operation: '+esc(session.operation||'—')+'</span>'
+        +'<span>Retries: '+esc(session.retry_count||0)+'</span>'
+        +'<span>Next retry: '+esc(session.next_retry_at||'—')+'</span>'
+        +'<span>'+esc(session.last_error||'No recovery error recorded.')+'</span>'
+        +(((session.status||'')==='waiting-retry')?'<button type="button" class="mao-mini" id="mao-recovery-resume-btn">Resume recovery</button>':'');
+      var resumeBtn=document.getElementById('mao-recovery-resume-btn');
+      if(resumeBtn){
+        resumeBtn.addEventListener('click',function(){
+          resumeBtn.disabled=true;
+          resumeBtn.textContent='Resuming…';
+          fetch('/api/session-manager/'+encodeURIComponent(session.id)+'/resume',{method:'POST'})
+            .then(function(){return loadRecoveryBar();})
+            .then(function(){if(!_run&&taskEl.value.trim()){_resumeRequested=true;launch();}})
+            .catch(function(){
+              resumeBtn.disabled=false;
+              resumeBtn.textContent='Resume recovery';
+            });
+        });
+      }
+    }).catch(function(){});
 }
 
 function markRunActivity(){_lastActivityAt=Date.now();}
@@ -500,7 +566,7 @@ function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').repl
 // SSE handler
 function handleEvent(type,data){
   markRunActivity();
-  if(type==='session'){_sid=data.session_id;_resumeRequested=false;refreshFiles();loadSessions();renderTraceBar();return;}
+  if(type==='session'){_sid=data.session_id;_resumeRequested=false;refreshFiles();loadSessions();renderTraceBar();reportRecovery('running',{session_id:_sid||'',connected:true});loadRecoveryBar();return;}
   if(type==='supervisor'){supText.textContent=data.text||'';return;}
   if(type==='pane_init'){
     createPane(data.pane_id,data.role,data.label||data.role,{'builder':'🔨','executor':'⚡','tester':'🧪','debugger':'🐛','ui':'🎨','reporter':'📊'}[data.role]||'🤖',data.assignment||'');
@@ -536,10 +602,12 @@ function handleEvent(type,data){
     fetch('/api/token-usage/record',{method:'POST',headers:{'Content-Type':'application/json'},
       body:JSON.stringify({agent_id:'multi-agento',page:'multi-agento',tokens:_maTok,session_id:_sid||'',status:'ok'})
     }).catch(function(){});
+    reportRecovery('completed',{session_id:_sid||'',summary:data.summary||'',files_created:data.files_created||[]});
+    loadRecoveryBar();
     loadSessions();
     renderTraceBar();
   }
-  else if(type==='error'){supText.textContent='❌ '+esc(data.message||'Error');setRunning(false);}
+  else if(type==='error'){supText.textContent='❌ '+esc(data.message||'Error');reportRecovery(maoTransientError(data.message||'')?'waiting-retry':'failed',{error:data.message||'Error',session_id:_sid||''});loadRecoveryBar();setRunning(false);}
 }
 
 function setRunning(v){
@@ -589,6 +657,8 @@ function launch(){
       return;
     }
     supText.textContent='⚠️ Stream disconnected. Session is preserved; reopen it from History after C1/C3 recovers.';
+    reportRecovery('waiting-retry',{error:'EventSource disconnected while the team session remained active.',session_id:_sid||''});
+    loadRecoveryBar();
     setRunning(false);
   };
   setRunning(true);startFileInterval();
@@ -702,6 +772,7 @@ function resumeSession(sid,task){
   supText.textContent='📂 Session loaded — the next launch continues the same C11 session workspace.';
   document.querySelectorAll('.mao-item[data-session-id]').forEach(function(el){el.classList.toggle('active',el.dataset.sessionId===sid);});
   renderTraceBar();
+  loadRecoveryBar();
   refreshFiles();loadProjects();
 }
 
@@ -837,6 +908,7 @@ document.getElementById('btn-sessions-history').addEventListener('click',functio
 })();
 
 renderTraceBar();
+loadRecoveryBar();
 })();
 </script>
 {% endblock %}

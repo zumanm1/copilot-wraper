@@ -27,7 +27,7 @@
 .tasked-table th,.tasked-table td{padding:.55rem .5rem;border-bottom:1px solid var(--border,#333);font-size:.84rem;text-align:left;vertical-align:top}
 .tasked-table tbody tr{cursor:pointer}
 .tasked-table tbody tr:hover{background:rgba(255,255,255,.03)}
-.tasked-status.running{color:#0a84ff}.tasked-status.completed{color:#30d158}.tasked-status.failed{color:#ff453a}.tasked-status.launch-required,.tasked-status.manual-only{color:#ffa000}
+.tasked-status.running{color:#0a84ff}.tasked-status.completed{color:#30d158}.tasked-status.failed{color:#ff453a}.tasked-status.launch-required,.tasked-status.manual-only,.tasked-status.waiting-retry,.tasked-status.recovering{color:#ffa000}
 .tasked-template-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.75rem}
 .tasked-template{background:#111;border:1px solid var(--border,#333);border-radius:14px;padding:.9rem;display:grid;gap:.55rem}
 .tasked-template h3{margin:0;font-size:.92rem}
@@ -870,12 +870,25 @@ Alert config example:
         '<div class="tasked-trace-item"><strong>Task alert generator</strong><span>Alert ID: ' + esc((trace.alert_id || latestAlert.id || '—')) + '\nStatus: ' + esc((trace.alert_generator || {}).latest_alert_status || latestAlert.status || '—') + '\nSeverity: ' + esc((trace.alert_generator || {}).severity || latestAlert.severity || '—') + '\nTitle: ' + esc((trace.alert_generator || {}).latest_alert_title || latestAlert.title || '—') + '</span></div>' +
         '<div class="tasked-trace-item"><strong>Context handoff</strong><span>' + esc((trace.planner || {}).context_handoff || task.context_handoff || '—') + '</span></div>' +
         '<div class="tasked-trace-item"><strong>Task completion</strong><span>Status: ' + esc((trace.completion || {}).last_status || latestRun.status || '—') + '\nReason: ' + esc((trace.completion || {}).terminal_reason || latestRun.terminal_reason || '—') + '\nCompleted: ' + esc(fmtTs((trace.completion || {}).completed_at || latestRun.completed_at)) + '</span></div>' +
+        '<div class="tasked-trace-item"><strong>Session manager</strong><span>Status: ' + esc((trace.recovery || {}).status || ((task.latest_recovery_session || {}).status) || 'steady') + '\nOperation: ' + esc((trace.recovery || {}).operation || ((task.latest_recovery_session || {}).operation) || '—') + '\nUpstream: ' + esc((trace.recovery || {}).upstream || ((task.latest_recovery_session || {}).upstream) || '—') + '\nRetries: ' + esc((trace.recovery || {}).retry_count || ((task.latest_recovery_session || {}).retry_count) || 0) + '\nNext retry: ' + esc(fmtTs((trace.recovery || {}).next_retry_at || ((task.latest_recovery_session || {}).next_retry_at))) + '\nError: ' + esc((trace.recovery || {}).last_error || ((task.latest_recovery_session || {}).last_error) || '—') + '</span></div>' +
       '</div>' +
       '<div class="tasked-actions">' +
         '<a class="tasked-btn secondary" href="' + esc(task.pipeline_url || '/piplinetask') + '">Open pipeline trace</a>' +
         '<a class="tasked-btn secondary" href="' + esc(task.alerts_url || '/alerts') + '">Open alerts</a>' +
         '<a class="tasked-btn secondary" href="' + esc(task.completed_url || '/task-completed') + '">Open completed</a>' +
+        (((task.latest_recovery_session || {}).status || '') === 'waiting-retry' ? '<button class="tasked-btn secondary" type="button" id="tasked-resume-recovery-btn" data-session-id="' + esc((task.latest_recovery_session || {}).id || '') + '">Resume recovery</button>' : '') +
       '</div>';
+    var resumeBtn = document.getElementById('tasked-resume-recovery-btn');
+    if (resumeBtn) {
+      resumeBtn.addEventListener('click', async function(){
+        resultEl.textContent = 'Resuming recovery session…';
+        var res = await fetch('/api/session-manager/' + encodeURIComponent(resumeBtn.dataset.sessionId) + '/resume', { method: 'POST' });
+        var data = await res.json();
+        resultEl.textContent = JSON.stringify(data, null, 2);
+        await loadTasks();
+        await loadRuns();
+      });
+    }
   }
 
   function fillForm(task) {
@@ -979,7 +992,7 @@ Alert config example:
         ? '<span data-live-start="' + esc(latestRun.started_at || latestRun.created_at || '') + '">' + esc(latestRun.duration_label || '0s') + '</span>'
         : esc(latestRun.duration_label || '—');
       return '<tr data-id="' + esc(t.id) + '">' +
-        '<td><strong>' + esc(t.name) + '</strong><div class="tasked-note">' + esc((t.template_label || t.template_key || 'custom')) + ' · ' + esc(t.id || '') + '</div><div class="tasked-note">' + (t.sandbox_assist ? ('AIO assist: ' + esc(executorLabel(t.sandbox_assist_target || '')) + ' · ' + esc(t.sandbox_assist_workspace_dir || '—')) : 'AIO assist disabled') + '</div></td>' +
+        '<td><strong>' + esc(t.name) + '</strong><div class="tasked-note">' + esc((t.template_label || t.template_key || 'custom')) + ' · ' + esc(t.id || '') + '</div><div class="tasked-note">' + (t.sandbox_assist ? ('AIO assist: ' + esc(executorLabel(t.sandbox_assist_target || '')) + ' · ' + esc(t.sandbox_assist_workspace_dir || '—')) : 'AIO assist disabled') + '</div><div class="tasked-note">Recovery: ' + esc(((t.latest_recovery_session || {}).status) || 'steady') + (((t.latest_recovery_session || {}).retry_count || 0) ? (' · retries ' + esc((t.latest_recovery_session || {}).retry_count)) : '') + '</div></td>' +
         '<td>' + esc(t.mode_label || t.mode) + '</td>' +
         '<td>' + esc(t.schedule_label || t.schedule_kind || '—') + '</td>' +
         '<td><span class="tasked-status ' + esc(t.lifecycle_state || t.last_status || 'idle') + '">' + esc(t.lifecycle_label || t.last_status || 'idle') + '</span></td>' +
@@ -1061,6 +1074,9 @@ Alert config example:
   async function loadSandboxRuntime() {
     var res = await fetch('/api/runtime-status?force=true', { cache: 'no-store' });
     var data = await res.json();
+    var smRes = await fetch('/api/session-manager?scope=task&status=waiting-retry&limit=5', { cache: 'no-store' });
+    var smData = await smRes.json();
+    var recoveries = smData.items || [];
     var components = data.components || {};
     var cards = ['c12b'].map(function(key) {
       var item = components[key] || {};
@@ -1070,7 +1086,13 @@ Alert config example:
         '<span class="tasked-runtime-state">Message: ' + esc(item.message || 'Unavailable') + '</span>' +
         '<span class="tasked-runtime-state">Latency: ' + esc((item.elapsed_ms == null) ? '—' : (item.elapsed_ms + 'ms')) + '</span>' +
       '</div>';
-    }).join('');
+    }).join('') +
+    '<div class="tasked-runtime-card">' +
+      '<strong>Recovery Manager</strong>' +
+      '<span class="tasked-runtime-state">Waiting recoveries: ' + esc(recoveries.length) + '</span>' +
+      '<span class="tasked-runtime-state">Latest: ' + esc(((recoveries[0] || {}).status) || 'steady') + '</span>' +
+      '<span class="tasked-runtime-state">Upstream: ' + esc(((recoveries[0] || {}).upstream) || '—') + '</span>' +
+    '</div>';
     runtimeGridEl.innerHTML = cards;
   }
 

@@ -811,6 +811,7 @@
   <!-- ── Stream Output + Input ──────────────────────────────────────────── -->
   <div class="agent-main">
     <div class="launch-context" id="agent-task-context" style="display:none"></div>
+    <div class="launch-context" id="agent-recovery-context" style="display:none"></div>
     <!-- Output tabs -->
     <div class="output-tabs">
       <button class="tab-btn active" data-tab="terminal" id="tab-terminal">⚡ Terminal</button>
@@ -1001,6 +1002,7 @@
   const btnRefreshHist   = document.getElementById('refresh-history');
   const followupBanner   = document.getElementById('followup-banner');
   const taskContextEl    = document.getElementById('agent-task-context');
+  const recoveryContextEl= document.getElementById('agent-recovery-context');
   const attachBadges     = document.getElementById('attach-badges');
   const btnAttach        = document.getElementById('btn-attach');
   const attachInput      = document.getElementById('attach-input');
@@ -1692,6 +1694,8 @@
       _taskFeedbackConnected = true;
       postTaskFeedback('waiting-feedback', 'Agent session connected and is still running.', 'Session ' + currentSessId + ' connected.', { session_id: currentSessId, connected: true });
     }
+    reportRecovery('running', { connected: true, session_id: currentSessId || '' });
+    loadRecoveryContext();
   }
 
   function handleWebServer(data) {
@@ -1749,6 +1753,8 @@
         summary: summary,
       });
     }
+    reportRecovery('completed', { session_id: currentSessId || data.session_id || '', summary: summary, steps_taken: steps });
+    loadRecoveryContext();
   }
 
   function handleError(data) {
@@ -1762,6 +1768,8 @@
         failed: true,
       });
     }
+    reportRecovery(isTransientError(data.message || '') ? 'waiting-retry' : 'failed', { error: data.message || 'Unknown error', session_id: currentSessId || '' });
+    loadRecoveryContext();
   }
 
   function handleTokenEstimate(data) {
@@ -1907,6 +1915,84 @@
       ' · Source: ' + escapeHtml(source || 'manual') +
       ' · Session: ' + escapeHtml(currentSessId || 'pending') + '</div>' +
       (links.length ? '<div class="launch-context-links">' + links.join('') + '</div>' : '');
+  }
+
+  function isTransientError(text) {
+    var v = String(text || '').toLowerCase();
+    return ['timeout','timed out','readtimeout','connecttimeout','connection','network','disconnected','server disconnected','broken pipe'].some(function(token){ return v.indexOf(token) >= 0; });
+  }
+
+  function recoveryOwnerId() {
+    return currentSessId || taskLaunch.task_run_id || taskLaunch.task_id || 'agent-page';
+  }
+
+  async function reportRecovery(status, extra) {
+    try {
+      await fetch('/api/session-manager/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scope: 'page',
+          page: 'agent',
+          owner_id: recoveryOwnerId(),
+          external_session_id: currentSessId || '',
+          task_id: taskLaunch.task_id || '',
+          run_id: taskLaunch.task_run_id || '',
+          upstream: 'c1',
+          operation: 'agent-stream',
+          status: status,
+          last_error: (extra && extra.error) || '',
+          state: extra || {},
+        }),
+      });
+    } catch (_) {}
+  }
+
+  async function loadRecoveryContext() {
+    if (!recoveryContextEl) return;
+    var ownerId = recoveryOwnerId();
+    if (!ownerId) {
+      recoveryContextEl.style.display = 'none';
+      recoveryContextEl.innerHTML = '';
+      return;
+    }
+    try {
+      var res = await fetch('/api/session-manager?page=agent&owner_id=' + encodeURIComponent(ownerId) + '&limit=1', { cache: 'no-store' });
+      var data = await res.json();
+      var session = (data.items || [])[0];
+      if (!session) {
+        recoveryContextEl.style.display = 'none';
+        recoveryContextEl.innerHTML = '';
+        return;
+      }
+      recoveryContextEl.style.display = 'grid';
+      recoveryContextEl.innerHTML =
+        '<strong>Session manager</strong>' +
+        '<div class="launch-context-meta">Status: ' + escapeHtml(session.status || 'steady') +
+        ' · Upstream: ' + escapeHtml(session.upstream || '—') +
+        ' · Operation: ' + escapeHtml(session.operation || '—') +
+        ' · Retries: ' + escapeHtml(String(session.retry_count || 0)) +
+        ' · Next retry: ' + escapeHtml(session.next_retry_at || '—') + '</div>' +
+        '<div class="launch-context-meta">' + escapeHtml(session.last_error || 'No recovery error recorded.') + '</div>' +
+        ((session.status || '') === 'waiting-retry'
+          ? '<div><button type="button" class="btn-sm" id="agent-recovery-resume-btn">Resume recovery</button></div>'
+          : '');
+      var resumeBtn = document.getElementById('agent-recovery-resume-btn');
+      if (resumeBtn) {
+        resumeBtn.addEventListener('click', async function() {
+          try {
+            resumeBtn.disabled = true;
+            resumeBtn.textContent = 'Resuming…';
+            await fetch('/api/session-manager/' + encodeURIComponent(session.id) + '/resume', { method: 'POST' });
+            await loadRecoveryContext();
+            if (!running && taskInput.value.trim()) runTask();
+          } catch (_) {
+            resumeBtn.disabled = false;
+            resumeBtn.textContent = 'Resume recovery';
+          }
+        });
+      }
+    } catch (_) {}
   }
 
   function canPostTaskFeedback() {
@@ -2193,6 +2279,8 @@
           return;
         }
         appendEntry('error', '<span class="stream-label">❌ Error</span> Stream disconnected. Session is kept; resume it from History if C1/C3 recovers.');
+        reportRecovery('waiting-retry', { error: 'EventSource disconnected while the agent session remained active.', session_id: currentSessId || '' });
+        loadRecoveryContext();
         setIdle(false);
       }
     });
@@ -2417,6 +2505,7 @@
     if (urlTask && !taskInput.value.trim()) taskInput.value = urlTask;
   })();
   renderTaskContext();
+  loadRecoveryContext();
   applyRunAvailability();
 
 })();

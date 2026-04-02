@@ -756,6 +756,48 @@ def _ensure_db() -> None:
             conn.execute("CREATE INDEX IF NOT EXISTS idx_task_step_results_run_started ON task_step_results(run_id, started_at DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_task_step_results_task_step ON task_step_results(task_id, step_id, started_at DESC)")
             conn.execute("CREATE INDEX IF NOT EXISTS idx_task_feedback_run_created ON task_feedback_events(run_id, created_at DESC)")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS session_manager_sessions (
+                    id TEXT PRIMARY KEY,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    scope TEXT NOT NULL,
+                    page TEXT DEFAULT '',
+                    owner_id TEXT DEFAULT '',
+                    task_id TEXT DEFAULT '',
+                    run_id TEXT DEFAULT '',
+                    upstream TEXT DEFAULT '',
+                    operation TEXT DEFAULT '',
+                    status TEXT DEFAULT 'running',
+                    timeout_ms INTEGER DEFAULT 0,
+                    adaptive_timeout_ms INTEGER DEFAULT 0,
+                    last_elapsed_ms INTEGER DEFAULT 0,
+                    retry_count INTEGER DEFAULT 0,
+                    max_retries INTEGER DEFAULT 2,
+                    next_retry_at TEXT,
+                    external_session_id TEXT DEFAULT '',
+                    last_error TEXT DEFAULT '',
+                    resume_payload_json TEXT DEFAULT '{}',
+                    state_json TEXT DEFAULT '{}',
+                    recovered_at TEXT
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS session_manager_metrics (
+                    scope TEXT NOT NULL,
+                    upstream TEXT NOT NULL,
+                    operation TEXT NOT NULL,
+                    sample_count INTEGER DEFAULT 0,
+                    avg_elapsed_ms REAL DEFAULT 0,
+                    max_elapsed_ms INTEGER DEFAULT 0,
+                    last_elapsed_ms INTEGER DEFAULT 0,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (scope, upstream, operation)
+                )
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_sm_status_retry ON session_manager_sessions(status, next_retry_at)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_sm_task_run ON session_manager_sessions(task_id, run_id, updated_at DESC)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_sm_page_owner ON session_manager_sessions(page, owner_id, updated_at DESC)")
     except sqlite3.Error:
         pass
     for statement in (
@@ -813,6 +855,355 @@ def _ensure_db() -> None:
     except Exception:
         pass
 
+
+# ── Session manager helpers ───────────────────────────────────────────────────
+
+SESSION_MANAGER_RETRYABLE_STATUSES = {"waiting-retry", "recovering", "retrying", "running"}
+SESSION_MANAGER_TERMINAL_STATUSES = {"completed", "failed", "cancelled"}
+
+
+class SessionRecoveryPending(RuntimeError):
+    def __init__(self, session: dict, error_text: str):
+        super().__init__(error_text)
+        self.session = session
+        self.error_text = error_text
+
+
+def _is_networkish(detail: str) -> bool:
+    text = (detail or "").lower()
+    return any(
+        token in text
+        for token in (
+            "connecterror",
+            "connection error",
+            "connection refused",
+            "connection reset",
+            "server disconnected",
+            "broken pipe",
+            "network is unreachable",
+            "temporary failure",
+            "name or service not known",
+            "nodename nor servname",
+            "remoteprotocolerror",
+            "dns",
+        )
+    )
+
+
+def _session_manager_metric(scope: str, upstream: str, operation: str) -> dict:
+    try:
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT * FROM session_manager_metrics WHERE scope=? AND upstream=? AND operation=?",
+                (scope, upstream, operation),
+            ).fetchone()
+        return dict(row) if row else {}
+    except sqlite3.Error:
+        return {}
+
+
+def _session_manager_timeout_ms(scope: str, upstream: str, operation: str, base_timeout_ms: int) -> int:
+    base_timeout_ms = max(5000, int(base_timeout_ms or 30000))
+    metric = _session_manager_metric(scope, upstream, operation)
+    if not metric:
+        return base_timeout_ms
+    avg_ms = float(metric.get("avg_elapsed_ms") or 0)
+    max_ms = int(metric.get("max_elapsed_ms") or 0)
+    last_ms = int(metric.get("last_elapsed_ms") or 0)
+    adaptive = base_timeout_ms
+    if avg_ms > 0:
+        adaptive = max(adaptive, int(avg_ms * 1.6 + 5000))
+    if max_ms > 0:
+        adaptive = max(adaptive, int(max_ms * 1.25 + 4000))
+    if last_ms > 0:
+        adaptive = max(adaptive, int(last_ms * 1.2 + 3000))
+    hard_cap = max(base_timeout_ms * 3, 420000)
+    return min(hard_cap, adaptive)
+
+
+def _session_manager_record_metric(scope: str, upstream: str, operation: str, elapsed_ms: int | None) -> None:
+    if elapsed_ms is None or elapsed_ms <= 0:
+        return
+    now = _iso_now()
+    try:
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT sample_count, avg_elapsed_ms, max_elapsed_ms FROM session_manager_metrics WHERE scope=? AND upstream=? AND operation=?",
+                (scope, upstream, operation),
+            ).fetchone()
+            if row:
+                sample_count = int(row["sample_count"] or 0) + 1
+                avg_elapsed_ms = (((float(row["avg_elapsed_ms"] or 0) * (sample_count - 1)) + elapsed_ms) / sample_count)
+                max_elapsed_ms = max(int(row["max_elapsed_ms"] or 0), elapsed_ms)
+                conn.execute(
+                    "UPDATE session_manager_metrics SET sample_count=?, avg_elapsed_ms=?, max_elapsed_ms=?, last_elapsed_ms=?, updated_at=? "
+                    "WHERE scope=? AND upstream=? AND operation=?",
+                    (sample_count, avg_elapsed_ms, max_elapsed_ms, elapsed_ms, now, scope, upstream, operation),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO session_manager_metrics (scope, upstream, operation, sample_count, avg_elapsed_ms, max_elapsed_ms, last_elapsed_ms, updated_at) "
+                    "VALUES (?,?,?,?,?,?,?,?)",
+                    (scope, upstream, operation, 1, float(elapsed_ms), elapsed_ms, elapsed_ms, now),
+                )
+    except sqlite3.Error:
+        return
+
+
+def _session_manager_backoff_seconds(retry_count: int) -> int:
+    return min(180, max(15, retry_count * 15))
+
+
+def _session_manager_row_to_dict(row: sqlite3.Row | dict) -> dict:
+    raw = dict(row)
+    raw["timeout_ms"] = int(raw.get("timeout_ms") or 0)
+    raw["adaptive_timeout_ms"] = int(raw.get("adaptive_timeout_ms") or 0)
+    raw["last_elapsed_ms"] = int(raw.get("last_elapsed_ms") or 0)
+    raw["retry_count"] = int(raw.get("retry_count") or 0)
+    raw["max_retries"] = int(raw.get("max_retries") or 0)
+    raw["resume_payload"] = _json_load_object(raw.get("resume_payload_json"))
+    raw["state"] = _json_load_object(raw.get("state_json"))
+    raw["is_resumable"] = (raw.get("status") or "") in {"waiting-retry", "recovering"}
+    raw["duration_label"] = _duration_label(raw.get("last_elapsed_ms") or None)
+    return raw
+
+
+def _session_manager_get(session_id: str) -> dict | None:
+    try:
+        with _db() as conn:
+            row = conn.execute("SELECT * FROM session_manager_sessions WHERE id=?", (session_id,)).fetchone()
+        return _session_manager_row_to_dict(row) if row else None
+    except sqlite3.Error:
+        return None
+
+
+def _session_manager_create(
+    *,
+    scope: str,
+    page: str,
+    owner_id: str,
+    task_id: str = "",
+    run_id: str = "",
+    upstream: str,
+    operation: str,
+    timeout_ms: int,
+    adaptive_timeout_ms: int,
+    max_retries: int = 2,
+    resume_payload: dict | None = None,
+    state: dict | None = None,
+    external_session_id: str = "",
+    session_id: str = "",
+) -> dict:
+    now = _iso_now()
+    session_id = session_id or ("sm_" + uuid.uuid4().hex[:12])
+    payload_json = json.dumps(resume_payload or {}, ensure_ascii=False)
+    state_json = json.dumps(state or {}, ensure_ascii=False)
+    try:
+        with _db() as conn:
+            existing = conn.execute("SELECT id, retry_count FROM session_manager_sessions WHERE id=?", (session_id,)).fetchone()
+            if existing:
+                conn.execute(
+                    "UPDATE session_manager_sessions SET updated_at=?, scope=?, page=?, owner_id=?, task_id=?, run_id=?, upstream=?, "
+                    "operation=?, status='recovering', timeout_ms=?, adaptive_timeout_ms=?, external_session_id=?, resume_payload_json=?, state_json=? "
+                    "WHERE id=?",
+                    (
+                        now, scope, page, owner_id, task_id, run_id, upstream, operation,
+                        timeout_ms, adaptive_timeout_ms, external_session_id, payload_json, state_json, session_id,
+                    ),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO session_manager_sessions (id, created_at, updated_at, scope, page, owner_id, task_id, run_id, upstream, "
+                    "operation, status, timeout_ms, adaptive_timeout_ms, last_elapsed_ms, retry_count, max_retries, external_session_id, "
+                    "resume_payload_json, state_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        session_id, now, now, scope, page, owner_id, task_id, run_id, upstream,
+                        operation, "running", timeout_ms, adaptive_timeout_ms, 0, 0, max_retries,
+                        external_session_id, payload_json, state_json,
+                    ),
+                )
+    except sqlite3.Error:
+        return {
+            "id": session_id,
+            "scope": scope,
+            "page": page,
+            "owner_id": owner_id,
+            "task_id": task_id,
+            "run_id": run_id,
+            "upstream": upstream,
+            "operation": operation,
+            "status": "running",
+            "timeout_ms": timeout_ms,
+            "adaptive_timeout_ms": adaptive_timeout_ms,
+            "retry_count": 0,
+            "max_retries": max_retries,
+            "resume_payload": resume_payload or {},
+            "state": state or {},
+            "external_session_id": external_session_id,
+        }
+    return _session_manager_get(session_id) or {
+        "id": session_id,
+        "scope": scope,
+        "page": page,
+        "owner_id": owner_id,
+        "task_id": task_id,
+        "run_id": run_id,
+        "upstream": upstream,
+        "operation": operation,
+        "status": "running",
+        "timeout_ms": timeout_ms,
+        "adaptive_timeout_ms": adaptive_timeout_ms,
+        "retry_count": 0,
+        "max_retries": max_retries,
+        "resume_payload": resume_payload or {},
+        "state": state or {},
+        "external_session_id": external_session_id,
+    }
+
+
+def _session_manager_update(session_id: str, **fields: object) -> dict | None:
+    if not session_id or not fields:
+        return _session_manager_get(session_id)
+    cols = []
+    values = []
+    for key, value in fields.items():
+        if key in {"resume_payload", "state"}:
+            cols.append(f"{key}_json=?")
+            values.append(json.dumps(value or {}, ensure_ascii=False))
+        else:
+            cols.append(f"{key}=?")
+            values.append(value)
+    cols.append("updated_at=?")
+    values.append(_iso_now())
+    values.append(session_id)
+    try:
+        with _db() as conn:
+            conn.execute(f"UPDATE session_manager_sessions SET {', '.join(cols)} WHERE id=?", values)
+    except sqlite3.Error:
+        return None
+    return _session_manager_get(session_id)
+
+
+def _session_manager_finish(
+    session_id: str,
+    *,
+    status: str,
+    elapsed_ms: int | None = None,
+    last_error: str = "",
+    state: dict | None = None,
+    external_session_id: str = "",
+) -> dict | None:
+    row = _session_manager_get(session_id)
+    if not row:
+        return None
+    fields: dict[str, object] = {
+        "status": status,
+        "last_elapsed_ms": int(elapsed_ms or 0),
+        "last_error": last_error[:1500],
+    }
+    if state is not None:
+        fields["state"] = state
+    if external_session_id:
+        fields["external_session_id"] = external_session_id
+    if status == "completed" and row.get("retry_count"):
+        fields["recovered_at"] = _iso_now()
+    result = _session_manager_update(session_id, **fields)
+    if elapsed_ms and row.get("scope") and row.get("upstream") and row.get("operation"):
+        _session_manager_record_metric(str(row["scope"]), str(row["upstream"]), str(row["operation"]), int(elapsed_ms))
+    return result
+
+
+def _session_manager_mark_retryable(
+    session_id: str,
+    *,
+    elapsed_ms: int,
+    error_text: str,
+    resume_payload: dict | None = None,
+    state: dict | None = None,
+) -> dict | None:
+    row = _session_manager_get(session_id)
+    if not row:
+        return None
+    retry_count = int(row.get("retry_count") or 0) + 1
+    next_retry_at = (datetime.now(timezone.utc) + timedelta(seconds=_session_manager_backoff_seconds(retry_count))).isoformat()
+    return _session_manager_update(
+        session_id,
+        status="waiting-retry",
+        last_elapsed_ms=int(elapsed_ms or 0),
+        last_error=error_text[:1500],
+        retry_count=retry_count,
+        next_retry_at=next_retry_at,
+        resume_payload=resume_payload if resume_payload is not None else row.get("resume_payload") or {},
+        state=state if state is not None else row.get("state") or {},
+    )
+
+
+def _session_manager_list(
+    *,
+    scope: str = "",
+    page: str = "",
+    owner_id: str = "",
+    task_id: str = "",
+    run_id: str = "",
+    status: str = "",
+    limit: int = 50,
+) -> list[dict]:
+    limit = max(1, min(200, int(limit or 50)))
+    where = []
+    params: list[object] = []
+    if scope:
+        where.append("scope=?")
+        params.append(scope)
+    if page:
+        where.append("page=?")
+        params.append(page)
+    if owner_id:
+        where.append("owner_id=?")
+        params.append(owner_id)
+    if task_id:
+        where.append("task_id=?")
+        params.append(task_id)
+    if run_id:
+        where.append("run_id=?")
+        params.append(run_id)
+    if status:
+        where.append("status=?")
+        params.append(status)
+    query = "SELECT * FROM session_manager_sessions"
+    if where:
+        query += " WHERE " + " AND ".join(where)
+    query += " ORDER BY updated_at DESC LIMIT ?"
+    params.append(limit)
+    try:
+        with _db() as conn:
+            rows = conn.execute(query, tuple(params)).fetchall()
+        return [_session_manager_row_to_dict(row) for row in rows]
+    except sqlite3.Error:
+        return []
+
+
+def _session_manager_latest(*, task_id: str = "", run_id: str = "", page: str = "", owner_id: str = "") -> dict | None:
+    items = _session_manager_list(task_id=task_id, run_id=run_id, page=page, owner_id=owner_id, limit=1)
+    return items[0] if items else None
+
+
+async def _session_manager_upstream_ready(upstream: str) -> bool:
+    upstream = (upstream or "").strip().lower()
+    if upstream == "c12b":
+        try:
+            client = _get_http()
+            r = await client.get(f"{C12B_URL}/health", timeout=5)
+            return r.status_code == 200
+        except Exception:
+            return False
+    if upstream in {"c1", "copilot"}:
+        runtime = await _get_runtime_status_snapshot(force=True)
+        components = runtime.get("components") or {}
+        c1_state = (components.get("c1") or {}).get("state")
+        c3_state = (components.get("c3") or {}).get("state")
+        m365_state = (components.get("m365") or {}).get("state")
+        return c1_state in {"ok", "slow"} and c3_state in {"ok", "slow"} and m365_state == "active"
+    return True
 
 # ── URL helpers ───────────────────────────────────────────────────────────────
 
@@ -1042,17 +1433,165 @@ def _task_c12b_cwd(workspace_dir: str) -> str:
 
 # ── C12b Sandbox helpers (lean host-exposed sandbox) ─────────────────────────
 
-async def _c12b_exec(command: str, timeout: int = 30, cwd: str = ".", session_id: str = "") -> dict:
+async def _c12b_exec(
+    command: str,
+    timeout: int = 30,
+    cwd: str = ".",
+    session_id: str = "",
+    *,
+    step_id: str = "",
+    scope: str = "sandbox",
+    page: str = "sandbox",
+    owner_id: str = "",
+    task_id: str = "",
+    run_id: str = "",
+    operation: str = "exec",
+    recovery_session_id: str = "",
+    max_retries: int = 2,
+) -> dict:
     client = _get_http()
-    try:
-        r = await client.post(
-            f"{C12B_URL}/exec",
-            json={"command": command, "timeout": timeout, "cwd": cwd, "session_id": session_id},
-            timeout=timeout + 10,
-        )
-        return r.json()
-    except Exception as exc:
-        return {"stdout": "", "stderr": str(exc), "exit_code": -1, "timed_out": False}
+    base_timeout_ms = max(1000, int(timeout * 1000))
+    adaptive_timeout_ms = _session_manager_timeout_ms(scope, "c12b", operation, base_timeout_ms)
+    resume_payload = {
+        "scope": scope,
+        "page": page,
+        "owner_id": owner_id,
+        "task_id": task_id,
+        "run_id": run_id,
+        "step_id": step_id,
+        "upstream": "c12b",
+        "operation": operation,
+        "command": command,
+        "cwd": cwd,
+        "session_id": session_id,
+    }
+    session = _session_manager_create(
+        scope=scope,
+        page=page,
+        owner_id=owner_id or session_id,
+        task_id=task_id,
+        run_id=run_id,
+        upstream="c12b",
+        operation=operation,
+        timeout_ms=base_timeout_ms,
+        adaptive_timeout_ms=adaptive_timeout_ms,
+        max_retries=max_retries,
+        resume_payload=resume_payload,
+        state={"cwd": cwd, "command": command},
+        external_session_id=session_id,
+        session_id=recovery_session_id,
+    )
+    timeout_s = max(timeout, int((adaptive_timeout_ms + 999) / 1000))
+    attempts = 0
+    while True:
+        t0 = time.monotonic()
+        try:
+            r = await client.post(
+                f"{C12B_URL}/exec",
+                json={"command": command, "timeout": timeout_s, "cwd": cwd, "session_id": session_id},
+                timeout=timeout_s + 10,
+            )
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            try:
+                payload = r.json()
+            except Exception:
+                payload = {"stdout": "", "stderr": r.text[:2000], "exit_code": -1, "timed_out": False}
+            payload["session_manager_id"] = session["id"]
+            payload["adaptive_timeout_ms"] = adaptive_timeout_ms
+            payload["timeout_used_ms"] = timeout_s * 1000
+            transient = bool(payload.get("timed_out")) or (r.status_code >= 500)
+            if transient and attempts < 1:
+                attempts += 1
+                timeout_s = max(timeout_s + 15, int((adaptive_timeout_ms * 1.35 + 999) / 1000))
+                _session_manager_update(
+                    session["id"],
+                    status="retrying",
+                    last_error=(payload.get("stderr") or f"HTTP {r.status_code}")[:1500],
+                    last_elapsed_ms=elapsed_ms,
+                    adaptive_timeout_ms=timeout_s * 1000,
+                    state={"cwd": cwd, "command": command, "attempts": attempts},
+                )
+                continue
+            if transient:
+                current = _session_manager_get(session["id"]) or session
+                if int(current.get("retry_count") or 0) < int(current.get("max_retries") or max_retries):
+                    pending = _session_manager_mark_retryable(
+                        session["id"],
+                        elapsed_ms=elapsed_ms,
+                        error_text=(payload.get("stderr") or f"HTTP {r.status_code}")[:1500],
+                        resume_payload=resume_payload,
+                        state={"cwd": cwd, "command": command, "timed_out": bool(payload.get("timed_out")), "attempts": attempts + 1},
+                    ) or current
+                    payload["retryable"] = True
+                    payload["resumable"] = True
+                    payload["session_manager"] = pending
+                    return payload
+            status = "completed" if int(payload.get("exit_code") or 0) == 0 and not payload.get("timed_out") and 200 <= r.status_code < 300 else "failed"
+            _session_manager_finish(
+                session["id"],
+                status=status,
+                elapsed_ms=elapsed_ms,
+                last_error=(payload.get("stderr") or f"HTTP {r.status_code}")[:1500] if status != "completed" else "",
+                state={"cwd": cwd, "command": command, "exit_code": payload.get("exit_code"), "timed_out": bool(payload.get("timed_out"))},
+                external_session_id=str(payload.get("session_id") or session_id),
+            )
+            return payload
+        except Exception as exc:
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            error_text = str(exc)
+            transient = _is_timeoutish(error_text) or _is_networkish(error_text)
+            if transient and attempts < 1:
+                attempts += 1
+                timeout_s = max(timeout_s + 15, int((adaptive_timeout_ms * 1.35 + 999) / 1000))
+                _session_manager_update(
+                    session["id"],
+                    status="retrying",
+                    last_error=error_text[:1500],
+                    last_elapsed_ms=elapsed_ms,
+                    adaptive_timeout_ms=timeout_s * 1000,
+                    state={"cwd": cwd, "command": command, "attempts": attempts},
+                )
+                continue
+            if transient:
+                current = _session_manager_get(session["id"]) or session
+                if int(current.get("retry_count") or 0) < int(current.get("max_retries") or max_retries):
+                    pending = _session_manager_mark_retryable(
+                        session["id"],
+                        elapsed_ms=elapsed_ms,
+                        error_text=error_text,
+                        resume_payload=resume_payload,
+                        state={"cwd": cwd, "command": command, "attempts": attempts + 1},
+                    ) or current
+                    return {
+                        "stdout": "",
+                        "stderr": error_text,
+                        "exit_code": -1,
+                        "timed_out": _is_timeoutish(error_text),
+                        "session_id": session_id,
+                        "session_manager_id": session["id"],
+                        "adaptive_timeout_ms": adaptive_timeout_ms,
+                        "retryable": True,
+                        "resumable": True,
+                        "session_manager": pending,
+                    }
+            _session_manager_finish(
+                session["id"],
+                status="failed",
+                elapsed_ms=elapsed_ms,
+                last_error=error_text,
+                state={"cwd": cwd, "command": command, "attempts": attempts + 1},
+                external_session_id=session_id,
+            )
+            return {
+                "stdout": "",
+                "stderr": error_text,
+                "exit_code": -1,
+                "timed_out": _is_timeoutish(error_text),
+                "session_id": session_id,
+                "session_manager_id": session["id"],
+                "adaptive_timeout_ms": adaptive_timeout_ms,
+                "retryable": False,
+            }
 
 
 # ── Agentic loop — system prompt ──────────────────────────────────────────────
@@ -1978,12 +2517,49 @@ async def _post_with_heartbeats(
     body: dict,
     request_timeout: float,
     heartbeat_every: float = WAIT_HEARTBEAT_S,
+    session_meta: dict | None = None,
 ):
-    task = asyncio.create_task(client.post(url, headers=headers, json=body, timeout=request_timeout))
+    session = None
+    timeout_seconds = request_timeout
+    if session_meta:
+        scope = str(session_meta.get("scope") or "stream")
+        upstream = str(session_meta.get("upstream") or "c1")
+        operation = str(session_meta.get("operation") or "stream-request")
+        base_timeout_ms = max(1000, int(float(request_timeout) * 1000))
+        adaptive_timeout_ms = _session_manager_timeout_ms(scope, upstream, operation, base_timeout_ms)
+        timeout_seconds = max(float(request_timeout), adaptive_timeout_ms / 1000.0)
+        session = _session_manager_create(
+            scope=scope,
+            page=str(session_meta.get("page") or ""),
+            owner_id=str(session_meta.get("owner_id") or ""),
+            task_id=str(session_meta.get("task_id") or ""),
+            run_id=str(session_meta.get("run_id") or ""),
+            upstream=upstream,
+            operation=operation,
+            timeout_ms=base_timeout_ms,
+            adaptive_timeout_ms=int(timeout_seconds * 1000),
+            max_retries=int(session_meta.get("max_retries") or 2),
+            resume_payload=_json_load_object(session_meta.get("resume_payload")),
+            state=_json_load_object(session_meta.get("state")),
+            external_session_id=str(session_meta.get("external_session_id") or ""),
+            session_id=str(session_meta.get("session_id") or ""),
+        )
+    t0 = time.monotonic()
+    task = asyncio.create_task(client.post(url, headers=headers, json=body, timeout=timeout_seconds))
     waited_s = 0
     while True:
         try:
             response = await asyncio.wait_for(asyncio.shield(task), timeout=heartbeat_every)
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            if session:
+                _session_manager_finish(
+                    session["id"],
+                    status="completed" if response.status_code < 500 else "failed",
+                    elapsed_ms=elapsed_ms,
+                    last_error="" if response.status_code < 500 else f"HTTP {response.status_code}",
+                    state={"http_status": response.status_code, "waited_s": waited_s},
+                    external_session_id=str(session_meta.get("external_session_id") or ""),
+                )
             yield {"kind": "response", "response": response, "waited_s": waited_s}
             return
         except asyncio.TimeoutError:
@@ -1993,10 +2569,54 @@ async def _post_with_heartbeats(
                 runtime = await _get_runtime_status_snapshot(client=client)
             except Exception:
                 runtime = None
+            if session:
+                _session_manager_update(
+                    session["id"],
+                    status="running",
+                    state={"waited_s": waited_s, "runtime": runtime or {}},
+                )
             yield {"kind": "heartbeat", "waited_s": waited_s, "runtime": runtime}
+        except Exception as exc:
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            if session:
+                transient = _is_timeoutish(str(exc)) or _is_networkish(str(exc))
+                if transient:
+                    current = _session_manager_get(session["id"]) or session
+                    if int(current.get("retry_count") or 0) < int(current.get("max_retries") or 2):
+                        pending = _session_manager_mark_retryable(
+                            session["id"],
+                            elapsed_ms=elapsed_ms,
+                            error_text=str(exc),
+                            resume_payload=_json_load_object(session_meta.get("resume_payload")),
+                            state={"waited_s": waited_s},
+                        ) or current
+                        raise SessionRecoveryPending(pending, str(exc)) from exc
+                    else:
+                        _session_manager_finish(session["id"], status="failed", elapsed_ms=elapsed_ms, last_error=str(exc), state={"waited_s": waited_s})
+                else:
+                    _session_manager_finish(session["id"], status="failed", elapsed_ms=elapsed_ms, last_error=str(exc), state={"waited_s": waited_s})
+            raise
 
 
-async def _chat_one(agent_id: str, prompt: str, c1_url: str, chat_mode: str = "", attachments: list | None = None, work_mode: str = "", messages: list | None = None) -> dict:
+async def _chat_one(
+    agent_id: str,
+    prompt: str,
+    c1_url: str,
+    chat_mode: str = "",
+    attachments: list | None = None,
+    work_mode: str = "",
+    messages: list | None = None,
+    *,
+    step_id: str = "",
+    scope: str = "chat",
+    page: str = "chat",
+    owner_id: str = "",
+    task_id: str = "",
+    run_id: str = "",
+    operation: str = "copilot-chat",
+    recovery_session_id: str = "",
+    max_retries: int = 2,
+) -> dict:
     """Call C1 for a single agent. Returns {ok, http_status, text, elapsed_ms}.
     If `messages` is provided it is used as the full conversation history (multi-turn).
     Otherwise falls back to single-turn prompt.
@@ -2004,53 +2624,178 @@ async def _chat_one(agent_id: str, prompt: str, c1_url: str, chat_mode: str = ""
     body = _build_chat_body(prompt, attachments=attachments, messages=messages, stream=False)
     headers = _build_chat_headers(agent_id, chat_mode=chat_mode, work_mode=work_mode)
     client = _get_http()
-    t0 = time.monotonic()
-    try:
-        r = await client.post(
-            f"{c1_url}/v1/chat/completions",
-            headers=headers,
-            json=body,
-            timeout=360,
-        )
-        elapsed_ms = int((time.monotonic() - t0) * 1000)
-        text = ""
-        error = None
-        diagnosis = None
-        if 200 <= r.status_code < 300:
-            try:
-                d = r.json()
-                text = d.get("choices", [{}])[0].get("message", {}).get("content", "")
-            except Exception:
-                text = r.text[:2000]
-            if not text.strip():
-                diagnosis = await _diagnose_copilot_issue("empty response from Copilot", client=client)
+    base_timeout_ms = 360000
+    adaptive_timeout_ms = _session_manager_timeout_ms(scope, "c1", operation, base_timeout_ms)
+    resume_payload = {
+        "scope": scope,
+        "page": page,
+        "owner_id": owner_id or agent_id,
+        "task_id": task_id,
+        "run_id": run_id,
+        "step_id": step_id,
+        "upstream": "c1",
+        "operation": operation,
+        "agent_id": agent_id,
+        "prompt": prompt[:4000],
+        "chat_mode": chat_mode,
+        "work_mode": work_mode,
+    }
+    session = _session_manager_create(
+        scope=scope,
+        page=page,
+        owner_id=owner_id or agent_id,
+        task_id=task_id,
+        run_id=run_id,
+        upstream="c1",
+        operation=operation,
+        timeout_ms=base_timeout_ms,
+        adaptive_timeout_ms=adaptive_timeout_ms,
+        max_retries=max_retries,
+        resume_payload=resume_payload,
+        state={"agent_id": agent_id, "chat_mode": chat_mode, "work_mode": work_mode},
+        session_id=recovery_session_id,
+    )
+    timeout_s = max(360, int((adaptive_timeout_ms + 999) / 1000))
+    attempts = 0
+    while True:
+        t0 = time.monotonic()
+        try:
+            r = await client.post(
+                f"{c1_url}/v1/chat/completions",
+                headers=headers,
+                json=body,
+                timeout=timeout_s,
+            )
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            text = ""
+            error = None
+            diagnosis = None
+            if 200 <= r.status_code < 300:
+                try:
+                    d = r.json()
+                    text = d.get("choices", [{}])[0].get("message", {}).get("content", "")
+                except Exception:
+                    text = r.text[:2000]
+                if not text.strip():
+                    diagnosis = await _diagnose_copilot_issue("empty response from Copilot", client=client)
+                    error = diagnosis["message"]
+                elif any(p in text.lower() for p in _COPILOT_SERVICE_PHRASES):
+                    diagnosis = await _diagnose_copilot_issue(text, client=client)
+                    error = diagnosis["message"]
+            else:
+                raw_error = _error_text(r.text[:2000])
+                diagnosis = await _diagnose_copilot_issue(raw_error or f"HTTP {r.status_code}", client=client)
                 error = diagnosis["message"]
-            elif any(p in text.lower() for p in _COPILOT_SERVICE_PHRASES):
-                diagnosis = await _diagnose_copilot_issue(text, client=client)
-                error = diagnosis["message"]
-        else:
-            raw_error = _error_text(r.text[:2000])
-            diagnosis = await _diagnose_copilot_issue(raw_error or f"HTTP {r.status_code}", client=client)
-            error = diagnosis["message"]
-        return {
-            "ok": 200 <= r.status_code < 300 and not error,
-            "http_status": r.status_code,
-            "text": text,
-            "error": error,
-            "elapsed_ms": elapsed_ms,
-            "diagnosis": diagnosis,
-        }
-    except Exception as e:
-        elapsed_ms = int((time.monotonic() - t0) * 1000)
-        diagnosis = await _diagnose_copilot_issue(str(e), client=client)
-        return {
-            "ok": False,
-            "http_status": None,
-            "text": "",
-            "error": diagnosis["message"],
-            "elapsed_ms": elapsed_ms,
-            "diagnosis": diagnosis,
-        }
+            transient = bool(diagnosis and (_is_timeoutish(error or "") or _is_networkish(error or ""))) or r.status_code >= 500
+            if transient and attempts < 1:
+                attempts += 1
+                timeout_s = max(timeout_s + 30, int((adaptive_timeout_ms * 1.35 + 999) / 1000))
+                _session_manager_update(
+                    session["id"],
+                    status="retrying",
+                    last_error=(error or f"HTTP {r.status_code}")[:1500],
+                    last_elapsed_ms=elapsed_ms,
+                    adaptive_timeout_ms=timeout_s * 1000,
+                    state={"agent_id": agent_id, "attempts": attempts, "chat_mode": chat_mode, "work_mode": work_mode},
+                )
+                continue
+            if transient:
+                current = _session_manager_get(session["id"]) or session
+                if int(current.get("retry_count") or 0) < int(current.get("max_retries") or max_retries):
+                    pending = _session_manager_mark_retryable(
+                        session["id"],
+                        elapsed_ms=elapsed_ms,
+                        error_text=error or f"HTTP {r.status_code}",
+                        resume_payload=resume_payload,
+                        state={"agent_id": agent_id, "attempts": attempts + 1, "chat_mode": chat_mode, "work_mode": work_mode},
+                    ) or current
+                    return {
+                        "ok": False,
+                        "http_status": r.status_code,
+                        "text": text,
+                        "error": error or "Waiting for C1/C3 recovery",
+                        "elapsed_ms": elapsed_ms,
+                        "diagnosis": diagnosis,
+                        "status": "waiting-retry",
+                        "retryable": True,
+                        "session_manager_id": session["id"],
+                        "session_manager": pending,
+                        "adaptive_timeout_ms": adaptive_timeout_ms,
+                    }
+            _session_manager_finish(
+                session["id"],
+                status="completed" if 200 <= r.status_code < 300 and not error else "failed",
+                elapsed_ms=elapsed_ms,
+                last_error=(error or "")[:1500],
+                state={"http_status": r.status_code, "agent_id": agent_id, "chat_mode": chat_mode, "work_mode": work_mode},
+            )
+            return {
+                "ok": 200 <= r.status_code < 300 and not error,
+                "http_status": r.status_code,
+                "text": text,
+                "error": error,
+                "elapsed_ms": elapsed_ms,
+                "diagnosis": diagnosis,
+                "session_manager_id": session["id"],
+                "adaptive_timeout_ms": adaptive_timeout_ms,
+            }
+        except Exception as e:
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            diagnosis = await _diagnose_copilot_issue(str(e), client=client)
+            error_text = diagnosis["message"]
+            transient = _is_timeoutish(str(e)) or _is_networkish(str(e)) or _is_timeoutish(error_text) or _is_networkish(error_text)
+            if transient and attempts < 1:
+                attempts += 1
+                timeout_s = max(timeout_s + 30, int((adaptive_timeout_ms * 1.35 + 999) / 1000))
+                _session_manager_update(
+                    session["id"],
+                    status="retrying",
+                    last_error=error_text[:1500],
+                    last_elapsed_ms=elapsed_ms,
+                    adaptive_timeout_ms=timeout_s * 1000,
+                    state={"agent_id": agent_id, "attempts": attempts, "chat_mode": chat_mode, "work_mode": work_mode},
+                )
+                continue
+            if transient:
+                current = _session_manager_get(session["id"]) or session
+                if int(current.get("retry_count") or 0) < int(current.get("max_retries") or max_retries):
+                    pending = _session_manager_mark_retryable(
+                        session["id"],
+                        elapsed_ms=elapsed_ms,
+                        error_text=error_text,
+                        resume_payload=resume_payload,
+                        state={"agent_id": agent_id, "attempts": attempts + 1, "chat_mode": chat_mode, "work_mode": work_mode},
+                    ) or current
+                    return {
+                        "ok": False,
+                        "http_status": None,
+                        "text": "",
+                        "error": error_text,
+                        "elapsed_ms": elapsed_ms,
+                        "diagnosis": diagnosis,
+                        "status": "waiting-retry",
+                        "retryable": True,
+                        "session_manager_id": session["id"],
+                        "session_manager": pending,
+                        "adaptive_timeout_ms": adaptive_timeout_ms,
+                    }
+            _session_manager_finish(
+                session["id"],
+                status="failed",
+                elapsed_ms=elapsed_ms,
+                last_error=error_text[:1500],
+                state={"agent_id": agent_id, "chat_mode": chat_mode, "work_mode": work_mode},
+            )
+            return {
+                "ok": False,
+                "http_status": None,
+                "text": "",
+                "error": error_text,
+                "elapsed_ms": elapsed_ms,
+                "diagnosis": diagnosis,
+                "session_manager_id": session["id"],
+                "adaptive_timeout_ms": adaptive_timeout_ms,
+            }
 
 
 def _iso_now() -> str:
@@ -2414,6 +3159,8 @@ def _task_lifecycle_state(task: dict) -> str:
     last_status = (task.get("last_status") or "idle").strip().lower()
     if last_status == "running" or str(task.get("id") or "") in _task_runner_ids:
         return "running"
+    if last_status in {"waiting-retry", "recovering"}:
+        return "waiting-retry"
     if last_status in {"launch-required", "manual-only", "launch-pending"}:
         return "launch-pending"
     if last_status in {"waiting-user", "cancelled"}:
@@ -2555,7 +3302,7 @@ def _task_alert_to_dict(row: sqlite3.Row | dict) -> dict:
     return raw
 
 
-def _task_trace_payload(task: dict, latest_run: dict | None = None, latest_alert: dict | None = None) -> dict:
+def _task_trace_payload(task: dict, latest_run: dict | None = None, latest_alert: dict | None = None, latest_recovery: dict | None = None) -> dict:
     return {
         "trace_id": task.get("id") or "",
         "task_id": task.get("id") or "",
@@ -2616,6 +3363,15 @@ def _task_trace_payload(task: dict, latest_run: dict | None = None, latest_alert
             "terminal_reason": (latest_run or {}).get("terminal_reason") or "",
             "completed_at": (latest_run or {}).get("completed_at") or "",
             "current_step_id": (latest_run or {}).get("current_step_id") or "",
+        },
+        "recovery": {
+            "session_id": (latest_recovery or {}).get("id") or "",
+            "status": (latest_recovery or {}).get("status") or "",
+            "retry_count": (latest_recovery or {}).get("retry_count") or 0,
+            "next_retry_at": (latest_recovery or {}).get("next_retry_at") or "",
+            "last_error": (latest_recovery or {}).get("last_error") or "",
+            "operation": (latest_recovery or {}).get("operation") or "",
+            "upstream": (latest_recovery or {}).get("upstream") or "",
         },
     }
 
@@ -2722,6 +3478,7 @@ def _task_pipeline_build(
     latest_alert = alert_items[-1] if alert_items else None
     step_items = [_task_step_result_to_dict(r) for r in (step_results or [])]
     feedback_items = [_task_feedback_to_dict(r) for r in (feedback_events or [])]
+    recovery_sessions = _session_manager_list(task_id=str(task.get("id") or ""), run_id=run_id, limit=6)
     task["current_step_id"] = (selected_run or {}).get("current_step_id") or ""
 
     events: list[dict] = []
@@ -2921,6 +3678,7 @@ def _task_pipeline_build(
         "terminal_reason": (selected_run or {}).get("terminal_reason") or "",
         "feedback_total": len(feedback_items),
         "steps_total": len(step_items),
+        "recovery_total": len(recovery_sessions),
     }
     return {
         "task": task,
@@ -2928,8 +3686,9 @@ def _task_pipeline_build(
         "alerts": alert_items,
         "feedback": feedback_items,
         "steps": step_items,
+        "recovery_sessions": recovery_sessions,
         "summary": summary,
-        "trace": _task_trace_payload(task, selected_run, latest_alert),
+        "trace": _task_trace_payload(task, selected_run, latest_alert, recovery_sessions[0] if recovery_sessions else None),
         "events": events,
     }
 
@@ -4050,6 +4809,8 @@ def _record_task_event(task_id: str, event_type: str, detail: str, *, status: st
 def _task_sandbox_stage_status(result: dict | None) -> str:
     if not result:
         return ""
+    if result.get("retryable") or result.get("resumable") or result.get("status") == "waiting-retry":
+        return "waiting-retry"
     if result.get("timed_out"):
         return "timed-out"
     return "completed" if int(result.get("exit_code") or 0) == 0 else "failed"
@@ -4091,6 +4852,7 @@ async def _task_execute_sandbox_plan(
     task_id: str,
     run_id: str,
     source: str,
+    step_id: str = "",
     target: str,
     workspace_dir: str,
     command: str,
@@ -4102,6 +4864,7 @@ async def _task_execute_sandbox_plan(
     trigger_mode: str = "json",
     trigger_text: str = "",
     alert_on_success: bool = True,
+    recovery_session_id: str = "",
 ) -> dict:
     timeout = 120
     if not command:
@@ -4121,8 +4884,21 @@ async def _task_execute_sandbox_plan(
             "summary_text": "",
         }
 
-    async def run_stage(stage_command: str, stage: str, prior_session_id: str = "") -> dict:
-        result = await _c12b_exec(stage_command, timeout=timeout, cwd=_task_c12b_cwd(workspace_dir), session_id=prior_session_id)
+    async def run_stage(stage_command: str, stage: str, prior_session_id: str = "", recovery_id: str = "") -> dict:
+        result = await _c12b_exec(
+            stage_command,
+            timeout=timeout,
+            cwd=_task_c12b_cwd(workspace_dir),
+            session_id=prior_session_id,
+            step_id=step_id,
+            scope="task",
+            page="tasked",
+            owner_id=task_id,
+            task_id=task_id,
+            run_id=run_id,
+            operation=f"{event_prefix}-{stage}",
+            recovery_session_id=recovery_id,
+        )
         status = _task_sandbox_stage_status(result)
         excerpt = _task_sandbox_excerpt(result)
         _record_task_event(
@@ -4134,16 +4910,73 @@ async def _task_execute_sandbox_plan(
         )
         return result | {"stage_status": status, "excerpt": excerpt}
 
-    exec_result = await run_stage(command, "exec")
+    exec_result = await run_stage(command, "exec", recovery_id=recovery_session_id)
     session_id = exec_result.get("session_id") or ""
     validation_result = None
     test_result = None
+    if exec_result.get("stage_status") == "waiting-retry":
+        return {
+            "ok": False,
+            "status": "waiting-retry",
+            "text": exec_result.get("excerpt") or "",
+            "error": exec_result.get("stderr") or exec_result.get("excerpt") or "Waiting for C12b recovery",
+            "alert": None,
+            "executor_target": target,
+            "workspace_dir": workspace_dir,
+            "sandbox_session_id": session_id,
+            "validation_status": "",
+            "validation_excerpt": "",
+            "test_status": "",
+            "test_excerpt": "",
+            "summary_text": exec_result.get("excerpt") or "",
+            "parsed": {},
+            "session_manager_id": exec_result.get("session_manager_id") or recovery_session_id,
+            "recovery_pending": True,
+        }
     if exec_result.get("stage_status") == "completed" and validation_command:
-        validation_result = await run_stage(validation_command, "validate", session_id)
+        validation_result = await run_stage(validation_command, "validate", session_id, recovery_session_id)
         session_id = validation_result.get("session_id") or session_id
+    if validation_result and validation_result.get("stage_status") == "waiting-retry":
+        return {
+            "ok": False,
+            "status": "waiting-retry",
+            "text": validation_result.get("excerpt") or exec_result.get("excerpt") or "",
+            "error": validation_result.get("stderr") or validation_result.get("excerpt") or "Waiting for C12b recovery",
+            "alert": None,
+            "executor_target": target,
+            "workspace_dir": workspace_dir,
+            "sandbox_session_id": session_id,
+            "validation_status": "waiting-retry",
+            "validation_excerpt": _task_sandbox_excerpt(validation_result),
+            "test_status": "",
+            "test_excerpt": "",
+            "summary_text": validation_result.get("excerpt") or "",
+            "parsed": {},
+            "session_manager_id": validation_result.get("session_manager_id") or recovery_session_id,
+            "recovery_pending": True,
+        }
     if exec_result.get("stage_status") == "completed" and (validation_result is None or validation_result.get("stage_status") == "completed") and test_command:
-        test_result = await run_stage(test_command, "test", session_id)
+        test_result = await run_stage(test_command, "test", session_id, recovery_session_id)
         session_id = test_result.get("session_id") or session_id
+    if test_result and test_result.get("stage_status") == "waiting-retry":
+        return {
+            "ok": False,
+            "status": "waiting-retry",
+            "text": test_result.get("excerpt") or exec_result.get("excerpt") or "",
+            "error": test_result.get("stderr") or test_result.get("excerpt") or "Waiting for C12b recovery",
+            "alert": None,
+            "executor_target": target,
+            "workspace_dir": workspace_dir,
+            "sandbox_session_id": session_id,
+            "validation_status": (validation_result or {}).get("stage_status") or "",
+            "validation_excerpt": _task_sandbox_excerpt(validation_result),
+            "test_status": "waiting-retry",
+            "test_excerpt": _task_sandbox_excerpt(test_result),
+            "summary_text": test_result.get("excerpt") or "",
+            "parsed": {},
+            "session_manager_id": test_result.get("session_manager_id") or recovery_session_id,
+            "recovery_pending": True,
+        }
 
     failures = [item for item in (exec_result, validation_result, test_result) if item and item.get("stage_status") != "completed"]
     overall_ok = not failures
@@ -4230,6 +5063,7 @@ async def _task_execute_sandbox_plan(
         "test_excerpt": _task_sandbox_excerpt(test_result),
         "summary_text": combined_text,
         "parsed": parsed_output,
+        "session_manager_id": exec_result.get("session_manager_id") or (validation_result or {}).get("session_manager_id") or (test_result or {}).get("session_manager_id") or recovery_session_id,
     }
 
 
@@ -4241,6 +5075,7 @@ async def _task_execute_sandbox(task_row: dict, *, task_id: str, run_id: str, so
         task_id=task_id,
         run_id=run_id,
         source=source,
+        step_id="sandbox",
         target=target,
         workspace_dir=workspace_dir,
         command=prompt,
@@ -4264,6 +5099,7 @@ async def _task_execute_sandbox_assist(task_row: dict, *, task_id: str, run_id: 
         task_id=task_id,
         run_id=run_id,
         source=source,
+        step_id="sandbox_assist",
         target=target,
         workspace_dir=workspace_dir,
         command=(task_row.get("sandbox_assist_command") or "").strip(),
@@ -4440,6 +5276,57 @@ def _task_update_run_tracking(run_id: str, **fields: object) -> None:
         return
 
 
+def _task_mark_waiting_retry(
+    task_row: dict,
+    run_id: str,
+    *,
+    current_step_id: str,
+    summary: str = "",
+    error_text: str = "",
+    session_manager_id: str = "",
+) -> dict:
+    now = _iso_now()
+    excerpt = (summary or error_text or "Waiting for service recovery")[:500]
+    _task_update_run_tracking(
+        run_id,
+        status="waiting-retry",
+        output_excerpt=(summary or "")[:2000],
+        error_text=(error_text or "")[:1500],
+        current_step_id=current_step_id,
+        terminal_reason="awaiting-service-recovery",
+    )
+    try:
+        with _db() as conn:
+            conn.execute(
+                "UPDATE task_definitions SET updated_at=?, last_status=?, last_result_excerpt=? WHERE id=?",
+                (now, "waiting-retry", excerpt, task_row.get("id")),
+            )
+    except sqlite3.Error:
+        pass
+    detail = summary or error_text or "Task run is waiting for service recovery."
+    if session_manager_id:
+        detail = (detail + f"\nRecovery session: {session_manager_id}")[:1500]
+    _record_task_event(
+        str(task_row.get("id") or ""),
+        "task-recovery-waiting",
+        detail,
+        status="waiting-retry",
+        run_id=run_id,
+    )
+    return {
+        "ok": True,
+        "task_id": task_row.get("id"),
+        "run_id": run_id,
+        "status": "waiting-retry",
+        "text": summary,
+        "error": error_text,
+        "current_step_id": current_step_id,
+        "terminal_reason": "awaiting-service-recovery",
+        "session_manager_id": session_manager_id,
+        "recovery_pending": True,
+    }
+
+
 def _task_mark_terminal(task_row: dict, run_id: str, *, status: str, text: str = "", error_text: str = "", alert_id: int | None = None, current_step_id: str = "", terminal_reason: str = "", next_run_at: str | None = None) -> dict:
     finished_at = _iso_now()
     excerpt = (text or error_text or "No output")[:500]
@@ -4485,11 +5372,25 @@ def _task_mark_terminal(task_row: dict, run_id: str, *, status: str, text: str =
     }
 
 
-async def _task_execute_chat_step(task_row: dict, step: dict, context: dict) -> dict:
+async def _task_execute_chat_step(task_row: dict, step: dict, context: dict, *, run_id: str = "", recovery_session_id: str = "") -> dict:
     prompt = str(_json_load_object(step.get("config")).get("prompt") or task_row.get("executor_prompt") or task_row.get("planner_prompt") or "").strip()
     if not prompt:
         return {"ok": False, "error": "chat prompt required", "text": ""}
-    return await _chat_one("c9-jokes-task", prompt, _urls()["c1"], chat_mode="deep", work_mode="work")
+    return await _chat_one(
+        "c9-jokes-task",
+        prompt,
+        _urls()["c1"],
+        chat_mode="deep",
+        work_mode="work",
+        scope="task",
+        page="tasked",
+        owner_id=str(task_row.get("id") or ""),
+        task_id=str(task_row.get("id") or ""),
+        run_id=run_id,
+        step_id=str(step.get("id") or ""),
+        operation=f"task-chat-{step.get('id') or 'step'}",
+        recovery_session_id=recovery_session_id,
+    )
 
 
 def _task_launch_url_for_step(task_row: dict, step: dict, run_id: str) -> str:
@@ -4502,7 +5403,17 @@ def _task_launch_url_for_step(task_row: dict, step: dict, run_id: str) -> str:
     return _task_launch_url(mode, prompt, task_id=str(task_row.get("id") or ""), run_id=run_id, extra_params=params)
 
 
-async def _task_resume_workflow(task_row: dict, run_id: str, *, source: str, start_step_id: str = "", parent_run_id: str = "", context: dict | None = None) -> dict:
+async def _task_resume_workflow(
+    task_row: dict,
+    run_id: str,
+    *,
+    source: str,
+    start_step_id: str = "",
+    parent_run_id: str = "",
+    context: dict | None = None,
+    recovery_session_id: str = "",
+    recovery_step_id: str = "",
+) -> dict:
     steps = _task_steps_for_task(task_row)
     step_index = _task_step_index_map(steps)
     next_run_at = _task_next_run_at(task_row.get("schedule_kind") or "manual", task_row.get("interval_minutes") or 0)
@@ -4546,6 +5457,7 @@ async def _task_resume_workflow(task_row: dict, run_id: str, *, source: str, sta
                 task_id=str(task_row.get("id") or ""),
                 run_id=run_id,
                 source=source,
+                step_id=current_step_id,
                 target=_task_sandbox_target(cfg.get("executor_target") or task_row.get("executor_target") or "c12b"),
                 workspace_dir=_task_sandbox_workspace(cfg.get("workspace_dir"), "c12b"),
                 command=str(cfg.get("command") or task_row.get("executor_prompt") or "").strip(),
@@ -4557,6 +5469,7 @@ async def _task_resume_workflow(task_row: dict, run_id: str, *, source: str, sta
                 trigger_mode=(task_row.get("trigger_mode") or "json").strip().lower(),
                 trigger_text=(task_row.get("trigger_text") or "").strip(),
                 alert_on_success=False,
+                recovery_session_id=recovery_session_id if current_step_id == recovery_step_id else "",
             )
             out = {
                 "text": sandbox_result.get("text") or "",
@@ -4566,10 +5479,31 @@ async def _task_resume_workflow(task_row: dict, run_id: str, *, source: str, sta
                 "validation_status": sandbox_result.get("validation_status") or "",
                 "test_status": sandbox_result.get("test_status") or "",
                 "parsed": sandbox_result.get("parsed") or {},
+                "session_manager_id": sandbox_result.get("session_manager_id") or "",
             }
             context["steps"][current_step_id] = out
             context["last_text"] = out["text"]
             context["alert_candidate"] = sandbox_result.get("alert")
+            if sandbox_result.get("status") == "waiting-retry":
+                _task_finish_step_result(result_id, status="waiting-retry", output=out, error_text=(sandbox_result.get("error") or ""))
+                _task_update_run_tracking(
+                    run_id,
+                    sandbox_session_id=sandbox_result.get("sandbox_session_id") or "",
+                    validation_status=sandbox_result.get("validation_status") or "",
+                    validation_excerpt=(sandbox_result.get("validation_excerpt") or "")[:1500],
+                    test_status=sandbox_result.get("test_status") or "",
+                    test_excerpt=(sandbox_result.get("test_excerpt") or "")[:1500],
+                    output_excerpt=(sandbox_result.get("text") or "")[:2000],
+                    trigger_snapshot_json=json.dumps(context, ensure_ascii=False),
+                )
+                return _task_mark_waiting_retry(
+                    task_row,
+                    run_id,
+                    current_step_id=current_step_id,
+                    summary=sandbox_result.get("text") or "",
+                    error_text=sandbox_result.get("error") or "Waiting for sandbox recovery",
+                    session_manager_id=sandbox_result.get("session_manager_id") or "",
+                )
             _task_finish_step_result(result_id, status="completed" if sandbox_result.get("ok") else "failed", output=out, error_text=(sandbox_result.get("error") or ""))
             _task_update_run_tracking(
                 run_id,
@@ -4587,13 +5521,35 @@ async def _task_resume_workflow(task_row: dict, run_id: str, *, source: str, sta
             idx += 1
             continue
         if kind == "chat":
-            chat_result = await _task_execute_chat_step(task_row, step, context)
+            chat_result = await _task_execute_chat_step(
+                task_row,
+                step,
+                context,
+                run_id=run_id,
+                recovery_session_id=recovery_session_id if current_step_id == recovery_step_id else "",
+            )
             text = (chat_result.get("text") or "").strip()
             parsed = _task_parse_json_payload(text)
-            out = {"text": text, "parsed": parsed or {}, "ok": bool(chat_result.get("ok") and text)}
+            out = {
+                "text": text,
+                "parsed": parsed or {},
+                "ok": bool(chat_result.get("ok") and text),
+                "session_manager_id": chat_result.get("session_manager_id") or "",
+            }
             context["steps"][current_step_id] = out
             context["last_text"] = text
             context["alert_candidate"] = _task_alert_from_result(task_row, text)
+            if chat_result.get("status") == "waiting-retry":
+                _task_finish_step_result(result_id, status="waiting-retry", output=out, error_text=(chat_result.get("error") or ""))
+                _task_update_run_tracking(run_id, output_excerpt=text[:2000], trigger_snapshot_json=json.dumps(context, ensure_ascii=False))
+                return _task_mark_waiting_retry(
+                    task_row,
+                    run_id,
+                    current_step_id=current_step_id,
+                    summary=text,
+                    error_text=chat_result.get("error") or "Waiting for Copilot recovery",
+                    session_manager_id=chat_result.get("session_manager_id") or "",
+                )
             _task_finish_step_result(result_id, status="completed" if out["ok"] else "failed", output=out, error_text=(chat_result.get("error") or ""))
             _task_update_run_tracking(run_id, output_excerpt=text[:2000], trigger_snapshot_json=json.dumps(context, ensure_ascii=False))
             if not out["ok"]:
@@ -4834,6 +5790,15 @@ async def _execute_task_record(task_id: str, *, source: str = "manual") -> dict:
                     output_excerpt=(assist_result.get("text") or "")[:2000],
                     trigger_snapshot_json=json.dumps(context, ensure_ascii=False),
                 )
+                if assist_result.get("status") == "waiting-retry":
+                    return _task_mark_waiting_retry(
+                        task_row,
+                        run_id,
+                        current_step_id="sandbox_assist",
+                        summary=assist_result.get("text") or "",
+                        error_text=assist_result.get("error") or "Waiting for sandbox assist recovery",
+                        session_manager_id=assist_result.get("session_manager_id") or "",
+                    )
                 if not assist_result.get("ok"):
                     alert = assist_result.get("alert") or {
                         "title": f"{task_row.get('name') or 'Task'} sandbox assist failed",
@@ -4860,6 +5825,75 @@ async def _execute_task_record(task_id: str, *, source: str = "manual") -> dict:
             _task_runner_ids.discard(task_id)
 
 
+async def _resume_task_from_session_manager(session_id: str) -> dict:
+    session = _session_manager_get(session_id)
+    if not session:
+        return {"ok": False, "error": "Recovery session not found", "session_id": session_id}
+    payload = session.get("resume_payload") or {}
+    task_id = str(payload.get("task_id") or session.get("task_id") or "")
+    run_id = str(payload.get("run_id") or session.get("run_id") or "")
+    step_id = str(payload.get("step_id") or "")
+    if not task_id or not run_id or not step_id:
+        _session_manager_finish(session_id, status="failed", elapsed_ms=0, last_error="Incomplete recovery payload")
+        return {"ok": False, "error": "Incomplete recovery payload", "session_id": session_id}
+
+    lock = _get_task_runner_lock()
+    async with lock:
+        if task_id in _task_runner_ids:
+            return {"ok": False, "error": "Task is already running", "task_id": task_id, "run_id": run_id}
+        _task_runner_ids.add(task_id)
+
+    try:
+        with _db() as conn:
+            row = conn.execute("SELECT * FROM task_definitions WHERE id=?", (task_id,)).fetchone()
+        if not row:
+            _session_manager_finish(session_id, status="failed", elapsed_ms=0, last_error="Task not found")
+            return {"ok": False, "error": "Task not found", "task_id": task_id, "run_id": run_id}
+        if not _task_claim(task_id, run_id, source="recovery"):
+            return {"ok": False, "error": "Task is already running", "task_id": task_id, "run_id": run_id}
+        task_row = _task_row_to_dict(row)
+        _session_manager_update(session_id, status="recovering", state={"step_id": step_id, "task_id": task_id, "run_id": run_id})
+        _record_task_event(task_id, "task-recovery-resume", f"Recovery manager resumed step {step_id}.", status="recovering", run_id=run_id)
+        result = await _task_resume_workflow(
+            task_row,
+            run_id,
+            source="recovery",
+            start_step_id=step_id,
+            parent_run_id=run_id,
+            context=_task_context_from_history(task_row, run_id),
+            recovery_session_id=session_id,
+            recovery_step_id=step_id,
+        )
+        final_status = str(result.get("status") or "")
+        if final_status and final_status != "waiting-retry":
+            _session_manager_finish(
+                session_id,
+                status="completed" if final_status == "completed" else ("cancelled" if final_status == "cancelled" else "failed"),
+                elapsed_ms=0,
+                last_error=(result.get("error") or "")[:1500],
+                state={"step_id": step_id, "task_id": task_id, "run_id": run_id, "result_status": final_status},
+            )
+        return result
+    finally:
+        _task_release_claim(task_id, run_id)
+        async with _get_task_runner_lock():
+            _task_runner_ids.discard(task_id)
+
+
+async def _resume_waiting_retry_sessions_once() -> None:
+    now = datetime.now(timezone.utc)
+    sessions = _session_manager_list(scope="task", status="waiting-retry", limit=8)
+    for session in sessions:
+        next_retry_at = _parse_iso_ts(session.get("next_retry_at"))
+        if next_retry_at and next_retry_at > now:
+            continue
+        if not session.get("task_id") or not session.get("run_id"):
+            continue
+        if not await _session_manager_upstream_ready(str(session.get("upstream") or "")):
+            continue
+        await _resume_task_from_session_manager(str(session.get("id") or ""))
+
+
 async def _run_due_tasks_once() -> None:
     now = _iso_now()
     try:
@@ -4880,6 +5914,7 @@ async def _task_scheduler_loop() -> None:
     while True:
         try:
             await _run_due_tasks_once()
+            await _resume_waiting_retry_sessions_once()
         except asyncio.CancelledError:
             raise
         except Exception:
@@ -5218,11 +6253,14 @@ async def api_tasks(include_archived: bool = False):
                 ).fetchall()
                 latest_run = _task_run_to_dict(latest_run_row) if latest_run_row else None
                 latest_alert = _task_alert_to_dict(latest_alert_row) if latest_alert_row else None
+                recovery_sessions = _session_manager_list(task_id=task["id"], run_id=(latest_run or {}).get("id") or "", limit=3)
                 task["steps"] = [_task_step_to_dict(step_row) for step_row in step_rows] or _task_build_default_steps(task)
                 task["current_step_id"] = (latest_run or {}).get("current_step_id") or ""
                 task["latest_run"] = latest_run
                 task["latest_alert"] = latest_alert
-                task["trace"] = _task_trace_payload(task, latest_run, latest_alert)
+                task["recovery_sessions"] = recovery_sessions
+                task["latest_recovery_session"] = recovery_sessions[0] if recovery_sessions else None
+                task["trace"] = _task_trace_payload(task, latest_run, latest_alert, task.get("latest_recovery_session"))
                 tasks.append(task)
         return JSONResponse({
             "ok": True,
@@ -5504,7 +6542,10 @@ def _task_state_response(task_id: str) -> dict | None:
         task["current_step_id"] = (latest_run or {}).get("current_step_id") or ""
         task["latest_run"] = latest_run
         task["latest_alert"] = latest_alert
-        task["trace"] = _task_trace_payload(task, latest_run, latest_alert)
+        recovery_sessions = _session_manager_list(task_id=task_id, run_id=(latest_run or {}).get("id") or "", limit=3)
+        task["recovery_sessions"] = recovery_sessions
+        task["latest_recovery_session"] = recovery_sessions[0] if recovery_sessions else None
+        task["trace"] = _task_trace_payload(task, latest_run, latest_alert, task.get("latest_recovery_session"))
         return task
     except sqlite3.Error:
         return None
@@ -5818,6 +6859,7 @@ async def api_task_completed(task_id: str = "", status: str = "completed,failed,
                     "SELECT * FROM task_step_results WHERE run_id=? ORDER BY started_at ASC",
                     (run["id"],),
                 ).fetchall()
+                recovery_sessions = _session_manager_list(task_id=str(run.get("task_id") or ""), run_id=str(run.get("id") or ""), limit=4)
                 items.append({
                     "run": run,
                     "task_name": row["task_name"] or run.get("task_id") or "Tasked",
@@ -5827,6 +6869,8 @@ async def api_task_completed(task_id: str = "", status: str = "completed,failed,
                     "latest_alert": _task_alert_to_dict(latest_alert_row) if latest_alert_row else None,
                     "feedback": [_task_feedback_to_dict(item) for item in feedback_rows],
                     "steps": [_task_step_result_to_dict(item) for item in step_rows],
+                    "recovery_sessions": recovery_sessions,
+                    "latest_recovery_session": recovery_sessions[0] if recovery_sessions else None,
                     "completed_url": f"/task-completed?task_id={quote(str(run.get('task_id') or ''))}",
                 })
         return JSONResponse({"ok": True, "items": items})
@@ -5864,6 +6908,9 @@ async def api_alerts(limit: int = 100):
                 (limit,),
             ).fetchall()
         alerts = [_task_alert_to_dict(row) for row in rows]
+        for alert in alerts:
+            recovery = _session_manager_latest(task_id=str(alert.get("task_id") or ""), run_id=str(alert.get("run_id") or ""))
+            alert["latest_recovery_session"] = recovery
         return JSONResponse({"ok": True, "alerts": alerts})
     except sqlite3.Error as exc:
         return JSONResponse({"ok": False, "error": str(exc), "alerts": []}, status_code=500)
@@ -5979,6 +7026,89 @@ async def api_task_pipelines(task_id: str = "", run_id: str = "", status: str = 
 async def api_alert_ack(alert_id: int):
     payload, status_code = _update_alert_status_record(alert_id, status="acknowledged")
     return JSONResponse(payload, status_code=status_code)
+
+
+@app.get("/api/session-manager", name="api_session_manager")
+async def api_session_manager(
+    scope: str = "",
+    page: str = "",
+    owner_id: str = "",
+    task_id: str = "",
+    run_id: str = "",
+    status: str = "",
+    limit: int = 50,
+):
+    items = _session_manager_list(scope=scope, page=page, owner_id=owner_id, task_id=task_id, run_id=run_id, status=status, limit=limit)
+    return JSONResponse({"ok": True, "items": items})
+
+
+@app.post("/api/session-manager/report", name="api_session_manager_report")
+async def api_session_manager_report(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    scope = (body.get("scope") or "page").strip()
+    page = (body.get("page") or "").strip()
+    owner_id = (body.get("owner_id") or "").strip()
+    status = (body.get("status") or "running").strip()
+    operation = (body.get("operation") or "stream").strip()
+    session_id = (body.get("session_id") or "").strip()
+    external_session_id = (body.get("external_session_id") or "").strip()
+    timeout_ms = int(body.get("timeout_ms") or 0)
+    adaptive_timeout_ms = int(body.get("adaptive_timeout_ms") or timeout_ms or 0)
+    if not owner_id and not session_id:
+        return JSONResponse({"ok": False, "error": "owner_id or session_id required"}, status_code=400)
+    if not session_id:
+        existing = _session_manager_list(scope=scope, page=page, owner_id=owner_id, status="", limit=1)
+        session_id = str((existing[0] if existing else {}).get("id") or "")
+    if session_id:
+        session = _session_manager_update(
+            session_id,
+            status=status,
+            owner_id=owner_id,
+            task_id=(body.get("task_id") or "").strip(),
+            run_id=(body.get("run_id") or "").strip(),
+            upstream=(body.get("upstream") or "").strip(),
+            operation=operation,
+            timeout_ms=timeout_ms,
+            adaptive_timeout_ms=adaptive_timeout_ms,
+            external_session_id=external_session_id,
+            last_error=(body.get("last_error") or "").strip()[:1500],
+            last_elapsed_ms=int(body.get("last_elapsed_ms") or 0),
+            state=_json_load_object(body.get("state")),
+            resume_payload=_json_load_object(body.get("resume_payload")),
+        )
+    else:
+        session = _session_manager_create(
+            scope=scope,
+            page=page,
+            owner_id=owner_id,
+            task_id=(body.get("task_id") or "").strip(),
+            run_id=(body.get("run_id") or "").strip(),
+            upstream=(body.get("upstream") or "").strip(),
+            operation=operation,
+            timeout_ms=timeout_ms,
+            adaptive_timeout_ms=adaptive_timeout_ms,
+            max_retries=int(body.get("max_retries") or 2),
+            resume_payload=_json_load_object(body.get("resume_payload")),
+            state=_json_load_object(body.get("state")),
+            external_session_id=external_session_id,
+        )
+        session = _session_manager_update(session["id"], status=status) or session
+    return JSONResponse({"ok": True, "session": session})
+
+
+@app.post("/api/session-manager/{session_id}/resume", name="api_session_manager_resume")
+async def api_session_manager_resume(session_id: str):
+    session = _session_manager_get(session_id)
+    if not session:
+        return JSONResponse({"ok": False, "error": "Recovery session not found"}, status_code=404)
+    if session.get("scope") == "task":
+        result = await _resume_task_from_session_manager(session_id)
+        return JSONResponse(result, status_code=200 if result.get("ok") or result.get("status") == "waiting-retry" else 400)
+    resumed = _session_manager_update(session_id, status="recovering")
+    return JSONResponse({"ok": True, "session": resumed})
 
 
 @app.get("/api/runtime-status", name="api_runtime_status")
@@ -7009,6 +8139,30 @@ async def api_agent_run(
                     headers=headers,
                     body=body,
                     request_timeout=180,
+                    session_meta={
+                        "scope": "page",
+                        "page": "agent",
+                        "owner_id": session_id,
+                        "upstream": "c1",
+                        "operation": "agent-step",
+                        "external_session_id": session_id,
+                        "max_retries": 2,
+                        "resume_payload": {
+                            "page": "agent",
+                            "session_id": session_id,
+                            "task": task,
+                            "step": step,
+                            "agent_id": agent_id,
+                            "chat_mode": chat_mode,
+                            "work_mode": work_mode,
+                        },
+                        "state": {
+                            "step": step,
+                            "agent_id": agent_id,
+                            "chat_mode": chat_mode,
+                            "work_mode": work_mode,
+                        },
+                    },
                 ):
                     if item["kind"] == "heartbeat":
                         wait_msg = _runtime_wait_message(item.get("runtime"))
@@ -7027,6 +8181,27 @@ async def api_agent_run(
                     return
                 llm_data = llm_r.json()
                 response_text: str = llm_data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            except SessionRecoveryPending as exc:
+                pending = exc.session or {}
+                try:
+                    with _db() as conn:
+                        conn.execute(
+                            "UPDATE agent_sessions SET status='waiting-retry', updated_at=?, steps_taken=? WHERE id=?",
+                            (datetime.now(timezone.utc).isoformat(), step, session_id),
+                        )
+                except sqlite3.Error:
+                    pass
+                yield _sse("error", {
+                    "message": (
+                        "Copilot or the network timed out. The session manager marked this run as recoverable. "
+                        "Resume the task after services recover."
+                    ),
+                    "session_id": session_id,
+                    "session_manager_id": pending.get("id"),
+                    "next_retry_at": pending.get("next_retry_at"),
+                    "retryable": True,
+                })
+                return
             except Exception as exc:
                 diagnosis = await _diagnose_copilot_issue(str(exc) or type(exc).__name__, client=client)
                 err_detail = diagnosis["message"]
@@ -7612,7 +8787,16 @@ async def api_sandbox_exec(request: Request):
     if sandbox == "c11":
         result = await _c11_exec(command, timeout=timeout, cwd=cwd, session_id=session_id)
     elif sandbox == "c12b":
-        result = await _c12b_exec(command, timeout=timeout, cwd=cwd)
+        result = await _c12b_exec(
+            command,
+            timeout=timeout,
+            cwd=cwd,
+            session_id=session_id,
+            scope="api",
+            page="api",
+            owner_id=session_id or "api-sandbox",
+            operation="api-sandbox-exec",
+        )
     else:
         result = await _c10_exec(command, timeout=timeout, cwd=cwd)
     return JSONResponse(result)
@@ -7813,6 +8997,25 @@ async def _ma_role_loop(
                 headers=headers,
                 body={"model": "copilot", "messages": messages, "stream": False},
                 request_timeout=180,
+                session_meta={
+                    "scope": "page",
+                    "page": "multi-agent",
+                    "owner_id": session_id,
+                    "upstream": "c1",
+                    "operation": f"multi-agent-pane:{role}",
+                    "external_session_id": session_id,
+                    "max_retries": 2,
+                    "resume_payload": {
+                        "page": "multi-agent",
+                        "session_id": session_id,
+                        "pane_id": pane_id,
+                        "role": role,
+                        "task": overall_task,
+                        "assignment": assignment,
+                        "step": step,
+                    },
+                    "state": {"pane_id": pane_id, "role": role, "step": step},
+                },
             ):
                 if item["kind"] == "heartbeat":
                     _q("pane_thinking", {
@@ -7828,6 +9031,24 @@ async def _ma_role_loop(
                 _q("pane_error", {"message": diagnosis["message"]})
                 return {"role": role, "pane_id": pane_id, "done": False, "summary": "C1 error", "files": files_created, "steps": step}
             response_text: str = llm_r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+        except SessionRecoveryPending as exc:
+            pending = exc.session or {}
+            _q("pane_error", {
+                "message": "Copilot or the network timed out. This pane is recoverable once services return.",
+                "session_manager_id": pending.get("id"),
+                "next_retry_at": pending.get("next_retry_at"),
+                "retryable": True,
+            })
+            return {
+                "role": role,
+                "pane_id": pane_id,
+                "done": False,
+                "summary": "waiting-retry",
+                "files": files_created,
+                "steps": step,
+                "status": "waiting-retry",
+                "session_manager_id": pending.get("id"),
+            }
         except Exception as exc:
             service_error_retries += 1
             diagnosis = await _diagnose_copilot_issue(str(exc), client=client)
@@ -8062,6 +9283,23 @@ async def api_multi_agent_run(
                 headers={"Content-Type": "application/json", "X-Agent-ID": "ma-supervisor"},
                 body={"model": "copilot", "messages": [{"role": "user", "content": supervisor_prompt}], "stream": False},
                 request_timeout=60,
+                session_meta={
+                    "scope": "page",
+                    "page": "multi-agent",
+                    "owner_id": session_id,
+                    "upstream": "c1",
+                    "operation": "multi-agent-supervisor",
+                    "external_session_id": session_id,
+                    "max_retries": 2,
+                    "resume_payload": {
+                        "page": "multi-agent",
+                        "session_id": session_id,
+                        "task": task,
+                        "roles": active_roles,
+                        "stage": "supervisor",
+                    },
+                    "state": {"roles": active_roles, "stage": "supervisor"},
+                },
             ):
                 if item["kind"] == "heartbeat":
                     yield _sse("supervisor", {
@@ -8073,6 +9311,27 @@ async def api_multi_agent_run(
             if sup_r is None:
                 raise RuntimeError("Supervisor request ended without a response")
             sup_text = sup_r.json().get("choices", [{}])[0].get("message", {}).get("content", "") if sup_r.status_code == 200 else ""
+        except SessionRecoveryPending as exc:
+            pending = exc.session or {}
+            try:
+                with _db() as conn:
+                    conn.execute(
+                        "UPDATE multi_agent_sessions SET status=?, updated_at=?, summary=? WHERE id=?",
+                        ("waiting-retry", datetime.now(timezone.utc).isoformat(), "Supervisor waiting for Copilot/network recovery.", session_id),
+                    )
+            except sqlite3.Error:
+                pass
+            _ma_pause_flags.pop(session_id, None)
+            for key in list(inject_qs.keys()):
+                _ma_inject_queues.pop(key, None)
+            yield _sse("error", {
+                "message": "Supervisor timed out while waiting on Copilot. Resume the team session after services recover.",
+                "session_id": session_id,
+                "session_manager_id": pending.get("id"),
+                "next_retry_at": pending.get("next_retry_at"),
+                "retryable": True,
+            })
+            return
         except Exception as exc:
             sup_text = ""
             diagnosis = await _diagnose_copilot_issue(str(exc), client=client)
@@ -8173,14 +9432,18 @@ async def api_multi_agent_run(
 
         # ── Final summary ──────────────────────────────────────────────────────
         done_roles = [r for r, res in pane_results.items() if res.get("done")]
+        waiting_roles = [r for r, res in pane_results.items() if res.get("status") == "waiting-retry"]
         all_files = list({f for res in pane_results.values() for f in (res.get("files") or [])})
         summary = f"{len(done_roles)}/{total_panes} roles completed. Files: {', '.join(all_files) or 'none'}."
+        final_status = "waiting-retry" if waiting_roles else "completed"
+        if waiting_roles:
+            summary = f"{summary} Waiting for recovery: {', '.join(waiting_roles)}."
 
         try:
             with _db() as conn:
                 conn.execute(
                     "UPDATE multi_agent_sessions SET status=?, updated_at=?, summary=? WHERE id=?",
-                    ("completed", datetime.now(timezone.utc).isoformat(), summary[:500], session_id),
+                    (final_status, datetime.now(timezone.utc).isoformat(), summary[:500], session_id),
                 )
         except sqlite3.Error:
             pass
@@ -8188,6 +9451,7 @@ async def api_multi_agent_run(
         yield _sse("final", {
             "summary": summary,
             "session_id": session_id,
+            "status": final_status,
             "results": {r: {"done": res.get("done"), "summary": res.get("summary", ""), "files": res.get("files", [])}
                         for r, res in pane_results.items()},
         })
@@ -8302,6 +9566,25 @@ async def _ma_role_loop_c11(
                 headers=headers,
                 body={"model": "copilot", "messages": messages, "stream": False},
                 request_timeout=180,
+                session_meta={
+                    "scope": "page",
+                    "page": "multi-agento",
+                    "owner_id": session_id,
+                    "upstream": "c1",
+                    "operation": f"multi-agento-pane:{role}",
+                    "external_session_id": session_id,
+                    "max_retries": 2,
+                    "resume_payload": {
+                        "page": "multi-agento",
+                        "session_id": session_id,
+                        "pane_id": pane_id,
+                        "role": role,
+                        "task": overall_task,
+                        "assignment": assignment,
+                        "step": step,
+                    },
+                    "state": {"pane_id": pane_id, "role": role, "step": step},
+                },
             ):
                 if item["kind"] == "heartbeat":
                     _q("pane_thinking", {
@@ -8317,6 +9600,24 @@ async def _ma_role_loop_c11(
                 _q("pane_error", {"message": diagnosis["message"]})
                 return {"role": role, "pane_id": pane_id, "done": False, "summary": "C1 error", "files": files_created, "steps": step}
             response_text: str = llm_r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+        except SessionRecoveryPending as exc:
+            pending = exc.session or {}
+            _q("pane_error", {
+                "message": "Copilot or the network timed out. This pane is recoverable once services return.",
+                "session_manager_id": pending.get("id"),
+                "next_retry_at": pending.get("next_retry_at"),
+                "retryable": True,
+            })
+            return {
+                "role": role,
+                "pane_id": pane_id,
+                "done": False,
+                "summary": "waiting-retry",
+                "files": files_created,
+                "steps": step,
+                "status": "waiting-retry",
+                "session_manager_id": pending.get("id"),
+            }
         except Exception as exc:
             service_error_retries += 1
             diagnosis = await _diagnose_copilot_issue(str(exc), client=client)
@@ -8527,6 +9828,23 @@ async def api_ma_run(
                 headers={"Content-Type": "application/json", "X-Agent-ID": agent_id},
                 body={"model": "copilot", "messages": [{"role": "user", "content": sup_prompt}], "stream": False},
                 request_timeout=60,
+                session_meta={
+                    "scope": "page",
+                    "page": "multi-agento",
+                    "owner_id": session_id,
+                    "upstream": "c1",
+                    "operation": "multi-agento-supervisor",
+                    "external_session_id": session_id,
+                    "max_retries": 2,
+                    "resume_payload": {
+                        "page": "multi-agento",
+                        "session_id": session_id,
+                        "task": task,
+                        "roles": active_roles,
+                        "stage": "supervisor",
+                    },
+                    "state": {"roles": active_roles, "stage": "supervisor"},
+                },
             ):
                 if item["kind"] == "heartbeat":
                     yield _sse("supervisor", {
@@ -8543,6 +9861,24 @@ async def api_ma_run(
                         if line.lower().startswith(r + ":"):
                             assignments[r] = line[len(r)+1:].strip()
                             break
+        except SessionRecoveryPending as exc:
+            pending = exc.session or {}
+            try:
+                with _db() as conn:
+                    conn.execute(
+                        "UPDATE ma_sessions SET status=?, updated_at=?, summary=? WHERE id=?",
+                        ("waiting-retry", datetime.now(timezone.utc).isoformat(), "Supervisor waiting for Copilot/network recovery.", session_id),
+                    )
+            except sqlite3.Error:
+                pass
+            yield _sse("error", {
+                "message": "Supervisor timed out while waiting on Copilot. Resume the team session after services recover.",
+                "session_id": session_id,
+                "session_manager_id": pending.get("id"),
+                "next_retry_at": pending.get("next_retry_at"),
+                "retryable": True,
+            })
+            return
         except Exception as exc:
             diagnosis = await _diagnose_copilot_issue(str(exc), client=client)
             yield _sse("supervisor", {"text": f"⚠️ Supervisor error: {diagnosis['summary']} — using default assignments"})
@@ -8626,11 +9962,16 @@ async def api_ma_run(
 
         # Persist session completion
         summary = " | ".join(r.get("summary", "")[:80] for r in results if r.get("summary"))
+        waiting_results = [r for r in results if r.get("status") == "waiting-retry"]
+        final_status = "waiting-retry" if waiting_results else "completed"
+        if waiting_results:
+            waiting_roles = [str(r.get("role") or "unknown") for r in waiting_results]
+            summary = (summary + " | " if summary else "") + ("Waiting for recovery: " + ", ".join(waiting_roles))
         try:
             with _db() as conn:
                 conn.execute(
                     "UPDATE ma_sessions SET status=?, updated_at=?, summary=?, files_created=?, steps_taken=? WHERE id=?",
-                    ("completed", datetime.now(timezone.utc).isoformat(), summary[:500],
+                    (final_status, datetime.now(timezone.utc).isoformat(), summary[:500],
                      json.dumps(list(dict.fromkeys(all_files))),
                      sum(r.get("steps", 0) for r in results),
                      session_id),
@@ -8643,6 +9984,7 @@ async def api_ma_run(
             "summary": summary or "All agents completed.",
             "files_created": list(dict.fromkeys(all_files)),
             "roles_done": len(results),
+            "status": final_status,
         })
 
     return StreamingResponse(

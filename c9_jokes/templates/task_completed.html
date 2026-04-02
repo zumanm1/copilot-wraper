@@ -105,7 +105,7 @@
         '<div class="tc-stat"><strong>' + esc(latestAlert.status || '—') + '</strong><span>Latest alert</span></div>' +
         '<div class="tc-stat"><strong>' + esc(item.task_archived ? 'yes' : 'no') + '</strong><span>Definition archived</span></div>' +
       '</div>' +
-      '<div class="tc-detail"><h3>Completion trace</h3><div class="tc-pre">Finished: ' + esc(fmtTs(run.completed_at || run.finished_at)) + '\nReason: ' + esc(run.terminal_reason || '—') + '\nAlert ID: ' + esc(latestAlert.id || '—') + '\nAlert status: ' + esc(latestAlert.status || '—') + '\n\nFeedback summary:\n' + esc(feedbackSummary || 'No agent feedback on this run.') + '</div></div>' +
+      '<div class="tc-detail"><h3>Completion trace</h3><div class="tc-pre">Finished: ' + esc(fmtTs(run.completed_at || run.finished_at)) + '\nReason: ' + esc(run.terminal_reason || '—') + '\nAlert ID: ' + esc(latestAlert.id || '—') + '\nAlert status: ' + esc(latestAlert.status || '—') + '\nRecovery: ' + esc(((item.latest_recovery_session || {}).status) || 'steady') + '\nRecovery error: ' + esc(((item.latest_recovery_session || {}).last_error) || '—') + '\n\nFeedback summary:\n' + esc(feedbackSummary || 'No agent feedback on this run.') + '</div></div>' +
     '</article>';
   }
   async function loadCompleted() {
@@ -137,7 +137,11 @@
     var res = await fetch('/api/runtime-status?force=true', { cache: 'no-store' });
     var data = await res.json();
     var item = (data.components || {}).c12b || {};
-    runtimeEl.innerHTML = '<span class="tc-pill">C12b: ' + esc(item.state || 'unknown') + ' · ' + esc(item.message || 'Unavailable') + '</span>';
+    var smRes = await fetch('/api/session-manager?scope=task&status=waiting-retry&limit=1', { cache: 'no-store' });
+    var smData = await smRes.json();
+    var recovery = (smData.items || [])[0] || {};
+    runtimeEl.innerHTML = '<span class="tc-pill">C12b: ' + esc(item.state || 'unknown') + ' · ' + esc(item.message || 'Unavailable') + '</span>' +
+      '<span class="tc-pill">Recovery: ' + esc(recovery.status || 'steady') + (recovery.upstream ? (' · ' + esc(recovery.upstream)) : '') + '</span>';
   }
   document.getElementById('tc-refresh').addEventListener('click', loadCompleted);
   statusEl.addEventListener('change', loadCompleted);

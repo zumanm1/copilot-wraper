@@ -39,7 +39,7 @@
 .pipeline-step-meta,.pipeline-feedback-meta,.pipeline-event-meta{font-size:.75rem;color:var(--muted);line-height:1.45}
 .pipeline-step-pre,.pipeline-feedback-pre,.pipeline-event-pre{font-size:.76rem;color:var(--fg);line-height:1.5;white-space:pre-wrap;word-break:break-word}
 .pipeline-empty{font-size:.82rem;color:var(--muted);padding:.8rem}
-.pipeline-badge.running{color:#0a84ff}.pipeline-badge.completed{color:#30d158}.pipeline-badge.failed{color:#ff453a}.pipeline-badge.launch-pending,.pipeline-badge.waiting-feedback,.pipeline-badge.alert-open{color:#ffa000}
+.pipeline-badge.running{color:#0a84ff}.pipeline-badge.completed{color:#30d158}.pipeline-badge.failed{color:#ff453a}.pipeline-badge.launch-pending,.pipeline-badge.waiting-feedback,.pipeline-badge.alert-open,.pipeline-badge.waiting-retry,.pipeline-badge.recovering{color:#ffa000}
 @media (max-width: 980px){
   .pipeline-item-header{grid-template-columns:1fr}
 }
@@ -66,6 +66,7 @@
         <select id="pipeline-status-filter">
           <option value="">All statuses</option>
           <option value="running">Running</option>
+          <option value="waiting-retry">Waiting retry</option>
           <option value="launch-pending">Launch pending</option>
           <option value="waiting-feedback">Waiting feedback</option>
           <option value="alert-open">Alert open</option>
@@ -136,6 +137,13 @@
     '</div>';
   }
 
+  function renderRecovery(item) {
+    return '<div class="pipeline-event">' +
+      '<div class="pipeline-event-head"><strong>Recovery session ' + esc(item.id || '—') + '</strong><div class="pipeline-event-meta">' + esc(item.status || 'unknown') + ' · ' + esc(fmtTs(item.updated_at)) + '</div></div>' +
+      '<div class="pipeline-event-pre">Operation: ' + esc(item.operation || '—') + '\nUpstream: ' + esc(item.upstream || '—') + '\nRetries: ' + esc(item.retry_count || 0) + '/' + esc(item.max_retries || 0) + '\nNext retry: ' + esc(fmtTs(item.next_retry_at)) + '\nError: ' + esc(item.last_error || '—') + '</div>' +
+    '</div>';
+  }
+
   function renderItem(item) {
     var task = item.task || {};
     var run = item.run || {};
@@ -177,9 +185,11 @@
           '<div class="pipeline-trace-item"><strong>AIO sandbox assist</strong><span>Enabled: ' + esc((trace.sandbox_assist || {}).enabled ? 'yes' : 'no') + '\nTarget: ' + esc(targetLabel((trace.sandbox_assist || {}).target || task.sandbox_assist_target || '')) + '\nWorkspace: ' + esc((trace.sandbox_assist || {}).workspace_dir || task.sandbox_assist_workspace_dir || '—') + '</span></div>' +
           '<div class="pipeline-trace-item"><strong>Task alert generator</strong><span>Status: ' + esc((trace.alert_generator || {}).latest_alert_status || (latestAlert && latestAlert.status) || '—') + '\nSeverity: ' + esc((trace.alert_generator || {}).severity || (latestAlert && latestAlert.severity) || '—') + '\nAlert ID: ' + esc(trace.alert_id || (latestAlert && latestAlert.id) || '—') + '</span></div>' +
           '<div class="pipeline-trace-item"><strong>Completion state</strong><span>Status: ' + esc((trace.completion || {}).last_status || run.status || '—') + '\nCurrent step: ' + esc((trace.completion || {}).current_step_id || run.current_step_id || '—') + '\nReason: ' + esc((trace.completion || {}).terminal_reason || run.terminal_reason || '—') + '\nCompleted: ' + esc(fmtTs((trace.completion || {}).completed_at || run.completed_at)) + '</span></div>' +
+          '<div class="pipeline-trace-item"><strong>Session manager</strong><span>Status: ' + esc((trace.recovery || {}).status || 'steady') + '\nOperation: ' + esc((trace.recovery || {}).operation || '—') + '\nUpstream: ' + esc((trace.recovery || {}).upstream || '—') + '\nRetries: ' + esc((trace.recovery || {}).retry_count || 0) + '\nNext retry: ' + esc(fmtTs((trace.recovery || {}).next_retry_at)) + '</span></div>' +
         '</div></section>' +
         '<section class="pipeline-section"><h3>Step results</h3><div class="pipeline-step-list">' + ((item.steps || []).length ? item.steps.map(renderStep).join('') : '<div class="pipeline-empty">No step results recorded.</div>') + '</div></section>' +
         '<section class="pipeline-section"><h3>Agent feedback</h3><div class="pipeline-feedback-list">' + ((item.feedback || []).length ? item.feedback.map(renderFeedback).join('') : '<div class="pipeline-empty">No agent feedback recorded for this run.</div>') + '</div></section>' +
+        '<section class="pipeline-section"><h3>Recovery sessions</h3><div class="pipeline-event-list">' + ((item.recovery_sessions || []).length ? item.recovery_sessions.map(renderRecovery).join('') : '<div class="pipeline-empty">No recovery sessions recorded for this run.</div>') + '</div></section>' +
         '<section class="pipeline-section"><h3>Timeline</h3><div class="pipeline-event-list">' + ((item.events || []).length ? item.events.map(renderEvent).join('') : '<div class="pipeline-empty">No events recorded.</div>') + '</div></section>' +
       '</div>' +
     '</article>';
@@ -207,7 +217,11 @@
     var res = await fetch('/api/runtime-status?force=true', { cache: 'no-store' });
     var data = await res.json();
     var item = (data.components || {}).c12b || {};
-    runtimeEl.innerHTML = '<span class="pipeline-runtime-pill">C12b: ' + esc(item.state || 'unknown') + ' · ' + esc(item.message || 'Unavailable') + '</span>';
+    var smRes = await fetch('/api/session-manager?scope=task&status=waiting-retry&limit=1', { cache: 'no-store' });
+    var smData = await smRes.json();
+    var recovery = (smData.items || [])[0] || {};
+    runtimeEl.innerHTML = '<span class="pipeline-runtime-pill">C12b: ' + esc(item.state || 'unknown') + ' · ' + esc(item.message || 'Unavailable') + '</span>' +
+      '<span class="pipeline-runtime-pill">Recovery: ' + esc(recovery.status || 'steady') + (recovery.upstream ? (' · ' + esc(recovery.upstream)) : '') + '</span>';
   }
 
   document.getElementById('pipeline-refresh').addEventListener('click', loadPipelines);
