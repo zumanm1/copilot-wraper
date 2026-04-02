@@ -701,6 +701,24 @@
   white-space: pre-wrap; word-break: break-word; line-height: 1.5;
   background: var(--bg);
 }
+.launch-context {
+  margin: 0.75rem 1rem 0;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(10,132,255,0.08);
+  display: grid;
+  gap: 0.35rem;
+  font-size: 0.8rem;
+}
+.launch-context strong { color: var(--accent); }
+.launch-context-meta { color: var(--muted); font-size: 0.76rem; }
+.launch-context-links { display:flex; gap:.45rem; flex-wrap:wrap; }
+.launch-context-links a {
+  display:inline-flex; align-items:center; justify-content:center;
+  padding:.32rem .62rem; border-radius:8px; text-decoration:none;
+  border:1px solid var(--border); color:var(--fg); background:#111; font-size:.76rem;
+}
 </style>
 
 <div class="agent-workspace">
@@ -792,6 +810,7 @@
 
   <!-- ── Stream Output + Input ──────────────────────────────────────────── -->
   <div class="agent-main">
+    <div class="launch-context" id="agent-task-context" style="display:none"></div>
     <!-- Output tabs -->
     <div class="output-tabs">
       <button class="tab-btn active" data-tab="terminal" id="tab-terminal">⚡ Terminal</button>
@@ -953,6 +972,7 @@
   'use strict';
 
   const agents = {{ agents | tojson }};
+  const taskLaunch = {{ task_launch | tojson }};
 
   // ── DOM refs ──────────────────────────────────────────────────────────────
   const streamEl         = document.getElementById('agent-stream');
@@ -980,6 +1000,7 @@
   const historyList      = document.getElementById('history-list');
   const btnRefreshHist   = document.getElementById('refresh-history');
   const followupBanner   = document.getElementById('followup-banner');
+  const taskContextEl    = document.getElementById('agent-task-context');
   const attachBadges     = document.getElementById('attach-badges');
   const btnAttach        = document.getElementById('btn-attach');
   const attachInput      = document.getElementById('attach-input');
@@ -1000,6 +1021,13 @@
   let currentStep   = 0;
   let maxSteps      = 15;
   let currentSessId = '';   // session_id for follow-ups
+  const STREAM_SETTLE_MS = 20000;
+  const PROMPT_GAP_MS = 25000;
+  const LONG_STREAM_GRACE_MS = 180000;
+  let _lastActivityAt = 0;
+  let _lastPromptAt = 0;
+  let _cooldownUntil = 0;
+  let _cooldownTimer = null;
 
   // ── Elapsed timer state ───────────────────────────────────────────────────
   let _taskStartTime = null;
@@ -1029,6 +1057,43 @@
       elapsedBadge.textContent = fmtElapsed(Date.now() - _taskStartTime);
     }
     elapsedBadge.className = 'elapsed-badge';
+  }
+
+  function markRunActivity() {
+    _lastActivityAt = Date.now();
+  }
+
+  function applyRunAvailability() {
+    if (_cooldownTimer) {
+      clearTimeout(_cooldownTimer);
+      _cooldownTimer = null;
+    }
+    if (running) {
+      btnRun.disabled = true;
+      return;
+    }
+    const remain = Math.max(0, _cooldownUntil - Date.now());
+    if (remain > 0) {
+      btnRun.disabled = true;
+      btnRun.textContent = 'Wait ' + Math.ceil(remain / 1000) + 's';
+      _cooldownTimer = setTimeout(applyRunAvailability, Math.min(remain, 1000));
+      return;
+    }
+    btnRun.disabled = false;
+    btnRun.textContent = 'Run';
+  }
+
+  function canStartRun() {
+    if (running) {
+      appendEntry('error', '<span class="stream-label">⏳ Busy</span> Previous output is still active. Wait for the stream to settle before sending another prompt.');
+      return false;
+    }
+    const remain = Math.max(0, _cooldownUntil - Date.now());
+    if (remain > 0) {
+      appendEntry('error', '<span class="stream-label">⏳ Cooldown</span> Wait ' + Math.ceil(remain / 1000) + 's before sending the next prompt.');
+      return false;
+    }
+    return true;
   }
 
   // ── Compare mode state ─────────────────────────────────────────────────────
@@ -1470,6 +1535,7 @@
     sessions.forEach(function(s) {
       const item = document.createElement('div');
       item.className = 'history-item ' + (s.status || 'running');
+      item.dataset.sessionId = s.id || '';
       if (s.id === currentSessId) item.classList.add('active');
       const date = new Date(s.created_at).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
       const statusIcon = s.status === 'completed' ? '✅' : s.status === 'failed' ? '⚠' : '⏳';
@@ -1492,12 +1558,10 @@
     followupBanner.classList.add('show');
     followupBanner.textContent = '📂 Session loaded: "' + (s.task||'').slice(0,60) + '" — type a follow-up below';
     document.querySelectorAll('.history-item').forEach(function(i) { i.classList.remove('active'); });
-    // find and mark active
-    document.querySelectorAll('.history-item').forEach(function(i) {
-      if (i.querySelector('.history-task') && i.querySelector('.history-task').textContent.includes((s.task||'').slice(0,40).trim())) {
-        i.classList.add('active');
-      }
+    document.querySelectorAll('.history-item[data-session-id]').forEach(function(i) {
+      i.classList.toggle('active', i.dataset.sessionId === s.id);
     });
+    renderTaskContext();
     taskInput.focus();
   }
 
@@ -1543,6 +1607,7 @@
 
   // ── SSE event handlers ─────────────────────────────────────────────────────
   function handleThinking(data) {
+    markRunActivity();
     const text = (data.text || '').trim();
     if (!text) return;
     const stepLabel = data.step > 0 ? '<span class="stream-label">STEP ' + data.step + '</span> ' : '';
@@ -1555,6 +1620,7 @@
   }
 
   function handleToolCall(data) {
+    markRunActivity();
     let inner = '<span class="stream-label">🔧 ' + escapeHtml(data.tool) + '</span>';
     let copyText = '';
     if (data.command) {
@@ -1588,6 +1654,7 @@
   }
 
   function handleObservation(data) {
+    markRunActivity();
     const failed = data.exit_code !== undefined && data.exit_code !== 0;
     const result = (data.result || '').trim();
     let inner = '<span class="stream-label">' + (failed ? '❌ RESULT' : '✅ RESULT') + '</span>';
@@ -1598,6 +1665,7 @@
   }
 
   function handleFileUpdate(data) {
+    markRunActivity();
     appendEntry('file_update',
       '<span class="stream-label">📁 File</span> ' + escapeHtml(data.path) +
       ' <span style="opacity:0.6">(' + escapeHtml(data.action || 'updated') + ')</span>');
@@ -1617,9 +1685,11 @@
     if (data.is_followup) {
       appendEntry('step_info', '<span class="stream-label">🔗 Session</span> Resuming session ' + escapeHtml(currentSessId));
     }
+    renderTaskContext();
   }
 
   function handleWebServer(data) {
+    markRunActivity();
     const port = data.port;
     appendEntry('step_info',
       '<span class="stream-label">🌐 Web Server</span> Detected on port ' + port +
@@ -1628,6 +1698,7 @@
   }
 
   function handleFinal(data) {
+    markRunActivity();
     const summary = data.summary || 'Task complete.';
     const steps = data.steps_taken || currentStep;
     const files = data.files_created || [];
@@ -1662,9 +1733,11 @@
     setIdle(true);
     refreshFiles();
     refreshHistory();
+    renderTaskContext();
   }
 
   function handleError(data) {
+    markRunActivity();
     appendEntry('error', '<span class="stream-label">❌ Error</span> ' + escapeHtml(data.message || 'Unknown error'));
     setIdle(false);
   }
@@ -1711,6 +1784,7 @@
   }
 
   function handleAuthRequired(data) {
+    markRunActivity();
     // M365 Copilot is not authenticated — show a prominent banner with sign-in link
     const authUrl = data.auth_url || 'http://localhost:6080/?resize=scale&autoconnect=true';
     const status  = data.session_status || 'unknown';
@@ -1741,6 +1815,8 @@
   // ── Run / stop state ───────────────────────────────────────────────────────
   function setRunning() {
     running = true;
+    _lastPromptAt = Date.now();
+    markRunActivity();
     btnRun.style.display = 'none';
     btnStop.style.display = '';
     btnResetWs.disabled = true;
@@ -1758,9 +1834,9 @@
 
   function setIdle(showFollowup) {
     running = false;
+    _cooldownUntil = Math.max(_lastPromptAt + PROMPT_GAP_MS, _lastActivityAt + STREAM_SETTLE_MS);
     btnRun.style.display = '';
     btnStop.style.display = 'none';
-    btnRun.disabled = false;
     btnResetWs.disabled = false;
     taskInput.disabled = false;
     agentSelect.disabled = false;
@@ -1776,6 +1852,37 @@
       taskInput.value = '';
       taskInput.placeholder = 'Follow-up task… (Ctrl+Enter to run)';
     }
+    renderTaskContext();
+    applyRunAvailability();
+  }
+
+  function renderTaskContext() {
+    if (!taskContextEl) return;
+    const taskId = taskLaunch.task_id || '';
+    const runId = taskLaunch.task_run_id || '';
+    const source = taskLaunch.source || '';
+    const hasContext = !!(taskId || runId || source || currentSessId);
+    if (!hasContext) {
+      taskContextEl.style.display = 'none';
+      taskContextEl.innerHTML = '';
+      return;
+    }
+    const links = [];
+    if (taskId) {
+      links.push('<a href="/tasked?task_id=' + encodeURIComponent(taskId) + '">Open Tasked</a>');
+      links.push('<a href="/piplinetask?task_id=' + encodeURIComponent(taskId) + '">Open Pipeline</a>');
+    }
+    if (source === 'tasked') {
+      links.push('<a href="/alerts">Open Alerts</a>');
+    }
+    taskContextEl.style.display = 'grid';
+    taskContextEl.innerHTML =
+      '<strong>Tasked launch context</strong>' +
+      '<div class="launch-context-meta">Task ID: ' + escapeHtml(taskId || '—') +
+      ' · Run ID: ' + escapeHtml(runId || '—') +
+      ' · Source: ' + escapeHtml(source || 'manual') +
+      ' · Session: ' + escapeHtml(currentSessId || 'pending') + '</div>' +
+      (links.length ? '<div class="launch-context-links">' + links.join('') + '</div>' : '');
   }
 
   // ── Compare mode ───────────────────────────────────────────────────────────
@@ -1975,7 +2082,7 @@
   // ── Run task ───────────────────────────────────────────────────────────────
   function runTask() {
     const task = taskInput.value.trim();
-    if (!task || running) return;
+    if (!task || !canStartRun()) return;
 
     // Only clear stream + reset preview for new sessions (not follow-ups)
     if (!currentSessId) {
@@ -2029,6 +2136,12 @@
       if (e.data) {
         try { handleError(JSON.parse(e.data)); } catch(_) { handleError({message: e.data}); }
       } else if (running) {
+        var now = Date.now();
+        var graceUntil = Math.min(_lastPromptAt + LONG_STREAM_GRACE_MS, _lastActivityAt + STREAM_SETTLE_MS);
+        if (now < graceUntil) {
+          appendEntry('thinking', '<span class="stream-label">⏳ Hold</span> Working on the response... Please wait. Stream reconnect grace is still active.');
+          return;
+        }
         appendEntry('error', '<span class="stream-label">❌ Error</span> Stream disconnected. Session is kept; resume it from History if C1/C3 recovers.');
         setIdle(false);
       }
@@ -2058,6 +2171,7 @@
     const badge = document.getElementById('agent-token-badge');
     if (badge) { badge.textContent = '0 tokens'; badge.className = 'token-badge-agent'; }
     appendEntry('step_info', '<span class="stream-label">✨ New Task</span> Session cleared — ready for a new task.');
+    renderTaskContext();
     taskInput.focus();
   });
 
@@ -2248,6 +2362,12 @@
   // ── Init ───────────────────────────────────────────────────────────────────
   refreshFiles();
   refreshHistory();
+  (function applyUrlTaskPrefill() {
+    var urlTask = taskLaunch.task || new URLSearchParams(window.location.search).get('task');
+    if (urlTask && !taskInput.value.trim()) taskInput.value = urlTask;
+  })();
+  renderTaskContext();
+  applyRunAvailability();
 
 })();
 </script>

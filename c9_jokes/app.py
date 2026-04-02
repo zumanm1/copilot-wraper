@@ -2780,11 +2780,23 @@ async def api_docs_alias():
 
 
 @app.get("/agent", response_class=HTMLResponse, name="page_agent")
-async def page_agent(request: Request):
+async def page_agent(
+    request: Request,
+    task: str = "",
+    task_id: str = "",
+    task_run_id: str = "",
+    source: str = "",
+):
     """AI Agent Workspace — IDE-like agentic task execution via C10 sandbox."""
     return templates.TemplateResponse(request, "agent.html", {
         "agents": AGENTS,
         "c10_url": C10_URL,
+        "task_launch": {
+            "task": task,
+            "task_id": task_id,
+            "task_run_id": task_run_id,
+            "source": source,
+        },
     })
 
 
@@ -5765,17 +5777,29 @@ async def _ma_role_loop_c11(
 # ── /multi-Agento routes ──────────────────────────────────────────────────────
 
 @app.get("/multi-agento", response_class=HTMLResponse, include_in_schema=False)
-async def page_multi_agento_lower(request: Request, task: str = ""):
+async def page_multi_agento_lower(request: Request, task: str = "", task_id: str = "", task_run_id: str = "", source: str = ""):
     from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/multi-Agento" + (f"?task={task}" if task else ""), status_code=301)
+    return RedirectResponse(url="/multi-Agento" + (f"?{request.url.query}" if request.url.query else ""), status_code=301)
 
 @app.get("/multi-Agento", response_class=HTMLResponse, name="page_multi_agento")
-async def page_multi_agento(request: Request, task: str = ""):
+async def page_multi_agento(
+    request: Request,
+    task: str = "",
+    task_id: str = "",
+    task_run_id: str = "",
+    source: str = "",
+):
     """Full-featured multi-agent IDE with C11 session-scoped workspace."""
     return templates.TemplateResponse(request, "multi_agento.html", {
         "agents": AGENTS,
         "ma_roles": _MA_ROLES,
         "task": task,
+        "task_launch": {
+            "task": task,
+            "task_id": task_id,
+            "task_run_id": task_run_id,
+            "source": source,
+        },
     })
 
 

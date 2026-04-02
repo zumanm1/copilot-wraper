@@ -282,6 +282,30 @@ class TestC9PageRoutes:
         assert "Open Alerts" in r.text
         assert "Live monitor every 15s" in r.text
 
+    def test_agent_page_supports_tasked_launch_context(self, c9_app):
+        r = c9_app.get("/agent?task=Build+app&task_id=task_123&task_run_id=trun_456&source=tasked")
+        assert r.status_code == 200
+        assert "⚡ Agent Workspace" in r.text
+        assert "/api/agent/run" in r.text
+        assert "Tasked launch context" in r.text
+        assert "task_123" in r.text
+        assert "trun_456" in r.text
+
+    def test_multi_agento_page_supports_tasked_launch_context(self, c9_app):
+        r = c9_app.get("/multi-Agento?task=Ship+feature&task_id=task_abc&task_run_id=trun_def&source=tasked")
+        assert r.status_code == 200
+        assert "Multi-Agento" in r.text
+        assert "/api/ma/run" in r.text
+        assert "Tasked launch context" in r.text
+        assert "task_abc" in r.text
+        assert "trun_def" in r.text
+
+    def test_multi_agento_page_does_not_render_duplicate_shell_panels(self, c9_app):
+        r = c9_app.get("/multi-Agento")
+        assert r.status_code == 200
+        assert r.text.count('id="rpanel-shell"') == 1
+        assert r.text.count('id="mao-shell-out"') == 1
+
     def test_pages_include_runtime_status_badge_polling(self, c9_app):
         r = c9_app.get("/chat")
         assert r.status_code == 200
