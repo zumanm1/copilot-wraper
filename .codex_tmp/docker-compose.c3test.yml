@@ -14,11 +14,3 @@ services:
     container_name: C9b_jokes
     ports:
       - "6190:6090"
-    networks:
-      - copilot-net
-      - sandbox-shared
-
-networks:
-  sandbox-shared:
-    external: true
-    name: copilot-openai-wrapper_copilot-net
