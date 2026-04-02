@@ -6329,6 +6329,93 @@ async def api_task_template_archive(template_key: str):
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
 
+@app.post("/api/tasks/bulk", name="api_tasks_bulk")
+async def api_tasks_bulk(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    action = (body.get("action") or "").strip().lower()
+    valid_actions = {"stop_all", "complete_all", "delete_completed", "delete_all", "archive_completed"}
+    if action not in valid_actions:
+        return JSONResponse({"ok": False, "error": f"action must be one of {sorted(valid_actions)}"}, status_code=400)
+    now = _iso_now()
+    try:
+        with _db() as conn:
+            if action == "stop_all":
+                rows = conn.execute(
+                    "SELECT DISTINCT task_id FROM task_runs WHERE status IN ('queued','running','launch-pending','waiting-feedback')"
+                ).fetchall()
+                task_ids = [r["task_id"] for r in rows]
+                conn.execute(
+                    "UPDATE task_runs SET status='cancelled', finished_at=?, completed_at=?, terminal_reason='stopped-by-user' "
+                    "WHERE status IN ('queued','running','launch-pending','waiting-feedback')",
+                    (now, now),
+                )
+                for tid in task_ids:
+                    conn.execute("UPDATE task_definitions SET last_status='cancelled', updated_at=? WHERE id=?", (now, tid))
+                _record_task_event("*", "task-stopped", f"Bulk stop-all: {len(task_ids)} task(s) cancelled.", status="cancelled")
+                return JSONResponse({"ok": True, "action": action, "affected": len(task_ids)})
+
+            elif action == "complete_all":
+                rows = conn.execute(
+                    "SELECT DISTINCT task_id FROM task_runs WHERE status IN ('queued','running','launch-pending','waiting-feedback','alert-open')"
+                ).fetchall()
+                task_ids = [r["task_id"] for r in rows]
+                conn.execute(
+                    "UPDATE task_runs SET status='completed', finished_at=COALESCE(finished_at,?), completed_at=?, terminal_reason='marked-complete-by-user' "
+                    "WHERE status IN ('queued','running','launch-pending','waiting-feedback','alert-open')",
+                    (now, now),
+                )
+                for tid in task_ids:
+                    conn.execute("UPDATE task_definitions SET last_status='completed', updated_at=? WHERE id=?", (now, tid))
+                return JSONResponse({"ok": True, "action": action, "affected": len(task_ids)})
+
+            elif action == "archive_completed":
+                rows = conn.execute(
+                    "SELECT id FROM task_definitions WHERE last_status IN ('completed','failed','cancelled') AND (archived_at IS NULL OR archived_at='')"
+                ).fetchall()
+                task_ids = [r["id"] for r in rows]
+                conn.execute(
+                    "UPDATE task_definitions SET archived_at=?, updated_at=? "
+                    "WHERE last_status IN ('completed','failed','cancelled') AND (archived_at IS NULL OR archived_at='')",
+                    (now, now),
+                )
+                return JSONResponse({"ok": True, "action": action, "affected": len(task_ids)})
+
+            elif action == "delete_completed":
+                rows = conn.execute(
+                    "SELECT id FROM task_definitions WHERE last_status IN ('completed','failed','cancelled')"
+                ).fetchall()
+                task_ids = [r["id"] for r in rows]
+                for tid in task_ids:
+                    conn.execute("DELETE FROM task_run_claims WHERE task_id=?", (tid,))
+                    conn.execute("DELETE FROM task_step_results WHERE task_id=?", (tid,))
+                    conn.execute("DELETE FROM task_workflow_steps WHERE task_id=?", (tid,))
+                    conn.execute("DELETE FROM task_feedback_events WHERE task_id=?", (tid,))
+                    conn.execute("DELETE FROM task_alerts WHERE task_id=?", (tid,))
+                    conn.execute("DELETE FROM task_events WHERE task_id=?", (tid,))
+                    conn.execute("DELETE FROM task_runs WHERE task_id=?", (tid,))
+                    conn.execute("DELETE FROM task_definitions WHERE id=?", (tid,))
+                return JSONResponse({"ok": True, "action": action, "affected": len(task_ids)})
+
+            elif action == "delete_all":
+                rows = conn.execute("SELECT id FROM task_definitions").fetchall()
+                count = len(rows)
+                conn.execute("DELETE FROM task_run_claims")
+                conn.execute("DELETE FROM task_step_results")
+                conn.execute("DELETE FROM task_workflow_steps")
+                conn.execute("DELETE FROM task_feedback_events")
+                conn.execute("DELETE FROM task_alerts")
+                conn.execute("DELETE FROM task_events")
+                conn.execute("DELETE FROM task_runs")
+                conn.execute("DELETE FROM task_definitions")
+                return JSONResponse({"ok": True, "action": action, "affected": count})
+
+    except sqlite3.Error as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
 @app.post("/api/tasks/seed-examples", name="api_tasks_seed_examples")
 async def api_tasks_seed_examples():
     try:
@@ -6796,6 +6883,67 @@ async def api_task_redo(task_id: str):
 async def api_task_archive(task_id: str):
     result = _task_archive_definition(task_id)
     return JSONResponse(result, status_code=200 if result.get("ok") else 404)
+
+
+@app.post("/api/tasks/{task_id}/stop", name="api_task_stop")
+async def api_task_stop(task_id: str):
+    now = _iso_now()
+    try:
+        with _db() as conn:
+            conn.execute(
+                "UPDATE task_runs SET status='cancelled', finished_at=?, completed_at=?, terminal_reason='stopped-by-user' "
+                "WHERE task_id=? AND status IN ('queued','running','launch-pending','waiting-feedback')",
+                (now, now, task_id),
+            )
+            conn.execute(
+                "UPDATE task_definitions SET last_status='cancelled', updated_at=? WHERE id=?",
+                (now, task_id),
+            )
+        _record_task_event(task_id, "task-stopped", "Task stopped by user.", status="cancelled")
+        return JSONResponse({"ok": True, "task_id": task_id, "status": "cancelled"})
+    except sqlite3.Error as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+@app.post("/api/tasks/{task_id}/complete", name="api_task_complete")
+async def api_task_complete(task_id: str):
+    now = _iso_now()
+    try:
+        with _db() as conn:
+            conn.execute(
+                "UPDATE task_runs SET status='completed', finished_at=COALESCE(finished_at,?), completed_at=?, terminal_reason='marked-complete-by-user' "
+                "WHERE task_id=? AND status IN ('queued','running','launch-pending','waiting-feedback','alert-open')",
+                (now, now, task_id),
+            )
+            conn.execute(
+                "UPDATE task_definitions SET last_status='completed', updated_at=? WHERE id=?",
+                (now, task_id),
+            )
+        _record_task_event(task_id, "task-completed", "Task marked complete by user.", status="completed")
+        return JSONResponse({"ok": True, "task_id": task_id, "status": "completed"})
+    except sqlite3.Error as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+@app.delete("/api/tasks/{task_id}", name="api_task_delete")
+async def api_task_delete(task_id: str):
+    try:
+        with _db() as conn:
+            row = conn.execute("SELECT id, name FROM task_definitions WHERE id=?", (task_id,)).fetchone()
+            if not row:
+                return JSONResponse({"ok": False, "error": "Task not found"}, status_code=404)
+            name = row["name"]
+            conn.execute("DELETE FROM task_run_claims WHERE task_id=?", (task_id,))
+            conn.execute("DELETE FROM task_step_results WHERE task_id=?", (task_id,))
+            conn.execute("DELETE FROM task_workflow_steps WHERE task_id=?", (task_id,))
+            conn.execute("DELETE FROM task_feedback_events WHERE task_id=?", (task_id,))
+            conn.execute("DELETE FROM task_alerts WHERE task_id=?", (task_id,))
+            conn.execute("DELETE FROM task_events WHERE task_id=?", (task_id,))
+            conn.execute("DELETE FROM task_runs WHERE task_id=?", (task_id,))
+            conn.execute("DELETE FROM task_definitions WHERE id=?", (task_id,))
+        return JSONResponse({"ok": True, "deleted": task_id, "name": name})
+    except sqlite3.Error as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
 
 @app.post("/api/task-feedback", name="api_task_feedback")
