@@ -1,103 +1,539 @@
 {% extends "base.html" %}
 {% block title %}Alerts{% endblock %}
 {% block content %}
+
+<div class="alerts-page-header">
+  <div class="alerts-page-header-left">
+    <h2 class="alerts-page-title">Alerts</h2>
+    <p class="alerts-page-subtitle">Tasked alerts are operational signals with traceability across Tasked, Pipeline, and Completed</p>
+  </div>
+  <div class="alerts-page-actions">
+    <button id="alerts-refresh" class="alerts-btn-refresh" title="Refresh (R)">
+      <svg class="alerts-icon-refresh" viewBox="0 0 16 16" fill="currentColor"><path d="M13.65 2.35A8 8 0 1 0 16 8h-2a6 6 0 1 1-1.76-4.24L10 6h6V0l-2.35 2.35z"/></svg>
+    </button>
+  </div>
+</div>
+
+<div id="alerts-toast" class="alerts-toast" role="alert" aria-live="polite"></div>
+
+<div class="alerts-filters-bar">
+  <div class="alerts-filter-group">
+    <label class="alerts-filter-label">Status</label>
+    <select id="alerts-status-filter" class="alerts-filter-select">
+      <option value="">All</option>
+      <option value="open">Open</option>
+      <option value="acknowledged">Acknowledged</option>
+      <option value="resolved">Resolved</option>
+      <option value="snoozed">Snoozed</option>
+    </select>
+  </div>
+  <div class="alerts-filter-group">
+    <label class="alerts-filter-label">Severity</label>
+    <select id="alerts-severity-filter" class="alerts-filter-select">
+      <option value="">All</option>
+      <option value="critical">Critical</option>
+      <option value="error">Error</option>
+      <option value="warning">Warning</option>
+      <option value="info">Info</option>
+    </select>
+  </div>
+  <div class="alerts-filter-group">
+    <label class="alerts-filter-label">Run Status</label>
+    <select id="alerts-run-filter" class="alerts-filter-select">
+      <option value="">All</option>
+      <option value="running">Running</option>
+      <option value="waiting-retry">Waiting Retry</option>
+      <option value="launch-pending">Launch Pending</option>
+      <option value="completed">Completed</option>
+      <option value="failed">Failed</option>
+      <option value="cancelled">Cancelled</option>
+    </select>
+  </div>
+  <div class="alerts-filter-group alerts-filter-search">
+    <svg class="alerts-icon-search" viewBox="0 0 16 16" fill="currentColor"><path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85zm-5.242.656a5 5 0 1 1 0-10 5 5 0 0 1 0 10z"/></svg>
+    <input id="alerts-search" class="alerts-filter-input" placeholder="Search tasks, triggers, summaries…">
+  </div>
+  <div class="alerts-filter-group">
+    <label class="alerts-filter-label">Refresh</label>
+    <select id="alerts-refresh-interval" class="alerts-filter-select">
+      <option value="1000">1s</option>
+      <option value="15000">15s</option>
+      <option value="30000">30s</option>
+      <option value="60000">1min</option>
+      <option value="120000" selected>2min</option>
+      <option value="900000">15min</option>
+      <option value="1800000">30min</option>
+    </select>
+  </div>
+  <div class="alerts-filter-spacer"></div>
+  <div class="alerts-view-controls">
+    <button id="alerts-view-cards" class="alerts-view-btn active" title="Card view">
+      <svg viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1"/><rect x="1" y="9" width="6" height="6" rx="1"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg>
+    </button>
+    <button id="alerts-view-table" class="alerts-view-btn" title="Table view">
+      <svg viewBox="0 0 16 16" fill="currentColor"><rect x="1" y="1" width="14" height="3" rx="1"/><rect x="1" y="6.5" width="14" height="3" rx="1"/><rect x="1" y="12" width="14" height="3" rx="1"/></svg>
+    </button>
+    <button id="alerts-group-toggle" class="alerts-view-btn" title="Group by status">
+      <svg viewBox="0 0 16 16" fill="currentColor"><path d="M2 4h12v2H2V2zm0 4h12v2H2V6zm0 4h12v2H2v-2z"/></svg>
+    </button>
+  </div>
+</div>
+
+<div class="alerts-stats-bar" id="alerts-stats-bar">
+  <div class="alerts-stat-card alerts-stat-card--open">
+    <span class="alerts-stat-value" id="alerts-count-open">0</span>
+    <span class="alerts-stat-label">Open</span>
+  </div>
+  <div class="alerts-stat-card alerts-stat-card--ack">
+    <span class="alerts-stat-value" id="alerts-count-ack">0</span>
+    <span class="alerts-stat-label">Acknowledged</span>
+  </div>
+  <div class="alerts-stat-card alerts-stat-card--resolved">
+    <span class="alerts-stat-value" id="alerts-count-resolved">0</span>
+    <span class="alerts-stat-label">Resolved</span>
+  </div>
+  <div class="alerts-stat-card alerts-stat-card--critical">
+    <span class="alerts-stat-value" id="alerts-count-critical">0</span>
+    <span class="alerts-stat-label">Critical</span>
+  </div>
+  <div class="alerts-stat-card alerts-stat-card--total">
+    <span class="alerts-stat-value" id="alerts-count-total">0</span>
+    <span class="alerts-stat-label">Total</span>
+  </div>
+</div>
+
+<div id="alerts-bulk-bar" class="alerts-bulk-bar" style="display:none;">
+  <span class="alerts-bulk-text"><span id="alerts-bulk-count">0</span> selected</span>
+  <button class="alerts-bulk-btn" data-bulk-action="acknowledged">Acknowledge</button>
+  <button class="alerts-bulk-btn" data-bulk-action="resolved">Resolve</button>
+  <button class="alerts-bulk-btn" data-bulk-action="snoozed">Snooze 30m</button>
+  <button class="alerts-bulk-btn alerts-bulk-btn--clear" id="alerts-bulk-clear">Clear</button>
+</div>
+
+<div class="alerts-runtime-bar" id="alerts-runtime">
+  <span class="alerts-runtime-pill">Loading runtime…</span>
+</div>
+
+<div id="alerts-card-view" class="alerts-card-grid"></div>
+
+<table class="alerts-table" id="alerts-table-view" style="display:none;">
+  <thead>
+    <tr>
+      <th class="alerts-th-check"><input type="checkbox" id="alerts-select-all" title="Select all"></th>
+      <th>When</th>
+      <th>Task</th>
+      <th>Run / Step</th>
+      <th>Severity</th>
+      <th>Trigger</th>
+      <th>Summary</th>
+      <th>Status</th>
+      <th>Actions</th>
+    </tr>
+  </thead>
+  <tbody id="alerts-body"><tr><td colspan="9" class="alerts-empty">Loading…</td></tr></tbody>
+</table>
+
+<div id="alerts-detail-panel" class="alerts-detail-panel">
+  <div class="alerts-detail-panel-header">
+    <h3 class="alerts-detail-panel-title">Alert Detail</h3>
+    <button id="alerts-detail-close" class="alerts-detail-close" title="Close">&times;</button>
+  </div>
+  <div id="alerts-detail-content" class="alerts-detail-content"></div>
+</div>
+
 <style>
-.alerts-card{background:var(--card, rgba(255,255,255,0.04));border:1px solid var(--border, rgba(255,255,255,0.08));border-radius:14px;padding:1rem}
-.alerts-head{display:flex;justify-content:space-between;align-items:flex-start;gap:1rem;margin-bottom:.8rem;flex-wrap:wrap}
-.alerts-note{font-size:.82rem;color:var(--muted);line-height:1.55}
-.alerts-toolbar{display:flex;gap:.65rem;flex-wrap:wrap;align-items:end}
-.alerts-toolbar label{display:grid;gap:.35rem;font-size:.8rem;color:var(--muted)}
-.alerts-toolbar input,.alerts-toolbar select{background:#111;border:1px solid var(--border,#333);border-radius:10px;color:var(--fg,#f5f5f7);padding:.58rem .7rem;font:inherit;min-width:170px}
-.alerts-table{width:100%;border-collapse:collapse}
-.alerts-table th,.alerts-table td{padding:.6rem .5rem;border-bottom:1px solid var(--border,#333);text-align:left;vertical-align:top;font-size:.84rem}
-.alerts-badge,.alerts-pill{display:inline-flex;align-items:center;gap:.35rem;border-radius:999px;padding:.12rem .5rem;border:1px solid var(--border,#333);font-size:.72rem;background:#111}
-.alerts-badge.open{color:#ff453a}.alerts-badge.acknowledged{color:#30d158}.alerts-badge.resolved{color:#64d2ff}.alerts-badge.snoozed{color:#ffd60a}
-.alerts-actions{display:flex;gap:.45rem;flex-wrap:wrap}
-.alerts-btn,.alerts-link{background:var(--accent,#0a84ff);color:white;border:none;border-radius:9px;padding:.4rem .7rem;cursor:pointer;text-decoration:none;display:inline-flex;align-items:center;justify-content:center}
-.alerts-link{background:transparent;border:1px solid var(--border,#333);color:var(--fg,#f5f5f7)}
-.alerts-runtime{display:flex;gap:.65rem;flex-wrap:wrap;margin-bottom:.85rem}
-.alerts-meta{font-size:.75rem;color:var(--muted);line-height:1.45}
+.alerts-page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.alerts-page-title { font-size: 1.35rem; font-weight: 700; margin: 0 0 0.25rem 0; letter-spacing: -0.01em; }
+.alerts-page-subtitle { margin: 0; font-size: 0.88rem; color: var(--muted); }
+.alerts-page-actions { display: flex; align-items: center; gap: 0.5rem; }
+.alerts-btn-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+  margin-top: 0;
+}
+.alerts-btn-refresh:hover { color: var(--accent); border-color: var(--accent); }
+.alerts-btn-refresh.spinning { animation: spin 0.8s linear infinite; }
+.alerts-icon-refresh { width: 16px; height: 16px; }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+.alerts-toast {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  font-weight: 500;
+  z-index: 1000;
+  transform: translateX(120%);
+  transition: transform 0.3s ease;
+  max-width: 360px;
+}
+.alerts-toast.visible { transform: translateX(0); }
+.alerts-toast.success { background: rgba(48, 209, 88, 0.15); border: 1px solid var(--ok); color: var(--ok); }
+.alerts-toast.error { background: rgba(255, 59, 48, 0.15); border: 1px solid var(--fail); color: var(--fail); }
+.alerts-toast.info { background: rgba(10, 132, 255, 0.15); border: 1px solid var(--accent); color: var(--accent); }
+
+.alerts-filters-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.85rem;
+  padding: 0.75rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.alerts-filter-group { display: flex; flex-direction: column; gap: 0.25rem; }
+.alerts-filter-label { font-size: 0.68rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.alerts-filter-select {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  padding: 0.4rem 0.6rem;
+  font-size: 0.82rem;
+  min-width: 130px;
+}
+.alerts-filter-select:focus { outline: none; border-color: var(--accent); }
+.alerts-filter-search { position: relative; flex: 1; min-width: 200px; }
+.alerts-icon-search { position: absolute; left: 0.5rem; top: 50%; transform: translateY(-50%); width: 14px; height: 14px; color: var(--muted); pointer-events: none; }
+.alerts-filter-input {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  padding: 0.4rem 0.6rem 0.4rem 1.75rem;
+  font-size: 0.82rem;
+  width: 100%;
+}
+.alerts-filter-input:focus { outline: none; border-color: var(--accent); }
+.alerts-filter-spacer { flex: 1; }
+.alerts-view-controls { display: flex; gap: 0.25rem; }
+.alerts-view-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0;
+  margin-top: 0;
+}
+.alerts-view-btn svg { width: 14px; height: 14px; }
+.alerts-view-btn:hover { color: var(--fg); border-color: var(--muted); }
+.alerts-view-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+.alerts-stats-bar {
+  display: flex;
+  gap: 0.65rem;
+  margin-bottom: 0.85rem;
+  flex-wrap: wrap;
+}
+.alerts-stat-card {
+  flex: 1;
+  min-width: 100px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.75rem;
+  text-align: center;
+  transition: border-color 0.2s ease;
+}
+.alerts-stat-card:hover { border-color: var(--muted); }
+.alerts-stat-card--open { border-top: 2px solid var(--fail); }
+.alerts-stat-card--ack { border-top: 2px solid var(--accent); }
+.alerts-stat-card--resolved { border-top: 2px solid var(--ok); }
+.alerts-stat-card--critical { border-top: 2px solid #ff453a; }
+.alerts-stat-card--total { border-top: 2px solid var(--muted); }
+.alerts-stat-value { display: block; font-size: 1.5rem; font-weight: 700; }
+.alerts-stat-label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+
+.alerts-bulk-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 0.75rem;
+}
+.alerts-bulk-text { font-size: 0.82rem; color: var(--muted); }
+.alerts-bulk-btn {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  padding: 0.3rem 0.65rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+  margin-top: 0;
+}
+.alerts-bulk-btn:hover { border-color: var(--accent); color: var(--accent); }
+.alerts-bulk-btn--clear { color: var(--muted); }
+
+.alerts-runtime-bar {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.75rem;
+}
+.alerts-runtime-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.25rem 0.65rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+
+.alerts-card-grid { display: grid; gap: 0.75rem; }
+.alert-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem;
+  transition: all 0.2s ease;
+  position: relative;
+  cursor: pointer;
+}
+.alert-card:hover { border-color: var(--accent); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+.alert-card.is-selected { border-color: var(--accent); background: rgba(10, 132, 255, 0.04); }
+.alert-card.severity-critical { border-left: 3px solid #ff453a; }
+.alert-card.severity-error { border-left: 3px solid #ff453a; }
+.alert-card.severity-warning { border-left: 3px solid #ffa000; }
+.alert-card.severity-info { border-left: 3px solid #0a84ff; }
+.alert-card.status-open { background: linear-gradient(135deg, var(--card) 0%, rgba(255,59,48,0.03) 100%); }
+.alert-card.status-acknowledged { background: linear-gradient(135deg, var(--card) 0%, rgba(10,132,255,0.03) 100%); }
+.alert-card.status-resolved { background: linear-gradient(135deg, var(--card) 0%, rgba(48,209,88,0.03) 100%); }
+.alert-card.status-snoozed { background: linear-gradient(135deg, var(--card) 0%, rgba(255,214,10,0.03) 100%); }
+.alert-card-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 0.65rem; }
+.alert-card-select { flex-shrink: 0; margin-top: 0.25rem; }
+.alert-card-select input { width: 16px; height: 16px; cursor: pointer; }
+.alert-card-title-area { flex: 1; min-width: 0; }
+.alert-card-title { font-size: 0.95rem; font-weight: 600; margin: 0 0 0.2rem 0; }
+.alert-card-meta { font-size: 0.75rem; color: var(--muted); }
+.alert-card-badges { display: flex; gap: 0.35rem; align-items: center; flex-shrink: 0; }
+.alert-card-body { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.5rem; margin-bottom: 0.65rem; }
+.alert-card-stat { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 0.45rem 0.6rem; }
+.alert-card-stat strong { display: block; font-size: 0.8rem; color: var(--fg); margin-bottom: 0.1rem; }
+.alert-card-stat span { font-size: 0.68rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+.alert-card-summary { font-size: 0.82rem; color: var(--fg); line-height: 1.5; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 0.55rem; margin-bottom: 0.65rem; }
+.alert-card-footer { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; flex-wrap: wrap; }
+.alert-card-actions { display: flex; gap: 0.35rem; flex-wrap: wrap; }
+.alert-card-links { display: flex; gap: 0.35rem; }
+
+.severity-pill { display: inline-flex; align-items: center; gap: 0.2rem; padding: 0.1rem 0.45rem; border-radius: 999px; font-size: 0.68rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.severity-pill.info { color: #0a84ff; background: rgba(10,132,255,0.1); border: 1px solid rgba(10,132,255,0.25); }
+.severity-pill.warning { color: #ffa000; background: rgba(255,160,0,0.1); border: 1px solid rgba(255,160,0,0.25); }
+.severity-pill.critical { color: #ff453a; background: rgba(255,69,58,0.1); border: 1px solid rgba(255,69,58,0.25); animation: pulse 1.2s ease-in-out infinite; }
+.severity-pill.error { color: #ff453a; background: rgba(255,69,58,0.15); border: 1px solid rgba(255,69,58,0.3); }
+.alerts-badge { display: inline-flex; align-items: center; gap: 0.3rem; border-radius: 999px; padding: 0.12rem 0.5rem; border: 1px solid var(--border); font-size: 0.72rem; background: var(--surface2); }
+.alerts-badge.open { color: #ff453a; border-color: rgba(255,69,58,0.3); background: rgba(255,69,58,0.08); }
+.alerts-badge.open::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #ff453a; animation: pulse-dot 1.5s ease-in-out infinite; }
+@keyframes pulse-dot { 0%,100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.4; transform: scale(1.5); } }
+.alerts-badge.acknowledged { color: #30d158; border-color: rgba(48,209,88,0.3); background: rgba(48,209,88,0.08); }
+.alerts-badge.resolved { color: #64d2ff; border-color: rgba(100,210,255,0.3); background: rgba(100,210,255,0.08); }
+.alerts-badge.snoozed { color: #ffd60a; border-color: rgba(255,214,10,0.3); background: rgba(255,214,10,0.08); }
+.status-badge { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.15rem 0.55rem; border-radius: 999px; font-size: 0.7rem; font-weight: 500; border: 1px solid; }
+.status-badge.idle { color: #8e8e93; border-color: rgba(142,142,147,0.3); background: rgba(142,142,147,0.08); }
+.status-badge.running { color: #0a84ff; border-color: rgba(10,132,255,0.3); background: rgba(10,132,255,0.08); }
+.status-badge.completed { color: #30d158; border-color: rgba(48,209,88,0.3); background: rgba(48,209,88,0.08); }
+.status-badge.failed { color: #ff453a; border-color: rgba(255,69,58,0.3); background: rgba(255,69,58,0.08); }
+.status-badge.cancelled { color: #ffa000; border-color: rgba(255,160,0,0.3); background: rgba(255,160,0,0.08); }
+.status-badge.waiting-retry { color: #ffa000; border-color: rgba(255,160,0,0.3); background: rgba(255,160,0,0.08); }
+.status-badge.launch-pending { color: #bf5af2; border-color: rgba(191,90,242,0.3); background: rgba(191,90,242,0.08); }
+
+.alerts-quick-btn {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 6px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.72rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  margin-top: 0;
+}
+.alerts-quick-btn:hover { border-color: var(--accent); background: rgba(10,132,255,0.08); }
+.alerts-quick-btn.ack { border-color: rgba(48,209,88,0.3); color: #30d158; }
+.alerts-quick-btn.ack:hover { background: rgba(48,209,88,0.1); border-color: #30d158; }
+.alerts-quick-btn.resolve { border-color: rgba(100,210,255,0.3); color: #64d2ff; }
+.alerts-quick-btn.resolve:hover { background: rgba(100,210,255,0.1); border-color: #64d2ff; }
+.alerts-quick-btn.snooze { border-color: rgba(255,214,10,0.3); color: #ffd60a; }
+.alerts-quick-btn.snooze:hover { background: rgba(255,214,10,0.1); border-color: #ffd60a; }
+.alerts-quick-btn.reopen { border-color: rgba(255,69,58,0.3); color: #ff6b6b; }
+.alerts-quick-btn.reopen:hover { background: rgba(255,69,58,0.1); border-color: #ff6b6b; }
+.alerts-link {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--fg);
+  border-radius: 6px;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.72rem;
+  text-decoration: none;
+  transition: all 0.15s ease;
+}
+.alerts-link:hover { border-color: var(--accent); color: var(--accent); }
+
+.alerts-table { width: 100%; border-collapse: collapse; }
+.alerts-table th, .alerts-table td { padding: 0.55rem 0.5rem; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; font-size: 0.82rem; }
+.alerts-table th { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.03em; }
+.alerts-th-check { width: 36px; }
+.alerts-empty { text-align: center; padding: 2rem; color: var(--muted); }
+.alerts-empty-icon { font-size: 2rem; margin-bottom: 0.5rem; opacity: 0.5; }
+
+.alerts-detail-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 480px;
+  max-width: 90vw;
+  height: 100vh;
+  background: var(--card);
+  border-left: 1px solid var(--border);
+  z-index: 999;
+  transform: translateX(100%);
+  transition: transform 0.3s ease;
+  display: flex;
+  flex-direction: column;
+  box-shadow: -4px 0 24px rgba(0,0,0,0.4);
+}
+.alerts-detail-panel.open { transform: translateX(0); }
+.alerts-detail-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.alerts-detail-panel-title { font-size: 1rem; font-weight: 600; margin: 0; }
+.alerts-detail-close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 1.5rem;
+  cursor: pointer;
+  padding: 0.25rem;
+  margin-top: 0;
+}
+.alerts-detail-close:hover { color: var(--fg); }
+.alerts-detail-content { flex: 1; overflow-y: auto; padding: 1rem; }
+.alerts-detail-section { margin-bottom: 1rem; }
+.alerts-detail-section-title { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.4rem; }
+.alerts-detail-value { font-size: 0.88rem; line-height: 1.6; }
+.alerts-detail-json { background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; padding: 0.65rem; font-size: 0.78rem; overflow-x: auto; white-space: pre-wrap; word-break: break-word; }
+
+.alerts-group-header {
+  padding: 0.55rem 0.75rem;
+  background: var(--surface2);
+  font-size: 0.79rem;
+  font-weight: 600;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  border-radius: 8px;
+  margin-bottom: 0.35rem;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.alerts-group-header:hover { color: var(--fg); background: var(--surface3); }
+.alerts-group-count { font-weight: 400; color: var(--muted); margin-left: 0.35rem; }
+
+@keyframes fade-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.alert-card { animation: fade-in 0.25s ease; }
+
+@media (max-width: 900px) {
+  .alerts-filters-bar { flex-direction: column; align-items: stretch; }
+  .alerts-filter-search { min-width: 0; }
+  .alerts-stats-bar { flex-wrap: wrap; }
+  .alerts-stat-card { min-width: 80px; flex: 1 1 calc(33% - 0.5rem); }
+}
+@media (max-width: 600px) {
+  .alerts-page-header { flex-direction: column; }
+  .alerts-stat-card { flex: 1 1 calc(50% - 0.5rem); }
+  .alerts-detail-panel { width: 100vw; }
+}
 </style>
-<section class="alerts-card">
-  <div class="alerts-head">
-    <div>
-      <h2 style="margin:0">Alerts</h2>
-      <div class="alerts-note">Tasked alerts are operational signals. Each row preserves traceability across Tasked, piplinetask, and TaskCompleted with run status, current step, repeat cadence, and executor details.</div>
-    </div>
-    <div class="alerts-toolbar">
-      <label>
-        Status
-        <select id="alerts-status-filter">
-          <option value="">All statuses</option>
-          <option value="open">Open</option>
-          <option value="acknowledged">Acknowledged</option>
-          <option value="resolved">Resolved</option>
-          <option value="snoozed">Snoozed</option>
-        </select>
-      </label>
-      <label>
-        Severity
-        <select id="alerts-severity-filter">
-          <option value="">All severities</option>
-          <option value="info">Info</option>
-          <option value="warning">Warning</option>
-          <option value="critical">Critical</option>
-          <option value="error">Error</option>
-        </select>
-      </label>
-      <label>
-        Run status
-        <select id="alerts-run-filter">
-          <option value="">All run states</option>
-          <option value="running">Running</option>
-          <option value="waiting-retry">Waiting retry</option>
-          <option value="launch-pending">Launch pending</option>
-          <option value="waiting-feedback">Waiting feedback</option>
-          <option value="completed">Completed</option>
-          <option value="failed">Failed</option>
-          <option value="cancelled">Cancelled</option>
-        </select>
-      </label>
-      <label>
-        Search
-        <input id="alerts-search" placeholder="Task, trigger, summary, run ID">
-      </label>
-      <button class="alerts-btn" id="alerts-refresh">Refresh</button>
-    </div>
-  </div>
-  <div class="alerts-runtime" id="alerts-runtime">
-    <span class="alerts-pill">Loading C12b runtime…</span>
-  </div>
-  <div class="alerts-note" id="alerts-monitor-note" style="margin-bottom:.85rem;">Tasked alerts auto-refresh every 15 seconds while this page stays visible.</div>
-  <table class="alerts-table">
-    <thead>
-      <tr><th>When</th><th>Tasked</th><th>Run / step</th><th>Severity / repeat</th><th>Trigger</th><th>Summary</th><th>Status</th><th>Actions</th></tr>
-    </thead>
-    <tbody id="alerts-body"><tr><td colspan="8" class="alerts-note">Loading…</td></tr></tbody>
-  </table>
-</section>
 
 <script>
 (function(){
   var MODE_LABELS = Object.fromEntries(({{ task_modes|safe }} || []).map(function(item){ return [item.id, item.label]; }));
   var EXECUTOR_TARGET_LABELS = Object.fromEntries(({{ task_executor_targets|safe }} || []).map(function(item){ return [item.id, item.label]; }));
   var TEMPLATE_LABELS = Object.fromEntries(({{ task_templates|safe }} || []).map(function(item){ return [item.key, item.name]; }));
+
   var body = document.getElementById('alerts-body');
-  var noteEl = document.getElementById('alerts-monitor-note');
   var runtimeEl = document.getElementById('alerts-runtime');
+  var noteEl = runtimeEl;
   var statusFilterEl = document.getElementById('alerts-status-filter');
   var severityFilterEl = document.getElementById('alerts-severity-filter');
   var runFilterEl = document.getElementById('alerts-run-filter');
   var searchEl = document.getElementById('alerts-search');
+  var tableView = document.getElementById('alerts-table-view');
+  var cardView = document.getElementById('alerts-card-view');
+  var viewCardsBtn = document.getElementById('alerts-view-cards');
+  var viewTableBtn = document.getElementById('alerts-view-table');
+  var groupToggle = document.getElementById('alerts-group-toggle');
+  var refreshBtn = document.getElementById('alerts-refresh');
+  var toast = document.getElementById('alerts-toast');
+  var bulkBar = document.getElementById('alerts-bulk-bar');
+  var bulkCount = document.getElementById('alerts-bulk-count');
+  var bulkClearBtn = document.getElementById('alerts-bulk-clear');
+  var selectAllCb = document.getElementById('alerts-select-all');
+  var detailPanel = document.getElementById('alerts-detail-panel');
+  var detailContent = document.getElementById('alerts-detail-content');
+  var detailCloseBtn = document.getElementById('alerts-detail-close');
+
+  var collapsedGroups = {};
+  var selectedIds = {};
+  var currentView = 'cards';
+  var allAlerts = [];
+
   function esc(v){ return String(v == null ? '' : v).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
   function fmtTs(ts){ if(!ts) return '—'; try { return new Date(ts).toLocaleString(); } catch(_) { return ts; } }
   function fmtSchedule(a){
     var kind = (a.schedule_kind || 'manual');
     if (kind === 'recurring') return 'Recurring / ' + (a.interval_minutes || 0) + 'm';
     if (kind === 'continuous') return 'Live / every ' + (a.interval_minutes || 0) + 'm';
-    return 'Manual / one-off';
+    return 'Manual';
   }
   function targetLabel(id){ return EXECUTOR_TARGET_LABELS[id] || id || '—'; }
+
+  function showToast(msg, type) {
+    toast.textContent = msg;
+    toast.className = 'alerts-toast ' + (type || 'info') + ' visible';
+    setTimeout(function() { toast.classList.remove('visible'); }, 3500);
+  }
+
   function alertMatches(a) {
     var statusFilter = (statusFilterEl.value || '').trim();
     var severityFilter = (severityFilterEl.value || '').trim();
@@ -109,10 +545,64 @@
     if (!search) return true;
     var haystack = [
       a.task_name, a.trigger_text, a.summary, a.title, a.task_mode, a.template_key, a.trace_id, a.run_id,
-      a.executor_target, a.workspace_dir, a.sandbox_assist_target, a.sandbox_assist_workspace_dir, a.current_step_id, a.repeat_key, a.terminal_reason
+      a.executor_target, a.workspace_dir, a.sandbox_assist_target, a.current_step_id, a.repeat_key, a.terminal_reason
     ].join(' ').toLowerCase();
     return haystack.indexOf(search) >= 0;
   }
+
+  function updateStats(rows) {
+    document.getElementById('alerts-count-open').textContent = rows.filter(function(a){ return (a.status||'open')==='open'; }).length;
+    document.getElementById('alerts-count-ack').textContent = rows.filter(function(a){ return (a.status||'open')==='acknowledged'; }).length;
+    document.getElementById('alerts-count-resolved').textContent = rows.filter(function(a){ return (a.status||'open')==='resolved'; }).length;
+    document.getElementById('alerts-count-critical').textContent = rows.filter(function(a){ return (a.severity||'info')==='critical'; }).length;
+    document.getElementById('alerts-count-total').textContent = rows.length;
+  }
+
+  function updateBulkBar() {
+    var count = Object.keys(selectedIds).length;
+    bulkCount.textContent = count;
+    bulkBar.style.display = count > 0 ? 'flex' : 'none';
+  }
+
+  function openDetail(a) {
+    var sevCls = (a.severity || 'info').toLowerCase();
+    var html = '';
+    html += '<div class="alerts-detail-section"><div class="alerts-detail-section-title">Title</div><div class="alerts-detail-value">' + esc(a.title || a.task_name || 'Alert') + '</div></div>';
+    html += '<div class="alerts-detail-section"><div class="alerts-detail-section-title">Badges</div><div><span class="severity-pill ' + esc(sevCls) + '">' + esc(a.severity || 'info') + '</span> <span class="alerts-badge ' + esc((a.status||'open').toLowerCase()) + '">' + esc(a.status || 'open') + '</span></div></div>';
+    html += '<div class="alerts-detail-section"><div class="alerts-detail-section-title">Summary</div><div class="alerts-detail-value">' + esc(a.summary || '—') + '</div></div>';
+    html += '<div class="alerts-detail-section"><div class="alerts-detail-section-title">Details</div>';
+    html += '<div class="alerts-detail-value">';
+    html += '<div>Created: ' + esc(fmtTs(a.created_at)) + '</div>';
+    html += '<div>Task: ' + esc(a.task_name || a.task_id || '—') + '</div>';
+    html += '<div>Mode: ' + esc(MODE_LABELS[a.task_mode] || a.task_mode || '—') + '</div>';
+    html += '<div>Template: ' + esc(TEMPLATE_LABELS[a.template_key] || a.template_key || 'custom') + '</div>';
+    html += '<div>Run: ' + esc(a.run_id || '—') + '</div>';
+    html += '<div>Run Status: ' + esc(a.run_status || '—') + '</div>';
+    html += '<div>Current Step: ' + esc(a.current_step_id || '—') + '</div>';
+    html += '<div>Executor: ' + esc(targetLabel(a.executor_target)) + '</div>';
+    html += '<div>Workspace: ' + esc(a.workspace_dir || '—') + '</div>';
+    html += '<div>Trigger: ' + esc(a.trigger_text || '—') + '</div>';
+    html += '<div>Repeat Key: ' + esc(a.repeat_key || '—') + '</div>';
+    html += '<div>Terminal Reason: ' + esc(a.terminal_reason || '—') + '</div>';
+    if (a.snoozed_until) html += '<div>Snoozed Until: ' + esc(fmtTs(a.snoozed_until)) + '</div>';
+    if (a.resolved_at) html += '<div>Resolved At: ' + esc(fmtTs(a.resolved_at)) + '</div>';
+    html += '</div></div>';
+    if (a.payload_json) {
+      html += '<div class="alerts-detail-section"><div class="alerts-detail-section-title">Payload</div><div class="alerts-detail-json">' + esc(typeof a.payload_json === 'string' ? a.payload_json : JSON.stringify(a.payload_json, null, 2)) + '</div></div>';
+    }
+    html += '<div class="alerts-detail-section"><div class="alerts-detail-section-title">Links</div><div style="display:flex;gap:0.4rem;flex-wrap:wrap;">';
+    html += '<a class="alerts-link" href="' + esc(a.task_url || '/tasked') + '">Tasked</a>';
+    html += '<a class="alerts-link" href="' + esc(a.pipeline_url || '/piplinetask') + '">Pipeline</a>';
+    html += '<a class="alerts-link" href="' + esc(a.preview_url || ('/tasked-preview?task_id=' + esc(a.task_id || ''))) + '">Preview</a>';
+    html += '</div></div>';
+    detailContent.innerHTML = html;
+    detailPanel.classList.add('open');
+  }
+
+  function closeDetail() {
+    detailPanel.classList.remove('open');
+  }
+
   async function updateAlertStatus(alertId, status, snoozeMinutes) {
     var url = status === 'acknowledged' ? '/api/alerts/' + encodeURIComponent(alertId) + '/ack' : '/api/alerts/' + encodeURIComponent(alertId) + '/status';
     var opts = { method: 'POST' };
@@ -122,73 +612,274 @@
     }
     var res = await fetch(url, opts);
     var data = await res.json().catch(function(){ return {}; });
-    if (!res.ok || data.ok === false) throw new Error(data.error || ('Alert update failed (' + res.status + ')'));
+    if (!res.ok || data.ok === false) throw new Error(data.error || ('Failed (' + res.status + ')'));
     return data;
   }
-  async function loadAlerts() {
-    var res = await fetch('/api/alerts?limit=250', { cache: 'no-store' });
-    var data = await res.json();
-    var rows = (data.alerts || []).filter(alertMatches);
-    if (noteEl) noteEl.textContent = 'Tasked alerts auto-refresh every 15 seconds while this page stays visible. Last refresh: ' + new Date().toLocaleTimeString() + '.';
-    if (!rows.length) {
-      body.innerHTML = '<tr><td colspan="8" class="alerts-note">No Tasked alerts yet.</td></tr>';
-      return;
-    }
-    body.innerHTML = rows.map(function(a) {
-      var modeLabel = MODE_LABELS[a.task_mode] || a.task_mode || '—';
-      var templateLabel = TEMPLATE_LABELS[a.template_key] || a.template_key || 'custom';
-      var cadence = (a.repeat_key || a.interval_minutes) ? (fmtSchedule(a) + ' · repeat key: ' + (a.repeat_key || '—')) : fmtSchedule(a);
-      return '<tr data-id="' + esc(a.id) + '">' +
-        '<td>' + esc(fmtTs(a.created_at)) + '</td>' +
-        '<td><strong>' + esc(a.task_name || a.task_id || 'Tasked') + '</strong><div class="alerts-meta">' + esc(modeLabel) + ' · ' + esc(templateLabel) + '</div><div class="alerts-meta">Trace: ' + esc(a.trace_id || a.task_id || '—') + '</div><div class="alerts-meta">Executor: ' + esc(targetLabel(a.executor_target)) + ' · Workspace: ' + esc(a.workspace_dir || '—') + '</div></td>' +
-        '<td><span class="alerts-pill">' + esc(a.run_status || '—') + '</span><div class="alerts-meta">Run: ' + esc(a.run_id || '—') + '</div><div class="alerts-meta">Current step: ' + esc(a.current_step_id || '—') + '</div><div class="alerts-meta">Terminal: ' + esc(a.terminal_reason || '—') + '</div><div class="alerts-meta">Recovery: ' + esc(((a.latest_recovery_session || {}).status) || 'steady') + '</div></td>' +
-        '<td><span class="alerts-pill">' + esc(a.severity || 'info') + '</span><div class="alerts-meta">' + esc(cadence) + '</div><div class="alerts-meta">Assist: ' + esc(a.sandbox_assist ? targetLabel(a.sandbox_assist_target) : 'disabled') + '</div></td>' +
-        '<td>' + esc(a.trigger_text || '—') + '</td>' +
-        '<td>' + esc((a.summary || '').slice(0, 240)) + '</td>' +
-        '<td><span class="alerts-badge ' + esc(a.status || 'open') + '">' + esc(a.status || 'open') + '</span><div class="alerts-meta">' + esc(a.snoozed_until ? ('Snoozed until ' + fmtTs(a.snoozed_until)) : (a.resolved_at ? ('Resolved ' + fmtTs(a.resolved_at)) : '')) + '</div></td>' +
-        '<td class="alerts-actions">' +
-          '<a class="alerts-link" href="' + esc(a.task_url || '/tasked') + '">Open Tasked</a>' +
-          '<a class="alerts-link" href="' + esc(a.pipeline_url || '/piplinetask') + '">Open Pipeline</a>' +
+
+  function renderAlertCard(a) {
+    var modeLabel = MODE_LABELS[a.task_mode] || a.task_mode || '—';
+    var templateLabel = TEMPLATE_LABELS[a.template_key] || a.template_key || 'custom';
+    var sevCls = (a.severity || 'info').toLowerCase();
+    var statusCls = (a.status || 'open').toLowerCase();
+    var isSelected = !!selectedIds[a.id];
+    return '<article class="alert-card severity-' + esc(sevCls) + ' status-' + esc(statusCls) + (isSelected ? ' is-selected' : '') + '" data-id="' + esc(a.id) + '">' +
+      '<div class="alert-card-header">' +
+        '<div class="alert-card-select"><input type="checkbox" class="alert-select-cb" data-id="' + esc(a.id) + '" ' + (isSelected ? 'checked' : '') + '></div>' +
+        '<div class="alert-card-title-area">' +
+          '<div class="alert-card-title">' + esc(a.title || a.task_name || 'Alert') + '</div>' +
+          '<div class="alert-card-meta">' + esc(fmtTs(a.created_at)) + ' · ' + esc(modeLabel) + ' · ' + esc(templateLabel) + '</div>' +
+        '</div>' +
+        '<div class="alert-card-badges">' +
+          '<span class="severity-pill ' + esc(sevCls) + '">' + esc(a.severity || 'info') + '</span>' +
+          '<span class="alerts-badge ' + esc(statusCls) + '">' + esc(a.status || 'open') + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<div class="alert-card-body">' +
+        '<div class="alert-card-stat"><strong>' + esc(a.run_status || '—') + '</strong><span>Run</span></div>' +
+        '<div class="alert-card-stat"><strong>' + esc(a.current_step_id || '—') + '</strong><span>Step</span></div>' +
+        '<div class="alert-card-stat"><strong>' + esc(targetLabel(a.executor_target)) + '</strong><span>Executor</span></div>' +
+        '<div class="alert-card-stat"><strong>' + esc(a.sandbox_assist ? targetLabel(a.sandbox_assist_target) : 'off') + '</strong><span>Assist</span></div>' +
+      '</div>' +
+      '<div class="alert-card-summary">' + esc((a.summary || '').slice(0, 280)) + (((a.summary || '').length > 280) ? '…' : '') + '</div>' +
+      '<div class="alert-card-footer">' +
+        '<div class="alert-card-actions">' +
+          ((a.status || 'open') === 'open' ? '<button class="alerts-quick-btn ack" data-action="acknowledged" data-id="' + esc(a.id) + '">Ack</button>' : '') +
+          ((a.status || 'open') !== 'resolved' ? '<button class="alerts-quick-btn resolve" data-action="resolved" data-id="' + esc(a.id) + '">Resolve</button>' : '') +
+          ((a.status || 'open') === 'open' ? '<button class="alerts-quick-btn snooze" data-action="snoozed" data-id="' + esc(a.id) + '" data-snooze="30">Snooze</button>' : '') +
+          ((a.status || 'open') !== 'open' ? '<button class="alerts-quick-btn reopen" data-action="open" data-id="' + esc(a.id) + '">Reopen</button>' : '') +
+        '</div>' +
+        '<div class="alert-card-links">' +
+          '<a class="alerts-link" href="' + esc(a.task_url || '/tasked') + '">Tasked</a>' +
           '<a class="alerts-link" href="' + esc(a.preview_url || ('/tasked-preview?task_id=' + esc(a.task_id || ''))) + '">Preview</a>' +
-          ((a.run_status || '') && ['completed','failed','cancelled'].indexOf(a.run_status) >= 0 ? '<a class="alerts-link" href="' + esc(a.completed_url || '/task-completed') + '">Open Completed</a>' : '') +
-          ((a.status || 'open') === 'open' ? '<button class="alerts-btn" data-action="acknowledged" data-id="' + esc(a.id) + '">Acknowledge</button>' : '') +
-          ((a.status || 'open') !== 'resolved' ? '<button class="alerts-btn" data-action="resolved" data-id="' + esc(a.id) + '">Resolve</button>' : '') +
-          ((a.status || 'open') === 'open' ? '<button class="alerts-btn" data-action="snoozed" data-id="' + esc(a.id) + '" data-snooze="30">Snooze 30m</button>' : '') +
-          ((a.status || 'open') !== 'open' ? '<button class="alerts-btn" data-action="open" data-id="' + esc(a.id) + '">Reopen</button>' : '') +
-        '</td>' +
-      '</tr>';
-    }).join('');
-    body.querySelectorAll('button[data-action]').forEach(function(btn) {
-      btn.addEventListener('click', async function() {
+        '</div>' +
+      '</div>' +
+    '</article>';
+  }
+
+  function renderAlertRow(a) {
+    var modeLabel = MODE_LABELS[a.task_mode] || a.task_mode || '—';
+    var templateLabel = TEMPLATE_LABELS[a.template_key] || a.template_key || 'custom';
+    var sevCls = (a.severity || 'info').toLowerCase();
+    var runStatusCls = (a.run_status || '').toLowerCase().replace(/[^a-z-]/g, '');
+    var isSelected = !!selectedIds[a.id];
+    return '<tr data-id="' + esc(a.id) + '" class="' + (isSelected ? 'is-selected' : '') + '">' +
+      '<td><input type="checkbox" class="alert-select-cb" data-id="' + esc(a.id) + '" ' + (isSelected ? 'checked' : '') + '></td>' +
+      '<td>' + esc(fmtTs(a.created_at)) + '</td>' +
+      '<td><strong>' + esc(a.task_name || a.task_id || 'Tasked') + '</strong><div class="alerts-meta">' + esc(modeLabel) + ' · ' + esc(templateLabel) + '</div></td>' +
+      '<td><span class="status-badge ' + esc(runStatusCls) + '">' + esc(a.run_status || '—') + '</span><div class="alerts-meta">Step: ' + esc(a.current_step_id || '—') + '</div></td>' +
+      '<td><span class="severity-pill ' + esc(sevCls) + '">' + esc(a.severity || 'info') + '</span></td>' +
+      '<td>' + esc(a.trigger_text || '—') + '</td>' +
+      '<td>' + esc((a.summary || '').slice(0, 120)) + '</td>' +
+      '<td><span class="alerts-badge ' + esc(a.status || 'open') + '">' + esc(a.status || 'open') + '</span></td>' +
+      '<td class="alerts-actions">' +
+        ((a.status || 'open') === 'open' ? '<button class="alerts-quick-btn ack" data-action="acknowledged" data-id="' + esc(a.id) + '">Ack</button>' : '') +
+        ((a.status || 'open') !== 'resolved' ? '<button class="alerts-quick-btn resolve" data-action="resolved" data-id="' + esc(a.id) + '">Resolve</button>' : '') +
+        '<a class="alerts-link" href="' + esc(a.preview_url || ('/tasked-preview?task_id=' + esc(a.task_id || ''))) + '">Preview</a>' +
+      '</td>' +
+    '</tr>';
+  }
+
+  async function loadAlerts() {
+    if (alertsIsLoading) return;
+    alertsIsLoading = true;
+    refreshBtn.classList.add('spinning');
+    try {
+      var res = await fetch('/api/alerts?limit=250', { cache: 'no-store' });
+      var data = await res.json();
+      allAlerts = data.alerts || [];
+      var rows = allAlerts.filter(alertMatches);
+      updateStats(rows);
+
+      if (!rows.length) {
+        body.innerHTML = '<tr><td colspan="9" class="alerts-empty"><div class="alerts-empty-icon">🔔</div>No alerts match your filters.</td></tr>';
+        cardView.innerHTML = '<div class="alerts-empty"><div class="alerts-empty-icon">🔔</div>No alerts match your filters.</div>';
+        return;
+      }
+
+      var isGrouped = groupToggle.classList.contains('active');
+      tableView.style.display = currentView === 'table' ? '' : 'none';
+      cardView.style.display = currentView === 'cards' ? '' : 'none';
+
+      if (currentView === 'cards') {
+        if (isGrouped) {
+          var groups = {};
+          var groupOrder = [];
+          rows.forEach(function(a) {
+            var key = (a.status || 'open').toLowerCase();
+            if (!groups[key]) { groups[key] = []; groupOrder.push(key); }
+            groups[key].push(a);
+          });
+          var html = '';
+          groupOrder.forEach(function(key) {
+            var collapsed = !!collapsedGroups[key];
+            html += '<div class="alerts-group-header" data-group-key="' + esc(key) + '">' + (collapsed ? '▶' : '▼') + ' ' + esc(key) + ' <span class="alerts-group-count">(' + groups[key].length + ')</span></div>';
+            if (!collapsed) html += groups[key].map(renderAlertCard).join('');
+          });
+          cardView.innerHTML = html;
+          cardView.querySelectorAll('.alerts-group-header').forEach(function(hdr) {
+            hdr.addEventListener('click', function() {
+              var key = hdr.dataset.groupKey;
+              collapsedGroups[key] = !collapsedGroups[key];
+              loadAlerts();
+            });
+          });
+        } else {
+          cardView.innerHTML = rows.map(renderAlertCard).join('');
+        }
+      } else {
+        body.innerHTML = rows.map(renderAlertRow).join('');
+      }
+
+      bindAlertActions();
+    } catch (err) {
+      showToast('Failed to load alerts: ' + err.message, 'error');
+    } finally {
+      refreshBtn.classList.remove('spinning');
+      alertsIsLoading = false;
+    }
+  }
+
+  function bindAlertActions() {
+    document.querySelectorAll('[data-action]').forEach(function(btn) {
+      btn.addEventListener('click', async function(e) {
+        e.stopPropagation();
         try {
           await updateAlertStatus(btn.dataset.id, btn.dataset.action, parseInt(btn.dataset.snooze || '0', 10) || 0);
+          showToast('Alert updated', 'success');
           await loadAlerts();
         } catch (err) {
-          if (noteEl) noteEl.textContent = err.message || 'Failed to update alert status.';
+          showToast(err.message, 'error');
         }
       });
     });
+
+    document.querySelectorAll('.alert-card').forEach(function(card) {
+      card.addEventListener('click', function(e) {
+        if (e.target.tagName === 'BUTTON' || e.target.tagName === 'A' || e.target.tagName === 'INPUT') return;
+        var id = card.dataset.id;
+        var alert = allAlerts.find(function(a){ return String(a.id) === id; });
+        if (alert) openDetail(alert);
+      });
+    });
+
+    document.querySelectorAll('.alert-select-cb').forEach(function(cb) {
+      cb.addEventListener('click', function(e) {
+        e.stopPropagation();
+        if (cb.checked) selectedIds[cb.dataset.id] = true;
+        else delete selectedIds[cb.dataset.id];
+        updateBulkBar();
+        loadAlerts();
+      });
+    });
   }
+
   async function loadRuntime() {
-    var res = await fetch('/api/runtime-status?force=true', { cache: 'no-store' });
-    var data = await res.json();
-    var item = (data.components || {}).c12b || {};
-    var smRes = await fetch('/api/session-manager?scope=task&status=waiting-retry&limit=1', { cache: 'no-store' });
-    var smData = await smRes.json();
-    var recovery = (smData.items || [])[0] || {};
-    runtimeEl.innerHTML = '<span class="alerts-pill">C12b: ' + esc(item.state || 'unknown') + ' · ' + esc(item.message || 'Unavailable') + '</span>' +
-      '<span class="alerts-pill">Recovery: ' + esc(recovery.status || 'steady') + (recovery.upstream ? (' · ' + esc(recovery.upstream)) : '') + '</span>';
+    try {
+      var res = await fetch('/api/runtime-status?force=true', { cache: 'no-store' });
+      var data = await res.json();
+      var item = (data.components || {}).c12b || {};
+      runtimeEl.innerHTML = '<span class="alerts-runtime-pill">C12b: ' + esc(item.state || 'unknown') + ' · ' + esc(item.message || 'Unavailable') + '</span>';
+    } catch(_) {
+      runtimeEl.innerHTML = '<span class="alerts-runtime-pill">Runtime unavailable</span>';
+    }
   }
-  document.getElementById('alerts-refresh').addEventListener('click', loadAlerts);
+
+  viewCardsBtn.addEventListener('click', function() {
+    currentView = 'cards';
+    viewCardsBtn.classList.add('active');
+    viewTableBtn.classList.remove('active');
+    loadAlerts();
+  });
+  viewTableBtn.addEventListener('click', function() {
+    currentView = 'table';
+    viewTableBtn.classList.add('active');
+    viewCardsBtn.classList.remove('active');
+    loadAlerts();
+  });
+  groupToggle.addEventListener('click', function() {
+    groupToggle.classList.toggle('active');
+    loadAlerts();
+  });
+  refreshBtn.addEventListener('click', loadAlerts);
   [statusFilterEl, severityFilterEl, runFilterEl].forEach(function(el){ el.addEventListener('change', loadAlerts); });
   searchEl.addEventListener('input', function(){
     clearTimeout(searchEl._debounce);
     searchEl._debounce = setTimeout(function(){ loadAlerts().catch(function(){}); }, 180);
   });
-  loadAlerts().catch(function(){ body.innerHTML = '<tr><td colspan="8" class="alerts-note">Failed to load Tasked alerts.</td></tr>'; });
-  loadRuntime().catch(function(){ runtimeEl.innerHTML = '<span class="alerts-pill">Sandbox runtime unavailable.</span>'; });
-  setInterval(function(){ if (!document.hidden) loadAlerts().catch(function(){}); }, 15000);
-  setInterval(function(){ if (!document.hidden) loadRuntime().catch(function(){}); }, 30000);
+  detailCloseBtn.addEventListener('click', closeDetail);
+
+  if (selectAllCb) {
+    selectAllCb.addEventListener('change', function() {
+      var checked = selectAllCb.checked;
+      document.querySelectorAll('.alert-select-cb').forEach(function(cb) {
+        cb.checked = checked;
+        if (checked) selectedIds[cb.dataset.id] = true;
+        else delete selectedIds[cb.dataset.id];
+      });
+      updateBulkBar();
+    });
+  }
+
+  document.querySelectorAll('.alerts-bulk-btn[data-bulk-action]').forEach(function(btn) {
+    btn.addEventListener('click', async function() {
+      var action = btn.dataset.bulkAction;
+      var ids = Object.keys(selectedIds);
+      if (!ids.length) return;
+      for (var i = 0; i < ids.length; i++) {
+        try { await updateAlertStatus(ids[i], action, action === 'snoozed' ? 30 : 0); } catch(_) {}
+      }
+      selectedIds = {};
+      updateBulkBar();
+      showToast(ids.length + ' alerts updated', 'success');
+      await loadAlerts();
+    });
+  });
+  bulkClearBtn.addEventListener('click', function() {
+    selectedIds = {};
+    updateBulkBar();
+    loadAlerts();
+  });
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'r' && !e.ctrlKey && !e.metaKey && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+      e.preventDefault();
+      loadAlerts();
+    }
+    if (e.key === 'Escape') closeDetail();
+  });
+
+  loadAlerts().catch(function(){ body.innerHTML = '<tr><td colspan="9" class="alerts-empty">Failed to load alerts.</td></tr>'; });
+  loadRuntime().catch(function(){ runtimeEl.innerHTML = '<span class="alerts-runtime-pill">Runtime unavailable</span>'; });
+  var alertsRefreshTimer = null;
+  var alertsRuntimeTimer = null;
+  var alertsIsLoading = false;
+  function fmtAlertsRefreshInterval(ms) {
+    if (ms < 60000) return Math.round(ms / 1000) + 's';
+    return Math.round(ms / 60000) + 'min';
+  }
+  function startAlertsRefreshTimer() {
+    if (alertsRefreshTimer) clearInterval(alertsRefreshTimer);
+    var interval = parseInt(alertsRefreshIntervalEl.value, 10) || 120000;
+    noteEl.textContent = 'Alerts auto-refresh every ' + fmtAlertsRefreshInterval(interval) + '. Last refresh: ' + new Date().toLocaleTimeString() + '.';
+    alertsRefreshTimer = setInterval(function() {
+      if (!document.hidden && !alertsIsLoading) loadAlerts().catch(function(){});
+    }, interval);
+  }
+  function startAlertsRuntimeTimer() {
+    if (alertsRuntimeTimer) clearInterval(alertsRuntimeTimer);
+    alertsRuntimeTimer = setInterval(function() {
+      if (!document.hidden) loadRuntime().catch(function(){});
+    }, 30000);
+  }
+  var alertsRefreshIntervalEl = document.getElementById('alerts-refresh-interval');
+  alertsRefreshIntervalEl.addEventListener('change', function() {
+    localStorage.setItem('alertsRefreshInterval', alertsRefreshIntervalEl.value);
+    startAlertsRefreshTimer();
+  });
+  var savedAlertsInterval = localStorage.getItem('alertsRefreshInterval');
+  if (savedAlertsInterval) alertsRefreshIntervalEl.value = savedAlertsInterval;
+  startAlertsRefreshTimer();
+  startAlertsRuntimeTimer();
 })();
 </script>
 {% endblock %}

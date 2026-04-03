@@ -3277,7 +3277,9 @@ def _task_run_to_dict(row: sqlite3.Row | dict) -> dict:
     raw["task_url"] = f"/tasked?task_id={quote(str(raw.get('task_id') or ''))}" if raw.get("task_id") else "/tasked"
     raw["pipeline_url"] = f"/piplinetask?task_id={quote(str(raw.get('task_id') or ''))}" if raw.get("task_id") else "/piplinetask"
     raw["completed_url"] = f"/task-completed?task_id={quote(str(raw.get('task_id') or ''))}" if raw.get("task_id") else "/task-completed"
-    raw["preview_url"] = f"/tasked-preview?task_id={quote(str(raw.get('task_id') or ''))}" if raw.get("task_id") else "/tasked-preview"
+    _tid = quote(str(raw.get('task_id') or ''))
+    _rid = quote(str(raw.get('id') or ''))
+    raw["preview_url"] = f"/tasked-preview?task_id={_tid}&run_id={_rid}" if raw.get("task_id") else "/tasked-preview"
     raw["is_running"] = (raw.get("status") or "").lower() == "running" and not raw.get("finished_at")
     raw["duration_ms"] = _duration_ms(raw.get("started_at") or raw.get("created_at"), raw.get("finished_at"))
     raw["duration_label"] = _duration_label(raw.get("duration_ms"))
@@ -3306,7 +3308,9 @@ def _task_alert_to_dict(row: sqlite3.Row | dict) -> dict:
     raw["task_url"] = f"/tasked?task_id={quote(str(raw.get('task_id') or ''))}" if raw.get("task_id") else "/tasked"
     raw["pipeline_url"] = f"/piplinetask?task_id={quote(str(raw.get('task_id') or ''))}" if raw.get("task_id") else "/piplinetask"
     raw["completed_url"] = f"/task-completed?task_id={quote(str(raw.get('task_id') or ''))}" if raw.get("task_id") else "/task-completed"
-    raw["preview_url"] = f"/tasked-preview?task_id={quote(str(raw.get('task_id') or ''))}" if raw.get("task_id") else "/tasked-preview"
+    _atid = quote(str(raw.get('task_id') or ''))
+    _arid = quote(str(raw.get('run_id') or ''))
+    raw["preview_url"] = f"/tasked-preview?task_id={_atid}&run_id={_arid}" if raw.get("task_id") else "/tasked-preview"
     raw["schedule_label"] = _task_schedule_label(raw.get("schedule_kind") or "manual", raw.get("interval_minutes") or 0, raw.get("active"))
     raw["severity"] = raw.get("severity") or "info"
     raw["repeat_key"] = raw.get("repeat_key") or ""

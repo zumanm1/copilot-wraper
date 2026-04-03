@@ -280,6 +280,21 @@
   margin-top: 0.3rem;
 }
 .filetree-section-label:first-child { border-top: none; margin-top: 0; }
+.filetree-search-wrap { padding: 0.35rem 0.5rem; border-bottom: 1px solid var(--border); }
+.filetree-search-input {
+  width: 100%;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--fg);
+  padding: 0.35rem 0.6rem;
+  font-size: 0.78rem;
+  box-sizing: border-box;
+}
+.filetree-search-input:focus { outline: none; border-color: var(--accent); }
+.filetree-search-input::placeholder { color: var(--muted); }
+.filetree-item.hidden { display: none; }
+.filetree-project-header.hidden { display: none; }
 
 /* ── File preview modal ──────────────────────────────────────────────────── */
 .file-preview-overlay {
@@ -795,6 +810,9 @@
         <button type="button" class="btn-sm" id="refresh-files" title="Refresh file tree">↺</button>
       </div>
     </div>
+    <div class="filetree-search-wrap">
+      <input type="text" id="filetree-search" class="filetree-search-input" placeholder="Search files…">
+    </div>
     <div class="filetree-list" id="filetree-list">
       <div class="filetree-empty" id="filetree-empty">Empty workspace</div>
     </div>
@@ -1295,23 +1313,22 @@
   function renderFileTree(entries, projects) {
     filetreeList.innerHTML = '';
     _knownProjects = projects || [];
+    _filetreeAllEntries = [];
+    _filetreeAllProjects = [];
     if (!entries || !entries.length) {
       filetreeList.innerHTML = '<div class="filetree-empty">Empty workspace</div>';
       return;
     }
 
-    // Build lookup: top-level dir slug → project record
     const projBySlug = {};
     (_knownProjects || []).forEach(function(p) { projBySlug[p.name] = p; });
 
-    // Sort entries: dirs first then files, alpha within each group
     const sorted = entries.slice().sort(function(a, b) {
       if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
       return a.path.localeCompare(b.path);
     });
 
-    // Group: project-dir entries vs loose entries
-    const projectEntries = {};   // slug → [{entry}]
+    const projectEntries = {};
     const looseEntries   = [];
     sorted.forEach(function(entry) {
       const topDir = entry.path.split('/')[0];
@@ -1319,7 +1336,6 @@
         if (!projectEntries[topDir]) projectEntries[topDir] = [];
         projectEntries[topDir].push(entry);
       } else if (projBySlug[entry.path]) {
-        // The project root dir itself — skip, we render a header instead
       } else {
         looseEntries.push(entry);
       }
@@ -1327,16 +1343,17 @@
 
     let hasContent = false;
 
-    // ── Render project sections ──────────────────────────────────────────────
     (_knownProjects || []).forEach(function(proj) {
       hasContent = true;
       const header = document.createElement('div');
       header.className = 'filetree-project-header';
+      header.dataset.name = proj.name;
       header.innerHTML = '<span style="flex-shrink:0;">📂</span>'
         + '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;" title="' + escapeHtml(proj.name) + '">'
         + escapeHtml(proj.display_name || proj.name) + '</span>';
       header.appendChild(_makeDelBtn({'data-project': proj.name}));
       filetreeList.appendChild(header);
+      _filetreeAllProjects.push(header);
 
       const children = projectEntries[proj.name] || [];
       if (!children.length) {
@@ -1346,12 +1363,14 @@
         filetreeList.appendChild(empty);
       } else {
         children.forEach(function(entry) {
-          filetreeList.appendChild(_makeFileItem(entry));
+          var item = _makeFileItem(entry);
+          item.dataset.name = entry.path;
+          filetreeList.appendChild(item);
+          _filetreeAllEntries.push(item);
         });
       }
     });
 
-    // ── Render loose files/dirs ──────────────────────────────────────────────
     if (looseEntries.length) {
       if (hasContent) {
         const sep = document.createElement('div');
@@ -1361,13 +1380,17 @@
       }
       looseEntries.forEach(function(entry) {
         hasContent = true;
-        filetreeList.appendChild(_makeFileItem(entry));
+        var item = _makeFileItem(entry);
+        item.dataset.name = entry.path;
+        filetreeList.appendChild(item);
+        _filetreeAllEntries.push(item);
       });
     }
 
     if (!hasContent) {
       filetreeList.innerHTML = '<div class="filetree-empty">Empty workspace</div>';
     }
+    applyFileTreeFilter(filetreeSearch ? filetreeSearch.value : '');
   }
 
   // ── Delete a file or directory ─────────────────────────────────────────────
@@ -1435,6 +1458,90 @@
     btnRefresh.textContent = '↺';
   }
   btnRefresh.addEventListener('click', refreshFiles);
+
+  // ── File tree search ───────────────────────────────────────────────────────
+  var filetreeSearch = document.getElementById('filetree-search');
+  var _filetreeAllEntries = [];
+  var _filetreeAllProjects = [];
+  function applyFileTreeFilter(query) {
+    var q = (query || '').toLowerCase().trim();
+    _filetreeAllEntries.forEach(function(el) {
+      if (!el.dataset) return;
+      var name = (el.dataset.name || '').toLowerCase();
+      if (!q || name.indexOf(q) >= 0) {
+        el.classList.remove('hidden');
+      } else {
+        el.classList.add('hidden');
+      }
+    });
+    _filetreeAllProjects.forEach(function(el) {
+      if (!el.dataset) return;
+      var name = (el.dataset.name || '').toLowerCase();
+      var hasVisibleChild = false;
+      var sibling = el.nextElementSibling;
+      while (sibling && !sibling.classList.contains('filetree-project-header') && !sibling.classList.contains('filetree-section-label')) {
+        if (!sibling.classList.contains('hidden') && (sibling.classList.contains('filetree-item'))) {
+          hasVisibleChild = true;
+          break;
+        }
+        sibling = sibling.nextElementSibling;
+      }
+      if (!q || hasVisibleChild || name.indexOf(q) >= 0) {
+        el.classList.remove('hidden');
+      } else {
+        el.classList.add('hidden');
+      }
+    });
+  }
+  if (filetreeSearch) {
+    filetreeSearch.addEventListener('input', function() {
+      applyFileTreeFilter(filetreeSearch.value);
+    });
+  }
+
+  var _origRenderFileTree = window._renderFileTree;
+
+  // ── File tree search ───────────────────────────────────────────────────────
+  var filetreeSearch = document.getElementById('filetree-search');
+  var _filetreeAllEntries = [];
+  var _filetreeAllProjects = [];
+  function applyFileTreeFilter(query) {
+    var q = (query || '').toLowerCase().trim();
+    _filetreeAllEntries.forEach(function(el) {
+      if (!el.dataset) return;
+      var name = (el.dataset.name || '').toLowerCase();
+      if (!q || name.indexOf(q) >= 0) {
+        el.classList.remove('hidden');
+      } else {
+        el.classList.add('hidden');
+      }
+    });
+    _filetreeAllProjects.forEach(function(el) {
+      if (!el.dataset) return;
+      var name = (el.dataset.name || '').toLowerCase();
+      var hasVisibleChild = false;
+      var sibling = el.nextElementSibling;
+      while (sibling && !sibling.classList.contains('filetree-project-header') && !sibling.classList.contains('filetree-section-label')) {
+        if (!sibling.classList.contains('hidden') && (sibling.classList.contains('filetree-item'))) {
+          hasVisibleChild = true;
+          break;
+        }
+        sibling = sibling.nextElementSibling;
+      }
+      if (!q || hasVisibleChild || name.indexOf(q) >= 0) {
+        el.classList.remove('hidden');
+      } else {
+        el.classList.add('hidden');
+      }
+    });
+  }
+  if (filetreeSearch) {
+    filetreeSearch.addEventListener('input', function() {
+      applyFileTreeFilter(filetreeSearch.value);
+    });
+  }
+
+  var _origRenderFileTree = window._renderFileTree;
 
   // ── New Project modal ──────────────────────────────────────────────────────
   function openNewProjectModal() {

@@ -1,0 +1,307 @@
+{
+  "passed": 60,
+  "failed": 0,
+  "warnings": 0,
+  "details": [
+    {
+      "status": true,
+      "test": "GET /health",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "GET /api/status",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "GET /api/session-health",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "POST /api/chat (C6 KiloCode)",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "Chat response OK",
+      "detail": "Hello"
+    },
+    {
+      "status": true,
+      "test": "Session ID returned",
+      "detail": "cs_3da07c07"
+    },
+    {
+      "status": true,
+      "test": "Token estimate returned",
+      "detail": "6"
+    },
+    {
+      "status": true,
+      "test": "GET /api/chat/sessions",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "Sessions is array",
+      "detail": "3 sessions"
+    },
+    {
+      "status": true,
+      "test": "GET /api/tasks",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "Tasks is array",
+      "detail": "9 tasks"
+    },
+    {
+      "status": true,
+      "test": "Cascading task exists",
+      "detail": "task_cc7e0d02"
+    },
+    {
+      "status": true,
+      "test": "GET /api/task-runs",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "Runs is array",
+      "detail": "5 runs"
+    },
+    {
+      "status": true,
+      "test": "GET /api/task-pipelines",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "Pipelines is array",
+      "detail": "3 pipelines"
+    },
+    {
+      "status": true,
+      "test": "Pipeline has task data",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "Pipeline has run data",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "Pipeline has steps data",
+      "detail": "5 steps"
+    },
+    {
+      "status": true,
+      "test": "Pipeline has feedback data",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "GET /api/alerts",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "Alerts is array",
+      "detail": "5 alerts"
+    },
+    {
+      "status": true,
+      "test": "Alert has ID",
+      "detail": "289"
+    },
+    {
+      "status": true,
+      "test": "Alert has status",
+      "detail": "open"
+    },
+    {
+      "status": true,
+      "test": "Alert has severity",
+      "detail": "warning"
+    },
+    {
+      "status": true,
+      "test": "Alert has task_name",
+      "detail": "Live Authoring C12b 1ab39367"
+    },
+    {
+      "status": true,
+      "test": "GET /api/task-completed",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "Completed items is array",
+      "detail": "5 items"
+    },
+    {
+      "status": true,
+      "test": "Item has run data",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "Item has task_name",
+      "detail": "Live Authoring C12b 1ab39367"
+    },
+    {
+      "status": true,
+      "test": "GET /api/tasks for preview",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "GET /api/task-preview",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "Preview OK",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "Preview has task data",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "Preview has step_results",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "Preview has alerts",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "POST /api/sandbox/exec (C12b)",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "Sandbox exec succeeded",
+      "detail": "exit_code=0"
+    },
+    {
+      "status": true,
+      "test": "GET /api/runtime-status",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "Component c1 healthy",
+      "detail": "ok"
+    },
+    {
+      "status": true,
+      "test": "Component c3 healthy",
+      "detail": "ok"
+    },
+    {
+      "status": true,
+      "test": "Component c12b healthy",
+      "detail": "ok"
+    },
+    {
+      "status": true,
+      "test": "GET tasks for cascading check",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "Task type is output",
+      "detail": "output"
+    },
+    {
+      "status": true,
+      "test": "Task mode is chat",
+      "detail": "chat"
+    },
+    {
+      "status": true,
+      "test": "Task has 4 steps",
+      "detail": "4 steps"
+    },
+    {
+      "status": true,
+      "test": "Has trigger step",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "Has sandbox step",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "Has chat step",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "Has alert step",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "GET / (Dashboard)",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "GET /chat (Chat)",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "GET /tasked (Tasked)",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "GET /piplinetask (Pipeline)",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "GET /alerts (Alerts)",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "GET /task-completed (TaskCompleted)",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "GET /tasked-preview (Tasked Preview)",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "GET /logs (Logs)",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "GET /sessions (Sessions)",
+      "detail": null
+    },
+    {
+      "status": true,
+      "test": "GET /token-counter (Token Counter)",
+      "detail": null
+    }
+  ]
+}
