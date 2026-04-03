@@ -157,6 +157,7 @@
           '<div class="pipeline-item-meta">Run ID: ' + esc(run.id || '—') + ' · Trace ID: ' + esc(summary.trace_id || task.id || '—') + ' · Source: ' + esc(run.source || '—') + '</div>' +
           '<div class="pipeline-pills">' +
             '<span class="pipeline-pill">' + esc(task.mode_label || task.mode || 'Unknown') + '</span>' +
+            (task.tasked_type_label ? '<span class="pipeline-pill">' + esc(task.tasked_type_label) + '</span>' : '') +
             '<span class="pipeline-pill pipeline-badge ' + esc(run.status || summary.last_status || 'idle') + '">' + esc(run.status || summary.last_status || 'idle') + '</span>' +
             '<span class="pipeline-pill">Current step: ' + esc(summary.current_step_id || run.current_step_id || '—') + '</span>' +
             '<span class="pipeline-pill">Terminal: ' + esc(summary.terminal_reason || run.terminal_reason || '—') + '</span>' +
@@ -166,6 +167,7 @@
           '<a class="pipeline-link" href="' + esc(task.task_url || '/tasked') + '">Open Tasked</a>' +
           '<a class="pipeline-link" href="' + esc(task.alerts_url || '/alerts') + '">Open Alerts</a>' +
           '<a class="pipeline-link" href="' + esc(task.completed_url || '/task-completed') + '">Open Completed</a>' +
+          '<a class="pipeline-link" href="' + esc(task.preview_url || ('/tasked-preview?task_id=' + esc(task.id || ''))) + '">Preview Output</a>' +
         '</div>' +
       '</div>' +
       '<div class="pipeline-summary-grid">' +

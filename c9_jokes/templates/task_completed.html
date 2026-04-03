@@ -95,6 +95,7 @@
           '<a class="tc-link" href="' + esc(run.task_url || '/tasked') + '">Open Tasked</a>' +
           '<a class="tc-link" href="' + esc(run.pipeline_url || '/piplinetask') + '">Open Pipeline</a>' +
           '<a class="tc-link" href="/alerts">Open Alerts</a>' +
+          '<a class="tc-link" href="' + esc(run.preview_url || ('/tasked-preview?task_id=' + esc(run.task_id || ''))) + '">Preview Output</a>' +
         '</div>' +
       '</div>' +
       '<div class="tc-summary">' +

@@ -149,6 +149,7 @@
         '<td class="alerts-actions">' +
           '<a class="alerts-link" href="' + esc(a.task_url || '/tasked') + '">Open Tasked</a>' +
           '<a class="alerts-link" href="' + esc(a.pipeline_url || '/piplinetask') + '">Open Pipeline</a>' +
+          '<a class="alerts-link" href="' + esc(a.preview_url || ('/tasked-preview?task_id=' + esc(a.task_id || ''))) + '">Preview</a>' +
           ((a.run_status || '') && ['completed','failed','cancelled'].indexOf(a.run_status) >= 0 ? '<a class="alerts-link" href="' + esc(a.completed_url || '/task-completed') + '">Open Completed</a>' : '') +
           ((a.status || 'open') === 'open' ? '<button class="alerts-btn" data-action="acknowledged" data-id="' + esc(a.id) + '">Acknowledge</button>' : '') +
           ((a.status || 'open') !== 'resolved' ? '<button class="alerts-btn" data-action="resolved" data-id="' + esc(a.id) + '">Resolve</button>' : '') +
