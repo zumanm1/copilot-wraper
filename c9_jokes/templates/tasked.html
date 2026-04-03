@@ -228,6 +228,10 @@
               <option value="multi-agento">multi-Agento</option>
             </select>
           </label>
+          <label>
+            Output Type
+            <select id="task-tasked-type"></select>
+          </label>
         </div>
         <div class="tasked-row">
           <label>
@@ -494,6 +498,7 @@ Alert config example:
   var EXECUTOR_TARGETS = {{ task_executor_targets|safe }};
   var STEP_KINDS = {{ task_step_kinds|safe }};
   var AGENT_TARGETS = {{ task_agent_targets|safe }};
+  var TASKED_TYPE_OPTIONS = {{ tasked_type_options|safe }};
   var TASKED_AUTHOR_EXAMPLES = {{ tasked_author_examples|safe }};
   var state = { tasks: [], selectedId: '', formDirty: false, lastLoadedAt: '', steps: [], authorDraft: null, collapsedGroups: {} };
   var initialTaskId = new URLSearchParams(window.location.search).get('task_id') || '';
@@ -550,8 +555,22 @@ Alert config example:
     alertSeverity: document.getElementById('task-alert-severity'),
     alertWhileTrue: document.getElementById('task-alert-while-true'),
     completionMark: document.getElementById('task-completion-mark'),
-    completionArchive: document.getElementById('task-completion-archive')
+    completionArchive: document.getElementById('task-completion-archive'),
+    taskedType: document.getElementById('task-tasked-type')
   };
+
+  // Populate output-type select from server-injected options
+  (function() {
+    var sel = fields.taskedType;
+    if (!sel) return;
+    TASKED_TYPE_OPTIONS.forEach(function(opt) {
+      var o = document.createElement('option');
+      o.value = opt.id;
+      o.textContent = opt.label;
+      o.title = opt.desc || '';
+      sel.appendChild(o);
+    });
+  })();
 
   function esc(v){ return String(v == null ? '' : v).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
   function fmtTs(ts){ if(!ts) return '—'; try { return new Date(ts).toLocaleString(); } catch(_) { return ts; } }
@@ -783,6 +802,7 @@ Alert config example:
     fields.id.value = asDraft ? '' : (task.id || '');
     fields.name.value = task.name || '';
     fields.mode.value = task.mode || 'chat';
+    if (fields.taskedType) fields.taskedType.value = task.tasked_type || 'output';
     fields.scheduleKind.value = task.schedule_kind || 'manual';
     fields.interval.value = task.interval_minutes || 0;
     fields.tabs.value = task.tabs_required || 1;
@@ -847,6 +867,7 @@ Alert config example:
     fields.id.value = '';
     fields.name.value = '';
     fields.mode.value = 'chat';
+    if (fields.taskedType) fields.taskedType.value = 'output';
     fields.scheduleKind.value = 'manual';
     fields.interval.value = 10;
     fields.tabs.value = 2;
@@ -968,6 +989,7 @@ Alert config example:
       id: fields.id.value.trim(),
       name: fields.name.value.trim(),
       mode: fields.mode.value,
+      tasked_type: fields.taskedType ? fields.taskedType.value : 'output',
       schedule_kind: fields.scheduleKind.value,
       interval_minutes: parseInt(fields.interval.value || '0', 10) || 0,
       tabs_required: parseInt(fields.tabs.value || '1', 10) || 1,
@@ -1061,14 +1083,17 @@ Alert config example:
     var durationHtml = latestRun.is_running
       ? '<span data-live-start="' + esc(latestRun.started_at || latestRun.created_at || '') + '">' + esc(latestRun.duration_label || '0s') + '</span>'
       : esc(latestRun.duration_label || '—');
+    var typePill = t.tasked_type_label ? '<span class="tasked-pill" title="Output type">' + esc(t.tasked_type_label) + '</span> ' : '';
+    var previewUrl = t.preview_url || ('/tasked-preview?task_id=' + esc(t.id || ''));
     var actions =
       '<div class="tasked-row-actions">' +
       (isRunning ? '<button class="tasked-row-btn stop-btn" type="button" data-row-action="stop" data-task-id="' + esc(t.id) + '" data-task-name="' + esc(t.name) + '" title="Stop this task">Stop</button>' : '') +
       (!isTerminal ? '<button class="tasked-row-btn done-btn" type="button" data-row-action="complete" data-task-id="' + esc(t.id) + '" data-task-name="' + esc(t.name) + '" title="Mark as completed">Done</button>' : '') +
+      '<a class="tasked-row-btn" href="' + previewUrl + '" title="Preview output" style="text-decoration:none">Preview</a>' +
       '<button class="tasked-row-btn del-btn" type="button" data-row-action="delete" data-task-id="' + esc(t.id) + '" data-task-name="' + esc(t.name) + '" title="Permanently delete task">Del</button>' +
       '</div>';
     return '<tr data-id="' + esc(t.id) + '">' +
-      '<td><strong>' + esc(t.name) + '</strong>' + (sys ? '<span class="tasked-sys-badge" title="Created from a built-in template">sys</span>' : '') + '<div class="tasked-note">' + esc((t.template_label || t.template_key || 'custom')) + ' · ' + esc(t.id || '') + '</div><div class="tasked-note">' + (t.sandbox_assist ? ('AIO assist: ' + esc(executorLabel(t.sandbox_assist_target || '')) + ' · ' + esc(t.sandbox_assist_workspace_dir || '—')) : 'AIO assist disabled') + '</div><div class="tasked-note">Recovery: ' + esc(((t.latest_recovery_session || {}).status) || 'steady') + (((t.latest_recovery_session || {}).retry_count || 0) ? (' · retries ' + esc((t.latest_recovery_session || {}).retry_count)) : '') + '</div></td>' +
+      '<td><strong>' + esc(t.name) + '</strong>' + (sys ? '<span class="tasked-sys-badge" title="Created from a built-in template">sys</span>' : '') + '<div class="tasked-note">' + typePill + esc((t.template_label || t.template_key || 'custom')) + ' · ' + esc(t.id || '') + '</div><div class="tasked-note">' + (t.sandbox_assist ? ('AIO assist: ' + esc(executorLabel(t.sandbox_assist_target || '')) + ' · ' + esc(t.sandbox_assist_workspace_dir || '—')) : 'AIO assist disabled') + '</div><div class="tasked-note">Recovery: ' + esc(((t.latest_recovery_session || {}).status) || 'steady') + (((t.latest_recovery_session || {}).retry_count || 0) ? (' · retries ' + esc((t.latest_recovery_session || {}).retry_count)) : '') + '</div></td>' +
       '<td>' + esc(t.mode_label || t.mode) + '</td>' +
       '<td>' + esc(t.schedule_label || t.schedule_kind || '—') + '</td>' +
       '<td><span class="tasked-status ' + esc(t.lifecycle_state || t.last_status || 'idle') + '">' + esc(t.lifecycle_label || t.last_status || 'idle') + '</span></td>' +

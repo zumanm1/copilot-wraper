@@ -85,6 +85,14 @@ TASK_WORKFLOW_STEP_KINDS = [
     {"id": "complete", "label": "Complete"},
 ]
 
+TASKED_TYPE_OPTIONS = [
+    {"id": "output",   "label": "Output",      "desc": "Produces AI text or data output to review"},
+    {"id": "alert",    "label": "Alert Only",   "desc": "Creates alerts when conditions are met, no readable output"},
+    {"id": "action",   "label": "Action",       "desc": "Performs an action (file op, API call) with no review output"},
+    {"id": "hook",     "label": "Hook/Trigger", "desc": "Triggers external systems or webhooks"},
+    {"id": "combined", "label": "Combined",     "desc": "Combination: output + alert or multiple types"},
+]
+
 TASK_AGENT_TARGET_OPTIONS = [
     {"id": "c2-aider", "label": "C2"},
     {"id": "c5-claude-code", "label": "C5"},
@@ -842,6 +850,7 @@ def _ensure_db() -> None:
         "ALTER TABLE task_alerts ADD COLUMN severity TEXT DEFAULT 'info'",
         "ALTER TABLE task_alerts ADD COLUMN repeat_key TEXT DEFAULT ''",
         "ALTER TABLE task_alerts ADD COLUMN closed_by_run_id TEXT DEFAULT ''",
+        "ALTER TABLE task_definitions ADD COLUMN tasked_type TEXT DEFAULT 'output'",
     ):
         try:
             with sqlite3.connect(DEFAULT_DB) as conn:
@@ -1952,7 +1961,8 @@ async def _probe_health(client: httpx.AsyncClient, name: str, url: str, path: st
             "url": full,
             "ok": False,
             "http_status": None,
-            "error": str(e),
+            "body": None,
+            "error": str(e) or repr(e),
             "elapsed_ms": elapsed_ms,
         }
 
@@ -3433,6 +3443,9 @@ def _task_row_to_dict(row: sqlite3.Row | dict) -> dict:
     raw["lifecycle_label"] = raw["lifecycle_state"].replace("-", " ").title()
     raw["mode_label"] = _task_mode_label(raw.get("mode") or "")
     raw["template_label"] = _task_template_label(raw.get("template_key") or "")
+    raw["tasked_type"] = raw.get("tasked_type") or "output"
+    raw["tasked_type_label"] = _task_output_type_label(raw["tasked_type"])
+    raw["preview_url"] = f"/tasked-preview?task_id={quote(str(raw.get('id') or ''))}" if raw.get("id") else "/tasked-preview"
     return raw
 
 
@@ -3446,6 +3459,59 @@ def _task_executor_target_label(target: str) -> str:
 
 def _task_template_label(template_key: str) -> str:
     return next((item["name"] for item in _task_templates_payload(active_only=False) if item["key"] == template_key), template_key or "custom")
+
+
+def _task_output_type_label(tasked_type: str) -> str:
+    return next((item["label"] for item in TASKED_TYPE_OPTIONS if item["id"] == (tasked_type or "output")), "Output")
+
+
+def _compile_task_output_text(steps: list[dict], run: dict | None = None) -> str:
+    """Extract and compile readable output text from task step results."""
+    parts: list[str] = []
+    for step in steps:
+        kind = str(step.get("step_kind") or "")
+        name = str(step.get("step_name") or step.get("step_id") or "Step")
+        output = step.get("output") or {}
+        if not isinstance(output, dict):
+            output = {}
+        if kind == "trigger":
+            continue
+        elif kind == "condition":
+            matched = bool(output.get("matched"))
+            parts.append(f"[Condition: {name}] → {'MATCHED ✓' if matched else 'NOT MATCHED ✗'}")
+        elif kind == "chat":
+            text = str(output.get("text") or "").strip()
+            if text:
+                parts.append(f"=== {name} ===\n{text}")
+        elif kind == "sandbox":
+            text = str(output.get("text") or output.get("stdout") or "").strip()
+            if text:
+                parts.append(f"=== {name} (Sandbox) ===\n{text}")
+            val = str(output.get("validation_excerpt") or "").strip()
+            if val:
+                parts.append(f"--- Validation ---\n{val}")
+            tst = str(output.get("test_excerpt") or "").strip()
+            if tst:
+                parts.append(f"--- Test ---\n{tst}")
+        elif kind in ("agent", "multi-agent", "multi-agento"):
+            url = str(output.get("launch_url") or "")
+            parts.append(f"[{name}] Agent launched" + (f" → {url}" if url else " (no URL captured)"))
+        elif kind == "alert":
+            title = str(output.get("title") or "")
+            summary = str(output.get("summary") or "")
+            if title:
+                parts.append(f"[Alert] {title}" + (f"\n{summary}" if summary else ""))
+        elif kind == "complete":
+            summary = str(output.get("summary") or "").strip()
+            parts.append("[Complete] " + (summary or "Workflow finished."))
+    if not parts and run:
+        excerpt = str(run.get("output_excerpt") or "").strip()
+        if excerpt:
+            parts.append(f"=== Output ===\n{excerpt}")
+        err = str(run.get("error_text") or "").strip()
+        if err:
+            parts.append(f"=== Error ===\n{err}")
+    return "\n\n".join(parts) if parts else "(No output captured for this run.)"
 
 
 def _task_pipeline_build(
@@ -6000,6 +6066,7 @@ async def page_task_legacy(request: Request):
 async def page_tasked(request: Request):
     return templates.TemplateResponse(request, "tasked.html", {
         "task_modes": TASK_MODE_OPTIONS,
+        "tasked_type_options": json.dumps(TASKED_TYPE_OPTIONS, ensure_ascii=False),
         "task_executor_targets": json.dumps(TASK_EXECUTOR_TARGET_OPTIONS, ensure_ascii=False),
         "task_step_kinds": json.dumps(TASK_WORKFLOW_STEP_KINDS, ensure_ascii=False),
         "task_agent_targets": json.dumps(TASK_AGENT_TARGET_OPTIONS, ensure_ascii=False),
@@ -6036,6 +6103,92 @@ async def page_piplinetask(request: Request):
         "task_step_kinds": json.dumps(TASK_WORKFLOW_STEP_KINDS, ensure_ascii=False),
         "task_templates": json.dumps(_task_templates_payload(), ensure_ascii=False),
     })
+
+
+@app.get("/tasked-preview", response_class=HTMLResponse, name="page_tasked_preview")
+async def page_tasked_preview(request: Request):
+    return templates.TemplateResponse(request, "tasked_preview.html", {
+        "task_modes": json.dumps(TASK_MODE_OPTIONS, ensure_ascii=False),
+        "tasked_type_options": json.dumps(TASKED_TYPE_OPTIONS, ensure_ascii=False),
+        "task_executor_targets": json.dumps(TASK_EXECUTOR_TARGET_OPTIONS, ensure_ascii=False),
+    })
+
+
+@app.get("/api/task-preview", name="api_task_preview")
+async def api_task_preview(task_id: str = "", run_id: str = ""):
+    """Return full task input parameters + compiled output for the Tasked Preview page."""
+    if not task_id and not run_id:
+        return JSONResponse({"ok": False, "error": "task_id or run_id required"}, status_code=400)
+    try:
+        with _db() as conn:
+            # Resolve task_id from run_id if needed
+            if run_id and not task_id:
+                rr = conn.execute("SELECT task_id FROM task_runs WHERE id=?", (run_id,)).fetchone()
+                task_id = rr["task_id"] if rr else ""
+            if not task_id:
+                return JSONResponse({"ok": False, "error": "Task not found for given run_id"}, status_code=404)
+
+            task_row = conn.execute("SELECT * FROM task_definitions WHERE id=?", (task_id,)).fetchone()
+            if not task_row:
+                return JSONResponse({"ok": False, "error": "Task not found"}, status_code=404)
+            task = _task_row_to_dict(task_row)
+
+            # Step definitions (workflow design)
+            step_def_rows = conn.execute(
+                "SELECT * FROM task_workflow_steps WHERE task_id=? AND active=1 ORDER BY position ASC",
+                (task_id,),
+            ).fetchall()
+            step_definitions = [_task_step_to_dict(r) for r in step_def_rows]
+            task["steps"] = step_definitions or _task_build_default_steps(task)
+
+            # Run to preview (specified or latest)
+            if run_id:
+                run_row = conn.execute("SELECT * FROM task_runs WHERE id=?", (run_id,)).fetchone()
+            else:
+                run_row = conn.execute(
+                    "SELECT * FROM task_runs WHERE task_id=? ORDER BY created_at DESC LIMIT 1",
+                    (task_id,),
+                ).fetchone()
+            run = _task_run_to_dict(run_row) if run_row else None
+            actual_run_id = (run or {}).get("id") or ""
+
+            # Recent runs list (for run selector)
+            recent_run_rows = conn.execute(
+                "SELECT id, created_at, status, source FROM task_runs WHERE task_id=? ORDER BY created_at DESC LIMIT 20",
+                (task_id,),
+            ).fetchall()
+            recent_runs = [dict(r) for r in recent_run_rows]
+
+            # Step results for selected run
+            step_results: list[dict] = []
+            if actual_run_id:
+                sr_rows = conn.execute(
+                    "SELECT * FROM task_step_results WHERE run_id=? ORDER BY started_at ASC",
+                    (actual_run_id,),
+                ).fetchall()
+                step_results = [_task_step_result_to_dict(r) for r in sr_rows]
+
+            # Alerts for selected run
+            alert_rows = conn.execute(
+                "SELECT * FROM task_alerts WHERE run_id=? ORDER BY created_at DESC",
+                (actual_run_id,),
+            ).fetchall() if actual_run_id else []
+            alerts = [_task_alert_to_dict(r) for r in alert_rows]
+
+            # Compile text output
+            output_text = _compile_task_output_text(step_results, run)
+
+            return JSONResponse({
+                "ok": True,
+                "task": task,
+                "run": run,
+                "recent_runs": recent_runs,
+                "step_results": step_results,
+                "alerts": alerts,
+                "output_text": output_text,
+            })
+    except sqlite3.Error as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
 
 @app.get("/pairs", response_class=HTMLResponse, name="page_pairs")
@@ -6481,6 +6634,9 @@ async def api_tasks_upsert(request: Request):
     except Exception:
         tabs_required = 1
     active = 1 if body.get("active", True) else 0
+    tasked_type = (body.get("tasked_type") or "output").strip().lower()
+    if tasked_type not in {item["id"] for item in TASKED_TYPE_OPTIONS}:
+        tasked_type = "output"
 
     if not name:
         return JSONResponse({"ok": False, "error": "name required"}, status_code=400)
@@ -6558,6 +6714,7 @@ async def api_tasks_upsert(request: Request):
                         json.dumps(completion_policy, ensure_ascii=False), json.dumps(alert_policy, ensure_ascii=False), 1,
                     ),
                 )
+            conn.execute("UPDATE task_definitions SET tasked_type=? WHERE id=?", (tasked_type, task_id))
             _task_save_steps(conn, task_id, normalized_steps)
             row = conn.execute("SELECT * FROM task_definitions WHERE id=?", (task_id,)).fetchone()
         task = _task_row_to_dict(row)

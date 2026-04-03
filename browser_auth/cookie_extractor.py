@@ -1206,10 +1206,15 @@ class PagePool:
 
         Called automatically after cookie extraction completes.
         Tab 1 (auth tab, NOT in _pool_pages) is not touched here.
+        Skips tabs currently checked out by agents to prevent hanging.
         Returns number of tabs successfully reloaded.
         """
         reloaded = 0
-        pages_to_reload = list(_pool_pages)
+        agent_pages = set(self._agent_tabs.values())
+        pages_to_reload = [p for p in _pool_pages if p not in agent_pages]
+        skipped = len(_pool_pages) - len(pages_to_reload)
+        if skipped:
+            print(f"[PagePool] reload_all_tabs: skipping {skipped} agent-checked-out tab(s)")
         _sync_pool_monitor(self, phase="reloading", detail=f"Reloading {len(pages_to_reload)} pool tab(s)")
         for page in pages_to_reload:
             try:
@@ -2892,13 +2897,15 @@ async def prepare_pool_from_tab1(
     update_tab1_auth_progress("pool_expand_progress", "running", f"Preparing pool tabs for target {effective_target}")
     if not pool._initialized:
         await pool.initialize(context, progress_step_id="pool_expand_progress")
-    elif reload_existing:
+    elif reload_existing and pool.available == 0:
         reloaded = await pool.reload_all_tabs()
         update_tab1_auth_progress(
             "pool_expand_progress",
             "running",
             f"Reloaded existing pool tabs; target remains {effective_target}",
         )
+    else:
+        print(f"[prepare_pool] Pool already healthy ({pool.available}/{pool.size} free) — skipping reload")
     current_total = pool.available + len(pool.agents)
     if effective_target > current_total:
         added = await pool.expand_to(context, effective_target, progress_step_id="pool_expand_progress")
