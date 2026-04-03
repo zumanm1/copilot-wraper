@@ -2,297 +2,528 @@
 {% block title %}Tasked Preview{% endblock %}
 {% block content %}
 <style>
-.tp-shell{display:grid;gap:1rem;max-width:1100px}
+/* ── layout ─────────────────────────────────────────────────── */
+.tpv-shell{display:grid;grid-template-columns:288px 1fr;height:calc(100vh - 5.5rem);gap:0;overflow:hidden}
+.tpv-sidebar{display:flex;flex-direction:column;border-right:1px solid var(--border,rgba(255,255,255,0.09));overflow:hidden;background:var(--card,rgba(255,255,255,0.03))}
+.tpv-preview-panel{overflow-y:auto;padding:1rem 1.25rem;display:flex;flex-direction:column;gap:.9rem}
+
+/* ── sidebar internals ──────────────────────────────────────── */
+.tpv-search-bar{padding:.65rem .75rem .5rem;display:flex;flex-direction:column;gap:.45rem;border-bottom:1px solid var(--border,rgba(255,255,255,0.09))}
+.tpv-search-bar input{background:#111;border:1px solid var(--border,#333);border-radius:9px;color:var(--fg,#f5f5f7);padding:.45rem .65rem;font:inherit;font-size:.82rem;width:100%;box-sizing:border-box}
+.tpv-filter-row{display:flex;gap:.4rem}
+.tpv-filter-row select{background:#111;border:1px solid var(--border,#333);border-radius:8px;color:var(--fg,#f5f5f7);padding:.3rem .45rem;font:inherit;font-size:.76rem;flex:1;min-width:0}
+.tpv-section-head{padding:.5rem .75rem .3rem;font-size:.72rem;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
+.tpv-section-head span{font-weight:600}
+.tpv-section-head em{font-style:normal;opacity:.65}
+.tpv-task-list{overflow-y:auto;flex:1;display:flex;flex-direction:column;gap:.15rem;padding:.25rem .45rem}
+.tpv-task-item{cursor:pointer;border-radius:10px;padding:.52rem .6rem;display:grid;gap:.18rem;border:1px solid transparent;transition:background .12s,border-color .12s}
+.tpv-task-item:hover{background:rgba(255,255,255,0.05);border-color:var(--border,rgba(255,255,255,0.08))}
+.tpv-task-item.selected{background:rgba(10,132,255,0.1);border-color:rgba(10,132,255,0.35)}
+.tpv-task-item-name{font-size:.84rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:.35rem}
+.tpv-task-item-meta{font-size:.74rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tpv-completed-section{border-top:1px solid var(--border,rgba(255,255,255,0.09));flex-shrink:0}
+.tpv-completed-list{display:flex;flex-direction:column;gap:.15rem;padding:.25rem .45rem .55rem;max-height:220px;overflow-y:auto}
+.tpv-completed-row{cursor:pointer;border-radius:9px;padding:.42rem .6rem;display:flex;align-items:center;gap:.45rem;font-size:.78rem;border:1px solid transparent;transition:background .12s}
+.tpv-completed-row:hover{background:rgba(255,255,255,0.05);border-color:var(--border,rgba(255,255,255,0.08))}
+.tpv-completed-name{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--fg,#f5f5f7)}
+.tpv-completed-age{font-size:.73rem;color:var(--muted);flex-shrink:0}
+.tpv-pill{display:inline-flex;align-items:center;border:1px solid var(--border,#333);border-radius:999px;padding:.1rem .4rem;font-size:.7rem;color:var(--muted);background:#111;white-space:nowrap;flex-shrink:0}
+.tpv-pill.done,.tpv-pill.completed{color:#30d158;border-color:rgba(48,209,88,.3)}
+.tpv-pill.failed,.tpv-pill.error{color:#ff453a;border-color:rgba(255,69,58,.3)}
+.tpv-pill.running{color:#0a84ff;border-color:rgba(10,132,255,.3)}
+.tpv-pill.cancelled{color:#ffa000;border-color:rgba(255,160,0,.3)}
+
+/* ── preview panel ──────────────────────────────────────────── */
+.tp-empty-state{display:flex;flex-direction:column;align-items:center;justify-content:center;flex:1;color:var(--muted);font-size:.9rem;gap:.6rem;text-align:center;padding:3rem 1rem;opacity:.7}
 .tp-hero{background:var(--card,rgba(255,255,255,0.04));border:1px solid var(--border,rgba(255,255,255,0.08));border-radius:16px;padding:1rem 1.2rem;display:grid;gap:.55rem}
 .tp-hero-row{display:flex;align-items:flex-start;gap:.75rem;flex-wrap:wrap}
-.tp-hero h1{margin:0;font-size:1.2rem;flex:1;min-width:180px}
-.tp-hero-meta{font-size:.83rem;color:var(--muted);line-height:1.55;display:flex;gap:1rem;flex-wrap:wrap}
-.tp-type-pill{display:inline-flex;align-items:center;gap:.3rem;border:1px solid var(--border,#333);border-radius:999px;padding:.22rem .65rem;font-size:.73rem;color:var(--muted);background:#111;white-space:nowrap}
+.tp-hero h1{margin:0;font-size:1.1rem;flex:1;min-width:180px}
+.tp-hero-meta{font-size:.82rem;color:var(--muted);line-height:1.55;display:flex;gap:1rem;flex-wrap:wrap}
+.tp-type-pill{display:inline-flex;align-items:center;border:1px solid var(--border,#333);border-radius:999px;padding:.22rem .65rem;font-size:.73rem;color:var(--muted);background:#111;white-space:nowrap}
 .tp-run-bar{display:flex;align-items:center;gap:.65rem;flex-wrap:wrap}
-.tp-run-bar label{font-size:.83rem;color:var(--muted)}
-.tp-run-bar select{background:#111;border:1px solid var(--border,#333);border-radius:8px;color:var(--fg,#f5f5f7);padding:.35rem .6rem;font:inherit;font-size:.83rem}
+.tp-run-bar label{font-size:.82rem;color:var(--muted)}
+.tp-run-bar select{background:#111;border:1px solid var(--border,#333);border-radius:8px;color:var(--fg,#f5f5f7);padding:.35rem .6rem;font:inherit;font-size:.82rem}
 .tp-card{background:var(--card,rgba(255,255,255,0.04));border:1px solid var(--border,rgba(255,255,255,0.08));border-radius:14px;padding:.9rem 1rem}
-.tp-card h2{margin:0 0 .65rem 0;font-size:.95rem;display:flex;align-items:center;gap:.5rem}
-.tp-output{white-space:pre-wrap;word-break:break-word;background:#111;border:1px solid var(--border,#333);border-radius:12px;padding:.85rem;min-height:90px;font-size:.83rem;font-family:monospace;line-height:1.55;color:var(--fg,#f5f5f7)}
-.tp-empty{color:var(--muted);font-size:.83rem;font-style:italic}
+.tp-card h2{margin:0 0 .65rem 0;font-size:.93rem;display:flex;align-items:center;gap:.5rem}
+.tp-output{white-space:pre-wrap;word-break:break-word;background:#111;border:1px solid var(--border,#333);border-radius:12px;padding:.85rem;min-height:90px;font-size:.82rem;font-family:monospace;line-height:1.55;color:var(--fg,#f5f5f7)}
+.tp-empty{color:var(--muted);font-size:.82rem;font-style:italic}
 .tp-steps{display:grid;gap:.6rem}
 .tp-step{background:#111;border:1px solid var(--border,#333);border-radius:12px;padding:.75rem .85rem;display:grid;gap:.35rem}
 .tp-step-head{display:flex;justify-content:space-between;align-items:center;gap:.5rem;flex-wrap:wrap}
-.tp-step-name{font-size:.87rem;font-weight:600}
-.tp-step-meta{display:flex;gap:.55rem;align-items:center;font-size:.77rem;color:var(--muted)}
-.tp-step-output{white-space:pre-wrap;word-break:break-word;font-size:.77rem;font-family:monospace;color:var(--muted);background:#0d0d0d;border-radius:8px;padding:.5rem .65rem;max-height:160px;overflow:auto;margin-top:.25rem}
+.tp-step-name{font-size:.86rem;font-weight:600}
+.tp-step-meta{display:flex;gap:.55rem;align-items:center;font-size:.76rem;color:var(--muted)}
+.tp-step-output{white-space:pre-wrap;word-break:break-word;font-size:.76rem;font-family:monospace;color:var(--muted);background:#0d0d0d;border-radius:8px;padding:.5rem .65rem;max-height:160px;overflow:auto;margin-top:.25rem}
 .tp-alerts{display:grid;gap:.55rem}
 .tp-alert{display:grid;gap:.25rem;background:#111;border:1px solid var(--border,#333);border-radius:12px;padding:.7rem .85rem}
-.tp-alert-head{display:flex;align-items:center;gap:.5rem;font-size:.87rem;font-weight:600}
-.tp-alert-body{font-size:.8rem;color:var(--muted)}
-.tp-actions{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center}
-.tp-stat{font-size:.78rem;color:var(--muted)}
-.tp-loading{color:var(--muted);font-size:.85rem;padding:1.5rem 0;text-align:center}
+.tp-alert-head{display:flex;align-items:center;gap:.5rem;font-size:.86rem;font-weight:600}
+.tp-alert-body{font-size:.79rem;color:var(--muted)}
+.tp-actions{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;padding:.3rem 0}
+.tp-stat{font-size:.77rem;color:var(--muted)}
+.tp-loading{color:var(--muted);font-size:.85rem;padding:2rem 0;text-align:center}
 .sev-info{color:#0a84ff}.sev-warn{color:#ffa000}.sev-error{color:#ff453a}.sev-ok{color:#30d158}
+.tp-btn{background:var(--accent,#0a84ff);color:#fff;border:none;border-radius:9px;padding:.42rem .75rem;cursor:pointer;font:inherit;font-size:.82rem;display:inline-flex;align-items:center;gap:.35rem}
+.tp-btn.secondary{background:transparent;border:1px solid var(--border,#333);color:var(--fg,#f5f5f7);text-decoration:none}
+.tp-btn:disabled{opacity:.45;cursor:default}
+/* ── responsive ─────────────────────────────────────────────── */
+@media(max-width:780px){
+  .tpv-shell{grid-template-columns:1fr;grid-template-rows:auto 1fr;height:auto}
+  .tpv-sidebar{border-right:none;border-bottom:1px solid var(--border,rgba(255,255,255,0.09));max-height:52vh}
+  .tpv-task-list{max-height:200px}
+}
 </style>
 
-<div class="tp-shell" id="tp-root">
-  <div class="tp-loading" id="tp-loading">Loading preview…</div>
-
-  <!-- hero header -->
-  <div class="tp-hero" id="tp-hero" style="display:none">
-    <div class="tp-hero-row">
-      <h1 id="tp-task-name">—</h1>
-      <span class="tp-type-pill" id="tp-type-pill"></span>
+<div class="tpv-shell">
+  <!-- ── sidebar ── -->
+  <div class="tpv-sidebar">
+    <div class="tpv-search-bar">
+      <input id="tpv-search" type="search" placeholder="Search tasks…" autocomplete="off">
+      <div class="tpv-filter-row">
+        <select id="tpv-status-filter">
+          <option value="">All statuses</option>
+          <option value="idle">Idle</option>
+          <option value="running">Running</option>
+          <option value="completed">Completed</option>
+          <option value="failed">Failed</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+        <select id="tpv-type-filter">
+          <option value="">All types</option>
+          <option value="output">Output</option>
+          <option value="alert">Alert Only</option>
+          <option value="action">Action</option>
+          <option value="hook">Hook/Trigger</option>
+          <option value="combined">Combined</option>
+        </select>
+      </div>
     </div>
-    <div id="tp-task-desc" class="tp-stat"></div>
-    <div class="tp-hero-meta">
-      <span id="tp-mode-label"></span>
-      <span id="tp-run-status"></span>
-      <span id="tp-run-time"></span>
+    <div class="tpv-section-head"><span id="tpv-task-count-label">Tasks</span><em id="tpv-sidebar-note"></em></div>
+    <div class="tpv-task-list" id="tpv-task-list">
+      <div class="tp-loading">Loading tasks…</div>
     </div>
-    <!-- run selector -->
-    <div class="tp-run-bar" id="tp-run-bar" style="display:none">
-      <label for="tp-run-sel">Run:</label>
-      <select id="tp-run-sel"></select>
-      <span class="tp-stat" id="tp-run-count"></span>
+    <div class="tpv-completed-section">
+      <div class="tpv-section-head"><span>Last Completed</span><em id="tpv-completed-note"></em></div>
+      <div class="tpv-completed-list" id="tpv-completed-list">
+        <div class="tp-loading" style="padding:.5rem 0 .25rem">Loading…</div>
+      </div>
     </div>
   </div>
 
-  <!-- compiled output -->
-  <div class="tp-card" id="tp-output-card" style="display:none">
-    <h2>Output</h2>
-    <pre class="tp-output" id="tp-output-text"></pre>
-  </div>
+  <!-- ── preview panel ── -->
+  <div class="tpv-preview-panel" id="tpv-preview-panel">
+    <div class="tp-empty-state" id="tpv-empty-state">
+      <div style="font-size:2rem">🔍</div>
+      <div>Select a task from the list to preview its output, steps, and alerts.</div>
+    </div>
+    <div id="tpv-preview-loading" class="tp-loading" style="display:none">Loading preview…</div>
+    <div id="tpv-preview-error" style="display:none;color:var(--fail,#ff453a);font-size:.84rem"></div>
 
-  <!-- step results -->
-  <div class="tp-card" id="tp-steps-card" style="display:none">
-    <h2>Step Results <span class="tp-stat" id="tp-step-count"></span></h2>
-    <div class="tp-steps" id="tp-steps-list"></div>
-  </div>
+    <!-- hero header -->
+    <div class="tp-hero" id="tp-hero" style="display:none">
+      <div class="tp-hero-row">
+        <h1 id="tp-task-name">—</h1>
+        <span class="tp-type-pill" id="tp-type-pill"></span>
+      </div>
+      <div id="tp-task-desc" class="tp-stat"></div>
+      <div class="tp-hero-meta">
+        <span id="tp-mode-label"></span>
+        <span id="tp-run-status" class="tasked-status"></span>
+        <span id="tp-run-time"></span>
+      </div>
+      <div class="tp-run-bar" id="tp-run-bar" style="display:none">
+        <label for="tp-run-sel">Run:</label>
+        <select id="tp-run-sel"></select>
+        <span class="tp-stat" id="tp-run-count"></span>
+      </div>
+    </div>
 
-  <!-- alerts -->
-  <div class="tp-card" id="tp-alerts-card" style="display:none">
-    <h2>Alerts <span class="tp-stat" id="tp-alert-count"></span></h2>
-    <div class="tp-alerts" id="tp-alerts-list"></div>
-  </div>
+    <!-- output -->
+    <div class="tp-card" id="tp-output-card" style="display:none">
+      <h2>Output</h2>
+      <pre class="tp-output" id="tp-output-text"></pre>
+    </div>
 
-  <!-- actions -->
-  <div class="tp-actions" id="tp-actions" style="display:none">
-    <a id="tp-link-tasked" href="#" class="tasked-btn secondary" style="text-decoration:none;display:inline-flex;align-items:center;gap:.35rem;">Open in Tasked →</a>
-    <button id="tp-run-btn" class="tasked-btn">▶ Run Now</button>
-    <span class="tp-stat" id="tp-run-msg"></span>
-  </div>
+    <!-- step results -->
+    <div class="tp-card" id="tp-steps-card" style="display:none">
+      <h2>Step Results <span class="tp-stat" id="tp-step-count"></span></h2>
+      <div class="tp-steps" id="tp-steps-list"></div>
+    </div>
 
-  <div id="tp-error" style="display:none;color:var(--fail,#ff453a);font-size:.85rem;padding:.5rem 0"></div>
+    <!-- alerts -->
+    <div class="tp-card" id="tp-alerts-card" style="display:none">
+      <h2>Alerts <span class="tp-stat" id="tp-alert-count"></span></h2>
+      <div class="tp-alerts" id="tp-alerts-list"></div>
+    </div>
+
+    <!-- actions -->
+    <div class="tp-actions" id="tp-actions" style="display:none">
+      <a id="tp-link-tasked" href="#" class="tp-btn secondary">Open in Tasked →</a>
+      <a id="tp-link-pipeline" href="#" class="tp-btn secondary">Open Pipeline →</a>
+      <a id="tp-link-completed" href="#" class="tp-btn secondary">Completed →</a>
+      <button id="tp-run-btn" class="tp-btn">▶ Run Now</button>
+      <span class="tp-stat" id="tp-run-msg"></span>
+    </div>
+  </div>
 </div>
 
 <script>
 (function () {
-  const TASKED_TYPE_OPTIONS = {{ tasked_type_options | safe }};
+  var TASKED_TYPE_OPTIONS = {{ tasked_type_options | safe }};
 
+  /* ── utilities ──────────────────────────────────────────────── */
   function qs(id) { return document.getElementById(id); }
-  function show(id) { const el = qs(id); if (el) el.style.display = ''; }
-  function hide(id) { const el = qs(id); if (el) el.style.display = 'none'; }
-  function text(id, val) { const el = qs(id); if (el) el.textContent = val; }
-
-  const params = new URLSearchParams(location.search);
-  let taskId = params.get('task_id') || '';
-  let runId  = params.get('run_id')  || '';
-
-  function statusClass(s) {
-    if (!s) return '';
-    s = s.toLowerCase();
-    if (s === 'completed') return 'completed';
-    if (s === 'failed' || s === 'error') return 'failed';
-    if (s === 'running') return 'running';
-    return '';
+  function show(id) { var el = qs(id); if (el) el.style.display = ''; }
+  function hide(id) { var el = qs(id); if (el) el.style.display = 'none'; }
+  function text(id, val) { var el = qs(id); if (el) el.textContent = val; }
+  function esc(v) {
+    return String(v == null ? '' : v).replace(/[&<>"]/g, function(c){
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];
+    });
   }
-
-  function sevClass(sev) {
-    const m = { info: 'sev-info', warn: 'sev-warn', warning: 'sev-warn', error: 'sev-error', ok: 'sev-ok' };
-    return m[(sev || '').toLowerCase()] || 'sev-info';
-  }
-
-  function fmtDate(s) {
-    if (!s) return '';
-    try { return new Date(s).toLocaleString(); } catch { return s; }
-  }
-
+  function fmtDate(s) { if (!s) return ''; try { return new Date(s).toLocaleString(); } catch(_) { return s; } }
   function fmtMs(ms) {
     if (ms == null || ms === '') return '';
-    const n = Number(ms);
+    var n = Number(ms);
     if (isNaN(n)) return '';
     if (n < 1000) return n + 'ms';
     return (n / 1000).toFixed(1) + 's';
   }
-
+  function timeAgo(s) {
+    if (!s) return '';
+    try {
+      var diff = Math.round((Date.now() - new Date(s).getTime()) / 1000);
+      if (diff < 60) return diff + 's ago';
+      if (diff < 3600) return Math.round(diff / 60) + 'm ago';
+      if (diff < 86400) return Math.round(diff / 3600) + 'h ago';
+      return Math.round(diff / 86400) + 'd ago';
+    } catch(_) { return ''; }
+  }
   function typeLabel(tid) {
-    const opt = TASKED_TYPE_OPTIONS.find(o => o.id === tid);
+    var opt = TASKED_TYPE_OPTIONS.find(function(o){ return o.id === tid; });
     return opt ? opt.label : (tid || 'Output');
   }
+  function statusPillClass(s) {
+    if (!s) return '';
+    s = s.toLowerCase();
+    if (s === 'completed' || s === 'done') return 'done';
+    if (s === 'failed' || s === 'error') return 'failed';
+    if (s === 'running') return 'running';
+    if (s === 'cancelled') return 'cancelled';
+    return '';
+  }
+  function sevClass(sev) {
+    var m = { info: 'sev-info', warn: 'sev-warn', warning: 'sev-warn', error: 'sev-error', ok: 'sev-ok' };
+    return m[(sev || '').toLowerCase()] || 'sev-info';
+  }
 
-  function renderPreview(data) {
-    const task = data.task || {};
-    const run  = data.run  || null;
-    const steps = data.step_results || [];
-    const alerts = data.alerts || [];
-    const outputText = data.output_text || '';
-    const recentRuns = data.recent_runs || [];
+  /* ── state ──────────────────────────────────────────────────── */
+  var params = new URLSearchParams(location.search);
+  var currentTaskId = params.get('task_id') || '';
+  var currentRunId  = params.get('run_id')  || '';
+  var allTasks = [];
+  var runBtnListener = null;
+
+  /* ── sidebar: task list ─────────────────────────────────────── */
+  function renderTaskList(tasks) {
+    var listEl = qs('tpv-task-list');
+    if (!listEl) return;
+    if (!tasks.length) {
+      listEl.innerHTML = '<div class="tp-empty" style="padding:.6rem">No tasks match the filter.</div>';
+      return;
+    }
+    listEl.innerHTML = tasks.map(function(t) {
+      var ls = (t.lifecycle_state || t.last_status || 'idle').toLowerCase();
+      var pillCls = statusPillClass(ls);
+      var runStatus = (t.latest_run && t.latest_run.status) ? t.latest_run.status : ls;
+      var lastRun = t.latest_run ? timeAgo(t.latest_run.created_at) : '';
+      var selected = t.id === currentTaskId ? ' selected' : '';
+      return '<div class="tpv-task-item' + selected + '" data-task-id="' + esc(t.id) + '">' +
+        '<div class="tpv-task-item-name">' +
+          esc(t.name || t.id) +
+          '<span class="tpv-pill ' + esc(pillCls) + '">' + esc(runStatus) + '</span>' +
+        '</div>' +
+        '<div class="tpv-task-item-meta">' + esc(t.mode_label || t.mode || '') +
+          (lastRun ? ' · ' + lastRun : '') +
+          (t.tasked_type && t.tasked_type !== 'output' ? ' · ' + esc(typeLabel(t.tasked_type)) : '') +
+        '</div>' +
+      '</div>';
+    }).join('');
+    listEl.querySelectorAll('.tpv-task-item').forEach(function(el) {
+      el.addEventListener('click', function() { selectTask(el.dataset.taskId, ''); });
+    });
+  }
+
+  function filterSidebar() {
+    var q = (qs('tpv-search').value || '').toLowerCase();
+    var st = (qs('tpv-status-filter').value || '').toLowerCase();
+    var ty = (qs('tpv-type-filter').value || '').toLowerCase();
+    var filtered = allTasks.filter(function(t) {
+      var nameMatch = !q || (t.name || '').toLowerCase().includes(q) || (t.id || '').toLowerCase().includes(q);
+      var stateMatch = !st || (t.lifecycle_state || t.last_status || 'idle').toLowerCase() === st ||
+        (t.latest_run && (t.latest_run.status || '').toLowerCase() === st);
+      var typeMatch = !ty || (t.tasked_type || 'output') === ty;
+      return nameMatch && stateMatch && typeMatch;
+    });
+    text('tpv-task-count-label', 'Tasks (' + filtered.length + ')');
+    renderTaskList(filtered);
+  }
+
+  /* ── sidebar: last completed ────────────────────────────────── */
+  function renderCompleted(items) {
+    var listEl = qs('tpv-completed-list');
+    if (!listEl) return;
+    if (!items.length) {
+      listEl.innerHTML = '<div class="tp-empty" style="padding:.4rem .6rem">No completed runs yet.</div>';
+      text('tpv-completed-note', '0');
+      return;
+    }
+    text('tpv-completed-note', items.length + '');
+    listEl.innerHTML = items.map(function(item) {
+      var run = item.run || {};
+      var name = item.task_name || run.task_id || 'Task';
+      var st = (run.status || 'done').toLowerCase();
+      var pillCls = statusPillClass(st);
+      var age = timeAgo(run.completed_at || run.finished_at || run.created_at);
+      return '<div class="tpv-completed-row" data-task-id="' + esc(run.task_id || '') + '" data-run-id="' + esc(run.id || '') + '">' +
+        '<span class="tpv-completed-name" title="' + esc(name) + '">' + esc(name) + '</span>' +
+        (age ? '<span class="tpv-completed-age">' + esc(age) + '</span>' : '') +
+        '<span class="tpv-pill ' + esc(pillCls) + '">' + esc(st) + '</span>' +
+      '</div>';
+    }).join('');
+    listEl.querySelectorAll('.tpv-completed-row').forEach(function(el) {
+      el.addEventListener('click', function() {
+        selectTask(el.dataset.taskId, el.dataset.runId);
+      });
+    });
+  }
+
+  /* ── load sidebar data ──────────────────────────────────────── */
+  function loadSidebar() {
+    Promise.all([
+      fetch('/api/tasks', { cache: 'no-store' }).then(function(r){ return r.json(); }).catch(function(){ return {}; }),
+      fetch('/api/task-completed?limit=15', { cache: 'no-store' }).then(function(r){ return r.json(); }).catch(function(){ return {}; }),
+    ]).then(function(results) {
+      var tasksData = results[0];
+      var completedData = results[1];
+      allTasks = tasksData.tasks || [];
+      text('tpv-task-count-label', 'Tasks (' + allTasks.length + ')');
+      text('tpv-sidebar-note', '');
+      filterSidebar();
+      renderCompleted(completedData.items || []);
+    }).catch(function() {
+      var listEl = qs('tpv-task-list');
+      if (listEl) listEl.innerHTML = '<div class="tp-empty" style="padding:.6rem">Failed to load tasks.</div>';
+    });
+  }
+
+  /* ── select a task ──────────────────────────────────────────── */
+  function selectTask(taskId, runId) {
+    if (!taskId) return;
+    currentTaskId = taskId;
+    currentRunId = runId || '';
+    // update URL
+    var url = new URL(location.href);
+    url.searchParams.set('task_id', taskId);
+    if (runId) url.searchParams.set('run_id', runId); else url.searchParams.delete('run_id');
+    history.replaceState(null, '', url.toString());
+    // highlight sidebar item
+    document.querySelectorAll('.tpv-task-item').forEach(function(el) {
+      el.classList.toggle('selected', el.dataset.taskId === taskId);
+    });
+    loadPreview(taskId, runId);
+  }
+
+  /* ── preview panel rendering ────────────────────────────────── */
+  function clearPreview() {
+    hide('tpv-empty-state');
+    hide('tpv-preview-loading');
+    hide('tpv-preview-error');
+    hide('tp-hero');
+    hide('tp-output-card');
+    hide('tp-steps-card');
+    hide('tp-alerts-card');
+    hide('tp-actions');
+    // reset run selector
+    var sel = qs('tp-run-sel');
+    if (sel) { sel.innerHTML = ''; hide('tp-run-bar'); }
+    // remove old run btn listener
+    var btn = qs('tp-run-btn');
+    if (btn && runBtnListener) { btn.removeEventListener('click', runBtnListener); runBtnListener = null; btn.disabled = false; }
+    text('tp-run-msg', '');
+  }
+
+  function renderPreview(data, taskId) {
+    var task = data.task || {};
+    var run  = data.run  || null;
+    var steps = data.step_results || [];
+    var alerts = data.alerts || [];
+    var outputText = data.output_text || '';
+    var recentRuns = data.recent_runs || [];
 
     // hero
     text('tp-task-name', task.name || '(Unnamed task)');
-    const pill = qs('tp-type-pill');
+    var pill = qs('tp-type-pill');
     if (pill) pill.textContent = typeLabel(task.tasked_type);
-    const desc = qs('tp-task-desc');
+    var desc = qs('tp-task-desc');
     if (desc) desc.textContent = task.description || '';
-
-    const modeEl = qs('tp-mode-label');
+    var modeEl = qs('tp-mode-label');
     if (modeEl) modeEl.textContent = task.mode_label ? 'Mode: ' + task.mode_label : '';
 
     if (run) {
-      const sc = statusClass(run.status);
-      text('tp-run-status', 'Status: ' + (run.status || '—'));
-      qs('tp-run-status').className = 'tasked-status ' + sc;
+      var st = (run.status || '').toLowerCase();
+      var stEl = qs('tp-run-status');
+      if (stEl) { stEl.textContent = 'Status: ' + (run.status || '—'); stEl.className = 'tasked-status ' + (statusPillClass(st)); }
       text('tp-run-time', run.created_at ? fmtDate(run.created_at) : '');
+    } else {
+      text('tp-run-status', 'No runs yet');
+      text('tp-run-time', '');
     }
 
     // run selector
     if (recentRuns.length > 1) {
-      const sel = qs('tp-run-sel');
-      sel.innerHTML = recentRuns.map(r => {
-        const label = fmtDate(r.created_at) + ' — ' + (r.status || '?') + (r.source ? ' (' + r.source + ')' : '');
-        const selected = r.id === (run ? run.id : '') ? ' selected' : '';
-        return '<option value="' + r.id + '"' + selected + '>' + label + '</option>';
-      }).join('');
-      sel.addEventListener('change', function () {
-        runId = this.value;
-        const url = new URL(location.href);
-        url.searchParams.set('task_id', taskId);
-        url.searchParams.set('run_id', runId);
-        history.replaceState(null, '', url.toString());
-        load();
-      });
-      text('tp-run-count', recentRuns.length + ' runs');
-      show('tp-run-bar');
+      var sel = qs('tp-run-sel');
+      if (sel) {
+        sel.innerHTML = recentRuns.map(function(r) {
+          var label = fmtDate(r.created_at) + ' — ' + (r.status || '?') + (r.source ? ' (' + r.source + ')' : '');
+          var selected = r.id === (run ? run.id : '') ? ' selected' : '';
+          return '<option value="' + esc(r.id) + '"' + selected + '>' + esc(label) + '</option>';
+        }).join('');
+        sel.onchange = function() {
+          currentRunId = this.value;
+          var url = new URL(location.href);
+          url.searchParams.set('run_id', currentRunId);
+          history.replaceState(null, '', url.toString());
+          loadPreview(taskId, currentRunId);
+        };
+        text('tp-run-count', recentRuns.length + ' runs');
+        show('tp-run-bar');
+      }
     }
 
     show('tp-hero');
 
     // output
-    const outEl = qs('tp-output-text');
-    if (outEl) outEl.textContent = outputText;
+    var outEl = qs('tp-output-text');
+    if (outEl) outEl.textContent = outputText || '(No output captured for this run.)';
     show('tp-output-card');
 
     // steps
-    const stepsList = qs('tp-steps-list');
+    var stepsList = qs('tp-steps-list');
     if (stepsList && steps.length) {
       text('tp-step-count', '(' + steps.length + ')');
-      stepsList.innerHTML = steps.map(function (s) {
-        const sc = statusClass(s.status);
-        const dur = fmtMs(s.duration_ms);
-        let outputSnippet = '';
+      stepsList.innerHTML = steps.map(function(s) {
+        var sc = statusPillClass(s.status);
+        var dur = fmtMs(s.duration_ms);
+        var outputSnippet = '';
         if (s.output && typeof s.output === 'object') {
-          const keys = Object.keys(s.output).filter(k => s.output[k] != null && s.output[k] !== '');
+          var keys = Object.keys(s.output).filter(function(k){ return s.output[k] != null && s.output[k] !== ''; });
           if (keys.length) {
-            const preview = {};
-            keys.slice(0, 4).forEach(k => {
-              const v = s.output[k];
-              preview[k] = typeof v === 'string' && v.length > 120 ? v.slice(0, 120) + '…' : v;
+            var preview = {};
+            keys.slice(0, 4).forEach(function(k) {
+              var v = s.output[k];
+              preview[k] = typeof v === 'string' && v.length > 140 ? v.slice(0, 140) + '…' : v;
             });
             outputSnippet = JSON.stringify(preview, null, 2);
           }
         }
         return '<div class="tp-step">' +
           '<div class="tp-step-head">' +
-            '<span class="tp-step-name">' + (s.step_name || s.step_id || 'Step') + '</span>' +
+            '<span class="tp-step-name">' + esc(s.step_name || s.step_id || 'Step') + '</span>' +
             '<div class="tp-step-meta">' +
-              (s.step_kind ? '<span class="tp-type-pill">' + s.step_kind + '</span>' : '') +
-              '<span class="tasked-status ' + sc + '">' + (s.status || '—') + '</span>' +
-              (dur ? '<span>' + dur + '</span>' : '') +
+              (s.step_kind ? '<span class="tp-type-pill">' + esc(s.step_kind) + '</span>' : '') +
+              '<span class="tpv-pill ' + esc(sc) + '">' + esc(s.status || '—') + '</span>' +
+              (dur ? '<span>' + esc(dur) + '</span>' : '') +
             '</div>' +
           '</div>' +
-          (outputSnippet ? '<pre class="tp-step-output">' + outputSnippet + '</pre>' : '') +
+          (outputSnippet ? '<pre class="tp-step-output">' + esc(outputSnippet) + '</pre>' : '') +
         '</div>';
       }).join('');
+      show('tp-steps-card');
+    } else if (stepsList) {
+      stepsList.innerHTML = '<div class="tp-empty">No step results for this run.</div>';
       show('tp-steps-card');
     }
 
     // alerts
-    const alertsList = qs('tp-alerts-list');
+    var alertsList = qs('tp-alerts-list');
     if (alertsList && alerts.length) {
       text('tp-alert-count', '(' + alerts.length + ')');
-      alertsList.innerHTML = alerts.map(function (a) {
-        const sc = sevClass(a.severity);
+      alertsList.innerHTML = alerts.map(function(a) {
+        var sc = sevClass(a.severity);
         return '<div class="tp-alert">' +
-          '<div class="tp-alert-head"><span class="' + sc + '">' + (a.severity || 'info').toUpperCase() + '</span> ' + (a.title || '') + '</div>' +
-          (a.summary ? '<div class="tp-alert-body">' + a.summary + '</div>' : '') +
+          '<div class="tp-alert-head"><span class="' + esc(sc) + '">' + esc((a.severity || 'info').toUpperCase()) + '</span> ' + esc(a.title || '') + '</div>' +
+          (a.summary ? '<div class="tp-alert-body">' + esc(a.summary.slice(0, 300)) + '</div>' : '') +
         '</div>';
       }).join('');
       show('tp-alerts-card');
     }
 
     // actions
-    const taskedLink = qs('tp-link-tasked');
-    if (taskedLink && taskId) taskedLink.href = '/tasked?task_id=' + encodeURIComponent(taskId);
-    const runBtn = qs('tp-run-btn');
+    var taskedLink = qs('tp-link-tasked');
+    if (taskedLink) taskedLink.href = task.task_url || ('/tasked?task_id=' + encodeURIComponent(taskId));
+    var pipeLink = qs('tp-link-pipeline');
+    if (pipeLink) pipeLink.href = task.pipeline_url || ('/piplinetask?task_id=' + encodeURIComponent(taskId));
+    var doneLink = qs('tp-link-completed');
+    if (doneLink) doneLink.href = task.completed_url || ('/task-completed?task_id=' + encodeURIComponent(taskId));
+
+    var runBtn = qs('tp-run-btn');
     if (runBtn) {
-      runBtn.addEventListener('click', function () {
+      runBtnListener = function() {
         runBtn.disabled = true;
         text('tp-run-msg', 'Triggering run…');
         fetch('/api/task/' + encodeURIComponent(taskId) + '/run', { method: 'POST' })
-          .then(r => r.json())
-          .then(function (d) {
+          .then(function(r){ return r.json(); })
+          .then(function(d) {
             if (d.ok || d.run_id) {
               text('tp-run-msg', 'Run started: ' + (d.run_id || ''));
-              setTimeout(load, 2000);
+              setTimeout(function(){ loadPreview(taskId, ''); }, 2500);
             } else {
               text('tp-run-msg', 'Error: ' + (d.error || 'unknown'));
               runBtn.disabled = false;
             }
           })
-          .catch(function () {
-            text('tp-run-msg', 'Request failed');
-            runBtn.disabled = false;
-          });
-      });
+          .catch(function() { text('tp-run-msg', 'Request failed'); runBtn.disabled = false; });
+      };
+      runBtn.addEventListener('click', runBtnListener);
     }
     show('tp-actions');
   }
 
-  function load() {
-    hide('tp-hero');
-    hide('tp-output-card');
-    hide('tp-steps-card');
-    hide('tp-alerts-card');
-    hide('tp-actions');
-    hide('tp-error');
-    show('tp-loading');
-
-    if (!taskId) {
-      hide('tp-loading');
-      const errEl = qs('tp-error');
-      if (errEl) { errEl.textContent = 'No task_id in URL. Open via /tasked-preview?task_id=<id>'; errEl.style.display = ''; }
-      return;
-    }
-
-    let url = '/api/task-preview?task_id=' + encodeURIComponent(taskId);
+  /* ── load preview ───────────────────────────────────────────── */
+  function loadPreview(taskId, runId) {
+    clearPreview();
+    show('tpv-preview-loading');
+    var url = '/api/task-preview?task_id=' + encodeURIComponent(taskId);
     if (runId) url += '&run_id=' + encodeURIComponent(runId);
-
-    fetch(url)
-      .then(r => r.json())
-      .then(function (data) {
-        hide('tp-loading');
+    fetch(url, { cache: 'no-store' })
+      .then(function(r){ return r.json(); })
+      .then(function(data) {
+        hide('tpv-preview-loading');
         if (!data.ok) {
-          const errEl = qs('tp-error');
+          var errEl = qs('tpv-preview-error');
           if (errEl) { errEl.textContent = data.error || 'Failed to load preview'; errEl.style.display = ''; }
           return;
         }
-        renderPreview(data);
+        renderPreview(data, taskId);
       })
-      .catch(function (e) {
-        hide('tp-loading');
-        const errEl = qs('tp-error');
+      .catch(function(e) {
+        hide('tpv-preview-loading');
+        var errEl = qs('tpv-preview-error');
         if (errEl) { errEl.textContent = 'Fetch error: ' + e.message; errEl.style.display = ''; }
       });
   }
 
-  load();
+  /* ── wire up filters ────────────────────────────────────────── */
+  qs('tpv-search').addEventListener('input', filterSidebar);
+  qs('tpv-status-filter').addEventListener('change', filterSidebar);
+  qs('tpv-type-filter').addEventListener('change', filterSidebar);
+
+  /* ── init ───────────────────────────────────────────────────── */
+  loadSidebar();
+  if (currentTaskId) {
+    loadPreview(currentTaskId, currentRunId);
+  } else {
+    show('tpv-empty-state');
+  }
 })();
 </script>
 {% endblock %}
