@@ -2,109 +2,541 @@
 {% block title %}C3 Auth{% endblock %}
 {% block content %}
 
-<div class="card" style="margin-bottom:1rem;">
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:0.8rem;flex-wrap:wrap;">
-    <div>
-      <h2 style="margin:0 0 0.35rem 0;">C3 Tab 1 Auth Progress</h2>
-      <div class="muted" style="font-size:0.9rem;">
-        Tracks the 25-step Tab 1 and worker-pool sequence, including pool expansion and inheritance checks.
+<div class="c3-auth-header">
+  <div class="c3-auth-header-left">
+    <h2 class="c3-auth-title">C3 Tab 1 Auth Progress</h2>
+    <p class="c3-auth-subtitle">Tracks the 25-step Tab 1 authentication and worker-pool sequence</p>
+  </div>
+  <div class="c3-auth-actions">
+    <button id="run-auth-btn" class="btn-run">
+      <span class="btn-run-icon">&#9654;</span>
+      <span class="btn-run-text">Run Validation</span>
+    </button>
+    <button id="refresh-auth-btn" class="btn-refresh" title="Refresh (R)">
+      <span class="btn-refresh-icon">&#8635;</span>
+    </button>
+  </div>
+</div>
+
+<div id="auth-toast" class="auth-toast" role="alert" aria-live="polite"></div>
+
+<div class="c3-auth-overview">
+  <div class="c3-auth-card c3-auth-card--summary">
+    <div class="c3-auth-card-header">
+      <h3 class="c3-auth-card-title">Run Summary</h3>
+      <span id="auth-run-badge" class="status-badge status-badge--idle">Idle</span>
+    </div>
+    <div class="c3-auth-summary-grid">
+      <div class="c3-auth-summary-item">
+        <span class="c3-auth-summary-label">Run ID</span>
+        <span id="auth-run-id" class="c3-auth-summary-value" data-copyable>—</span>
+      </div>
+      <div class="c3-auth-summary-item">
+        <span class="c3-auth-summary-label">Current Step</span>
+        <span id="auth-current-step" class="c3-auth-summary-value">—</span>
+      </div>
+      <div class="c3-auth-summary-item">
+        <span class="c3-auth-summary-label">Started</span>
+        <span id="auth-started" class="c3-auth-summary-value">—</span>
+      </div>
+      <div class="c3-auth-summary-item">
+        <span class="c3-auth-summary-label">Updated</span>
+        <span id="auth-updated" class="c3-auth-summary-value">—</span>
+      </div>
+      <div class="c3-auth-summary-item">
+        <span class="c3-auth-summary-label">Session</span>
+        <span id="auth-session" class="c3-auth-summary-value">—</span>
+      </div>
+      <div class="c3-auth-summary-item">
+        <span class="c3-auth-summary-label">C3 Pool</span>
+        <span id="auth-pool" class="c3-auth-summary-value">—</span>
       </div>
     </div>
-    <div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">
-      <button id="run-auth-btn" class="btn-sm">Run Tab 1 Validation</button>
-      <button id="refresh-auth-btn" class="btn-sm">Refresh</button>
+    <div class="c3-auth-result-area">
+      <div class="c3-auth-result-label">Result</div>
+      <pre id="auth-result" class="c3-auth-result">Waiting for first poll…</pre>
+    </div>
+  </div>
+
+  <div class="c3-auth-card c3-auth-card--runtime">
+    <h3 class="c3-auth-card-title">Runtime Context</h3>
+    <div class="c3-auth-runtime-grid">
+      <div class="c3-auth-runtime-item">
+        <span class="c3-auth-runtime-label">Runtime</span>
+        <span id="runtime-summary" class="c3-auth-runtime-value">—</span>
+      </div>
+      <div class="c3-auth-runtime-item">
+        <span class="c3-auth-runtime-label">M365 Session</span>
+        <span id="runtime-session" class="c3-auth-runtime-value">—</span>
+      </div>
+      <div class="c3-auth-runtime-item">
+        <span class="c3-auth-runtime-label">C3 Status</span>
+        <span id="runtime-c3" class="c3-auth-runtime-value">—</span>
+      </div>
+      <div class="c3-auth-runtime-item">
+        <span class="c3-auth-runtime-label">Progress API</span>
+        <span id="runtime-progress" class="c3-auth-runtime-value">—</span>
+      </div>
     </div>
   </div>
 </div>
 
-<div style="display:grid;grid-template-columns:1.1fr 0.9fr;gap:1rem;align-items:start;">
-  <div class="card">
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.75rem;">
-      <strong>Run Summary</strong>
-      <span id="auth-run-badge" class="badge">Idle</span>
-    </div>
-    <div id="auth-summary-grid" style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:0.6rem 1rem;font-size:0.88rem;">
-      <div><span class="muted">Run ID</span><div id="auth-run-id">—</div></div>
-      <div><span class="muted">Current step</span><div id="auth-current-step">—</div></div>
-      <div><span class="muted">Started</span><div id="auth-started">—</div></div>
-      <div><span class="muted">Updated</span><div id="auth-updated">—</div></div>
-      <div><span class="muted">Session</span><div id="auth-session">—</div></div>
-      <div><span class="muted">C3 pool</span><div id="auth-pool">—</div></div>
-    </div>
-    <div style="margin-top:0.85rem;">
-      <div class="muted" style="font-size:0.8rem;margin-bottom:0.25rem;">Error / last result</div>
-      <pre id="auth-result" style="min-height:4.5rem;margin:0;">Waiting for first poll…</pre>
-    </div>
-  </div>
-
-  <div class="card">
-    <strong style="display:block;margin-bottom:0.75rem;">Runtime Context</strong>
-    <div style="display:grid;gap:0.55rem;font-size:0.88rem;">
-      <div><span class="muted">Runtime badge</span><div id="runtime-summary">—</div></div>
-      <div><span class="muted">M365 session</span><div id="runtime-session">—</div></div>
-      <div><span class="muted">C3 status</span><div id="runtime-c3">—</div></div>
-      <div><span class="muted">Progress API</span><div id="runtime-progress">—</div></div>
-    </div>
-  </div>
-</div>
-
-<div class="card" style="margin-top:1rem;">
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.75rem;">
-    <strong>Pool Monitor</strong>
+<div class="c3-auth-card c3-auth-card--pool">
+  <div class="c3-auth-card-header">
+    <h3 class="c3-auth-card-title">Pool Monitor</h3>
     <span class="muted" id="pool-monitor-note">Tracking current pool state</span>
   </div>
-  <div id="pool-monitor-grid" style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:0.6rem 1rem;font-size:0.88rem;">
-    <div><span class="muted">Phase</span><div id="pool-phase">—</div></div>
-    <div><span class="muted">Target</span><div id="pool-target">—</div></div>
-    <div><span class="muted">Current</span><div id="pool-current">—</div></div>
-    <div><span class="muted">Free</span><div id="pool-free">—</div></div>
-    <div><span class="muted">Agent tabs</span><div id="pool-agent-tabs">—</div></div>
-    <div><span class="muted">Last action</span><div id="pool-last-action">—</div></div>
+  <div class="c3-auth-pool-area">
+    <div class="c3-auth-pool-gauge">
+      <svg id="pool-gauge-svg" viewBox="0 0 120 120" class="pool-gauge-svg">
+        <circle cx="60" cy="60" r="50" class="pool-gauge-bg" />
+        <circle id="pool-gauge-ring" cx="60" cy="60" r="50" class="pool-gauge-ring" />
+        <text id="pool-gauge-text" x="60" y="56" class="pool-gauge-text">—</text>
+        <text id="pool-gauge-label" x="60" y="72" class="pool-gauge-label">available</text>
+      </svg>
+    </div>
+    <div class="c3-auth-pool-stats">
+      <div class="c3-auth-pool-stat">
+        <span class="c3-auth-pool-stat-label">Phase</span>
+        <span id="pool-phase" class="c3-auth-pool-stat-value">—</span>
+      </div>
+      <div class="c3-auth-pool-stat">
+        <span class="c3-auth-pool-stat-label">Target</span>
+        <span id="pool-target" class="c3-auth-pool-stat-value">—</span>
+      </div>
+      <div class="c3-auth-pool-stat">
+        <span class="c3-auth-pool-stat-label">Current</span>
+        <span id="pool-current" class="c3-auth-pool-stat-value">—</span>
+      </div>
+      <div class="c3-auth-pool-stat">
+        <span class="c3-auth-pool-stat-label">Agent Tabs</span>
+        <span id="pool-agent-tabs" class="c3-auth-pool-stat-value">—</span>
+      </div>
+      <div class="c3-auth-pool-stat">
+        <span class="c3-auth-pool-stat-label">Last Action</span>
+        <span id="pool-last-action" class="c3-auth-pool-stat-value">—</span>
+      </div>
+    </div>
   </div>
-  <div style="margin-top:0.85rem;">
-    <div class="muted" style="font-size:0.8rem;margin-bottom:0.25rem;">Pool detail</div>
-    <pre id="pool-detail" style="min-height:3.4rem;margin:0;">Waiting for first poll…</pre>
+  <div class="c3-auth-pool-detail">
+    <div class="c3-auth-pool-detail-label">Pool Detail</div>
+    <pre id="pool-detail" class="c3-auth-pool-detail-text">Waiting for first poll…</pre>
   </div>
 </div>
 
-<div class="card" style="margin-top:1rem;">
-  <div style="display:flex;align-items:center;justify-content:space-between;gap:0.5rem;flex-wrap:wrap;margin-bottom:0.75rem;">
-    <strong>25-Step Checklist</strong>
+<div class="c3-auth-card c3-auth-card--steps">
+  <div class="c3-auth-card-header">
+    <h3 class="c3-auth-card-title">25-Step Checklist</h3>
     <span class="muted" id="auth-poll-note">Polling…</span>
   </div>
-  <ol id="step-list" style="list-style:none;padding:0;margin:0;display:grid;gap:0.6rem;"></ol>
+
+  <div id="phase-progress-bar" class="phase-progress-bar">
+    <div class="phase-segment" data-phase="setup" title="Setup (Steps 1-6)">
+      <span class="phase-segment-label">Setup</span>
+      <div class="phase-segment-track"><div class="phase-segment-fill" id="phase-fill-setup"></div></div>
+    </div>
+    <div class="phase-segment" data-phase="hello" title="Hello (Steps 7-13)">
+      <span class="phase-segment-label">Hello</span>
+      <div class="phase-segment-track"><div class="phase-segment-fill" id="phase-fill-hello"></div></div>
+    </div>
+    <div class="phase-segment" data-phase="follow" title="Follow-up (Steps 14-19)">
+      <span class="phase-segment-label">Follow-up</span>
+      <div class="phase-segment-track"><div class="phase-segment-fill" id="phase-fill-follow"></div></div>
+    </div>
+    <div class="phase-segment" data-phase="pool" title="Pool (Steps 20-25)">
+      <span class="phase-segment-label">Pool</span>
+      <div class="phase-segment-track"><div class="phase-segment-fill" id="phase-fill-pool"></div></div>
+    </div>
+  </div>
+
+  <div id="step-phases" class="step-phases"></div>
 </div>
 
 <style>
-.c3-auth-step{
-  display:grid;
-  grid-template-columns:auto 1fr;
-  gap:0.75rem;
-  align-items:start;
-  border:1px solid var(--border);
-  border-radius:10px;
-  padding:0.7rem 0.8rem;
-  background:rgba(245,245,247,0.02);
+.c3-auth-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
 }
-.c3-auth-step .idx{
-  width:1.65rem;
-  height:1.65rem;
-  border-radius:999px;
-  display:inline-flex;
-  align-items:center;
-  justify-content:center;
-  font-size:0.75rem;
-  font-weight:700;
-  background:rgba(142,142,147,0.18);
-  color:var(--muted);
+.c3-auth-title {
+  font-size: 1.35rem;
+  font-weight: 700;
+  margin: 0 0 0.25rem 0;
+  letter-spacing: -0.01em;
 }
-.c3-auth-step.pending .idx{ background:rgba(142,142,147,0.18); color:var(--muted); }
-.c3-auth-step.running .idx{ background:rgba(10,132,255,0.18); color:#0a84ff; }
-.c3-auth-step.done .idx{ background:rgba(48,209,88,0.18); color:#30d158; }
-.c3-auth-step.error .idx{ background:rgba(255,69,58,0.18); color:#ff453a; }
-.c3-auth-step .label{ font-weight:600; }
-.c3-auth-step .meta{ font-size:0.78rem; color:var(--muted); margin-top:0.2rem; }
-.c3-auth-step .detail{ font-size:0.82rem; margin-top:0.22rem; white-space:pre-wrap; word-break:break-word; }
+.c3-auth-subtitle {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+.c3-auth-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-shrink: 0;
+}
+.btn-run {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 1rem;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.1s ease;
+  margin-top: 0;
+}
+.btn-run:hover:not(:disabled) { background: #0070e0; }
+.btn-run:active:not(:disabled) { transform: scale(0.97); }
+.btn-run:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-run-icon { font-size: 0.75rem; }
+.btn-run.loading .btn-run-text::after { content: '…'; animation: dots 1.2s steps(3, end) infinite; }
+.btn-refresh {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 1.1rem;
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease;
+  margin-top: 0;
+}
+.btn-refresh:hover { color: var(--accent); border-color: var(--accent); }
+.btn-refresh.spinning { animation: spin 0.8s linear infinite; }
+
+@keyframes dots {
+  0% { content: ''; }
+  33% { content: '.'; }
+  66% { content: '..'; }
+  100% { content: '...'; }
+}
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.auth-toast {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 8px;
+  font-size: 0.88rem;
+  font-weight: 500;
+  z-index: 1000;
+  transform: translateX(120%);
+  transition: transform 0.3s ease;
+  max-width: 360px;
+}
+.auth-toast.visible { transform: translateX(0); }
+.auth-toast.success { background: rgba(48, 209, 88, 0.15); border: 1px solid var(--ok); color: var(--ok); }
+.auth-toast.error { background: rgba(255, 59, 48, 0.15); border: 1px solid var(--fail); color: var(--fail); }
+.auth-toast.info { background: rgba(10, 132, 255, 0.15); border: 1px solid var(--accent); color: var(--accent); }
+
+.c3-auth-overview {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr;
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+.c3-auth-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.1rem;
+  transition: border-color 0.2s ease;
+}
+.c3-auth-card:hover { border-color: rgba(245, 245, 247, 0.2); }
+.c3-auth-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.85rem;
+}
+.c3-auth-card-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 0.2rem 0.65rem;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.status-badge--idle { background: var(--surface2); color: var(--muted); }
+.status-badge--running { background: rgba(10, 132, 255, 0.15); color: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+.status-badge--passed { background: rgba(48, 209, 88, 0.15); color: var(--ok); }
+.status-badge--failed { background: rgba(255, 59, 48, 0.15); color: var(--fail); }
+
+.c3-auth-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+}
+.c3-auth-summary-item { display: flex; flex-direction: column; gap: 0.15rem; }
+.c3-auth-summary-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.c3-auth-summary-value { font-size: 0.88rem; word-break: break-all; }
+
+.c3-auth-result-area { margin-top: 0.85rem; }
+.c3-auth-result-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.35rem; }
+.c3-auth-result {
+  min-height: 4.5rem;
+  max-height: 8rem;
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.65rem;
+  overflow-y: auto;
+}
+
+.c3-auth-runtime-grid { display: flex; flex-direction: column; gap: 0.65rem; }
+.c3-auth-runtime-item { display: flex; flex-direction: column; gap: 0.15rem; }
+.c3-auth-runtime-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.c3-auth-runtime-value { font-size: 0.85rem; word-break: break-all; }
+
+.c3-auth-pool-area {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  margin-bottom: 0.85rem;
+}
+.c3-auth-pool-gauge { flex-shrink: 0; width: 120px; height: 120px; }
+.pool-gauge-svg { width: 100%; height: 100%; }
+.pool-gauge-bg {
+  fill: none;
+  stroke: var(--surface3);
+  stroke-width: 8;
+}
+.pool-gauge-ring {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 8;
+  stroke-linecap: round;
+  stroke-dasharray: 314.16;
+  stroke-dashoffset: 314.16;
+  transform: rotate(-90deg);
+  transform-origin: center;
+  transition: stroke-dashoffset 0.6s ease, stroke 0.3s ease;
+}
+.pool-gauge-ring.full { stroke: var(--ok); }
+.pool-gauge-ring.partial { stroke: var(--accent); }
+.pool-gauge-ring.empty { stroke: var(--fail); }
+.pool-gauge-text {
+  fill: var(--fg);
+  font-size: 22px;
+  font-weight: 700;
+  text-anchor: middle;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif;
+}
+.pool-gauge-label {
+  fill: var(--muted);
+  font-size: 10px;
+  text-anchor: middle;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", sans-serif;
+}
+.c3-auth-pool-stats {
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.65rem;
+}
+.c3-auth-pool-stat { display: flex; flex-direction: column; gap: 0.15rem; }
+.c3-auth-pool-stat-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; }
+.c3-auth-pool-stat-value { font-size: 0.88rem; }
+.c3-auth-pool-detail { margin-top: 0.5rem; }
+.c3-auth-pool-detail-label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.35rem; }
+.c3-auth-pool-detail-text {
+  min-height: 3rem;
+  max-height: 6rem;
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem;
+  overflow-y: auto;
+}
+
+.phase-progress-bar {
+  display: flex;
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+  padding: 0.75rem;
+  background: var(--surface2);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+.phase-segment {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.phase-segment-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  text-align: center;
+}
+.phase-segment-track {
+  height: 6px;
+  background: var(--surface3);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.phase-segment-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 3px;
+  transition: width 0.4s ease, background 0.3s ease;
+  background: var(--muted);
+}
+.phase-segment-fill.done { background: var(--ok); }
+.phase-segment-fill.running { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+.phase-segment-fill.error { background: var(--fail); }
+
+.step-phases { display: flex; flex-direction: column; gap: 1.25rem; }
+.step-phase { }
+.step-phase-header {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  cursor: pointer;
+  padding: 0.5rem 0;
+  user-select: none;
+}
+.step-phase-header:hover .step-phase-title { color: var(--accent); }
+.step-phase-chevron {
+  width: 16px;
+  height: 16px;
+  color: var(--muted);
+  transition: transform 0.2s ease;
+  flex-shrink: 0;
+}
+.step-phase-header.open .step-phase-chevron { transform: rotate(90deg); }
+.step-phase-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  margin: 0;
+  transition: color 0.15s ease;
+}
+.step-phase-count {
+  font-size: 0.72rem;
+  color: var(--muted);
+  background: var(--surface3);
+  padding: 0.1rem 0.45rem;
+  border-radius: 10px;
+}
+.step-phase-body {
+  display: grid;
+  gap: 0.5rem;
+  padding-left: 1.25rem;
+  overflow: hidden;
+  max-height: 0;
+  opacity: 0;
+  transition: max-height 0.35s ease, opacity 0.25s ease, padding 0.35s ease;
+}
+.step-phase-body.open {
+  max-height: 2000px;
+  opacity: 1;
+  padding-top: 0.5rem;
+}
+
+.c3-step {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 0.65rem;
+  align-items: start;
+  padding: 0.6rem 0.75rem;
+  border-radius: 8px;
+  background: var(--surface2);
+  border: 1px solid transparent;
+  transition: border-color 0.2s ease, background 0.2s ease;
+}
+.c3-step:hover { border-color: var(--border); }
+.c3-step.pending { opacity: 0.5; }
+.c3-step.running { border-color: rgba(10, 132, 255, 0.3); background: rgba(10, 132, 255, 0.04); }
+.c3-step.done { border-color: rgba(48, 209, 88, 0.2); }
+.c3-step.error { border-color: rgba(255, 59, 48, 0.3); background: rgba(255, 59, 48, 0.04); }
+.c3-step-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.7rem;
+  font-weight: 700;
+  background: var(--surface3);
+  color: var(--muted);
+  flex-shrink: 0;
+  transition: background 0.2s ease, color 0.2s ease;
+}
+.c3-step.pending .c3-step-dot { background: var(--surface3); color: var(--muted); }
+.c3-step.running .c3-step-dot { background: rgba(10, 132, 255, 0.2); color: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
+.c3-step.done .c3-step-dot { background: rgba(48, 209, 88, 0.2); color: var(--ok); }
+.c3-step.error .c3-step-dot { background: rgba(255, 59, 48, 0.2); color: var(--fail); }
+.c3-step-content { min-width: 0; }
+.c3-step-label { font-weight: 600; font-size: 0.88rem; }
+.c3-step-meta { font-size: 0.75rem; color: var(--muted); margin-top: 0.15rem; }
+.c3-step-detail { font-size: 0.8rem; margin-top: 0.25rem; white-space: pre-wrap; word-break: break-word; color: var(--muted); }
+
+[data-copyable] { cursor: pointer; position: relative; }
+[data-copyable]:hover::after {
+  content: 'copy';
+  position: absolute;
+  top: -1.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 0.65rem;
+  color: var(--accent);
+  background: var(--card);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .c3-auth-overview { grid-template-columns: 1fr; }
+  .c3-auth-summary-grid { grid-template-columns: repeat(2, 1fr); }
+  .c3-auth-pool-area { flex-direction: column; align-items: flex-start; }
+  .c3-auth-pool-stats { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 600px) {
+  .c3-auth-header { flex-direction: column; }
+  .c3-auth-actions { width: 100%; justify-content: flex-start; }
+  .c3-auth-summary-grid { grid-template-columns: 1fr; }
+  .c3-auth-pool-stats { grid-template-columns: 1fr; }
+  .phase-progress-bar { flex-direction: column; gap: 0.35rem; }
+  .phase-segment { flex-direction: row; align-items: center; }
+  .phase-segment-label { width: 80px; text-align: left; }
+}
 </style>
 
 <script>
@@ -112,11 +544,19 @@
   var runBtn = document.getElementById('run-auth-btn');
   var refreshBtn = document.getElementById('refresh-auth-btn');
   var runBadge = document.getElementById('auth-run-badge');
-  var stepList = document.getElementById('step-list');
+  var toast = document.getElementById('auth-toast');
+  var stepPhases = document.getElementById('step-phases');
   var authResult = document.getElementById('auth-result');
   var pollNote = document.getElementById('auth-poll-note');
   var inflight = false;
   var pollTimer = null;
+
+  var PHASES = [
+    { id: 'setup', label: 'Setup', steps: [0,1,2,3,4,5] },
+    { id: 'hello', label: 'Hello', steps: [6,7,8,9,10,11,12] },
+    { id: 'follow', label: 'Follow-up', steps: [13,14,15,16,17,18] },
+    { id: 'pool', label: 'Pool', steps: [19,20,21,22,23,24] },
+  ];
 
   function esc(v) {
     return String(v == null ? '' : v)
@@ -127,9 +567,15 @@
       .replace(/'/g, '&#39;');
   }
 
+  function showToast(msg, type) {
+    toast.textContent = msg;
+    toast.className = 'auth-toast ' + (type || 'info') + ' visible';
+    setTimeout(function() { toast.classList.remove('visible'); }, 3500);
+  }
+
   function setBadge(text, level) {
     runBadge.textContent = text;
-    runBadge.className = 'badge ' + (level || '');
+    runBadge.className = 'status-badge status-badge--' + (level || 'idle');
   }
 
   function fmtDuration(ms) {
@@ -147,30 +593,94 @@
     return session.session + profile + mode;
   }
 
-  function renderSteps(steps) {
-    if (!Array.isArray(steps) || !steps.length) {
-      stepList.innerHTML = '<li class="muted">No C3 auth progress data yet.</li>';
+  function updateGauge(available, total) {
+    var ring = document.getElementById('pool-gauge-ring');
+    var text = document.getElementById('pool-gauge-text');
+    var label = document.getElementById('pool-gauge-label');
+    if (!total || total === 0) {
+      ring.style.strokeDashoffset = 314.16;
+      text.textContent = '0';
+      label.textContent = 'of 0';
+      ring.className.baseVal = 'pool-gauge-ring empty';
       return;
     }
-    stepList.innerHTML = steps.map(function(step, idx) {
-      var status = step.status || 'pending';
-      return (
-        '<li class="c3-auth-step ' + esc(status) + '">' +
-          '<div class="idx">' + (idx + 1) + '</div>' +
-          '<div>' +
-            '<div class="label">' + esc(step.label || step.id || ('Step ' + (idx + 1))) + '</div>' +
-            '<div class="meta">Status: ' + esc(status) +
-              (step.updated_at ? ' · ' + esc(step.updated_at) : '') +
-              ' · last ' + esc(fmtDuration(step.last_ms)) +
-              ' · min ' + esc(fmtDuration(step.stats && step.stats.min_ms)) +
-              ' · avg ' + esc(fmtDuration(step.stats && step.stats.avg_ms)) +
-              ' · max ' + esc(fmtDuration(step.stats && step.stats.max_ms)) +
-            '</div>' +
-            '<div class="detail">' + esc(step.detail || '—') + '</div>' +
-          '</div>' +
-        '</li>'
-      );
-    }).join('');
+    var pct = available / total;
+    var offset = 314.16 * (1 - pct);
+    ring.style.strokeDashoffset = offset;
+    text.textContent = available;
+    label.textContent = 'of ' + total;
+    ring.className.baseVal = 'pool-gauge-ring ' + (pct >= 0.75 ? 'full' : pct >= 0.25 ? 'partial' : 'empty');
+  }
+
+  function updatePhaseProgress(steps) {
+    PHASES.forEach(function(phase) {
+      var fill = document.getElementById('phase-fill-' + phase.id);
+      if (!fill) return;
+      var total = phase.steps.length;
+      var done = 0;
+      var hasRunning = false;
+      var hasError = false;
+      phase.steps.forEach(function(idx) {
+        var s = steps[idx];
+        if (!s) return;
+        if (s.status === 'done') done++;
+        if (s.status === 'running') hasRunning = true;
+        if (s.status === 'error') hasError = true;
+      });
+      var pct = total > 0 ? (done / total * 100) : 0;
+      fill.style.width = pct + '%';
+      fill.className = 'phase-segment-fill ' + (hasError ? 'error' : hasRunning ? 'running' : pct >= 100 ? 'done' : '');
+    });
+  }
+
+  function renderStepPhases(steps) {
+    if (!Array.isArray(steps) || !steps.length) {
+      stepPhases.innerHTML = '<div class="muted" style="padding:1rem 0;text-align:center;">No C3 auth progress data yet.</div>';
+      return;
+    }
+    var html = '';
+    PHASES.forEach(function(phase, pi) {
+      var phaseSteps = phase.steps.map(function(idx) { return steps[idx]; }).filter(Boolean);
+      var doneCount = phaseSteps.filter(function(s) { return s.status === 'done'; }).length;
+      var totalCount = phaseSteps.length;
+      var isOpen = pi === 0;
+      html += '<div class="step-phase">';
+      html += '<div class="step-phase-header' + (isOpen ? ' open' : '') + '" data-phase="' + esc(phase.id) + '">';
+      html += '<svg class="step-phase-chevron" viewBox="0 0 16 16" fill="currentColor"><path d="M6 3l5 5-5 5z"/></svg>';
+      html += '<h4 class="step-phase-title">' + esc(phase.label) + '</h4>';
+      html += '<span class="step-phase-count">' + doneCount + '/' + totalCount + '</span>';
+      html += '</div>';
+      html += '<div class="step-phase-body' + (isOpen ? ' open' : '') + '" data-phase-body="' + esc(phase.id) + '">';
+      phaseSteps.forEach(function(step, si) {
+        var globalIdx = phase.steps[si];
+        var status = step.status || 'pending';
+        html += '<div class="c3-step ' + esc(status) + '">';
+        html += '<div class="c3-step-dot">' + (globalIdx + 1) + '</div>';
+        html += '<div class="c3-step-content">';
+        html += '<div class="c3-step-label">' + esc(step.label || step.id || ('Step ' + (globalIdx + 1))) + '</div>';
+        html += '<div class="c3-step-meta">';
+        html += esc(status);
+        if (step.updated_at) html += ' · ' + esc(step.updated_at);
+        html += ' · last ' + esc(fmtDuration(step.last_ms));
+        html += ' · min ' + esc(fmtDuration(step.stats && step.stats.min_ms));
+        html += ' · avg ' + esc(fmtDuration(step.stats && step.stats.avg_ms));
+        html += ' · max ' + esc(fmtDuration(step.stats && step.stats.max_ms));
+        html += '</div>';
+        if (step.detail) html += '<div class="c3-step-detail">' + esc(step.detail) + '</div>';
+        html += '</div></div>';
+      });
+      html += '</div></div>';
+    });
+    stepPhases.innerHTML = html;
+
+    stepPhases.querySelectorAll('.step-phase-header').forEach(function(header) {
+      header.addEventListener('click', function() {
+        var phaseId = this.getAttribute('data-phase');
+        var body = stepPhases.querySelector('[data-phase-body="' + phaseId + '"]');
+        this.classList.toggle('open');
+        if (body) body.classList.toggle('open');
+      });
+    });
   }
 
   function render(payload) {
@@ -194,20 +704,21 @@
     document.getElementById('runtime-c3').textContent = c3status.status ? JSON.stringify(c3status) : '—';
     document.getElementById('runtime-progress').textContent = payload && payload.ok ? 'available' : ('unavailable' + (payload && payload.http_status ? ' · HTTP ' + payload.http_status : ''));
 
-    if (active) setBadge('Running', 'warn');
-    else if (result === 'ok') setBadge('Passed', 'ok');
-    else if (result === 'error') setBadge('Failed', 'fail');
-    else setBadge('Idle', '');
+    if (active) setBadge('Running', 'running');
+    else if (result === 'ok') setBadge('Passed', 'passed');
+    else if (result === 'error') setBadge('Failed', 'failed');
+    else setBadge('Idle', 'idle');
 
     var lines = [];
     if (progress.error) lines.push(progress.error);
     if (!lines.length && progress.result) lines.push('Result: ' + progress.result);
     if (!lines.length) lines.push('No run result yet.');
     authResult.textContent = lines.join('\n');
+
+    updateGauge(pool.pool_available || 0, pool.pool_size || 0);
     document.getElementById('pool-phase').textContent = pool.phase || 'idle';
     document.getElementById('pool-target').textContent = (pool.target_size || 0) ? String(pool.target_size) : '—';
     document.getElementById('pool-current').textContent = (pool.pool_size || 0) ? String(pool.pool_size) : '0';
-    document.getElementById('pool-free').textContent = (pool.pool_available || 0) + ' free';
     document.getElementById('pool-agent-tabs').textContent = String(pool.agent_tabs || 0);
     document.getElementById('pool-last-action').textContent =
       'added ' + String(pool.last_added || 0) + ' · reloaded ' + String(pool.last_reloaded || 0);
@@ -216,8 +727,10 @@
       'Current ' + (pool.pool_initialized ? 'initialized' : 'not initialized') +
       ' · target ' + String(pool.target_size || 0) +
       ' · requested ' + String(pool.requested_target || 0);
-    renderSteps(progress.steps || []);
-    pollNote.textContent = active ? 'Polling every 2s while run is active' : 'Polling every 5s';
+
+    updatePhaseProgress(progress.steps || []);
+    renderStepPhases(progress.steps || []);
+    pollNote.textContent = active ? 'Polling every 2s while active' : 'Polling every 5s';
   }
 
   async function refresh() {
@@ -227,9 +740,9 @@
       render(data);
       return data;
     } catch (err) {
-      setBadge('Unavailable', 'fail');
+      setBadge('Unavailable', 'failed');
       authResult.textContent = String(err);
-      stepList.innerHTML = '<li class="muted">Failed to load /api/c3-auth-progress.</li>';
+      stepPhases.innerHTML = '<div class="muted" style="padding:1rem 0;text-align:center;">Failed to load /api/c3-auth-progress.</div>';
       return null;
     }
   }
@@ -248,8 +761,11 @@
     if (inflight) return;
     inflight = true;
     runBtn.disabled = true;
-    setBadge('Starting…', 'warn');
+    runBtn.classList.add('loading');
+    refreshBtn.classList.add('spinning');
+    setBadge('Starting…', 'running');
     authResult.textContent = 'Starting validate-auth run…';
+    showToast('Starting C3 auth validation…', 'info');
     fetch('/api/c3-auth-progress/run', { method: 'POST' })
       .then(function(res) {
         return res.json().then(function(body) {
@@ -258,13 +774,18 @@
       })
       .then(function(out) {
         authResult.textContent = JSON.stringify(out.body, null, 2);
+        if (out.ok) showToast('Validation run completed', 'success');
+        else showToast('Validation run failed (HTTP ' + out.status + ')', 'error');
       })
       .catch(function(err) {
         authResult.textContent = String(err);
+        showToast('Validation run error: ' + String(err), 'error');
       })
       .finally(function() {
         inflight = false;
         runBtn.disabled = false;
+        runBtn.classList.remove('loading');
+        refreshBtn.classList.remove('spinning');
         refresh().then(function(data) {
           scheduleNext(!!(data && data.progress && data.progress.active));
         });
@@ -275,8 +796,28 @@
 
   runBtn.addEventListener('click', startRun);
   refreshBtn.addEventListener('click', function() {
+    refreshBtn.classList.add('spinning');
     refresh().then(function(data) {
+      refreshBtn.classList.remove('spinning');
       scheduleNext(!!(data && data.progress && data.progress.active));
+    });
+  });
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'r' && !e.ctrlKey && !e.metaKey && document.activeElement.tagName !== 'INPUT' && document.activeElement.tagName !== 'TEXTAREA') {
+      e.preventDefault();
+      refreshBtn.click();
+    }
+  });
+
+  document.querySelectorAll('[data-copyable]').forEach(function(el) {
+    el.addEventListener('click', function() {
+      var text = this.textContent.trim();
+      if (text && text !== '—') {
+        navigator.clipboard.writeText(text).then(function() {
+          showToast('Copied: ' + text.substring(0, 50), 'success');
+        });
+      }
     });
   });
 
