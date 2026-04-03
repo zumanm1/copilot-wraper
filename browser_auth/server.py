@@ -36,6 +36,7 @@ from cookie_extractor import (
     extract_and_save,
     extract_access_token,
     finish_tab1_auth_progress,
+    mark_tab1_auth_progress_done,
     get_context,
     get_pool_monitor_snapshot,
     get_tab1_auth_progress_snapshot,
@@ -435,6 +436,7 @@ async def validate_auth():
         pool_tabs_reloaded = 0
         pool_tabs_added = 0
         if result.get("validated"):
+            mark_tab1_auth_progress_done("pool_ready", "Tab 1 validated; pool preparation starting")
             pool_result = await prepare_pool_from_tab1(reload_existing=True)
             pool_tabs_reloaded = int(pool_result.get("pool_tabs_reloaded") or 0)
             pool_tabs_added = int(pool_result.get("pool_tabs_added") or 0)

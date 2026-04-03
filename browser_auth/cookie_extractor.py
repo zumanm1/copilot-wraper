@@ -2907,8 +2907,13 @@ async def prepare_pool_from_tab1(
     else:
         print(f"[prepare_pool] Pool already healthy ({pool.available}/{pool.size} free) — skipping reload")
     current_total = pool.available + len(pool.agents)
-    if effective_target > current_total:
+    if effective_target > pool.size:
         added = await pool.expand_to(context, effective_target, progress_step_id="pool_expand_progress")
+    elif effective_target > current_total:
+        print(
+            f"[prepare_pool] Pool at size={pool.size} (target={effective_target}); "
+            f"{current_total} tabs tracked ({pool.available} free + {len(pool.agents)} agent); skipping expand"
+        )
     mark_tab1_auth_progress_done(
         "pool_expand_progress",
         f"Pool prep complete: size={pool.size}, free={pool.available}, added={added}, reloaded={reloaded}",
@@ -2931,10 +2936,6 @@ async def prepare_pool_from_tab1(
     mark_tab1_auth_progress_done(
         "pool_expand_done",
         f"Pool steady: target={effective_target}, size={pool.size}, free={pool.available}",
-    )
-    mark_tab1_auth_progress_done(
-        "pool_ready",
-        f"Pool ready ({pool.available}/{pool.size} tabs free; reloaded {reloaded}; added {added})",
     )
     _sync_pool_monitor(
         pool,
