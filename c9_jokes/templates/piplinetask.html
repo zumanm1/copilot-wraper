@@ -271,6 +271,7 @@
     } catch(e) {
       listEl.innerHTML = '<div class="pipeline-empty">Failed to load task pipelines. ' + esc(e.message) + '</div>';
     } finally { pipelineIsLoading = false; }
+  }
 
   async function loadRuntime() {
     var res = await fetch('/api/runtime-status?force=true', { cache: 'no-store' });
