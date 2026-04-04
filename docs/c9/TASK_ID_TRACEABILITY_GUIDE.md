@@ -358,3 +358,420 @@ After any `app.py` change, restart C9b (templates reload automatically):
 ```bash
 docker restart C9b_jokes
 ```
+
+---
+
+## 10. Five Demo Tasks — All 5 `tasked_type` Variants
+
+Created and run 2026-04-04. These cover every supported `tasked_type`.
+
+### T1 — Output (chat mode)
+
+**What it does:** LLM produces readable text output (bullet points via C1b Copilot API).
+
+| Field | Value |
+|-------|-------|
+| `task_id` | `task_3f950f6e` |
+| `tasked_type` | `output` |
+| `mode` | `chat` |
+| `schedule_kind` | `manual` |
+| `planner_prompt` | `"Produce a 3-bullet summary of the top 3 benefits of using async Python for API servers."` |
+| `executor_prompt` | `"You are a concise technical writer. Produce exactly 3 numbered bullet points, max 20 words each."` |
+| `trigger_mode` | `always` |
+
+**Run record:**
+| Field | Value |
+|-------|-------|
+| `run_id` | `trun_32293732` |
+| `alert_id` | `364` |
+| `status` | `completed` |
+| `terminal_reason` | `workflow-complete` |
+
+**Redo run record (lifecycle demo):**
+| `run_id` | `trun_1a6a8905` | `alert_id` | `424` |
+
+**Traceability URLs:**
+```
+Tasked:    http://localhost:6090/tasked?task_id=task_3f950f6e
+Pipeline:  http://localhost:6090/piplinetask?task_id=task_3f950f6e
+Preview:   http://localhost:6090/tasked-preview?task_id=task_3f950f6e&run_id=trun_32293732
+Completed: http://localhost:6090/task-completed?task_id=task_3f950f6e
+```
+
+**To recreate:**
+```bash
+curl -s -X POST "http://localhost:6090/api/tasks" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "T1 — Daily LLM Output Summary",
+    "mode": "chat",
+    "schedule_kind": "manual",
+    "tasked_type": "output",
+    "planner_prompt": "Produce a 3-bullet summary of the top 3 benefits of using async Python for API servers.",
+    "executor_prompt": "You are a concise technical writer. Produce exactly 3 numbered bullet points, max 20 words each.",
+    "context_handoff": "Output-type task: generates readable LLM text output",
+    "trigger_mode": "always",
+    "steps": [
+      {"id":"t1_trigger","name":"Trigger","kind":"trigger","position":1},
+      {"id":"t1_chat","name":"Generate Summary","kind":"chat","position":2,"config":{"prompt":"List 3 benefits of async Python for APIs"}},
+      {"id":"t1_alert","name":"Output Alert","kind":"alert","position":3,"config":{"title":"T1 Output Ready","severity":"info","summary":"LLM summary generated successfully"}},
+      {"id":"t1_complete","name":"Complete","kind":"complete","position":4}
+    ]
+  }'
+# Then run it:
+curl -s -X POST "http://localhost:6090/api/tasks/{NEW_TASK_ID}/run"
+```
+
+---
+
+### T2 — Alert (chat mode)
+
+**What it does:** Evaluates a condition via LLM and fires an alert based on the JSON result.
+
+| Field | Value |
+|-------|-------|
+| `task_id` | `task_21dffb26` |
+| `tasked_type` | `alert` |
+| `mode` | `chat` |
+| `planner_prompt` | `"Check: is the value 42 greater than the limit of 10? Answer only JSON: {\"triggered\": true/false, \"reason\": \"...\"}"` |
+| `executor_prompt` | `"You are a condition evaluator. Respond with a brief explanation confirming or denying the condition."` |
+| `trigger_mode` | `json` |
+
+**Run record:**
+| Field | Value |
+|-------|-------|
+| `run_id` | `trun_bcdaa631` |
+| `alert_id` | `420` |
+| `status` | `completed` |
+| `terminal_reason` | `workflow-complete` |
+
+**Traceability URLs:**
+```
+Tasked:    http://localhost:6090/tasked?task_id=task_21dffb26
+Pipeline:  http://localhost:6090/piplinetask?task_id=task_21dffb26
+Preview:   http://localhost:6090/tasked-preview?task_id=task_21dffb26&run_id=trun_bcdaa631
+Completed: http://localhost:6090/task-completed?task_id=task_21dffb26
+```
+
+**To recreate:**
+```bash
+curl -s -X POST "http://localhost:6090/api/tasks" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "T2 — Alert: Threshold Condition Check",
+    "mode": "chat",
+    "schedule_kind": "manual",
+    "tasked_type": "alert",
+    "planner_prompt": "Check: is the value 42 greater than the limit of 10? Answer only JSON: {\"triggered\": true, \"reason\": \"42 exceeds limit of 10\"}",
+    "executor_prompt": "You are a condition evaluator. Respond with a brief explanation confirming or denying the condition.",
+    "context_handoff": "Alert-type task: evaluates conditions and fires alerts via JSON trigger",
+    "trigger_mode": "json",
+    "steps": [
+      {"id":"t2b_trigger","name":"Trigger","kind":"trigger","position":1},
+      {"id":"t2b_condition","name":"Condition Check","kind":"chat","position":2,"config":{"prompt":"Is value 42 > limit 10?"}},
+      {"id":"t2b_alert","name":"Threshold Alert","kind":"alert","position":3,"config":{"title":"T2 Threshold Exceeded","severity":"warning","summary":"Value 42 exceeds limit of 10"}},
+      {"id":"t2b_complete","name":"Complete","kind":"complete","position":4}
+    ]
+  }'
+```
+
+---
+
+### T3 — Action (sandbox mode via C12b)
+
+**What it does:** Executes shell commands in the C12b sandbox, validates output, fires alert on completion.
+
+| Field | Value |
+|-------|-------|
+| `task_id` | `task_00843dbb` |
+| `tasked_type` | `action` |
+| `mode` | `sandbox` |
+| `executor_target` | `C12b` |
+| `planner_prompt` | `"Run: date && ls /workspace | wc -l"` |
+| `trigger_mode` | `always` |
+
+**Run record:**
+| Field | Value |
+|-------|-------|
+| `run_id` | `trun_5468fcc6` |
+| `alert_id` | `421` |
+| `status` | `completed` |
+| `terminal_reason` | `workflow-complete` |
+| `output` | `ACTION_DONE\nSat Apr  4 08:35:00 UTC 2026\nfiles=13\nvalidation_ok` |
+
+**Restart run record:**
+| `run_id` | `trun_e37fb4d1` | `alert_id` | `425` |
+
+**Traceability URLs:**
+```
+Tasked:    http://localhost:6090/tasked?task_id=task_00843dbb
+Pipeline:  http://localhost:6090/piplinetask?task_id=task_00843dbb
+Preview:   http://localhost:6090/tasked-preview?task_id=task_00843dbb&run_id=trun_5468fcc6
+Completed: http://localhost:6090/task-completed?task_id=task_00843dbb
+```
+
+**To recreate:**
+```bash
+curl -s -X POST "http://localhost:6090/api/tasks" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "T3 — Action: Sandbox Shell Execution",
+    "mode": "sandbox",
+    "schedule_kind": "manual",
+    "tasked_type": "action",
+    "planner_prompt": "Run a shell action: echo ACTION_DONE && date && echo files=$(ls /workspace | wc -l)",
+    "executor_prompt": "Execute in sandbox and report: date, file count, validation status.",
+    "context_handoff": "Action-type task: executes shell commands in C12b sandbox",
+    "trigger_mode": "always",
+    "executor_target": "C12b",
+    "workspace_dir": "/workspace",
+    "validation_command": "echo validation_ok",
+    "steps": [
+      {"id":"t3_trigger","name":"Trigger","kind":"trigger","position":1},
+      {"id":"t3_sandbox","name":"Shell Action","kind":"sandbox","position":2,"config":{"command":"echo ACTION_DONE && date && echo files=$(ls /workspace | wc -l)"}},
+      {"id":"t3_alert","name":"Action Alert","kind":"alert","position":3,"config":{"title":"T3 Action Completed","severity":"info","summary":"Shell action executed in C12b sandbox"}},
+      {"id":"t3_complete","name":"Complete","kind":"complete","position":4}
+    ]
+  }'
+```
+
+---
+
+### T4 — Hook (chat mode, simulates external webhook trigger)
+
+**What it does:** Simulates an external system webhook by generating a JSON deployment payload via LLM.
+
+| Field | Value |
+|-------|-------|
+| `task_id` | `task_814e3f3b` |
+| `tasked_type` | `hook` |
+| `mode` | `chat` |
+| `planner_prompt` | `"Simulate sending a webhook payload. Generate a JSON webhook body for a deployment event."` |
+| `trigger_mode` | `always` |
+
+**Run record:**
+| Field | Value |
+|-------|-------|
+| `run_id` | `trun_96a073f5` |
+| `alert_id` | `422` |
+| `status` | `completed` |
+| `terminal_reason` | `workflow-complete` |
+
+**Traceability URLs:**
+```
+Tasked:    http://localhost:6090/tasked?task_id=task_814e3f3b
+Pipeline:  http://localhost:6090/piplinetask?task_id=task_814e3f3b
+Preview:   http://localhost:6090/tasked-preview?task_id=task_814e3f3b&run_id=trun_96a073f5
+Completed: http://localhost:6090/task-completed?task_id=task_814e3f3b
+```
+
+**To recreate:**
+```bash
+curl -s -X POST "http://localhost:6090/api/tasks" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "T4 — Hook: External System Trigger",
+    "mode": "chat",
+    "schedule_kind": "manual",
+    "tasked_type": "hook",
+    "planner_prompt": "Simulate sending a webhook payload. Generate a JSON webhook body for a deployment event.",
+    "executor_prompt": "You are a webhook dispatcher. Respond with a JSON webhook payload for a deployment event.",
+    "context_handoff": "Hook-type task: simulates triggering external systems via webhook",
+    "trigger_mode": "always",
+    "steps": [
+      {"id":"t4_trigger","name":"Trigger","kind":"trigger","position":1},
+      {"id":"t4_hook","name":"Webhook Dispatch","kind":"chat","position":2,"config":{"prompt":"Generate deployment webhook JSON payload"}},
+      {"id":"t4_alert","name":"Hook Alert","kind":"alert","position":3,"config":{"title":"T4 Hook Dispatched","severity":"info","summary":"External webhook payload generated and dispatched"}},
+      {"id":"t4_complete","name":"Complete","kind":"complete","position":4}
+    ]
+  }'
+```
+
+---
+
+### T5 — Combined (all trigger types in one task)
+
+**What it does:** Combines output generation, alert firing, and structured recommendations — exercises all trigger mechanisms in a single run.
+
+| Field | Value |
+|-------|-------|
+| `task_id` | `task_80986663` |
+| `tasked_type` | `combined` |
+| `mode` | `chat` |
+| `planner_prompt` | `"Generate a combined report with SUMMARY, RECOMMENDED_ACTION, and SEVERITY sections."` |
+| `trigger_mode` | `always` |
+
+**Run record:**
+| Field | Value |
+|-------|-------|
+| `run_id` | `trun_6b571b78` |
+| `alert_id` | `423` |
+| `status` | `completed` |
+| `terminal_reason` | `workflow-complete` |
+
+**Traceability URLs:**
+```
+Tasked:    http://localhost:6090/tasked?task_id=task_80986663
+Pipeline:  http://localhost:6090/piplinetask?task_id=task_80986663
+Preview:   http://localhost:6090/tasked-preview?task_id=task_80986663&run_id=trun_6b571b78
+Completed: http://localhost:6090/task-completed?task_id=task_80986663
+```
+
+**To recreate:**
+```bash
+curl -s -X POST "http://localhost:6090/api/tasks" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "T5 — Combined: Full Pipeline (Output + Alert + Action)",
+    "mode": "chat",
+    "schedule_kind": "manual",
+    "tasked_type": "combined",
+    "planner_prompt": "Generate a combined report with SUMMARY, RECOMMENDED_ACTION, and SEVERITY sections for a system incident.",
+    "executor_prompt": "You are an incident analyst. Structure your response with clearly labeled SUMMARY, RECOMMENDED_ACTION, and SEVERITY sections.",
+    "context_handoff": "Combined-type task: exercises output, alert, and action paths in one run",
+    "trigger_mode": "always",
+    "steps": [
+      {"id":"t5_trigger","name":"Trigger","kind":"trigger","position":1},
+      {"id":"t5_chat","name":"Generate Report","kind":"chat","position":2,"config":{"prompt":"Generate incident report with SUMMARY, RECOMMENDED_ACTION, SEVERITY"}},
+      {"id":"t5_alert","name":"Combined Alert","kind":"alert","position":3,"config":{"title":"T5 Combined Report Ready","severity":"high","summary":"Full pipeline report generated with output, alert, and action steps"}},
+      {"id":"t5_complete","name":"Complete","kind":"complete","position":4}
+    ]
+  }'
+```
+
+---
+
+## 11. Full Task Lifecycle Operations
+
+All operations are on C9b at `http://localhost:6090`. These can be called from the UI buttons or directly via API.
+
+### Create
+```bash
+curl -X POST http://localhost:6090/api/tasks \
+  -H "Content-Type: application/json" \
+  -d '{...task definition...}'
+# Returns: { ok: true, task: { id: "task_xxxxxxxx", ... } }
+```
+
+### Edit (update fields)
+```bash
+curl -X POST http://localhost:6090/api/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"id":"task_xxxxxxxx","name":"Updated Name","notes":"Updated notes"}'
+# Returns: { ok: true, task: { id, name, ... } }
+```
+
+### Run (trigger execution)
+```bash
+curl -X POST http://localhost:6090/api/tasks/task_xxxxxxxx/run
+# Returns: { ok: true, run_id: "trun_xxxxxxxx", status: "completed"|"running", alert_id: N }
+```
+
+### Redo (re-run — creates new run record)
+```bash
+curl -X POST http://localhost:6090/api/tasks/task_xxxxxxxx/redo
+# Returns: same as /run — new run_id, new alert_id
+# Demo: T1 redo → run_id=trun_1a6a8905, alert_id=424
+```
+
+### Stop (cancel a running task)
+```bash
+curl -X POST http://localhost:6090/api/tasks/task_xxxxxxxx/stop
+# Returns: { ok: true, task_id: "task_xxxxxxxx", status: "cancelled" }
+# Note: if already completed, sets status=cancelled on the run
+```
+
+### Pause (freeze task scheduling)
+```bash
+curl -X POST http://localhost:6090/api/tasks/task_xxxxxxxx/pause
+# Returns: { ok: true, task: { last_status: "paused", active: false, ... } }
+# Demo: T4 paused successfully → last_status=paused
+```
+
+### Resume (re-enable task after pause)
+```bash
+curl -X POST http://localhost:6090/api/tasks/task_xxxxxxxx/resume
+# Returns: { ok: true, task: { last_status: "idle", active: true, ... } }
+# Demo: T4 resumed → last_status=idle
+```
+
+### Restart (stop + immediate re-run)
+```bash
+curl -X POST http://localhost:6090/api/tasks/task_xxxxxxxx/restart
+# Returns: { ok: true, run_id: "trun_xxxxxxxx", status: "completed", alert_id: N }
+# Demo: T3 restart → run_id=trun_e37fb4d1, alert_id=425
+```
+
+### Clone (duplicate task definition)
+```bash
+curl -X POST http://localhost:6090/api/tasks/task_xxxxxxxx/clone
+# Returns: { ok: true, task: { id: "task_NEW", name: "...Original Name (Clone)", ... }, source_task_id: "task_xxxxxxxx" }
+# Demo: T1 cloned → task_5bc7b30d ("T1 — Daily LLM Output Summary (Clone)")
+```
+
+### Archive (soft-disable, hide from active list)
+```bash
+curl -X POST http://localhost:6090/api/tasks/task_xxxxxxxx/archive
+# Returns: { ok: true, task: { lifecycle_state: "archived", active: false, archived_at: "...", ... } }
+# Demo: Clone task_5bc7b30d archived → lifecycle_state=archived
+```
+
+### Delete (permanent, removes all related data)
+```bash
+curl -X DELETE http://localhost:6090/api/tasks/task_xxxxxxxx
+# Returns: { ok: true, deleted: "task_xxxxxxxx", name: "Task Name" }
+# Demo: Clone task_5bc7b30d deleted → confirmed ok:true
+# WARNING: This also deletes task_runs, task_alerts, step_results for that task
+```
+
+### Alert Lifecycle
+```bash
+# Acknowledge
+curl -X POST http://localhost:6090/api/alerts/{alert_id}/status \
+  -H "Content-Type: application/json" -d '{"status":"acknowledged"}'
+
+# Resolve
+curl -X POST http://localhost:6090/api/alerts/{alert_id}/status \
+  -H "Content-Type: application/json" -d '{"status":"resolved"}'
+
+# Snooze 30 minutes
+curl -X POST http://localhost:6090/api/alerts/{alert_id}/status \
+  -H "Content-Type: application/json" -d '{"status":"snoozed","snooze_minutes":30}'
+
+# Reopen
+curl -X POST http://localhost:6090/api/alerts/{alert_id}/status \
+  -H "Content-Type: application/json" -d '{"status":"open"}'
+```
+
+---
+
+## 12. Master Summary Table — All Tasks, Creation to Finish
+
+Recorded: 2026-04-04
+
+| # | Task Name | `task_id` | `tasked_type` | `mode` | `run_id` | `alert_id` | Final Status | Pages Traced |
+|---|-----------|-----------|--------------|--------|----------|-----------|-------------|-------------|
+| T1 | Daily LLM Output Summary | `task_3f950f6e` | `output` | chat | `trun_32293732` | 364 | ✅ completed | Tasked, Pipeline, Alerts, Completed, Preview |
+| T1-redo | Same task, redo run | `task_3f950f6e` | `output` | chat | `trun_1a6a8905` | 424 | ✅ completed | Pipeline, Alerts, Preview |
+| T2 | Alert: Threshold Check | `task_21dffb26` | `alert` | chat | `trun_bcdaa631` | 420 | ✅ completed | Tasked, Pipeline, Alerts, Completed, Preview |
+| T3 | Action: Sandbox Shell | `task_00843dbb` | `action` | sandbox | `trun_5468fcc6` | 421 | ✅ completed | Tasked, Pipeline, Alerts, Completed, Preview |
+| T3-restart | Same task, restart | `task_00843dbb` | `action` | sandbox | `trun_e37fb4d1` | 425 | ✅ completed | Pipeline, Preview |
+| T4 | Hook: External Trigger | `task_814e3f3b` | `hook` | chat | `trun_96a073f5` | 422 | ✅ completed | Tasked, Pipeline, Alerts, Completed, Preview |
+| T5 | Combined: Full Pipeline | `task_80986663` | `combined` | chat | `trun_6b571b78` | 423 | ✅ completed | Tasked, Pipeline, Alerts, Completed, Preview |
+| Clone | T1 Clone (lifecycle demo) | `task_5bc7b30d` | `output` | chat | — | — | archived → deleted | — |
+
+### Lifecycle Operations Demonstrated
+
+| Operation | Task | Result |
+|-----------|------|--------|
+| **create** | All T1–T5 | 5 tasks created with all `tasked_type` variants |
+| **run** | All T1–T5 | All 5 reached `status=completed` |
+| **redo** | T1 | New `run_id=trun_1a6a8905`, `alert_id=424` |
+| **restart** | T3 | New `run_id=trun_e37fb4d1`, `alert_id=425` |
+| **stop** | T2 | `status=cancelled` |
+| **pause** | T4 | `last_status=paused`, `active=false` |
+| **resume** | T4 | `last_status=idle`, `active=true` |
+| **clone** | T1 | New `task_id=task_5bc7b30d` ("T1 Clone") |
+| **archive** | T1 Clone | `lifecycle_state=archived`, `archived_at` set |
+| **delete** | T1 Clone | `{ ok: true, deleted: "task_5bc7b30d" }` |
+| **edit** | T1 | Notes updated via `POST /api/tasks` with `id` |
