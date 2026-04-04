@@ -2,728 +2,969 @@
 {% block title %}Tasked Live Docs{% endblock %}
 {% block content %}
 <style>
-/* ═══════════════════════════════════════════════════
-   TASKED LIVE DOCUMENTATION — Full Redesign
-   ═══════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════
+   TASKED LIVE DOCUMENTATION — Brilliant 3-Panel Redesign
+   Uses app design system variables from style.css
+   ═══════════════════════════════════════════════════════════════ */
 
-/* ── Shell ─────────────────────────────────────── */
-.tld { display:flex; flex-direction:column; height:calc(100vh - 102px); margin:-1.25rem; overflow:hidden; background:#08080d; }
-
-/* ── Top bar ───────────────────────────────────── */
-.tld-topbar {
-  display:flex; align-items:center; gap:0.75rem; padding:0.55rem 1.1rem;
-  background:#0d0d14; border-bottom:1px solid rgba(255,255,255,0.07);
-  flex-shrink:0; flex-wrap:wrap;
+/* ── Shell ──────────────────────────────────────────────────── */
+.tld {
+  display: flex; flex-direction: column;
+  height: calc(100vh - 102px); margin: -1.25rem;
+  overflow: hidden; background: var(--bg);
 }
-.tld-topbar-title { font-size:0.9rem; font-weight:700; color:#e2e8f0; letter-spacing:-0.01em; }
-.tld-topbar-subtitle { font-size:0.7rem; color:#64748b; margin-left:0.25rem; }
 
-/* ── Tab bar ───────────────────────────────────── */
+/* ── Top bar ────────────────────────────────────────────────── */
+.tld-topbar {
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 0.5rem 1rem; background: var(--card);
+  border-bottom: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap;
+}
+.tld-topbar-title { font-size: 0.85rem; font-weight: 700; color: var(--fg); }
+.tld-topbar-sep { color: var(--border); font-size: 0.8rem; }
+.tld-topbar-sub { font-size: 0.72rem; color: var(--muted); }
+.tld-topbar-chips { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-left: auto; }
+.tld-type-chip {
+  font-size: 0.67rem; font-weight: 700; padding: 0.1rem 0.45rem;
+  border-radius: 10px; letter-spacing: 0.03em; cursor: default;
+  display: inline-flex; align-items: center; gap: 0.3rem;
+}
+.tld-type-chip .dot { width: 6px; height: 6px; border-radius: 50%; }
+
+/* ── Workspace: 3 columns ───────────────────────────────────── */
+.tld-workspace { display: flex; flex: 1; overflow: hidden; }
+
+/* ── Left Nav ───────────────────────────────────────────────── */
+.tld-nav {
+  width: 200px; flex-shrink: 0; overflow-y: auto;
+  background: var(--card); border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+}
+.tld-nav::-webkit-scrollbar { width: 4px; }
+.tld-nav::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.tld-nav-section {
+  font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: var(--muted); opacity: 0.65;
+  padding: 0.75rem 0.85rem 0.35rem;
+}
+.tld-nav-divider { height: 1px; background: var(--border); margin: 0.4rem 0.85rem; }
+.tld-nav-item {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.3rem 0.85rem; font-size: 0.77rem; color: var(--muted);
+  cursor: pointer; border: none; background: none; text-align: left; width: 100%;
+  border-left: 2px solid transparent; transition: all 0.12s; text-decoration: none;
+}
+.tld-nav-item:hover { background: rgba(245,245,247,0.04); color: var(--fg); }
+.tld-nav-item.active { color: var(--accent); border-left-color: var(--accent); background: rgba(10,132,255,0.07); }
+.tld-nav-item.nav-trace { font-size: 0.73rem; padding: 0.25rem 0.7rem 0.25rem 0.85rem; }
+.tld-nav-item.nav-trace.sel { color: var(--fg); border-left-color: var(--accent); background: rgba(10,132,255,0.07); }
+
+.tld-nav-trace-row { display: flex; align-items: center; gap: 0.4rem; width: 100%; }
+.tld-nav-trace-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tld-nav-trace-badge {
+  font-size: 0.6rem; font-weight: 700; padding: 0.05rem 0.3rem;
+  border-radius: 3px; flex-shrink: 0;
+}
+.tld-nav-dot {
+  width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0;
+  background: rgba(142,142,147,0.4); transition: background 0.3s;
+}
+.tld-nav-dot.completed { background: var(--ok); }
+.tld-nav-dot.running   { background: var(--accent); animation: tld-nav-pulse 1.2s ease-in-out infinite; }
+.tld-nav-dot.failed    { background: var(--fail); }
+@keyframes tld-nav-pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+.tld-nav-refresh {
+  font-size: 0.7rem; padding: 0.1rem 0.4rem; border-radius: 4px;
+  border: 1px solid var(--border); background: none; color: var(--muted);
+  cursor: pointer; margin-left: auto; transition: color 0.12s;
+}
+.tld-nav-refresh:hover { color: var(--accent); border-color: var(--accent); }
+.tld-nav-section-row { display: flex; align-items: center; padding: 0.75rem 0.85rem 0.35rem; }
+.tld-nav-section-row .tld-nav-section { padding: 0; flex: 1; }
+
+/* ── Main area ──────────────────────────────────────────────── */
+.tld-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
 .tld-tabs {
-  display:flex; gap:0; padding:0 1.1rem; background:#0d0d14;
-  border-bottom:1px solid rgba(255,255,255,0.07); flex-shrink:0;
+  display: flex; background: var(--card); border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 .tld-tab {
-  padding:0.5rem 1rem; font-size:0.75rem; font-weight:600; color:#64748b;
-  cursor:pointer; border:none; background:none; border-bottom:2px solid transparent;
-  transition:all 0.15s; letter-spacing:0.01em;
+  padding: 0.5rem 1.1rem; font-size: 0.78rem; font-weight: 600; color: var(--muted);
+  cursor: pointer; border: none; background: none; border-bottom: 2px solid transparent;
+  transition: all 0.13s; letter-spacing: 0.01em;
 }
-.tld-tab:hover { color:#94a3b8; }
-.tld-tab.active { color:#22d3ee; border-bottom-color:#22d3ee; }
+.tld-tab:hover { color: var(--fg); }
+.tld-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
 
-/* ── Body below tabs ───────────────────────────── */
-.tld-body { flex:1; overflow:hidden; display:flex; }
+.tld-content { flex: 1; overflow: hidden; position: relative; }
 
-/* ══════════════════════════════════════════════════
-   TAB 1 — DOCUMENTATION
-   ══════════════════════════════════════════════════ */
-.tld-doc-panel {
-  width:100%; height:100%; overflow-y:auto; padding:1.25rem 1.5rem;
-  display:flex; flex-direction:column; gap:1.5rem;
+/* ── Tab panels ─────────────────────────────────────────────── */
+.tld-panel {
+  position: absolute; inset: 0; overflow-y: auto; display: none;
+  padding: 1.25rem 1.4rem;
 }
+.tld-panel.active { display: block; }
+.tld-panel::-webkit-scrollbar { width: 5px; }
+.tld-panel::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
 
-/* Section heading */
-.tld-doc-h1 { font-size:0.65rem; text-transform:uppercase; letter-spacing:0.1em; color:#475569; font-weight:700; margin-bottom:0.75rem; }
+/* ── Right Detail Panel ─────────────────────────────────────── */
+.tld-detail {
+  width: 300px; flex-shrink: 0; background: var(--card);
+  border-left: 1px solid var(--border); display: flex; flex-direction: column;
+  overflow: hidden; transition: width 0.2s;
+}
+.tld-detail.collapsed { width: 0; overflow: hidden; }
+.tld-detail-header {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border);
+  flex-shrink: 0; min-height: 36px;
+}
+.tld-detail-title { font-size: 0.77rem; font-weight: 700; color: var(--fg); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tld-detail-btn {
+  font-size: 0.7rem; padding: 0.1rem 0.35rem; border-radius: 4px;
+  border: 1px solid var(--border); background: none; color: var(--muted);
+  cursor: pointer; transition: color 0.12s; flex-shrink: 0;
+}
+.tld-detail-btn:hover { color: var(--fg); }
+.tld-detail-body { flex: 1; overflow-y: auto; padding: 0.75rem; display: flex; flex-direction: column; gap: 0.75rem; }
+.tld-detail-body::-webkit-scrollbar { width: 4px; }
+.tld-detail-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 
-/* Type cards grid */
-.tld-type-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(340px, 1fr)); gap:1rem; }
+.tld-detail-section { display: flex; flex-direction: column; gap: 0.35rem; }
+.tld-detail-label {
+  font-size: 0.65rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.07em; color: var(--muted); opacity: 0.7;
+}
+.tld-detail-output {
+  background: rgba(0,0,0,0.4); border: 1px solid var(--border);
+  border-radius: 5px; padding: 0.5rem 0.6rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem; color: var(--muted); max-height: 160px; overflow-y: auto;
+  white-space: pre-wrap; word-break: break-word; line-height: 1.5;
+}
+.tld-detail-output::-webkit-scrollbar { width: 3px; }
+.tld-detail-output::-webkit-scrollbar-thumb { background: var(--border); }
+.tld-detail-output.empty { color: rgba(142,142,147,0.4); font-style: italic; }
 
+/* ── Section headings (doc) ─────────────────────────────────── */
+.tld-doc-section { margin-bottom: 2rem; }
+.tld-sec-h1 {
+  font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.09em;
+  color: var(--muted); font-weight: 700; margin-bottom: 0.75rem;
+  display: flex; align-items: center; gap: 0.5rem;
+}
+.tld-sec-h1::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+
+/* ── ID cards grid ──────────────────────────────────────────── */
+.tld-id-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.75rem; }
+.tld-id-card {
+  background: rgba(245,245,247,0.03); border: 1px solid var(--border);
+  border-radius: 8px; padding: 0.85rem;
+}
+.tld-id-card-head { font-size: 0.82rem; font-weight: 700; margin-bottom: 0.4rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.tld-id-card-sub { font-size: 0.75rem; color: var(--muted); line-height: 1.55; }
+.tld-id-card-sub code { font-family: ui-monospace; font-size: 0.72rem; color: var(--accent); }
+
+/* ── Stepper ────────────────────────────────────────────────── */
+.tld-stepper {
+  display: flex; align-items: stretch; background: rgba(245,245,247,0.03);
+  border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
+}
+.tld-step { flex: 1; padding: 0.75rem 0.85rem; border-right: 1px solid var(--border); }
+.tld-step:last-child { border-right: none; }
+.tld-step-num { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); opacity: 0.6; margin-bottom: 0.25rem; }
+.tld-step-kind { font-size: 0.82rem; font-weight: 700; color: var(--fg); margin-bottom: 0.35rem; }
+.tld-step-desc { font-size: 0.73rem; color: var(--muted); line-height: 1.5; }
+.tld-step-desc code { font-family: ui-monospace; font-size: 0.7rem; color: var(--accent); }
+.tld-step-desc b { color: rgba(245,245,247,0.7); }
+
+/* ── Type cards grid ────────────────────────────────────────── */
+.tld-type-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 1rem; }
 .tld-type-card {
-  border-radius:10px; overflow:hidden; border:1px solid rgba(255,255,255,0.07);
-  background:#0f0f18; display:flex; flex-direction:column;
+  border-radius: 8px; overflow: hidden; border: 1px solid var(--border);
+  background: rgba(245,245,247,0.02); display: flex; flex-direction: column;
+  border-left-width: 3px;
 }
-.tld-type-card-header {
-  padding:0.8rem 1rem 0.7rem; display:flex; align-items:center; gap:0.75rem;
-  border-bottom:1px solid rgba(255,255,255,0.05);
-}
-.tld-type-icon { font-size:1.25rem; flex-shrink:0; }
+.tld-type-card-header { padding: 0.75rem 1rem; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; gap: 0.75rem; }
+.tld-type-card-meta { flex: 1; }
+.tld-type-name-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem; }
+.tld-type-name { font-size: 0.82rem; font-weight: 700; color: var(--fg); }
 .tld-type-badge {
-  font-size:0.68rem; font-weight:700; padding:0.15rem 0.5rem; border-radius:20px;
-  letter-spacing:0.04em; text-transform:uppercase;
+  font-size: 0.67rem; font-weight: 700; padding: 0.12rem 0.45rem;
+  border-radius: 10px; letter-spacing: 0.04em; text-transform: uppercase;
 }
-.tld-type-card-body { padding:0.85rem 1rem; display:flex; flex-direction:column; gap:0.8rem; }
+.tld-type-tagline { font-size: 0.73rem; color: var(--muted); }
+.tld-type-card-body { padding: 0.85rem 1rem; flex: 1; display: flex; flex-direction: column; gap: 0.75rem; }
 
-/* Flow steps */
-.tld-flow {
-  display:flex; align-items:center; flex-wrap:wrap; gap:0.25rem; font-size:0.68rem;
-}
+/* Info grid inside type cards */
+.tld-info-grid { display: grid; grid-template-columns: 110px 1fr; gap: 0.18rem 0.5rem; font-size: 0.75rem; }
+.tld-info-key { color: var(--muted); padding: 0.12rem 0; font-size: 0.72rem; }
+.tld-info-val { color: rgba(245,245,247,0.85); padding: 0.12rem 0; }
+.tld-info-val.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.7rem; word-break: break-all; }
+
+/* Flow chips */
+.tld-flow { display: flex; align-items: center; flex-wrap: wrap; gap: 0.2rem; font-size: 0.7rem; }
 .tld-flow-step {
-  display:flex; align-items:center; gap:0.25rem;
-  background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07);
-  border-radius:5px; padding:0.2rem 0.45rem; color:#94a3b8;
+  background: rgba(245,245,247,0.04); border: 1px solid var(--border);
+  border-radius: 4px; padding: 0.18rem 0.4rem; color: var(--muted);
 }
-.tld-flow-step.active { color:#e2e8f0; border-color:rgba(255,255,255,0.15); background:rgba(255,255,255,0.07); }
-.tld-flow-arrow { color:#334155; font-size:0.6rem; }
-
-/* Info rows */
-.tld-info-grid { display:grid; grid-template-columns:120px 1fr; gap:0.2rem 0.5rem; font-size:0.72rem; }
-.tld-info-key   { color:#64748b; padding:0.15rem 0; }
-.tld-info-val   { color:#cbd5e1; padding:0.15rem 0; font-family:monospace; font-size:0.68rem; word-break:break-all; }
-.tld-info-val.text { font-family:inherit; font-size:0.72rem; }
+.tld-flow-step.on { color: var(--fg); border-color: rgba(245,245,247,0.2); background: rgba(245,245,247,0.08); }
+.tld-flow-arr { color: rgba(245,245,247,0.2); font-size: 0.6rem; }
 
 /* Code blocks */
 .tld-code {
-  background:#050509; border:1px solid rgba(255,255,255,0.06); border-radius:6px;
-  padding:0.65rem 0.75rem; font-family:monospace; font-size:0.67rem;
-  color:#7dd3fc; line-height:1.7; overflow-x:auto; white-space:pre;
+  background: rgba(0,0,0,0.5); border: 1px solid var(--border); border-radius: 6px;
+  padding: 0.6rem 0.75rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.7rem; color: #7dd3fc; line-height: 1.7; overflow-x: auto; white-space: pre;
 }
-.tld-code .cm { color:#475569; }
-.tld-code .kw { color:#c084fc; }
-.tld-code .st { color:#86efac; }
-.tld-code .nu { color:#fbbf24; }
+.tld-code .cm { color: rgba(142,142,147,0.6); }
+.tld-code .kw { color: #c084fc; }
+.tld-code .st { color: #86efac; }
+.tld-code .nu { color: #fbbf24; }
+.tld-code .ky { color: var(--accent); }
 
-/* Type colours */
-.output-accent  { color:#4ade80; } .output-bg  { background:#052c14; border-color:#14532d; }
-.alert-accent   { color:#fbbf24; } .alert-bg   { background:#2c1a00; border-color:#78350f; }
-.action-accent  { color:#60a5fa; } .action-bg  { background:#0a1628; border-color:#1e3a5f; }
-.hook-accent    { color:#c084fc; } .hook-bg    { background:#1a0a28; border-color:#4c1d95; }
-.combined-accent{ color:#f87171; } .combined-bg{ background:#28080a; border-color:#7f1d1d; }
-.sandbox-accent { color:#22d3ee; } .sandbox-bg { background:#03181e; border-color:#164e63; }
+.tld-type-trace-ids { font-size: 0.7rem; color: rgba(142,142,147,0.5); font-family: ui-monospace; }
 
-/* Lifecycle table */
-.tld-lc-table { width:100%; border-collapse:collapse; font-size:0.72rem; }
-.tld-lc-table th { color:#475569; font-size:0.65rem; text-transform:uppercase; letter-spacing:0.06em; padding:0.4rem 0.6rem; border-bottom:1px solid rgba(255,255,255,0.06); text-align:left; }
-.tld-lc-table td { padding:0.35rem 0.6rem; border-bottom:1px solid rgba(255,255,255,0.04); color:#94a3b8; vertical-align:top; }
-.tld-lc-table td:first-child { color:#e2e8f0; font-weight:600; font-family:monospace; font-size:0.68rem; width:90px; }
-.tld-lc-table td:nth-child(2) { color:#22d3ee; font-family:monospace; font-size:0.67rem; }
-.tld-lc-table tr:last-child td { border-bottom:none; }
-.tld-lc-table tr:hover td { background:rgba(255,255,255,0.02); }
+.tld-type-footer { display: flex; align-items: center; justify-content: space-between; padding-top: 0.35rem; border-top: 1px solid var(--border); }
 
-/* Trace table */
-.tld-trace-table { width:100%; border-collapse:collapse; font-size:0.72rem; }
-.tld-trace-table th { color:#475569; font-size:0.65rem; text-transform:uppercase; letter-spacing:0.06em; padding:0.4rem 0.7rem; border-bottom:1px solid rgba(255,255,255,0.06); text-align:left; background:#0d0d14; position:sticky; top:0; }
-.tld-trace-table td { padding:0.4rem 0.7rem; border-bottom:1px solid rgba(255,255,255,0.04); color:#94a3b8; font-family:monospace; font-size:0.68rem; }
-.tld-trace-table td:first-child { color:#22d3ee; font-weight:700; }
-.tld-trace-table tr:hover td { background:rgba(255,255,255,0.025); }
-.tld-pill-sm { font-size:0.62rem; font-weight:700; padding:0.1rem 0.4rem; border-radius:10px; }
+/* ── Tables ─────────────────────────────────────────────────── */
+.tld-table-wrap { background: rgba(245,245,247,0.02); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.tld-table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
+.tld-table th {
+  font-size: 0.67rem; text-transform: uppercase; letter-spacing: 0.07em;
+  color: var(--muted); padding: 0.45rem 0.7rem; border-bottom: 1px solid var(--border);
+  text-align: left; background: var(--card); position: sticky; top: 0;
+  font-weight: 600;
+}
+.tld-table td { padding: 0.38rem 0.7rem; border-bottom: 1px solid rgba(245,245,247,0.04); color: rgba(245,245,247,0.8); vertical-align: top; }
+.tld-table td.mono { font-family: ui-monospace; font-size: 0.7rem; }
+.tld-table td.accent { color: var(--accent); font-family: ui-monospace; font-size: 0.7rem; }
+.tld-table td.ok { color: var(--ok); }
+.tld-table td.fail { color: var(--fail); }
+.tld-table td.muted { color: var(--muted); }
+.tld-table tr:last-child td { border-bottom: none; }
+.tld-table tr:hover td { background: rgba(245,245,247,0.02); }
 
-/* ══════════════════════════════════════════════════
-   TAB 2 — LIVE TESTING
-   ══════════════════════════════════════════════════ */
-.tld-live-panel {
-  width:100%; height:100%; overflow-y:auto; padding:1rem 1.25rem;
-  display:flex; flex-direction:column; gap:1rem;
+.tld-pill {
+  font-size: 0.65rem; font-weight: 700; padding: 0.1rem 0.38rem;
+  border-radius: 8px; text-transform: uppercase; letter-spacing: 0.03em;
 }
 
-/* Live card grid */
-.tld-live-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(360px,1fr)); gap:0.85rem; }
-
-.tld-live-card {
-  border-radius:8px; overflow:hidden; border:1px solid rgba(255,255,255,0.07);
-  background:#0f0f18; display:flex; flex-direction:column; transition:border-color 0.2s;
+/* ── Monitoring cards ───────────────────────────────────────── */
+.tld-mon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 0.65rem; }
+.tld-mon-card {
+  background: rgba(245,245,247,0.02); border: 1px solid var(--border);
+  border-radius: 7px; padding: 0.8rem; text-decoration: none;
+  display: block; transition: border-color 0.15s, background 0.15s;
 }
-.tld-live-card:hover { border-color:rgba(255,255,255,0.13); }
-.tld-live-card.running { border-color:rgba(59,130,246,0.4); }
-.tld-live-card.completed { border-color:rgba(74,222,128,0.25); }
-.tld-live-card.failed { border-color:rgba(248,113,113,0.35); }
+.tld-mon-card:hover { background: rgba(245,245,247,0.04); border-color: rgba(245,245,247,0.18); }
+.tld-mon-name { font-size: 0.8rem; font-weight: 700; color: var(--fg); margin-bottom: 0.3rem; }
+.tld-mon-desc { font-size: 0.72rem; color: var(--muted); line-height: 1.5; }
+.tld-mon-url { font-size: 0.68rem; color: var(--accent); font-family: ui-monospace; margin-top: 0.3rem; }
 
-.tld-live-card-header {
-  padding:0.6rem 0.85rem; display:flex; align-items:center; gap:0.6rem;
-  border-bottom:1px solid rgba(255,255,255,0.05);
-}
-.tld-live-card-title { font-size:0.78rem; font-weight:700; color:#e2e8f0; flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
-.tld-live-card-body { padding:0.7rem 0.85rem; flex:1; display:flex; flex-direction:column; gap:0.55rem; }
-
-/* Status bar */
-.tld-status-bar { display:flex; align-items:center; gap:0.5rem; }
-.tld-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; background:#334155; transition:background 0.3s; }
-.tld-dot.idle      { background:#334155; }
-.tld-dot.running   { background:#3b82f6; box-shadow:0 0 0 3px rgba(59,130,246,0.2); animation:tld-pulse 1.2s ease-in-out infinite; }
-.tld-dot.completed { background:#4ade80; }
-.tld-dot.failed    { background:#f87171; }
-.tld-dot.cancelled { background:#94a3b8; }
-@keyframes tld-pulse { 0%,100%{opacity:1} 50%{opacity:0.35} }
-
-.tld-status-label { font-size:0.72rem; color:#64748b; }
-.tld-status-label.running  { color:#60a5fa; }
-.tld-status-label.completed{ color:#4ade80; }
-.tld-status-label.failed   { color:#f87171; }
-
-/* ID chips */
-.tld-id-row { display:flex; flex-wrap:wrap; gap:0.3rem; }
-.tld-id-chip {
-  font-family:monospace; font-size:0.64rem; color:#94a3b8;
-  background:rgba(0,0,0,0.35); border:1px solid rgba(255,255,255,0.06);
-  border-radius:4px; padding:0.15rem 0.4rem; line-height:1.5;
-}
-.tld-id-chip b { color:#7dd3fc; font-weight:600; margin-right:0.15rem; }
-
-/* Action buttons */
-.tld-actions { display:flex; gap:0.35rem; flex-wrap:wrap; }
-.tld-btn {
-  font-size:0.69rem; font-weight:700; padding:0.28rem 0.6rem;
-  border-radius:5px; border:1px solid transparent; cursor:pointer;
-  transition:opacity 0.15s, transform 0.1s; letter-spacing:0.02em;
-  white-space:nowrap;
-}
-.tld-btn:hover:not(:disabled) { opacity:0.82; transform:translateY(-1px); }
-.tld-btn:active:not(:disabled){ transform:translateY(0); }
-.tld-btn:disabled { opacity:0.35; cursor:not-allowed; }
-.tld-btn.run      { background:#052c14; color:#4ade80; border-color:#14532d; }
-.tld-btn.stop     { background:#28080a; color:#f87171; border-color:#7f1d1d; }
-.tld-btn.restart  { background:#0a1628; color:#60a5fa; border-color:#1e3a5f; }
-.tld-btn.redo     { background:#1a0a28; color:#c084fc; border-color:#4c1d95; }
-.tld-btn.validate { background:#03181e; color:#22d3ee; border-color:#164e63; }
-
-/* Output */
-.tld-output {
-  background:#050509; border:1px solid rgba(255,255,255,0.05); border-radius:5px;
-  padding:0.5rem 0.65rem; font-family:monospace; font-size:0.66rem; color:#94a3b8;
-  max-height:180px; overflow-y:auto; white-space:pre-wrap; word-break:break-word;
-  line-height:1.55; flex-shrink:0;
-}
-.tld-output.empty { color:#334155; font-style:italic; }
-.tld-output::-webkit-scrollbar { width:4px; }
-.tld-output::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.08); border-radius:2px; }
-
-/* Validation checks */
-.tld-checks { display:flex; flex-direction:column; gap:0.25rem; }
-.tld-check { display:flex; align-items:center; gap:0.4rem; font-size:0.69rem; }
-.tld-check-icon { font-size:0.8rem; flex-shrink:0; }
-.tld-check-ok   { color:#4ade80; }
-.tld-check-fail { color:#f87171; }
-.tld-check-wait { color:#334155; }
-.tld-check-msg  { color:#64748b; font-size:0.66rem; margin-left:auto; }
-
-/* Trace links */
-.tld-links { display:flex; flex-wrap:wrap; gap:0.3rem; }
-.tld-link {
-  font-size:0.64rem; color:#7dd3fc; text-decoration:none;
-  padding:0.12rem 0.38rem; border:1px solid rgba(125,211,252,0.18);
-  border-radius:4px; background:rgba(125,211,252,0.05);
-  transition:background 0.15s;
-}
-.tld-link:hover { background:rgba(125,211,252,0.12); color:#bae6fd; }
-
-/* Step flow mini */
-.tld-mini-flow { display:flex; align-items:center; gap:0.2rem; flex-wrap:wrap; }
-.tld-mini-step {
-  font-size:0.62rem; padding:0.1rem 0.35rem; border-radius:3px;
-  border:1px solid rgba(255,255,255,0.07); color:#64748b; background:rgba(255,255,255,0.03);
-}
-.tld-mini-step.done { color:#4ade80; border-color:rgba(74,222,128,0.25); background:rgba(74,222,128,0.05); }
-.tld-mini-arr { color:#1e293b; font-size:0.6rem; }
+/* ══════════════════════════════════════════════════════════════
+   LIVE TESTING TAB
+   ══════════════════════════════════════════════════════════════ */
 
 /* Toolbar */
 .tld-live-toolbar {
-  display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap;
-  background:#0d0d14; border-bottom:1px solid rgba(255,255,255,0.06);
-  padding:0.55rem 1.25rem; flex-shrink:0;
+  display: flex; align-items: center; gap: 0.55rem; flex-wrap: wrap;
+  margin-bottom: 1rem; padding: 0.55rem 0.75rem;
+  background: rgba(245,245,247,0.02); border: 1px solid var(--border);
+  border-radius: 7px;
 }
-.tld-live-toolbar .tld-btn { font-size:0.72rem; padding:0.32rem 0.75rem; }
+.tld-gstatus { font-size: 0.72rem; color: var(--muted); margin-left: auto; }
 
-/* Global status */
-#tld-gstatus { font-size:0.71rem; color:#475569; margin-left:auto; }
+/* Live card grid */
+.tld-live-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 0.85rem; }
 
-/* Scrollbar global */
-.tld-doc-panel::-webkit-scrollbar,
-.tld-live-panel::-webkit-scrollbar { width:5px; }
-.tld-doc-panel::-webkit-scrollbar-thumb,
-.tld-live-panel::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.07); border-radius:3px; }
+/* Live card */
+.tld-live-card {
+  border-radius: 7px; overflow: hidden;
+  border: 1px solid var(--border); border-left-width: 3px;
+  background: rgba(245,245,247,0.02); display: flex; flex-direction: column;
+  transition: border-color 0.2s, box-shadow 0.2s; cursor: pointer;
+}
+.tld-live-card:hover { border-color: rgba(245,245,247,0.16); }
+.tld-live-card.sel { box-shadow: 0 0 0 2px var(--accent); border-color: var(--accent); }
+.tld-live-card.running { border-color: rgba(10,132,255,0.45); }
+.tld-live-card.completed { border-left-color: var(--ok) !important; }
+.tld-live-card.failed { border-color: rgba(255,59,48,0.35); }
+
+.tld-live-card-header {
+  padding: 0.55rem 0.85rem; display: flex; align-items: center; gap: 0.55rem;
+  border-bottom: 1px solid var(--border);
+}
+.tld-live-card-title { font-size: 0.78rem; font-weight: 700; color: var(--fg); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tld-live-card-body { padding: 0.65rem 0.85rem; flex: 1; display: flex; flex-direction: column; gap: 0.5rem; }
+
+/* Status row */
+.tld-status-row { display: flex; align-items: center; gap: 0.45rem; }
+.tld-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; background: rgba(142,142,147,0.3); transition: background 0.3s; }
+.tld-dot.running   { background: var(--accent); box-shadow: 0 0 0 3px rgba(10,132,255,0.2); animation: tld-dot-pulse 1.2s ease-in-out infinite; }
+.tld-dot.completed { background: var(--ok); }
+.tld-dot.failed    { background: var(--fail); }
+.tld-dot.cancelled { background: var(--muted); }
+@keyframes tld-dot-pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+.tld-status-lbl { font-size: 0.73rem; color: var(--muted); }
+.tld-status-lbl.running   { color: var(--accent); }
+.tld-status-lbl.completed { color: var(--ok); }
+.tld-status-lbl.failed    { color: var(--fail); }
+
+/* ID chips */
+.tld-chip-row { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.tld-chip {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.67rem;
+  color: var(--muted); background: rgba(0,0,0,0.3); border: 1px solid var(--border);
+  border-radius: 4px; padding: 0.12rem 0.4rem; cursor: pointer; transition: color 0.12s;
+}
+.tld-chip:hover { color: var(--accent); border-color: var(--accent); }
+.tld-chip b { color: rgba(125,211,252,0.8); font-weight: 600; margin-right: 0.15rem; }
+
+/* Mini step flow */
+.tld-mini-flow { display: flex; align-items: center; gap: 0.18rem; flex-wrap: wrap; }
+.tld-mini-step {
+  font-size: 0.65rem; padding: 0.08rem 0.32rem; border-radius: 3px;
+  border: 1px solid var(--border); color: var(--muted); background: rgba(245,245,247,0.02);
+}
+.tld-mini-step.done { color: var(--ok); border-color: rgba(48,209,88,0.3); background: rgba(48,209,88,0.05); }
+.tld-mini-arr { color: rgba(245,245,247,0.15); font-size: 0.6rem; }
+
+/* Output preview */
+.tld-out-preview {
+  background: rgba(0,0,0,0.4); border: 1px solid var(--border); border-radius: 5px;
+  padding: 0.45rem 0.6rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.69rem; color: var(--muted); max-height: 100px; overflow-y: auto;
+  white-space: pre-wrap; word-break: break-word; line-height: 1.5;
+}
+.tld-out-preview::-webkit-scrollbar { width: 3px; }
+.tld-out-preview::-webkit-scrollbar-thumb { background: var(--border); }
+.tld-out-preview.empty { color: rgba(142,142,147,0.35); font-style: italic; }
+
+/* Action buttons */
+.tld-actions { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+.tld-btn {
+  font-size: 0.71rem; font-weight: 700; padding: 0.26rem 0.6rem;
+  border-radius: 5px; border: 1px solid transparent; cursor: pointer;
+  transition: opacity 0.13s, transform 0.1s; letter-spacing: 0.02em; white-space: nowrap;
+}
+.tld-btn:hover:not(:disabled) { opacity: 0.8; transform: translateY(-1px); }
+.tld-btn:active:not(:disabled) { transform: translateY(0); }
+.tld-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.tld-btn.run  { background: rgba(48,209,88,0.1);  color: var(--ok);    border-color: rgba(48,209,88,0.3); }
+.tld-btn.stop { background: rgba(255,59,48,0.1);  color: var(--fail);  border-color: rgba(255,59,48,0.3); }
+.tld-btn.rst  { background: rgba(10,132,255,0.1); color: var(--accent);border-color: rgba(10,132,255,0.3); }
+.tld-btn.redo { background: rgba(192,132,252,0.1);color: #c084fc;      border-color: rgba(192,132,252,0.3); }
+.tld-btn.val  { background: rgba(34,211,238,0.1); color: #22d3ee;      border-color: rgba(34,211,238,0.3); }
+.tld-btn.sm   { font-size: 0.68rem; padding: 0.2rem 0.45rem; }
+
+/* Links row */
+.tld-links { display: flex; flex-wrap: wrap; gap: 0.25rem; }
+.tld-link {
+  font-size: 0.69rem; color: rgba(125,211,252,0.7); text-decoration: none;
+  padding: 0.1rem 0.35rem; border: 1px solid rgba(125,211,252,0.15);
+  border-radius: 4px; background: rgba(125,211,252,0.04);
+  transition: color 0.13s, background 0.13s;
+}
+.tld-link:hover { color: #bae6fd; background: rgba(125,211,252,0.1); }
+
+/* Validation checks */
+.tld-checks { display: flex; flex-direction: column; gap: 0.22rem; }
+.tld-check { display: flex; align-items: center; gap: 0.4rem; font-size: 0.72rem; }
+.tld-check-icon { font-size: 0.75rem; flex-shrink: 0; }
+.tld-check-ok   { color: var(--ok); }
+.tld-check-fail { color: var(--fail); }
+.tld-check-wait { color: rgba(142,142,147,0.4); }
+.tld-check-msg  { color: var(--muted); font-size: 0.68rem; margin-left: auto; }
+
+/* Target badge */
+.tld-target-badge {
+  font-size: 0.65rem; font-weight: 700; padding: 0.08rem 0.35rem;
+  border-radius: 4px; letter-spacing: 0.03em;
+  border: 1px solid; flex-shrink: 0;
+}
+
+/* Type colors */
+.c-output   { color: #4ade80; }
+.c-alert    { color: #fbbf24; }
+.c-action   { color: #60a5fa; }
+.c-hook     { color: #c084fc; }
+.c-combined { color: #f87171; }
+.c-sandbox  { color: #22d3ee; }
+
+.bg-output   { background: rgba(74,222,128,0.08);  border-color: rgba(74,222,128,0.25);  color: #4ade80; }
+.bg-alert    { background: rgba(251,191,36,0.08);  border-color: rgba(251,191,36,0.25);  color: #fbbf24; }
+.bg-action   { background: rgba(96,165,250,0.08);  border-color: rgba(96,165,250,0.25);  color: #60a5fa; }
+.bg-hook     { background: rgba(192,132,252,0.08); border-color: rgba(192,132,252,0.25); color: #c084fc; }
+.bg-combined { background: rgba(248,113,113,0.08); border-color: rgba(248,113,113,0.25); color: #f87171; }
+.bg-sandbox  { background: rgba(34,211,238,0.08);  border-color: rgba(34,211,238,0.25);  color: #22d3ee; }
+
+.bl-output   { border-left-color: #4ade80  !important; }
+.bl-alert    { border-left-color: #fbbf24  !important; }
+.bl-action   { border-left-color: #60a5fa  !important; }
+.bl-hook     { border-left-color: #c084fc  !important; }
+.bl-combined { border-left-color: #f87171  !important; }
+.bl-sandbox  { border-left-color: #22d3ee  !important; }
+
+/* Responsive */
+@media (max-width: 1100px) {
+  .tld-detail { display: none; }
+  .tld-nav { width: 168px; }
+}
+@media (max-width: 780px) {
+  .tld-nav { display: none; }
+  .tld-live-grid { grid-template-columns: 1fr; }
+}
 </style>
 
 <div class="tld">
 
-  <!-- ══ TOP BAR ══════════════════════════════════════════════════ -->
+  <!-- ═══ TOP BAR ════════════════════════════════════════════════ -->
   <div class="tld-topbar">
-    <span class="tld-topbar-title">📋 Tasked Live Documentation</span>
-    <span class="tld-topbar-subtitle">— create · run · trace · validate · 5 types · 6 traces</span>
-    <span style="margin-left:auto;font-size:0.7rem;color:#475569;">
-      C9b:6090 → C1b:8000 (chat) · C12b:8210 (sandbox)
-    </span>
+    <span class="tld-topbar-title">Tasked Live Documentation</span>
+    <span class="tld-topbar-sep">|</span>
+    <span class="tld-topbar-sub">C9b:6090 &rarr; C1b:8000 (chat) &middot; C12b:8210 (sandbox)</span>
+    <div class="tld-topbar-chips">
+      <span class="tld-type-chip bg-output"><span class="dot" style="background:#4ade80"></span>output</span>
+      <span class="tld-type-chip bg-alert"><span class="dot" style="background:#fbbf24"></span>alert</span>
+      <span class="tld-type-chip bg-action"><span class="dot" style="background:#60a5fa"></span>action</span>
+      <span class="tld-type-chip bg-hook"><span class="dot" style="background:#c084fc"></span>hook</span>
+      <span class="tld-type-chip bg-combined"><span class="dot" style="background:#f87171"></span>combined</span>
+      <span class="tld-type-chip bg-sandbox"><span class="dot" style="background:#22d3ee"></span>sandbox</span>
+    </div>
   </div>
 
-  <!-- ══ TABS ════════════════════════════════════════════════════ -->
-  <div class="tld-tabs">
-    <button class="tld-tab active" onclick="showTab('doc')" id="tab-doc">📖 Documentation</button>
-    <button class="tld-tab" onclick="showTab('live')" id="tab-live">⚡ Live Testing</button>
-  </div>
+  <div class="tld-workspace">
 
-  <!-- ══ BODY ════════════════════════════════════════════════════ -->
-  <div class="tld-body">
+    <!-- ═══ LEFT NAV ═══════════════════════════════════════════════ -->
+    <nav class="tld-nav">
+      <div class="tld-nav-section">Documentation</div>
 
-    <!-- ══════════════════════════════════════════════════════════
-         TAB 1 — DOCUMENTATION
-         ══════════════════════════════════════════════════════════ -->
-    <div id="panel-doc" class="tld-doc-panel">
+      <button class="tld-nav-item" onclick="navDoc('ids')">How IDs Work</button>
+      <button class="tld-nav-item" onclick="navDoc('workflow')">Workflow Steps</button>
+      <button class="tld-nav-item" onclick="navDoc('types')">Types (5)</button>
+      <button class="tld-nav-item" onclick="navDoc('type-output')" style="padding-left:1.5rem;font-size:0.73rem;"><span class="c-output">&bull;</span>&nbsp;output</button>
+      <button class="tld-nav-item" onclick="navDoc('type-alert')"  style="padding-left:1.5rem;font-size:0.73rem;"><span class="c-alert">&bull;</span>&nbsp;alert</button>
+      <button class="tld-nav-item" onclick="navDoc('type-action')" style="padding-left:1.5rem;font-size:0.73rem;"><span class="c-action">&bull;</span>&nbsp;action</button>
+      <button class="tld-nav-item" onclick="navDoc('type-hook')"   style="padding-left:1.5rem;font-size:0.73rem;"><span class="c-hook">&bull;</span>&nbsp;hook</button>
+      <button class="tld-nav-item" onclick="navDoc('type-combined')" style="padding-left:1.5rem;font-size:0.73rem;"><span class="c-combined">&bull;</span>&nbsp;combined</button>
+      <button class="tld-nav-item" onclick="navDoc('traces')">Trace Table</button>
+      <button class="tld-nav-item" onclick="navDoc('lifecycle')">Lifecycle Ops</button>
+      <button class="tld-nav-item" onclick="navDoc('monitoring')">Monitoring</button>
 
-      <!-- ── Overview ─────────────────────────────────────────── -->
-      <div>
-        <div class="tld-doc-h1">How the System Works</div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:0.65rem;">
-          <div style="background:#0f0f18;border:1px solid rgba(255,255,255,0.06);border-radius:7px;padding:0.75rem;">
-            <div style="font-size:0.78rem;font-weight:700;color:#22d3ee;margin-bottom:0.35rem;">1. task_id</div>
-            <div style="font-size:0.72rem;color:#64748b;line-height:1.5;">Created when you <code style="color:#7dd3fc">POST /api/tasks</code>. Permanent anchor — never changes across all runs, alerts and steps.</div>
-          </div>
-          <div style="background:#0f0f18;border:1px solid rgba(255,255,255,0.06);border-radius:7px;padding:0.75rem;">
-            <div style="font-size:0.78rem;font-weight:700;color:#c084fc;margin-bottom:0.35rem;">2. run_id</div>
-            <div style="font-size:0.72rem;color:#64748b;line-height:1.5;">Created on each <code style="color:#7dd3fc">POST /api/tasks/{id}/run</code>. Each execution gets a unique <code style="color:#7dd3fc">trun_xxxxxxxx</code>.</div>
-          </div>
-          <div style="background:#0f0f18;border:1px solid rgba(255,255,255,0.06);border-radius:7px;padding:0.75rem;">
-            <div style="font-size:0.78rem;font-weight:700;color:#fbbf24;margin-bottom:0.35rem;">3. alert_id</div>
-            <div style="font-size:0.72rem;color:#64748b;line-height:1.5;">Integer created when the alert step fires. Only created if <code style="color:#7dd3fc">trigger_mode=always</code> or JSON returns <code style="color:#7dd3fc">triggered:true</code>.</div>
-          </div>
-          <div style="background:#0f0f18;border:1px solid rgba(255,255,255,0.06);border-radius:7px;padding:0.75rem;">
-            <div style="font-size:0.78rem;font-weight:700;color:#4ade80;margin-bottom:0.35rem;">4. step_id</div>
-            <div style="font-size:0.72rem;color:#64748b;line-height:1.5;">Each step in the workflow has a fixed ID (e.g. <code style="color:#7dd3fc">t1_chat</code>). Results stored per step per run.</div>
-          </div>
-        </div>
+      <div class="tld-nav-divider"></div>
+
+      <div class="tld-nav-section-row">
+        <div class="tld-nav-section">Live Tests</div>
+        <button class="tld-nav-refresh" id="nav-refresh-btn" onclick="refreshStatus()" title="Refresh all statuses">&orarr;</button>
+      </div>
+      <div id="tld-nav-traces"><!-- populated by JS --></div>
+    </nav>
+
+    <!-- ═══ MAIN ════════════════════════════════════════════════════ -->
+    <div class="tld-main">
+      <div class="tld-tabs">
+        <button class="tld-tab active" id="tab-doc"  onclick="showTab('doc')">Documentation</button>
+        <button class="tld-tab"        id="tab-live" onclick="showTab('live')">Live Testing</button>
       </div>
 
-      <!-- ── The 4-step workflow ───────────────────────────────── -->
-      <div>
-        <div class="tld-doc-h1">Universal 4-Step Workflow (all task types)</div>
-        <div style="background:#0f0f18;border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:1rem;">
-          <div style="display:flex;align-items:stretch;gap:0;overflow-x:auto;">
+      <div class="tld-content">
 
-            <div style="flex:1;min-width:130px;padding:0.6rem 0.75rem;border-right:1px solid rgba(255,255,255,0.06);">
-              <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;color:#475569;margin-bottom:0.35rem;">Step 1 · trigger</div>
-              <div style="font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:0.3rem;">Start</div>
-              <div style="font-size:0.69rem;color:#475569;line-height:1.5;">Records timestamp, schedule kind, marks run as <code style="color:#7dd3fc">queued→running</code>. No external call.</div>
-            </div>
+        <!-- ══ DOC PANEL ════════════════════════════════════════════ -->
+        <div id="panel-doc" class="tld-panel active">
 
-            <div style="flex:2;min-width:170px;padding:0.6rem 0.75rem;border-right:1px solid rgba(255,255,255,0.06);">
-              <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;color:#475569;margin-bottom:0.35rem;">Step 2 · chat or sandbox</div>
-              <div style="font-size:0.78rem;font-weight:700;color:#60a5fa;margin-bottom:0.3rem;">Execute</div>
-              <div style="font-size:0.69rem;color:#475569;line-height:1.5;">
-                <b style="color:#94a3b8">chat:</b> POST C1b:8000/v1/chat/completions → LLM text<br>
-                <b style="color:#94a3b8">sandbox:</b> POST C12b:8210/exec → stdout/exit_code
-              </div>
-            </div>
-
-            <div style="flex:1.5;min-width:140px;padding:0.6rem 0.75rem;border-right:1px solid rgba(255,255,255,0.06);">
-              <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;color:#475569;margin-bottom:0.35rem;">Step 3 · alert</div>
-              <div style="font-size:0.78rem;font-weight:700;color:#fbbf24;margin-bottom:0.3rem;">Fire Alert</div>
-              <div style="font-size:0.69rem;color:#475569;line-height:1.5;">
-                <b style="color:#94a3b8">always:</b> alert fires unconditionally<br>
-                <b style="color:#94a3b8">json:</b> fires only if output contains <code style="color:#7dd3fc">{"triggered":true}</code>
-              </div>
-            </div>
-
-            <div style="flex:1;min-width:120px;padding:0.6rem 0.75rem;">
-              <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;color:#475569;margin-bottom:0.35rem;">Step 4 · complete</div>
-              <div style="font-size:0.78rem;font-weight:700;color:#4ade80;margin-bottom:0.3rem;">Close</div>
-              <div style="font-size:0.69rem;color:#475569;line-height:1.5;">Sets <code style="color:#7dd3fc">terminal_reason=workflow-complete</code>, status=completed. Run is final.</div>
-            </div>
-
-          </div>
-        </div>
-      </div>
-
-      <!-- ── 5 Type cards ──────────────────────────────────────── -->
-      <div>
-        <div class="tld-doc-h1">The 5 Tasked Types — Deep Reference</div>
-        <div class="tld-type-grid">
-
-          <!-- OUTPUT -->
-          <div class="tld-type-card">
-            <div class="tld-type-card-header output-bg" style="background:#052c14;border-color:#14532d;">
-              <span class="tld-type-icon">▶</span>
-              <div style="flex:1;">
-                <div style="display:flex;align-items:center;gap:0.5rem;">
-                  <span class="tld-type-badge output-bg output-accent" style="background:#064e1a;">output</span>
-                  <span style="font-size:0.75rem;font-weight:700;color:#e2e8f0;">Output Task</span>
+          <!-- SECTION: How IDs Work -->
+          <div class="tld-doc-section" id="ids">
+            <div class="tld-sec-h1">How IDs Work</div>
+            <div class="tld-id-grid">
+              <div class="tld-id-card">
+                <div class="tld-id-card-head" style="color:var(--accent)">task_id</div>
+                <div class="tld-id-card-sub">
+                  Created when you call <code>POST /api/tasks</code>.<br>
+                  Format: <code>task_xxxxxxxx</code> (8 hex chars).<br>
+                  Permanent anchor — never changes across all runs, alerts, and steps.
+                  Shown in Tasked, Piplinetask, Alerts, Completed, and Preview pages.
                 </div>
-                <div style="font-size:0.68rem;color:#4ade80;margin-top:0.15rem;">LLM produces readable text or structured data</div>
+              </div>
+              <div class="tld-id-card">
+                <div class="tld-id-card-head" style="color:#c084fc">run_id</div>
+                <div class="tld-id-card-sub">
+                  Created on each <code>POST /api/tasks/{id}/run</code>.<br>
+                  Format: <code>trun_xxxxxxxx</code>.<br>
+                  One per execution. A single task can have many runs. Stored in <code>task_runs</code> table.
+                </div>
+              </div>
+              <div class="tld-id-card">
+                <div class="tld-id-card-head" style="color:#fbbf24">alert_id</div>
+                <div class="tld-id-card-sub">
+                  Integer. Created only when the alert workflow step fires.<br>
+                  Fires if <code>trigger_mode=always</code>, or if the LLM response contains <code>{"triggered":true}</code> when <code>trigger_mode=json</code>.<br>
+                  Stored in <code>task_alerts</code> table.
+                </div>
+              </div>
+              <div class="tld-id-card">
+                <div class="tld-id-card-head" style="color:var(--ok)">step_id</div>
+                <div class="tld-id-card-sub">
+                  Fixed per task (e.g. <code>nt1_trigger</code>, <code>nt1_chat</code>).<br>
+                  Defined when the task is created. Step results are stored per step per run in <code>task_step_results</code>.
+                  Visible in the Piplinetask step diagram.
+                </div>
               </div>
             </div>
-            <div class="tld-type-card-body">
-              <div class="tld-info-grid">
-                <span class="tld-info-key">How created</span>
-                <span class="tld-info-val">POST /api/tasks · tasked_type="output" · mode="chat"</span>
-                <span class="tld-info-key">How triggered</span>
-                <span class="tld-info-val text">Manual (Run Now button) or schedule. trigger_mode="always"</span>
-                <span class="tld-info-key">Execution</span>
-                <span class="tld-info-val text">C9b → POST C1b:8000/v1/chat/completions with planner+executor prompts → LLM returns text</span>
-                <span class="tld-info-key">Alert fires</span>
-                <span class="tld-info-val text">Yes — always fires (trigger_mode=always). Creates alert_id.</span>
-                <span class="tld-info-key">Completion</span>
-                <span class="tld-info-val">terminal_reason=workflow-complete · status=completed</span>
-                <span class="tld-info-key">Where to see</span>
-                <span class="tld-info-val text">Tasked (definition) · Piplinetask (steps) · Alerts (fired) · Completed (run) · Preview (full output)</span>
+          </div>
+
+          <!-- SECTION: Workflow -->
+          <div class="tld-doc-section" id="workflow">
+            <div class="tld-sec-h1">Universal 4-Step Workflow</div>
+            <div class="tld-stepper">
+              <div class="tld-step">
+                <div class="tld-step-num">Step 1 &middot; trigger</div>
+                <div class="tld-step-kind" style="color:var(--muted)">Start</div>
+                <div class="tld-step-desc">Records timestamp and schedule kind. Transitions run from <code>queued</code> to <code>running</code>. No external API call.</div>
               </div>
-              <div class="tld-flow">
-                <div class="tld-flow-step">POST /api/tasks</div><div class="tld-flow-arrow">→</div>
-                <div class="tld-flow-step active">task_id created</div><div class="tld-flow-arrow">→</div>
-                <div class="tld-flow-step">POST /api/tasks/{id}/run</div><div class="tld-flow-arrow">→</div>
-                <div class="tld-flow-step active">C1b LLM call</div><div class="tld-flow-arrow">→</div>
-                <div class="tld-flow-step active">alert fired</div><div class="tld-flow-arrow">→</div>
-                <div class="tld-flow-step active">run_id + alert_id</div>
+              <div class="tld-step">
+                <div class="tld-step-num">Step 2 &middot; chat or sandbox</div>
+                <div class="tld-step-kind" style="color:var(--accent)">Execute</div>
+                <div class="tld-step-desc">
+                  <b>chat:</b> POST C1b:8000/v1/chat/completions &rarr; LLM text response<br>
+                  <b>sandbox:</b> POST C12b:8210/exec &rarr; stdout / exit_code / session_id
+                </div>
               </div>
-              <div class="tld-code"><span class="cm"># Create + run (output type)</span>
-<span class="kw">curl</span> -X POST :6090/api/tasks -d <span class="st">'{"name":"My Output","mode":"chat",
+              <div class="tld-step">
+                <div class="tld-step-num">Step 3 &middot; alert</div>
+                <div class="tld-step-kind" style="color:#fbbf24">Fire Alert</div>
+                <div class="tld-step-desc">
+                  <b>always:</b> alert fires unconditionally<br>
+                  <b>json:</b> fires only when output contains <code>{"triggered":true}</code>
+                </div>
+              </div>
+              <div class="tld-step">
+                <div class="tld-step-num">Step 4 &middot; complete</div>
+                <div class="tld-step-kind" style="color:var(--ok)">Close</div>
+                <div class="tld-step-desc">Sets <code>terminal_reason=workflow-complete</code> and <code>status=completed</code>. Run is final.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- SECTION: 5 Types -->
+          <div class="tld-doc-section" id="types">
+            <div class="tld-sec-h1">5 Tasked Types &mdash; Deep Reference</div>
+            <div class="tld-type-grid">
+
+              <!-- OUTPUT -->
+              <div class="tld-type-card bl-output" id="type-output">
+                <div class="tld-type-card-header">
+                  <div class="tld-type-meta">
+                    <div class="tld-type-name-row">
+                      <span class="tld-type-badge bg-output">output</span>
+                      <span class="tld-type-name">Output Task</span>
+                    </div>
+                    <div class="tld-type-tagline">LLM produces readable text or structured data</div>
+                  </div>
+                </div>
+                <div class="tld-type-card-body">
+                  <div class="tld-info-grid">
+                    <span class="tld-info-key">How created</span>
+                    <span class="tld-info-val mono">POST /api/tasks · tasked_type="output"</span>
+                    <span class="tld-info-key">How triggered</span>
+                    <span class="tld-info-val">Manual (Run Now) or schedule. trigger_mode="always"</span>
+                    <span class="tld-info-key">Execution</span>
+                    <span class="tld-info-val">C9b &rarr; POST C1b:8000/v1/chat/completions with planner + executor prompts &rarr; LLM text</span>
+                    <span class="tld-info-key">Alert fires</span>
+                    <span class="tld-info-val">Yes — always (trigger_mode=always). Creates alert_id.</span>
+                    <span class="tld-info-key">Completion</span>
+                    <span class="tld-info-val mono">terminal_reason=workflow-complete · status=completed</span>
+                    <span class="tld-info-key">Where to see</span>
+                    <span class="tld-info-val">Tasked &middot; Piplinetask &middot; Alerts &middot; Completed &middot; Preview</span>
+                  </div>
+                  <div class="tld-flow">
+                    <span class="tld-flow-step">POST /api/tasks</span><span class="tld-flow-arr">&rarr;</span>
+                    <span class="tld-flow-step on">task_id created</span><span class="tld-flow-arr">&rarr;</span>
+                    <span class="tld-flow-step">POST /run</span><span class="tld-flow-arr">&rarr;</span>
+                    <span class="tld-flow-step on">C1b LLM call</span><span class="tld-flow-arr">&rarr;</span>
+                    <span class="tld-flow-step on">alert fired</span><span class="tld-flow-arr">&rarr;</span>
+                    <span class="tld-flow-step on">completed</span>
+                  </div>
+                  <div class="tld-code"><span class="cm"># Create output task</span>
+<span class="kw">curl</span> -X POST :6090/api/tasks -d <span class="st">'{"name":"Tips","mode":"chat",
   "tasked_type":"output","trigger_mode":"always",
-  "planner_prompt":"Summarise 3 Python tips.",
-  "executor_prompt":"Be concise, 3 bullet points.",
+  "planner_prompt":"List 3 Python tips.",
+  "executor_prompt":"Be concise.",
   "steps":[
-    {"id":"s1","name":"Trigger","kind":"trigger","position":1},
-    {"id":"s2","name":"Chat","kind":"chat","position":2},
-    {"id":"s3","name":"Alert","kind":"alert","position":3},
-    {"id":"s4","name":"Complete","kind":"complete","position":4}
-  ]}'</span>
-<span class="cm"># → {"task":{"id":"task_xxxxxxxx",...}}</span>
-<span class="kw">curl</span> -X POST :6090/api/tasks/task_xxxxxxxx/run
-<span class="cm"># → {"run_id":"trun_xxx","alert_id":N,"status":"completed"}</span></div>
-              <div style="font-size:0.68rem;color:#334155;font-weight:600;margin-top:0.25rem;">TRACE-001 · task_97baeced · trun_83871f0d · alert=430</div>
-            </div>
-          </div>
-
-          <!-- ALERT -->
-          <div class="tld-type-card">
-            <div class="tld-type-card-header" style="background:#2c1a00;border-color:#78350f;">
-              <span class="tld-type-icon">⚡</span>
-              <div style="flex:1;">
-                <div style="display:flex;align-items:center;gap:0.5rem;">
-                  <span class="tld-type-badge" style="background:#431e00;color:#fbbf24;">alert</span>
-                  <span style="font-size:0.75rem;font-weight:700;color:#e2e8f0;">Alert Task</span>
+    {"id":"s1","kind":"trigger","position":1},
+    {"id":"s2","kind":"chat","position":2},
+    {"id":"s3","kind":"alert","position":3},
+    {"id":"s4","kind":"complete","position":4}]}'</span>
+<span class="kw">curl</span> -X POST :6090/api/tasks/<span class="ky">task_xxxxxxxx</span>/run</div>
+                  <div class="tld-type-footer">
+                    <span class="tld-type-trace-ids">TRACE-001 &middot; task_97baeced &middot; trun_83871f0d &middot; alert=430</span>
+                    <button class="tld-btn run sm" onclick="switchToLive('TRACE-001')">Test in Live</button>
+                  </div>
                 </div>
-                <div style="font-size:0.68rem;color:#fbbf24;margin-top:0.15rem;">Evaluates a condition — fires alert only when triggered</div>
               </div>
-            </div>
-            <div class="tld-type-card-body">
-              <div class="tld-info-grid">
-                <span class="tld-info-key">How created</span>
-                <span class="tld-info-val">POST /api/tasks · tasked_type="alert" · trigger_mode="json"</span>
-                <span class="tld-info-key">How triggered</span>
-                <span class="tld-info-val text">Manual run. LLM must return JSON: {"triggered":true,"reason":"..."} to fire alert.</span>
-                <span class="tld-info-key">Execution</span>
-                <span class="tld-info-val text">C9b sends planner question to C1b. Response parsed for "triggered":true field.</span>
-                <span class="tld-info-key">Alert fires</span>
-                <span class="tld-info-val text">Conditional — only when JSON response contains triggered:true. severity=warning typically.</span>
-                <span class="tld-info-key">Completion</span>
-                <span class="tld-info-val">Same: terminal_reason=workflow-complete · status=completed</span>
-                <span class="tld-info-key">Key difference</span>
-                <span class="tld-info-val text">trigger_mode="json" vs "always". Use for threshold checks, anomaly detection.</span>
-              </div>
-              <div class="tld-flow">
-                <div class="tld-flow-step">planner asks condition</div><div class="tld-flow-arrow">→</div>
-                <div class="tld-flow-step active">C1b evaluates</div><div class="tld-flow-arrow">→</div>
-                <div class="tld-flow-step active">parse {"triggered":true}</div><div class="tld-flow-arrow">→</div>
-                <div class="tld-flow-step active">alert fired if true</div>
-              </div>
-              <div class="tld-code"><span class="cm"># planner_prompt forces JSON response</span>
-<span class="st">"planner_prompt": "Is CPU 95% > threshold 80%?</span>
-<span class="st"> Respond ONLY as JSON: {\"triggered\":true,\"reason\":\"...\"}"</span>
-<span class="st">"trigger_mode": "json"</span>  <span class="cm">← key setting</span></div>
-              <div style="font-size:0.68rem;color:#334155;font-weight:600;margin-top:0.25rem;">TRACE-002 · task_adc06130 · trun_eae69a71 · alert=432</div>
-            </div>
-          </div>
 
-          <!-- ACTION -->
-          <div class="tld-type-card">
-            <div class="tld-type-card-header" style="background:#0a1628;border-color:#1e3a5f;">
-              <span class="tld-type-icon">⚙</span>
-              <div style="flex:1;">
-                <div style="display:flex;align-items:center;gap:0.5rem;">
-                  <span class="tld-type-badge" style="background:#0d2040;color:#60a5fa;">action</span>
-                  <span style="font-size:0.75rem;font-weight:700;color:#e2e8f0;">Action Task</span>
+              <!-- ALERT -->
+              <div class="tld-type-card bl-alert" id="type-alert">
+                <div class="tld-type-card-header">
+                  <div class="tld-type-meta">
+                    <div class="tld-type-name-row">
+                      <span class="tld-type-badge bg-alert">alert</span>
+                      <span class="tld-type-name">Alert Task</span>
+                    </div>
+                    <div class="tld-type-tagline">Evaluates a condition — fires alert only when triggered</div>
+                  </div>
                 </div>
-                <div style="font-size:0.68rem;color:#60a5fa;margin-top:0.15rem;">Runs shell commands on C12b sandbox — returns raw stdout</div>
+                <div class="tld-type-card-body">
+                  <div class="tld-info-grid">
+                    <span class="tld-info-key">How created</span>
+                    <span class="tld-info-val mono">POST /api/tasks · tasked_type="alert" · trigger_mode="json"</span>
+                    <span class="tld-info-key">How triggered</span>
+                    <span class="tld-info-val">Manual run. LLM must return JSON with <code style="font-size:0.7rem;color:var(--accent)">{"triggered":true,"reason":"..."}</code> to fire alert.</span>
+                    <span class="tld-info-key">Execution</span>
+                    <span class="tld-info-val">C9b &rarr; C1b with condition-evaluation prompt. Response parsed for triggered field.</span>
+                    <span class="tld-info-key">Key difference</span>
+                    <span class="tld-info-val">trigger_mode="json" vs "always". Use for threshold checks, anomaly detection.</span>
+                    <span class="tld-info-key">Completion</span>
+                    <span class="tld-info-val mono">terminal_reason=workflow-complete · status=completed</span>
+                  </div>
+                  <div class="tld-flow">
+                    <span class="tld-flow-step">planner: ask condition</span><span class="tld-flow-arr">&rarr;</span>
+                    <span class="tld-flow-step on">C1b evaluates</span><span class="tld-flow-arr">&rarr;</span>
+                    <span class="tld-flow-step on">parse triggered:true</span><span class="tld-flow-arr">&rarr;</span>
+                    <span class="tld-flow-step on">conditional alert</span>
+                  </div>
+                  <div class="tld-code"><span class="cm"># Planner forces JSON-only response</span>
+<span class="st">"planner_prompt"</span>: <span class="st">"Is CPU 95% above threshold 80%?
+ Respond ONLY as JSON: {\"triggered\":true,\"reason\":\"...\"}"</span>
+<span class="st">"trigger_mode"</span>: <span class="st">"json"</span>  <span class="cm">&lt;-- key setting</span></div>
+                  <div class="tld-type-footer">
+                    <span class="tld-type-trace-ids">TRACE-002 &middot; task_adc06130 &middot; trun_eae69a71 &middot; alert=432</span>
+                    <button class="tld-btn run sm" onclick="switchToLive('TRACE-002')">Test in Live</button>
+                  </div>
+                </div>
               </div>
-            </div>
-            <div class="tld-type-card-body">
-              <div class="tld-info-grid">
-                <span class="tld-info-key">How created</span>
-                <span class="tld-info-val">POST /api/tasks · tasked_type="action" · mode="sandbox" · executor_target="C12b"</span>
-                <span class="tld-info-key">How triggered</span>
-                <span class="tld-info-val text">Manual run. C9b calls POST C12b:8210/exec with the command string.</span>
-                <span class="tld-info-key">Execution</span>
-                <span class="tld-info-val text">C12b runs the shell command in /workspace. Returns stdout, stderr, exit_code, session_id. exit_code≠0 → failed.</span>
-                <span class="tld-info-key">C12b response</span>
-                <span class="tld-info-val">{"stdout":"...","stderr":"","exit_code":0,"session_id":"c12b_xxx"}</span>
-                <span class="tld-info-key">Validation</span>
-                <span class="tld-info-val text">Optional validation_command and test_command also sent to C12b separately.</span>
-                <span class="tld-info-key">Completion</span>
-                <span class="tld-info-val">Execution:completed · Validation:completed · Test:completed</span>
-              </div>
-              <div class="tld-flow">
-                <div class="tld-flow-step">mode=sandbox</div><div class="tld-flow-arrow">→</div>
-                <div class="tld-flow-step active">POST C12b:8210/exec</div><div class="tld-flow-arrow">→</div>
-                <div class="tld-flow-step active">stdout + exit_code=0</div><div class="tld-flow-arrow">→</div>
-                <div class="tld-flow-step active">validation cmd</div><div class="tld-flow-arrow">→</div>
-                <div class="tld-flow-step active">alert + complete</div>
-              </div>
-              <div class="tld-code"><span class="cm"># C12b direct call (what C9b does internally)</span>
+
+              <!-- ACTION -->
+              <div class="tld-type-card bl-action" id="type-action">
+                <div class="tld-type-card-header">
+                  <div class="tld-type-meta">
+                    <div class="tld-type-name-row">
+                      <span class="tld-type-badge bg-action">action</span>
+                      <span class="tld-type-name">Action Task</span>
+                      <span class="tld-target-badge bg-sandbox">C12b</span>
+                    </div>
+                    <div class="tld-type-tagline">Runs shell commands on C12b sandbox — returns raw stdout</div>
+                  </div>
+                </div>
+                <div class="tld-type-card-body">
+                  <div class="tld-info-grid">
+                    <span class="tld-info-key">How created</span>
+                    <span class="tld-info-val mono">POST /api/tasks · tasked_type="action" · mode="sandbox"</span>
+                    <span class="tld-info-key">How triggered</span>
+                    <span class="tld-info-val">Manual run. C9b calls POST C12b:8210/exec with command string.</span>
+                    <span class="tld-info-key">C12b response</span>
+                    <span class="tld-info-val mono">{"stdout":"...","stderr":"","exit_code":0,"session_id":"c12b_xxx"}</span>
+                    <span class="tld-info-key">Failure condition</span>
+                    <span class="tld-info-val">exit_code != 0 marks step as failed. stderr captured separately.</span>
+                    <span class="tld-info-key">Validation</span>
+                    <span class="tld-info-val">Optional validation_command + test_command also sent to C12b.</span>
+                  </div>
+                  <div class="tld-flow">
+                    <span class="tld-flow-step">mode=sandbox</span><span class="tld-flow-arr">&rarr;</span>
+                    <span class="tld-flow-step on">POST C12b:8210/exec</span><span class="tld-flow-arr">&rarr;</span>
+                    <span class="tld-flow-step on">stdout exit_code=0</span><span class="tld-flow-arr">&rarr;</span>
+                    <span class="tld-flow-step on">alert + complete</span>
+                  </div>
+                  <div class="tld-code"><span class="cm"># Direct C12b call (what C9b does internally)</span>
 <span class="kw">curl</span> -X POST http://localhost:<span class="nu">8210</span>/exec \
   -d <span class="st">'{"command":"df -h /workspace && echo DONE"}'</span>
-<span class="cm"># ← {"stdout":"...","exit_code":0,"session_id":"c12b_xxx"}</span>
+<span class="cm"># &lt;-- {"stdout":"...","exit_code":0,"session_id":"c12b_xxx"}</span>
 
-<span class="cm"># As a C9 tasked action task</span>
+<span class="cm"># In a C9 task definition:</span>
 <span class="st">"mode"</span>: <span class="st">"sandbox"</span>, <span class="st">"executor_target"</span>: <span class="st">"C12b"</span>
 <span class="st">"steps"</span>: [{<span class="st">"kind"</span>:<span class="st">"sandbox"</span>,<span class="st">"config"</span>:{<span class="st">"command"</span>:<span class="st">"df -h"</span>}}]</div>
-              <div style="font-size:0.68rem;color:#334155;font-weight:600;margin-top:0.25rem;">TRACE-003 · task_f0642138 · trun_6167744c · alert=433 · TRACE-010 · task_fe608355 · trun_6edf884a · alert=457</div>
+                  <div class="tld-type-footer">
+                    <span class="tld-type-trace-ids">TRACE-003 &middot; task_f0642138 / TRACE-010 &middot; task_fe608355</span>
+                    <button class="tld-btn run sm" onclick="switchToLive('TRACE-003')">Test in Live</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- HOOK -->
+              <div class="tld-type-card bl-hook" id="type-hook">
+                <div class="tld-type-card-header">
+                  <div class="tld-type-meta">
+                    <div class="tld-type-name-row">
+                      <span class="tld-type-badge bg-hook">hook</span>
+                      <span class="tld-type-name">Hook Task</span>
+                    </div>
+                    <div class="tld-type-tagline">Generates webhook payloads — triggers external systems</div>
+                  </div>
+                </div>
+                <div class="tld-type-card-body">
+                  <div class="tld-info-grid">
+                    <span class="tld-info-key">How created</span>
+                    <span class="tld-info-val mono">POST /api/tasks · tasked_type="hook" · mode="chat"</span>
+                    <span class="tld-info-key">How triggered</span>
+                    <span class="tld-info-val">Manual run. Planner instructs LLM to generate a webhook JSON payload.</span>
+                    <span class="tld-info-key">Execution</span>
+                    <span class="tld-info-val">C9b &rarr; C1b with hook-specific prompt. LLM generates JSON payload (Slack, GitHub, CI/CD).</span>
+                    <span class="tld-info-key">Alert fires</span>
+                    <span class="tld-info-val">Yes — trigger_mode=always. Alert confirms hook was dispatched.</span>
+                    <span class="tld-info-key">Extension</span>
+                    <span class="tld-info-val">Payload from output can be forwarded to external URLs in future sandbox steps.</span>
+                  </div>
+                  <div class="tld-flow">
+                    <span class="tld-flow-step">planner: generate webhook</span><span class="tld-flow-arr">&rarr;</span>
+                    <span class="tld-flow-step on">C1b generates JSON</span><span class="tld-flow-arr">&rarr;</span>
+                    <span class="tld-flow-step on">alert: dispatched</span><span class="tld-flow-arr">&rarr;</span>
+                    <span class="tld-flow-step on">complete</span>
+                  </div>
+                  <div class="tld-code"><span class="cm"># Planner instructs LLM to act as dispatcher</span>
+<span class="st">"planner_prompt"</span>: <span class="st">"Generate a Slack webhook payload
+ for a build-success notification."</span>
+<span class="st">"executor_prompt"</span>: <span class="st">"You are a CI/CD dispatcher.
+ Produce valid Slack webhook JSON."</span>
+<span class="cm"># Output: {"text":"Build passed","attachments":[...]}</span></div>
+                  <div class="tld-type-footer">
+                    <span class="tld-type-trace-ids">TRACE-004 &middot; task_f7632723 &middot; trun_f0c82c94 &middot; alert=435</span>
+                    <button class="tld-btn run sm" onclick="switchToLive('TRACE-004')">Test in Live</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- COMBINED -->
+              <div class="tld-type-card bl-combined" id="type-combined">
+                <div class="tld-type-card-header">
+                  <div class="tld-type-meta">
+                    <div class="tld-type-name-row">
+                      <span class="tld-type-badge bg-combined">combined</span>
+                      <span class="tld-type-name">Combined Task</span>
+                    </div>
+                    <div class="tld-type-tagline">All type paths exercised: output + alert + action + hook in one run</div>
+                  </div>
+                </div>
+                <div class="tld-type-card-body">
+                  <div class="tld-info-grid">
+                    <span class="tld-info-key">How created</span>
+                    <span class="tld-info-val mono">POST /api/tasks · tasked_type="combined"</span>
+                    <span class="tld-info-key">How triggered</span>
+                    <span class="tld-info-val">Manual run. Planner requests a structured multi-section report.</span>
+                    <span class="tld-info-key">Execution</span>
+                    <span class="tld-info-val">C1b LLM generates structured output (SUMMARY + ACTION + SEVERITY). All paths covered.</span>
+                    <span class="tld-info-key">Alert fires</span>
+                    <span class="tld-info-val">Always — severity=high. Combined tasks produce critical-level alerts.</span>
+                    <span class="tld-info-key">Duration</span>
+                    <span class="tld-info-val">Longest of all types — observed 7m 40s for full structured LLM generation.</span>
+                  </div>
+                  <div class="tld-flow">
+                    <span class="tld-flow-step">multi-section prompt</span><span class="tld-flow-arr">&rarr;</span>
+                    <span class="tld-flow-step on">C1b full report</span><span class="tld-flow-arr">&rarr;</span>
+                    <span class="tld-flow-step on">severity=high alert</span><span class="tld-flow-arr">&rarr;</span>
+                    <span class="tld-flow-step on">completed</span>
+                  </div>
+                  <div class="tld-code"><span class="cm"># Multi-section prompt covers all paths</span>
+<span class="st">"planner_prompt"</span>: <span class="st">"Produce a security audit covering
+ FINDINGS, RISK_LEVEL, and REMEDIATION_STEPS."</span>
+<span class="st">"executor_prompt"</span>: <span class="st">"You are a security auditor.
+ Label each section: FINDINGS / RISK_LEVEL / REMEDIATION."</span>
+<span class="st">"alert_policy"</span>: {<span class="st">"severity"</span>:<span class="st">"high"</span>}  <span class="cm">&lt;-- priority alert</span></div>
+                  <div class="tld-type-footer">
+                    <span class="tld-type-trace-ids">TRACE-005 &middot; task_0f1c9b39 &middot; trun_84413c8c &middot; alert=438 &middot; 7m40s</span>
+                    <button class="tld-btn run sm" onclick="switchToLive('TRACE-005')">Test in Live</button>
+                  </div>
+                </div>
+              </div>
+
+            </div><!-- end type grid -->
+          </div>
+
+          <!-- SECTION: Trace Table -->
+          <div class="tld-doc-section" id="traces">
+            <div class="tld-sec-h1">Trace Reference Table</div>
+            <div class="tld-table-wrap">
+              <table class="tld-table">
+                <thead>
+                  <tr>
+                    <th>Trace</th><th>Name</th><th>task_id</th><th>Type</th>
+                    <th>Mode</th><th>run_id</th><th>alert_id</th><th>Status</th><th>Duration</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td class="accent">TRACE-001</td>
+                    <td>Python Tips Output</td>
+                    <td class="mono">task_97baeced</td>
+                    <td><span class="tld-pill bg-output">output</span></td>
+                    <td class="muted">chat</td>
+                    <td class="mono">trun_83871f0d</td><td class="mono">430</td>
+                    <td class="ok">completed</td><td class="muted">1m 40s</td>
+                  </tr>
+                  <tr>
+                    <td class="accent">TRACE-002</td>
+                    <td>CPU Alert Check</td>
+                    <td class="mono">task_adc06130</td>
+                    <td><span class="tld-pill bg-alert">alert</span></td>
+                    <td class="muted">chat</td>
+                    <td class="mono">trun_eae69a71</td><td class="mono">432</td>
+                    <td class="ok">completed</td><td class="muted">47s</td>
+                  </tr>
+                  <tr>
+                    <td class="accent">TRACE-003</td>
+                    <td>Disk Check Action</td>
+                    <td class="mono">task_f0642138</td>
+                    <td><span class="tld-pill bg-action">action</span></td>
+                    <td style="color:#22d3ee;">sandbox</td>
+                    <td class="mono">trun_6167744c</td><td class="mono">433</td>
+                    <td class="ok">completed</td><td class="muted">&sim;0s</td>
+                  </tr>
+                  <tr>
+                    <td class="accent">TRACE-004</td>
+                    <td>Slack Webhook</td>
+                    <td class="mono">task_f7632723</td>
+                    <td><span class="tld-pill bg-hook">hook</span></td>
+                    <td class="muted">chat</td>
+                    <td class="mono">trun_f0c82c94</td><td class="mono">435</td>
+                    <td class="ok">completed</td><td class="muted">27s</td>
+                  </tr>
+                  <tr>
+                    <td class="accent">TRACE-005</td>
+                    <td>Security Audit Combined</td>
+                    <td class="mono">task_0f1c9b39</td>
+                    <td><span class="tld-pill bg-combined">combined</span></td>
+                    <td class="muted">chat</td>
+                    <td class="mono">trun_84413c8c</td><td class="mono">438</td>
+                    <td class="ok">completed</td><td class="muted">7m 40s</td>
+                  </tr>
+                  <tr>
+                    <td class="accent">TRACE-010</td>
+                    <td>C12b Linux System Probe</td>
+                    <td class="mono">task_fe608355</td>
+                    <td><span class="tld-pill bg-action">action</span></td>
+                    <td style="color:#22d3ee;">sandbox</td>
+                    <td class="mono">trun_6edf884a</td><td class="mono">457</td>
+                    <td class="ok">completed</td><td class="muted">&sim;10s</td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
           </div>
 
-          <!-- HOOK -->
-          <div class="tld-type-card">
-            <div class="tld-type-card-header" style="background:#1a0a28;border-color:#4c1d95;">
-              <span class="tld-type-icon">🔗</span>
-              <div style="flex:1;">
-                <div style="display:flex;align-items:center;gap:0.5rem;">
-                  <span class="tld-type-badge" style="background:#230e35;color:#c084fc;">hook</span>
-                  <span style="font-size:0.75rem;font-weight:700;color:#e2e8f0;">Hook Task</span>
-                </div>
-                <div style="font-size:0.68rem;color:#c084fc;margin-top:0.15rem;">Generates webhook payloads — triggers external systems</div>
-              </div>
-            </div>
-            <div class="tld-type-card-body">
-              <div class="tld-info-grid">
-                <span class="tld-info-key">How created</span>
-                <span class="tld-info-val">POST /api/tasks · tasked_type="hook" · mode="chat"</span>
-                <span class="tld-info-key">How triggered</span>
-                <span class="tld-info-val text">Manual run. Planner instructs LLM to generate a webhook JSON payload.</span>
-                <span class="tld-info-key">Execution</span>
-                <span class="tld-info-val text">C9b calls C1b with hook-specific prompt. LLM generates JSON payload (e.g. Slack, GitHub, CI/CD webhook body).</span>
-                <span class="tld-info-key">Alert fires</span>
-                <span class="tld-info-val text">Yes — trigger_mode=always. Alert confirms the hook was dispatched.</span>
-                <span class="tld-info-key">Completion</span>
-                <span class="tld-info-val">terminal_reason=workflow-complete · output contains webhook JSON</span>
-                <span class="tld-info-key">Extension</span>
-                <span class="tld-info-val text">Payload from output can be forwarded to external URLs in future sandbox steps.</span>
-              </div>
-              <div class="tld-flow">
-                <div class="tld-flow-step">planner: "generate webhook"</div><div class="tld-flow-arrow">→</div>
-                <div class="tld-flow-step active">C1b generates JSON payload</div><div class="tld-flow-arrow">→</div>
-                <div class="tld-flow-step active">alert: hook dispatched</div><div class="tld-flow-arrow">→</div>
-                <div class="tld-flow-step active">complete</div>
-              </div>
-              <div class="tld-code"><span class="cm"># Hook planner instructs LLM to act as dispatcher</span>
-<span class="st">"planner_prompt"</span>: <span class="st">"Generate a Slack webhook payload</span>
-<span class="st"> for a build-success notification."</span>
-<span class="st">"executor_prompt"</span>: <span class="st">"You are a CI/CD dispatcher.</span>
-<span class="st"> Produce valid Slack webhook JSON."</span>
-<span class="cm"># Output: {"text":"Build passed ✅","attachments":[...]}</span></div>
-              <div style="font-size:0.68rem;color:#334155;font-weight:600;margin-top:0.25rem;">TRACE-004 · task_f7632723 · trun_f0c82c94 · alert=435</div>
+          <!-- SECTION: Lifecycle -->
+          <div class="tld-doc-section" id="lifecycle">
+            <div class="tld-sec-h1">Lifecycle Operations</div>
+            <div class="tld-table-wrap">
+              <table class="tld-table">
+                <thead><tr><th>Operation</th><th>Endpoint</th><th>Result</th><th>Notes</th></tr></thead>
+                <tbody>
+                  <tr><td class="mono">create</td><td class="accent">POST /api/tasks</td><td class="ok">new task_id</td><td>Permanent definition. Steps saved to DB.</td></tr>
+                  <tr><td class="mono">run</td><td class="accent">POST /api/tasks/{id}/run</td><td class="ok">run_id + alert_id</td><td>Executes workflow. Creates task_run record.</td></tr>
+                  <tr><td class="mono">stop</td><td class="accent">POST /api/tasks/{id}/stop</td><td class="fail">status=cancelled</td><td>Cancels in-progress or latest run.</td></tr>
+                  <tr><td class="mono">pause</td><td class="accent">POST /api/tasks/{id}/pause</td><td style="color:#fbbf24;">active=false</td><td>Freezes scheduler. Existing runs finish.</td></tr>
+                  <tr><td class="mono">resume</td><td class="accent">POST /api/tasks/{id}/resume</td><td class="ok">active=true</td><td>Re-enables scheduling.</td></tr>
+                  <tr><td class="mono">restart</td><td class="accent">POST /api/tasks/{id}/restart</td><td style="color:var(--accent);">new run_id</td><td>Stop + immediate re-run. New IDs.</td></tr>
+                  <tr><td class="mono">redo</td><td class="accent">POST /api/tasks/{id}/redo</td><td style="color:#c084fc;">new run_id</td><td>Re-run without stopping first.</td></tr>
+                  <tr><td class="mono">clone</td><td class="accent">POST /api/tasks/{id}/clone</td><td style="color:#22d3ee;">new task_id</td><td>Copy with no run history. Editable.</td></tr>
+                  <tr><td class="mono">archive</td><td class="accent">POST /api/tasks/{id}/archive</td><td class="muted">lifecycle=archived</td><td>Soft-hide. History preserved.</td></tr>
+                  <tr><td class="mono">delete</td><td class="accent">DELETE /api/tasks/{id}</td><td class="fail">permanent</td><td>Removes task + all runs + alerts.</td></tr>
+                </tbody>
+              </table>
             </div>
           </div>
 
-          <!-- COMBINED -->
-          <div class="tld-type-card" style="grid-column:span 2;">
-            <div class="tld-type-card-header" style="background:#28080a;border-color:#7f1d1d;">
-              <span class="tld-type-icon">✦</span>
-              <div style="flex:1;">
-                <div style="display:flex;align-items:center;gap:0.5rem;">
-                  <span class="tld-type-badge" style="background:#3d0a0d;color:#f87171;">combined</span>
-                  <span style="font-size:0.75rem;font-weight:700;color:#e2e8f0;">Combined Task</span>
-                </div>
-                <div style="font-size:0.68rem;color:#f87171;margin-top:0.15rem;">All types in one run: output + alert + action + hook paths exercised</div>
-              </div>
-            </div>
-            <div class="tld-type-card-body">
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
-                <div class="tld-info-grid">
-                  <span class="tld-info-key">How created</span>
-                  <span class="tld-info-val">POST /api/tasks · tasked_type="combined"</span>
-                  <span class="tld-info-key">How triggered</span>
-                  <span class="tld-info-val text">Manual run. Planner requests a structured multi-section report.</span>
-                  <span class="tld-info-key">Execution</span>
-                  <span class="tld-info-val text">C1b LLM generates structured output (SUMMARY + ACTION + SEVERITY). All paths covered.</span>
-                  <span class="tld-info-key">Alert fires</span>
-                  <span class="tld-info-val text">Always — severity=high. Combined tasks typically produce critical-level alerts.</span>
-                  <span class="tld-info-key">Completion</span>
-                  <span class="tld-info-val text">Longest running type due to structured full-context LLM generation (7m 40s observed).</span>
-                </div>
-                <div>
-                  <div class="tld-code" style="height:100%;"><span class="cm"># Combined uses multi-section prompt</span>
-<span class="st">"planner_prompt"</span>: <span class="st">"Produce a security audit</span>
-<span class="st"> covering FINDINGS, RISK_LEVEL,</span>
-<span class="st"> and REMEDIATION_STEPS."</span>
-
-<span class="st">"executor_prompt"</span>: <span class="st">"You are a security auditor.</span>
-<span class="st"> Label each section clearly.</span>
-<span class="st"> FINDINGS / RISK_LEVEL / REMEDIATION."</span>
-
-<span class="cm"># severity=high forces priority alert</span>
-<span class="st">"alert_policy"</span>: {<span class="st">"severity"</span>:<span class="st">"high"</span>}</div>
-                  <div style="font-size:0.68rem;color:#334155;font-weight:600;margin-top:0.5rem;">TRACE-005 · task_0f1c9b39 · trun_84413c8c · alert=438 · duration=7m40s</div>
-                </div>
-              </div>
+          <!-- SECTION: Monitoring -->
+          <div class="tld-doc-section" id="monitoring">
+            <div class="tld-sec-h1">Monitoring Domains</div>
+            <div class="tld-mon-grid">
+              <a class="tld-mon-card" href="/tasked" target="_blank">
+                <div class="tld-mon-name">Tasked</div>
+                <div class="tld-mon-desc">Create, edit, run, clone, archive, and delete task definitions.</div>
+                <div class="tld-mon-url">/tasked?task_id=</div>
+              </a>
+              <a class="tld-mon-card" href="/piplinetask" target="_blank">
+                <div class="tld-mon-name">Piplinetask</div>
+                <div class="tld-mon-desc">Step-by-step execution view. Step flow diagram + trace grid per run.</div>
+                <div class="tld-mon-url">/piplinetask?task_id=</div>
+              </a>
+              <a class="tld-mon-card" href="/alerts" target="_blank">
+                <div class="tld-mon-name">Alerts</div>
+                <div class="tld-mon-desc">All fired alerts. Acknowledge, resolve, and snooze. Linked to run_id.</div>
+                <div class="tld-mon-url">/alerts</div>
+              </a>
+              <a class="tld-mon-card" href="/task-completed" target="_blank">
+                <div class="tld-mon-name">Task Completed</div>
+                <div class="tld-mon-desc">Terminal runs only (completed/failed/cancelled). Redo and clone buttons.</div>
+                <div class="tld-mon-url">/task-completed?task_id=</div>
+              </a>
+              <a class="tld-mon-card" href="/tasked-preview" target="_blank">
+                <div class="tld-mon-name">Preview</div>
+                <div class="tld-mon-desc">Full output viewer — task definition, step results, and compiled output per run.</div>
+                <div class="tld-mon-url">/tasked-preview?task_id=&run_id=</div>
+              </a>
+              <a class="tld-mon-card" href="/tasked-live-doc" target="_blank">
+                <div class="tld-mon-name">Live Docs</div>
+                <div class="tld-mon-desc">This page. Live testing, deep reference docs, and validation for all 6 traces.</div>
+                <div class="tld-mon-url">/tasked-live-doc</div>
+              </a>
             </div>
           </div>
 
+        </div><!-- end panel-doc -->
+
+        <!-- ══ LIVE PANEL ════════════════════════════════════════════ -->
+        <div id="panel-live" class="tld-panel">
+
+          <div class="tld-live-toolbar">
+            <button class="tld-btn rst" onclick="refreshStatus()">Refresh Status</button>
+            <button class="tld-btn run" onclick="runAll()">Run All</button>
+            <button class="tld-btn val" onclick="validateAll()">Validate All</button>
+            <span style="font-size:0.72rem;color:var(--muted);">Auto:</span>
+            <select id="tld-auto-sel" onchange="setAutoRefresh(this.value)"
+              style="font-size:0.72rem;padding:0.22rem 0.4rem;background:rgba(245,245,247,0.04);
+                     border:1px solid var(--border);border-radius:5px;color:var(--fg);cursor:pointer;">
+              <option value="0">Off</option>
+              <option value="15000">15s</option>
+              <option value="30000">30s</option>
+              <option value="60000">1 min</option>
+            </select>
+            <span id="tld-gstatus" class="tld-gstatus"></span>
+          </div>
+
+          <div class="tld-live-grid" id="tld-cards"></div>
+        </div><!-- end panel-live -->
+
+      </div><!-- end tld-content -->
+    </div><!-- end tld-main -->
+
+    <!-- ═══ RIGHT DETAIL PANEL ══════════════════════════════════════ -->
+    <aside id="tld-detail" class="tld-detail">
+      <div class="tld-detail-header">
+        <span class="tld-detail-title" id="det-title">Select a trace</span>
+        <button class="tld-detail-btn" onclick="collapseDetail()" title="Collapse">&times;</button>
+      </div>
+      <div class="tld-detail-body" id="det-body">
+        <div style="font-size:0.75rem;color:var(--muted);padding:0.5rem 0;">
+          Click a trace card or a trace in the left nav to see details here.
         </div>
       </div>
+    </aside>
 
-      <!-- ── Trace reference table ──────────────────────────────── -->
-      <div>
-        <div class="tld-doc-h1">Trace Reference Table — All 6 Traces</div>
-        <div style="background:#0f0f18;border:1px solid rgba(255,255,255,0.06);border-radius:8px;overflow:hidden;">
-          <table class="tld-trace-table">
-            <thead>
-              <tr>
-                <th>Trace #</th><th>Task Name</th><th>task_id</th><th>Type</th><th>Mode</th>
-                <th>run_id</th><th>alert_id</th><th>Status</th><th>Duration</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>TRACE-001</td>
-                <td style="font-family:inherit;color:#94a3b8;">Python Tips Output</td>
-                <td>task_97baeced</td>
-                <td><span class="tld-pill-sm output-bg output-accent">output</span></td>
-                <td style="color:#64748b;">chat</td>
-                <td>trun_83871f0d</td><td>430</td>
-                <td style="color:#4ade80;">✅ completed</td><td style="color:#64748b;">1m 40s</td>
-              </tr>
-              <tr>
-                <td>TRACE-002</td>
-                <td style="font-family:inherit;color:#94a3b8;">CPU Alert Check</td>
-                <td>task_adc06130</td>
-                <td><span class="tld-pill-sm alert-bg alert-accent">alert</span></td>
-                <td style="color:#64748b;">chat</td>
-                <td>trun_eae69a71</td><td>432</td>
-                <td style="color:#4ade80;">✅ completed</td><td style="color:#64748b;">47s</td>
-              </tr>
-              <tr>
-                <td>TRACE-003</td>
-                <td style="font-family:inherit;color:#94a3b8;">Disk Check Action</td>
-                <td>task_f0642138</td>
-                <td><span class="tld-pill-sm action-bg action-accent">action</span></td>
-                <td style="color:#22d3ee;">sandbox</td>
-                <td>trun_6167744c</td><td>433</td>
-                <td style="color:#4ade80;">✅ completed</td><td style="color:#64748b;">~0s</td>
-              </tr>
-              <tr>
-                <td>TRACE-004</td>
-                <td style="font-family:inherit;color:#94a3b8;">Slack Webhook</td>
-                <td>task_f7632723</td>
-                <td><span class="tld-pill-sm hook-bg hook-accent">hook</span></td>
-                <td style="color:#64748b;">chat</td>
-                <td>trun_f0c82c94</td><td>435</td>
-                <td style="color:#4ade80;">✅ completed</td><td style="color:#64748b;">27s</td>
-              </tr>
-              <tr>
-                <td>TRACE-005</td>
-                <td style="font-family:inherit;color:#94a3b8;">Security Audit Combined</td>
-                <td>task_0f1c9b39</td>
-                <td><span class="tld-pill-sm combined-bg combined-accent">combined</span></td>
-                <td style="color:#64748b;">chat</td>
-                <td>trun_84413c8c</td><td>438</td>
-                <td style="color:#4ade80;">✅ completed</td><td style="color:#64748b;">7m 40s</td>
-              </tr>
-              <tr>
-                <td>TRACE-010</td>
-                <td style="font-family:inherit;color:#94a3b8;">C12b Linux Probe</td>
-                <td>task_fe608355</td>
-                <td><span class="tld-pill-sm action-bg action-accent">action</span></td>
-                <td style="color:#22d3ee;">sandbox</td>
-                <td>trun_6edf884a</td><td>457</td>
-                <td style="color:#4ade80;">✅ completed</td><td style="color:#64748b;">~10s</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- ── Lifecycle operations ───────────────────────────────── -->
-      <div>
-        <div class="tld-doc-h1">Lifecycle Operations — All API Calls</div>
-        <div style="background:#0f0f18;border:1px solid rgba(255,255,255,0.06);border-radius:8px;overflow:hidden;">
-          <table class="tld-lc-table">
-            <thead><tr><th>Operation</th><th>API Call</th><th>Result</th><th>Notes</th></tr></thead>
-            <tbody>
-              <tr><td>create</td><td>POST /api/tasks</td><td style="color:#4ade80;">new task_id</td><td>Permanent definition. Steps saved to DB.</td></tr>
-              <tr><td>run</td><td>POST /api/tasks/{id}/run</td><td style="color:#4ade80;">run_id + alert_id</td><td>Executes workflow. Creates task_run record.</td></tr>
-              <tr><td>stop</td><td>POST /api/tasks/{id}/stop</td><td style="color:#f87171;">status=cancelled</td><td>Cancels in-progress or latest run.</td></tr>
-              <tr><td>pause</td><td>POST /api/tasks/{id}/pause</td><td style="color:#fbbf24;">active=false</td><td>Freezes scheduler. Existing runs finish.</td></tr>
-              <tr><td>resume</td><td>POST /api/tasks/{id}/resume</td><td style="color:#4ade80;">active=true</td><td>Re-enables scheduling.</td></tr>
-              <tr><td>restart</td><td>POST /api/tasks/{id}/restart</td><td style="color:#60a5fa;">new run_id</td><td>Stop + immediate re-run. New IDs.</td></tr>
-              <tr><td>redo</td><td>POST /api/tasks/{id}/redo</td><td style="color:#c084fc;">new run_id</td><td>Re-run without stopping first.</td></tr>
-              <tr><td>clone</td><td>POST /api/tasks/{id}/clone</td><td style="color:#22d3ee;">new task_id</td><td>Copy with no run history. Editable.</td></tr>
-              <tr><td>archive</td><td>POST /api/tasks/{id}/archive</td><td style="color:#94a3b8;">lifecycle=archived</td><td>Soft-hide. History preserved.</td></tr>
-              <tr><td>delete</td><td>DELETE /api/tasks/{id}</td><td style="color:#f87171;">permanent</td><td>Removes task + all runs + alerts.</td></tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- ── 5 monitoring pages ─────────────────────────────────── -->
-      <div>
-        <div class="tld-doc-h1">5 Monitoring Domains</div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:0.65rem;margin-bottom:1rem;">
-          <a href="/tasked" target="_blank" style="background:#0f0f18;border:1px solid rgba(255,255,255,0.06);border-radius:7px;padding:0.75rem;text-decoration:none;display:block;">
-            <div style="font-size:0.78rem;font-weight:700;color:#e2e8f0;margin-bottom:0.3rem;">📝 Tasked</div>
-            <div style="font-size:0.68rem;color:#64748b;line-height:1.5;">Create · edit · run · clone · archive · delete task definitions. URL: <code style="color:#7dd3fc">/tasked?task_id=</code></div>
-          </a>
-          <a href="/piplinetask" target="_blank" style="background:#0f0f18;border:1px solid rgba(255,255,255,0.06);border-radius:7px;padding:0.75rem;text-decoration:none;display:block;">
-            <div style="font-size:0.78rem;font-weight:700;color:#e2e8f0;margin-bottom:0.3rem;">🔀 Piplinetask</div>
-            <div style="font-size:0.68rem;color:#64748b;line-height:1.5;">Step-by-step execution view. Step flow diagram + trace grid. URL: <code style="color:#7dd3fc">/piplinetask?task_id=</code></div>
-          </a>
-          <a href="/alerts" target="_blank" style="background:#0f0f18;border:1px solid rgba(255,255,255,0.06);border-radius:7px;padding:0.75rem;text-decoration:none;display:block;">
-            <div style="font-size:0.78rem;font-weight:700;color:#e2e8f0;margin-bottom:0.3rem;">🔔 Alerts</div>
-            <div style="font-size:0.68rem;color:#64748b;line-height:1.5;">All fired alerts. Ack · resolve · snooze. Linked to run_id. URL: <code style="color:#7dd3fc">/alerts</code></div>
-          </a>
-          <a href="/task-completed" target="_blank" style="background:#0f0f18;border:1px solid rgba(255,255,255,0.06);border-radius:7px;padding:0.75rem;text-decoration:none;display:block;">
-            <div style="font-size:0.78rem;font-weight:700;color:#e2e8f0;margin-bottom:0.3rem;">✅ Task Completed</div>
-            <div style="font-size:0.68rem;color:#64748b;line-height:1.5;">Terminal runs only (completed/failed/cancelled). Redo · clone buttons. URL: <code style="color:#7dd3fc">/task-completed?task_id=</code></div>
-          </a>
-          <a href="/tasked-preview" target="_blank" style="background:#0f0f18;border:1px solid rgba(255,255,255,0.06);border-radius:7px;padding:0.75rem;text-decoration:none;display:block;">
-            <div style="font-size:0.78rem;font-weight:700;color:#e2e8f0;margin-bottom:0.3rem;">👁 Preview</div>
-            <div style="font-size:0.68rem;color:#64748b;line-height:1.5;">Full output + all step results for a specific run. URL: <code style="color:#7dd3fc">/tasked-preview?task_id=&run_id=</code></div>
-          </a>
-        </div>
-      </div>
-
-    </div><!-- end panel-doc -->
-
-    <!-- ══════════════════════════════════════════════════════════
-         TAB 2 — LIVE TESTING
-         ══════════════════════════════════════════════════════════ -->
-    <div id="panel-live" class="tld-live-panel" style="display:none;">
-      <div class="tld-live-toolbar">
-        <span style="font-size:0.8rem;font-weight:700;color:#e2e8f0;">Live Testing</span>
-        <button class="tld-btn run" onclick="runAll()">▶ Run All 6</button>
-        <button class="tld-btn validate" onclick="validateAll()">✓ Validate All</button>
-        <button class="tld-btn restart" onclick="refreshStatus()">↻ Refresh</button>
-        <span id="tld-gstatus"></span>
-      </div>
-      <div class="tld-live-grid" id="tld-cards"></div>
-    </div>
-
-  </div><!-- end tld-body -->
+  </div><!-- end tld-workspace -->
 </div><!-- end tld -->
 
 <script>
 (function() {
   'use strict';
 
-  /* ── Tab switching ──────────────────────────────────────────── */
-  window.showTab = function(name) {
-    ['doc','live'].forEach(function(t) {
-      document.getElementById('panel-' + t).style.display = t === name ? '' : 'none';
-      var tab = document.getElementById('tab-' + t);
-      if (tab) tab.className = 'tld-tab' + (t === name ? ' active' : '');
-    });
-    if (name === 'live') refreshStatus();
-  };
-
-  /* ── Trace definitions ──────────────────────────────────────── */
+  /* ── TRACES config ──────────────────────────────────────────── */
   var TRACES = [
     {
-      trace:'TRACE-001', type:'output', mode:'chat', typeColor:'#4ade80',
+      trace:'TRACE-001', type:'output', typeColor:'#4ade80', typeCls:'output',
+      mode:'chat', target:'C1b',
       task_id:'task_97baeced', run_id:'trun_83871f0d', alert_id:430,
-      name:'NEW-T1 — Python Tips Output',
+      name:'Python Tips Output',
       desc:'output · chat → C1b · always alert',
       planner:'List 3 essential Python tips for writing cleaner code.',
       executor:'You are a senior Python developer. Give exactly 3 concise tips, one sentence each.',
@@ -736,24 +977,26 @@
       ]
     },
     {
-      trace:'TRACE-002', type:'alert', mode:'chat', typeColor:'#fbbf24',
+      trace:'TRACE-002', type:'alert', typeColor:'#fbbf24', typeCls:'alert',
+      mode:'chat', target:'C1b',
       task_id:'task_adc06130', run_id:'trun_eae69a71', alert_id:432,
-      name:'NEW-T2 — CPU Alert Check',
-      desc:'alert · chat → C1b · json trigger (threshold)',
+      name:'CPU Alert Check',
+      desc:'alert · chat → C1b · json trigger',
       planner:'Is CPU 95% > threshold 80%? JSON ONLY: {"triggered":true,"reason":"..."}',
       executor:'You are a monitoring system. Evaluate the condition precisely.',
       trigger_mode:'json',
       steps:[
         {id:'nt2_trigger',name:'Trigger',kind:'trigger',position:1},
-        {id:'nt2_condition',name:'Condition Check',kind:'chat',position:2,config:{prompt:'Is CPU 95% > 80%?'}},
+        {id:'nt2_condition',name:'Condition Check',kind:'chat',position:2},
         {id:'nt2_alert',name:'CPU Alert',kind:'alert',position:3,config:{title:'CPU Threshold Exceeded',severity:'warning',summary:'95% > 80%'}},
         {id:'nt2_complete',name:'Complete',kind:'complete',position:4}
       ]
     },
     {
-      trace:'TRACE-003', type:'action', mode:'sandbox', typeColor:'#60a5fa',
+      trace:'TRACE-003', type:'action', typeColor:'#60a5fa', typeCls:'action',
+      mode:'sandbox', target:'C12b',
       task_id:'task_f0642138', run_id:'trun_6167744c', alert_id:433,
-      name:'NEW-T3 — Disk Check Action',
+      name:'Disk Check Action',
       desc:'action · sandbox → C12b:8210 · shell command',
       planner:'Run: df -h /workspace && ls /workspace | wc -l',
       executor:'Execute shell and report disk usage and file count.',
@@ -766,39 +1009,42 @@
       ]
     },
     {
-      trace:'TRACE-004', type:'hook', mode:'chat', typeColor:'#c084fc',
+      trace:'TRACE-004', type:'hook', typeColor:'#c084fc', typeCls:'hook',
+      mode:'chat', target:'C1b',
       task_id:'task_f7632723', run_id:'trun_f0c82c94', alert_id:435,
-      name:'NEW-T4 — Slack Webhook Trigger',
+      name:'Slack Webhook Trigger',
       desc:'hook · chat → C1b · generates webhook JSON payload',
       planner:'Generate a Slack webhook payload for a build-success notification.',
       executor:'You are a CI/CD dispatcher. Produce valid Slack webhook JSON.',
       trigger_mode:'always',
       steps:[
         {id:'nt4_trigger',name:'Trigger',kind:'trigger',position:1},
-        {id:'nt4_hook',name:'Slack Webhook',kind:'chat',position:2,config:{prompt:'Generate Slack build-success webhook JSON'}},
+        {id:'nt4_hook',name:'Slack Webhook',kind:'chat',position:2},
         {id:'nt4_alert',name:'Hook Alert',kind:'alert',position:3,config:{title:'Slack Hook Dispatched',severity:'info',summary:'Payload generated'}},
         {id:'nt4_complete',name:'Complete',kind:'complete',position:4}
       ]
     },
     {
-      trace:'TRACE-005', type:'combined', mode:'chat', typeColor:'#f87171',
+      trace:'TRACE-005', type:'combined', typeColor:'#f87171', typeCls:'combined',
+      mode:'chat', target:'C1b',
       task_id:'task_0f1c9b39', run_id:'trun_84413c8c', alert_id:438,
-      name:'NEW-T5 — Security Audit Combined',
+      name:'Security Audit Combined',
       desc:'combined · chat → C1b · all paths · severity=high',
       planner:'Produce a security audit: FINDINGS, RISK_LEVEL, REMEDIATION_STEPS.',
       executor:'You are a security auditor. Label each section clearly.',
       trigger_mode:'always',
       steps:[
         {id:'nt5_trigger',name:'Trigger',kind:'trigger',position:1},
-        {id:'nt5_chat',name:'Audit Report',kind:'chat',position:2,config:{prompt:'Security audit: FINDINGS, RISK_LEVEL, REMEDIATION_STEPS'}},
+        {id:'nt5_chat',name:'Audit Report',kind:'chat',position:2},
         {id:'nt5_alert',name:'Audit Alert',kind:'alert',position:3,config:{title:'Security Audit Ready',severity:'high',summary:'Review findings'}},
         {id:'nt5_complete',name:'Complete',kind:'complete',position:4}
       ]
     },
     {
-      trace:'TRACE-010', type:'action', mode:'sandbox', typeColor:'#22d3ee',
+      trace:'TRACE-010', type:'action', typeColor:'#22d3ee', typeCls:'sandbox',
+      mode:'sandbox', target:'C12b',
       task_id:'task_fe608355', run_id:'trun_6edf884a', alert_id:457,
-      name:'TRACE-010 — C12b Linux System Probe',
+      name:'C12b Linux System Probe',
       desc:'action · sandbox → C12b:8210 · 9-section system probe',
       planner:'Run Linux system probe: hostname, kernel, OS, CPU, memory, disk, Python, Node, timestamp.',
       executor:'Execute each probe command with a section header. Return stdout verbatim.',
@@ -807,7 +1053,7 @@
       test_command:'ls /workspace | wc -l && echo TEST_OK',
       steps:[
         {id:'tr10_trigger',name:'Trigger',kind:'trigger',position:1},
-        {id:'tr10_sandbox',name:'C12b Probe',kind:'sandbox',position:2,config:{command:"echo '=== 1. HOSTNAME ===' && hostname && echo '=== 2. KERNEL ===' && uname -srm && echo '=== 3. OS ===' && grep PRETTY_NAME /etc/os-release && echo '=== 4. CPU ===' && uname -m && nproc && echo '=== 5. MEMORY ===' && awk '/MemTotal|MemAvailable/{print}' /proc/meminfo && echo '=== 6. DISK ===' && df -h /workspace && echo '=== 7. PYTHON ===' && python3 --version && echo '=== 8. NODE ===' && node --version && echo '=== 9. TIMESTAMP ===' && date -u +%Y-%m-%dT%H:%M:%SZ && echo '=== PROBE_COMPLETE ==='" }},
+        {id:'tr10_sandbox',name:'C12b Probe',kind:'sandbox',position:2,config:{command:"echo '=== 1. HOSTNAME ===' && hostname && echo '=== 2. KERNEL ===' && uname -srm && echo '=== 3. OS ===' && grep PRETTY_NAME /etc/os-release && echo '=== 4. CPU ===' && uname -m && nproc && echo '=== 5. MEMORY ===' && awk '/MemTotal|MemAvailable/{print}' /proc/meminfo && echo '=== 6. DISK ===' && df -h /workspace && echo '=== 7. PYTHON ===' && python3 --version && echo '=== 8. NODE ===' && node --version && echo '=== 9. TIMESTAMP ===' && date -u +%Y-%m-%dT%H:%M:%SZ && echo '=== PROBE_COMPLETE ==='"}},
         {id:'tr10_alert',name:'Probe Alert',kind:'alert',position:3,config:{title:'C12b Probe Complete',severity:'info',summary:'9-section probe done'}},
         {id:'tr10_complete',name:'Complete',kind:'complete',position:4}
       ]
@@ -817,123 +1063,241 @@
   /* ── State ──────────────────────────────────────────────────── */
   var S = {};
   TRACES.forEach(function(t) {
-    S[t.trace] = { task_id:t.task_id, run_id:t.run_id, alert_id:t.alert_id,
-                   status:'idle', output:'', checks:null };
+    var savedRid = localStorage.getItem('tld_sr_' + t.trace) || t.run_id;
+    var savedSt  = localStorage.getItem('tld_ss_' + t.trace) || 'idle';
+    S[t.trace] = {
+      task_id: t.task_id, run_id: savedRid, alert_id: t.alert_id,
+      status: savedSt, output: '', checks: null, selected: false
+    };
   });
 
+  var autoTimer = null;
+  var selectedTrace = localStorage.getItem('tld_sel') || 'TRACE-001';
+
   /* ── Helpers ───────────────────────────────────────────────── */
-  function esc(s) {
-    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+  function post(url,body) { return fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}).then(function(r){return r.json();}); }
+  function get(url)       { return fetch(url).then(function(r){return r.json();}); }
+  function gstatus(msg,c) { var el=document.getElementById('tld-gstatus'); if(el){el.textContent=msg; el.style.color=c||'var(--muted)';} }
+  function saveState(trace) {
+    if (S[trace].run_id)  localStorage.setItem('tld_sr_' + trace, S[trace].run_id);
+    if (S[trace].status)  localStorage.setItem('tld_ss_' + trace, S[trace].status);
   }
-  function post(url, body) {
-    return fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}).then(function(r){return r.json();});
-  }
-  function get(url)  { return fetch(url).then(function(r){return r.json();}); }
-  function gstatus(msg,c) {
-    var el=document.getElementById('tld-gstatus');
-    if(el){el.textContent=msg;el.style.color=c||'#475569';}
+  function copyText(s) {
+    try { navigator.clipboard.writeText(s); gstatus('Copied: ' + s.substring(0,30), 'var(--accent)'); } catch(e) {}
   }
 
-  /* ── Build all cards ────────────────────────────────────────── */
+  /* ── Tab switching ──────────────────────────────────────────── */
+  window.showTab = function(name) {
+    ['doc','live'].forEach(function(t) {
+      var p = document.getElementById('panel-' + t);
+      var b = document.getElementById('tab-' + t);
+      if (p) p.className = 'tld-panel' + (t === name ? ' active' : '');
+      if (b) b.className = 'tld-tab' + (t === name ? ' active' : '');
+    });
+    if (name === 'live') refreshStatus();
+  };
+
+  window.switchToLive = function(trace) {
+    showTab('live');
+    selectTrace(trace);
+    var card = document.getElementById('card-' + trace);
+    if (card) card.scrollIntoView({behavior:'smooth', block:'center'});
+  };
+
+  window.navDoc = function(anchor) {
+    showTab('doc');
+    var el = document.getElementById(anchor);
+    var panel = document.getElementById('panel-doc');
+    if (el && panel) {
+      panel.scrollTop = el.offsetTop - 16;
+      // highlight nav item
+      document.querySelectorAll('.tld-nav-item').forEach(function(n){ n.classList.remove('active'); });
+    }
+  };
+
+  /* ── Nav render ─────────────────────────────────────────────── */
+  function renderNav() {
+    var c = document.getElementById('tld-nav-traces');
+    if (!c) return;
+    c.innerHTML = TRACES.map(function(t) {
+      var s = S[t.trace];
+      var sel = selectedTrace === t.trace;
+      return '<button class="tld-nav-item nav-trace' + (sel?' sel':'') + '"' +
+        ' onclick="switchToLive(\'' + t.trace + '\')">' +
+        '<div class="tld-nav-trace-row">' +
+          '<span class="tld-nav-dot ' + s.status + '"></span>' +
+          '<span class="tld-nav-trace-name">' + esc(t.trace) + '</span>' +
+          '<span class="tld-nav-trace-badge bg-' + t.typeCls + '">' + esc(t.type) + '</span>' +
+        '</div>' +
+      '</button>';
+    }).join('');
+  }
+
+  /* ── Card render ────────────────────────────────────────────── */
   function buildCards() {
     var c = document.getElementById('tld-cards');
     if (!c) return;
     c.innerHTML = '';
-    TRACES.forEach(function(t) { c.appendChild(makeCard(t)); });
+    TRACES.forEach(function(t) {
+      var div = document.createElement('div');
+      div.id = 'card-' + t.trace;
+      renderCard(t, div);
+      c.appendChild(div);
+    });
   }
 
-  function makeCard(t) {
-    var div = document.createElement('div');
-    div.id = 'card-' + t.trace;
-    div.className = 'tld-live-card';
-    renderCard(t, div);
-    return div;
-  }
-
-  function renderCard(t, div) {
+  function renderCard(t, el) {
     var s = S[t.trace];
-    div.className = 'tld-live-card ' + s.status;
+    var sel = selectedTrace === t.trace;
+    el.className = 'tld-live-card bl-' + t.typeCls + ' ' + s.status + (sel ? ' sel' : '');
 
+    var isDone = s.status === 'completed' || s.status === 'failed' || s.status === 'cancelled';
     var stepFlow = t.steps.map(function(st,i) {
-      var done = s.status === 'completed' || s.status === 'failed';
-      return '<span class="tld-mini-step' + (done?' done':'') + '">' + esc(st.kind) + '</span>' +
-             (i < t.steps.length-1 ? '<span class="tld-mini-arr">→</span>' : '');
+      return '<span class="tld-mini-step' + (isDone?' done':'') + '">' + esc(st.kind) + '</span>' +
+             (i < t.steps.length-1 ? '<span class="tld-mini-arr">&rarr;</span>' : '');
     }).join('');
 
-    var checkHtml = '';
-    if (s.checks) {
-      var names = ['Tasked','Pipeline','Alert','Completed','Preview'];
-      checkHtml = '<div class="tld-checks">' +
-        s.checks.map(function(c,i) {
-          return '<div class="tld-check">' +
-            '<span class="tld-check-icon">' + (c.ok?'✅':'❌') + '</span>' +
-            '<span class="' + (c.ok?'tld-check-ok':'tld-check-fail') + '">' + names[i] + '</span>' +
-            '<span class="tld-check-msg">' + esc(c.msg) + '</span>' +
-          '</div>';
-        }).join('') +
+    var tid = esc(s.task_id || '—');
+    var rid = esc(s.run_id  || '—');
+    var aid = esc(s.alert_id ? String(s.alert_id) : '—');
+
+    el.innerHTML =
+      '<div class="tld-live-card-header" onclick="selectTrace(\'' + t.trace + '\')">' +
+        '<div style="width:9px;height:9px;border-radius:50%;background:' + t.typeColor + ';flex-shrink:0;"></div>' +
+        '<span class="tld-live-card-title">' + esc(t.trace) + ' &mdash; ' + esc(t.name) + '</span>' +
+        '<span class="tld-type-chip bg-' + t.typeCls + '" style="font-size:0.63rem;padding:0.08rem 0.35rem;">' + esc(t.type) + '</span>' +
+        '<span class="tld-target-badge bg-' + (t.target==='C12b'?'sandbox':'action') + '" style="font-size:0.63rem;">' + esc(t.target) + '</span>' +
+      '</div>' +
+      '<div class="tld-live-card-body">' +
+        '<div class="tld-status-row">' +
+          '<div class="tld-dot ' + s.status + '" id="dot-' + t.trace + '"></div>' +
+          '<span class="tld-status-lbl ' + s.status + '" id="slbl-' + t.trace + '">' + esc(statusLabel(s.status)) + '</span>' +
+          '<div class="tld-mini-flow" style="margin-left:auto;">' + stepFlow + '</div>' +
+        '</div>' +
+        '<div class="tld-chip-row">' +
+          '<span class="tld-chip" onclick="copyText(\'' + (s.task_id||'') + '\')"><b>task</b>' + esc((s.task_id||'').substring(5)) + '</span>' +
+          '<span class="tld-chip" id="rid-' + t.trace + '" onclick="copyText(\'' + (s.run_id||'') + '\')"><b>run</b>' + esc((s.run_id||'—').substring(5)) + '</span>' +
+          '<span class="tld-chip" id="aid-' + t.trace + '"><b>alert</b>' + aid + '</span>' +
+        '</div>' +
+        '<div class="tld-actions">' +
+          '<button class="tld-btn run"  onclick="doRun(\'' + t.trace + '\')">Run</button>' +
+          '<button class="tld-btn stop" onclick="doStop(\'' + t.trace + '\')">Stop</button>' +
+          '<button class="tld-btn rst"  onclick="doRestart(\'' + t.trace + '\')">Restart</button>' +
+          '<button class="tld-btn redo" onclick="doRedo(\'' + t.trace + '\')">Redo</button>' +
+          '<button class="tld-btn val"  onclick="doValidate(\'' + t.trace + '\')">Validate</button>' +
+        '</div>' +
+        '<div class="tld-out-preview' + (!s.output?' empty':'') + '" id="out-' + t.trace + '">' +
+          esc(s.output ? s.output.substring(0, 400) : 'No output yet. Click Run to execute.') +
+        '</div>' +
+        '<div class="tld-links">' +
+          '<a class="tld-link" href="/tasked?task_id=' + (s.task_id||'') + '" target="_blank">Tasked</a>' +
+          '<a class="tld-link" href="/piplinetask?task_id=' + (s.task_id||'') + '" target="_blank">Pipeline</a>' +
+          '<a class="tld-link" href="/alerts" target="_blank">Alerts</a>' +
+          '<a class="tld-link" href="/task-completed?task_id=' + (s.task_id||'') + '" target="_blank">Completed</a>' +
+          '<a class="tld-link" href="/tasked-preview?task_id=' + (s.task_id||'') + '&run_id=' + (s.run_id||'') + '" target="_blank">Preview</a>' +
+        '</div>' +
       '</div>';
-    }
-
-    var tid = s.task_id || '—';
-    var rid = s.run_id  || '—';
-    var aid = s.alert_id ? String(s.alert_id) : '—';
-
-    div.innerHTML = [
-      /* header */
-      '<div class="tld-live-card-header">',
-        '<div style="width:10px;height:10px;border-radius:50%;background:' + t.typeColor + ';flex-shrink:0;"></div>',
-        '<span class="tld-live-card-title" title="' + esc(t.name) + '">' + esc(t.trace) + ' — ' + esc(t.name) + '</span>',
-      '</div>',
-      /* body */
-      '<div class="tld-live-card-body">',
-        '<div style="font-size:0.68rem;color:#475569;">' + esc(t.desc) + '</div>',
-        /* status */
-        '<div class="tld-status-bar">',
-          '<div class="tld-dot ' + s.status + '" id="dot-' + t.trace + '"></div>',
-          '<span class="tld-status-label ' + s.status + '" id="slbl-' + t.trace + '">' + statusLabel(s.status) + '</span>',
-          '<div class="tld-mini-flow" style="margin-left:auto;">' + stepFlow + '</div>',
-        '</div>',
-        /* IDs */
-        '<div class="tld-id-row">',
-          '<span class="tld-id-chip"><b>task_id</b>' + esc(tid) + '</span>',
-          '<span class="tld-id-chip"><b>run_id</b><span id="rid-' + t.trace + '">' + esc(rid) + '</span></span>',
-          '<span class="tld-id-chip"><b>alert</b><span id="aid-' + t.trace + '">' + esc(aid) + '</span></span>',
-        '</div>',
-        /* buttons */
-        '<div class="tld-actions">',
-          '<button class="tld-btn run"      onclick="doRun(\'' + t.trace + '\')">▶ Run</button>',
-          '<button class="tld-btn stop"     onclick="doStop(\'' + t.trace + '\')">■ Stop</button>',
-          '<button class="tld-btn restart"  onclick="doRestart(\'' + t.trace + '\')">↺ Restart</button>',
-          '<button class="tld-btn redo"     onclick="doRedo(\'' + t.trace + '\')">⟳ Redo</button>',
-          '<button class="tld-btn validate" onclick="doValidate(\'' + t.trace + '\')">✓ Validate</button>',
-        '</div>',
-        /* output */
-        '<div class="tld-output' + (!s.output?' empty':'') + '" id="out-' + t.trace + '">' +
-          esc(s.output ? s.output.substring(0,500) : 'No output yet. Click ▶ Run to execute.') +
-        '</div>',
-        /* validation checks */
-        checkHtml,
-        /* links */
-        '<div class="tld-links">',
-          '<a class="tld-link" href="/tasked?task_id=' + esc(tid) + '" target="_blank">📝 Tasked</a>',
-          '<a class="tld-link" href="/piplinetask?task_id=' + esc(tid) + '" target="_blank">🔀 Pipeline</a>',
-          '<a class="tld-link" href="/alerts" target="_blank">🔔 Alerts</a>',
-          '<a class="tld-link" href="/task-completed?task_id=' + esc(tid) + '" target="_blank">✅ Completed</a>',
-          '<a class="tld-link" href="/tasked-preview?task_id=' + esc(tid) + '&run_id=' + esc(rid) + '" target="_blank">👁 Preview</a>',
-        '</div>',
-      '</div>'
-    ].join('');
-  }
-
-  function statusLabel(s) {
-    return {idle:'Idle',running:'Running…',completed:'Completed',failed:'Failed',cancelled:'Cancelled'}[s]||s;
   }
 
   function refreshCard(trace) {
     var t = TRACES.find(function(x){return x.trace===trace;});
-    var div = document.getElementById('card-' + trace);
-    if (t && div) renderCard(t, div);
+    var el = document.getElementById('card-' + trace);
+    if (t && el) renderCard(t, el);
   }
+
+  function statusLabel(s) {
+    return {idle:'Idle',running:'Running\u2026',completed:'Completed',failed:'Failed',cancelled:'Cancelled'}[s] || s;
+  }
+
+  /* ── Detail panel ───────────────────────────────────────────── */
+  function selectTrace(trace) {
+    selectedTrace = trace;
+    localStorage.setItem('tld_sel', trace);
+    // update card + nav highlight
+    TRACES.forEach(function(t) { refreshCard(t.trace); });
+    renderNav();
+    renderDetail(trace);
+  }
+
+  function renderDetail(trace) {
+    var t = TRACES.find(function(x){return x.trace===trace;});
+    var s = S[trace];
+    if (!t || !s) return;
+
+    document.getElementById('det-title').textContent = t.trace + ' \u2014 ' + t.name;
+
+    var checksHtml = '';
+    if (s.checks) {
+      var names = ['Tasked','Pipeline','Alert','Completed','Preview'];
+      checksHtml = '<div class="tld-detail-section"><div class="tld-detail-label">Validation (5 checks)</div>' +
+        '<div class="tld-checks">' +
+          s.checks.map(function(c,i) {
+            return '<div class="tld-check">' +
+              '<span class="tld-check-icon">' + (c.ok?'&#10003;':'&#10007;') + '</span>' +
+              '<span class="' + (c.ok?'tld-check-ok':'tld-check-fail') + '">' + names[i] + '</span>' +
+              '<span class="tld-check-msg">' + esc(c.msg) + '</span>' +
+            '</div>';
+          }).join('') +
+        '</div></div>';
+    } else {
+      checksHtml = '<div class="tld-detail-section"><div class="tld-detail-label">Validation</div>' +
+        '<div style="font-size:0.72rem;color:var(--muted);">Click Validate to run 5-domain checks.</div></div>';
+    }
+
+    document.getElementById('det-body').innerHTML =
+      '<div class="tld-detail-section">' +
+        '<div style="display:flex;align-items:center;gap:0.4rem;flex-wrap:wrap;">' +
+          '<span class="tld-type-badge bg-' + t.typeCls + '">' + esc(t.type) + '</span>' +
+          '<span class="tld-target-badge bg-' + (t.target==='C12b'?'sandbox':'action') + '">' + esc(t.target) + '</span>' +
+          '<span class="tld-dot ' + s.status + '" style="margin-left:0.25rem;"></span>' +
+          '<span class="tld-status-lbl ' + s.status + '">' + esc(statusLabel(s.status)) + '</span>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="tld-detail-section">' +
+        '<div class="tld-detail-label">IDs</div>' +
+        '<div style="display:flex;flex-direction:column;gap:0.22rem;">' +
+          '<span class="tld-chip" onclick="copyText(\'' + esc(s.task_id||'') + '\')" style="display:block;"><b>task_id</b>' + esc(s.task_id||'—') + '</span>' +
+          '<span class="tld-chip" onclick="copyText(\'' + esc(s.run_id||'') + '\')" style="display:block;"><b>run_id&nbsp;</b>' + esc(s.run_id||'—') + '</span>' +
+          '<span class="tld-chip" style="display:block;"><b>alert&nbsp;&nbsp;</b>' + esc(s.alert_id ? String(s.alert_id) : '—') + '</span>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="tld-detail-section">' +
+        '<div class="tld-detail-label">Output</div>' +
+        '<div class="tld-detail-output' + (!s.output?' empty':'') + '">' +
+          esc(s.output || 'No output yet.') +
+        '</div>' +
+      '</div>' +
+
+      checksHtml +
+
+      '<div class="tld-detail-section">' +
+        '<div class="tld-detail-label">Quick Actions</div>' +
+        '<div class="tld-actions">' +
+          '<button class="tld-btn run sm"  onclick="doRun(\'' + trace + '\')">Run</button>' +
+          '<button class="tld-btn stop sm" onclick="doStop(\'' + trace + '\')">Stop</button>' +
+          '<button class="tld-btn val sm"  onclick="doValidate(\'' + trace + '\')">Validate</button>' +
+        '</div>' +
+      '</div>' +
+
+      '<div class="tld-detail-section">' +
+        '<div class="tld-detail-label">Links</div>' +
+        '<div class="tld-links">' +
+          '<a class="tld-link" href="/tasked?task_id=' + esc(s.task_id||'') + '" target="_blank">Tasked</a>' +
+          '<a class="tld-link" href="/piplinetask?task_id=' + esc(s.task_id||'') + '" target="_blank">Pipeline</a>' +
+          '<a class="tld-link" href="/alerts" target="_blank">Alerts</a>' +
+          '<a class="tld-link" href="/task-completed?task_id=' + esc(s.task_id||'') + '" target="_blank">Completed</a>' +
+          '<a class="tld-link" href="/tasked-preview?task_id=' + esc(s.task_id||'') + '&run_id=' + esc(s.run_id||'') + '" target="_blank">Preview</a>' +
+        '</div>' +
+      '</div>';
+  }
+
+  window.collapseDetail = function() {
+    var d = document.getElementById('tld-detail');
+    if (d) d.classList.toggle('collapsed');
+  };
 
   /* ── Operations ─────────────────────────────────────────────── */
   function ensureTask(trace, cb) {
@@ -941,137 +1305,163 @@
     if (!t) return;
     if (S[trace].task_id) { cb(S[trace].task_id, t); return; }
     var payload = {
-      name:t.name, mode:t.mode, schedule_kind:'manual', tasked_type:t.type,
-      planner_prompt:t.planner, executor_prompt:t.executor||'Execute the task.',
-      trigger_mode:t.trigger_mode, steps:t.steps
+      name: t.name, mode: t.mode, schedule_kind: 'manual', tasked_type: t.type,
+      planner_prompt: t.planner, executor_prompt: t.executor || 'Execute the task.',
+      trigger_mode: t.trigger_mode, steps: t.steps
     };
-    if (t.executor_target)      payload.executor_target      = t.executor_target;
-    if (t.validation_command)   payload.validation_command   = t.validation_command;
-    if (t.test_command)         payload.test_command         = t.test_command;
+    if (t.executor_target)    payload.executor_target    = t.executor_target;
+    if (t.validation_command) payload.validation_command = t.validation_command;
+    if (t.test_command)       payload.test_command       = t.test_command;
     post('/api/tasks', payload).then(function(d) {
       var newId = (d.task||{}).id;
       if (newId) { S[trace].task_id = newId; cb(newId, t); }
-      else { gstatus('Create failed: ' + trace,'#f87171'); }
+      else { gstatus('Create failed: ' + trace, 'var(--fail)'); }
     });
   }
 
   window.doRun = function(trace) {
-    gstatus('Running ' + trace + '…','#60a5fa');
-    S[trace].status = 'running'; S[trace].output = ''; refreshCard(trace);
+    gstatus('Running ' + trace + '\u2026', 'var(--accent)');
+    S[trace].status = 'running'; S[trace].output = ''; refreshCard(trace); renderNav();
+    if (selectedTrace === trace) renderDetail(trace);
     ensureTask(trace, function(taskId) {
       post('/api/tasks/' + taskId + '/run', {}).then(function(d) {
         S[trace].status   = d.status || 'failed';
         S[trace].output   = d.text || d.error || '(no output)';
         if (d.run_id)   S[trace].run_id   = d.run_id;
         if (d.alert_id) S[trace].alert_id = String(d.alert_id);
-        refreshCard(trace);
-        gstatus(trace + ' → ' + S[trace].status, S[trace].status==='completed'?'#4ade80':'#f87171');
-      }).catch(function(e){ S[trace].status='failed'; refreshCard(trace); gstatus('Error: '+e.message,'#f87171'); });
+        saveState(trace); refreshCard(trace); renderNav();
+        if (selectedTrace === trace) renderDetail(trace);
+        gstatus(trace + ' \u2192 ' + S[trace].status, S[trace].status==='completed'?'var(--ok)':'var(--fail)');
+      }).catch(function(e){ S[trace].status='failed'; saveState(trace); refreshCard(trace); renderNav(); gstatus('Error: '+e.message,'var(--fail)'); });
     });
   };
 
   window.doStop = function(trace) {
     var taskId = S[trace].task_id; if (!taskId) return;
     post('/api/tasks/' + taskId + '/stop', {}).then(function(d) {
-      S[trace].status = d.status || 'cancelled'; refreshCard(trace);
-      gstatus(trace + ' stopped','#f87171');
+      S[trace].status = d.status || 'cancelled'; saveState(trace); refreshCard(trace); renderNav();
+      if (selectedTrace === trace) renderDetail(trace);
+      gstatus(trace + ' stopped', 'var(--fail)');
     });
   };
 
   window.doRestart = function(trace) {
     var taskId = S[trace].task_id; if (!taskId) return;
-    gstatus('Restarting ' + trace + '…','#60a5fa');
-    S[trace].status='running'; S[trace].output=''; refreshCard(trace);
+    gstatus('Restarting ' + trace + '\u2026', 'var(--accent)');
+    S[trace].status = 'running'; S[trace].output = ''; refreshCard(trace); renderNav();
     post('/api/tasks/' + taskId + '/restart', {}).then(function(d) {
-      S[trace].status = d.status||'failed'; S[trace].output = d.text||d.error||'';
+      S[trace].status = d.status || 'failed'; S[trace].output = d.text || d.error || '';
       if (d.run_id)   S[trace].run_id   = d.run_id;
       if (d.alert_id) S[trace].alert_id = String(d.alert_id);
-      refreshCard(trace);
-      gstatus(trace + ' restarted → ' + S[trace].status, S[trace].status==='completed'?'#4ade80':'#f87171');
+      saveState(trace); refreshCard(trace); renderNav();
+      if (selectedTrace === trace) renderDetail(trace);
+      gstatus(trace + ' restarted \u2192 ' + S[trace].status, S[trace].status==='completed'?'var(--ok)':'var(--fail)');
     });
   };
 
   window.doRedo = function(trace) {
     var taskId = S[trace].task_id; if (!taskId) return;
-    gstatus('Redo ' + trace + '…','#c084fc');
-    S[trace].status='running'; refreshCard(trace);
+    gstatus('Redo ' + trace + '\u2026', '#c084fc');
+    S[trace].status = 'running'; refreshCard(trace); renderNav();
     post('/api/tasks/' + taskId + '/redo', {}).then(function(d) {
-      S[trace].status = d.status||'failed'; S[trace].output = d.text||d.error||'';
+      S[trace].status = d.status || 'failed'; S[trace].output = d.text || d.error || '';
       if (d.run_id)   S[trace].run_id   = d.run_id;
       if (d.alert_id) S[trace].alert_id = String(d.alert_id);
-      refreshCard(trace);
-      gstatus(trace + ' redo → ' + S[trace].status, '#c084fc');
+      saveState(trace); refreshCard(trace); renderNav();
+      if (selectedTrace === trace) renderDetail(trace);
+      gstatus(trace + ' redo \u2192 ' + S[trace].status, '#c084fc');
     });
   };
 
   window.doValidate = function(trace) {
     var taskId = S[trace].task_id; var runId = S[trace].run_id;
-    if (!taskId) { gstatus('No task_id — run first','#f87171'); return; }
-    gstatus('Validating ' + trace + '…','#22d3ee');
+    if (!taskId) { gstatus('No task_id — run first', 'var(--fail)'); return; }
+    gstatus('Validating ' + trace + '\u2026', '#22d3ee');
     var checks = [
       get('/api/tasks').then(function(d){
-        var t=((d.tasks||[]).find(function(x){return x.id===taskId;}))||{};
-        return {ok:t.last_status==='completed',msg:'status='+( t.last_status||'?')};
+        var t = ((d.tasks||[]).find(function(x){return x.id===taskId;}))||{};
+        return {ok: t.last_status==='completed', msg:'status='+(t.last_status||'?')};
       }),
       get('/api/task-pipelines?task_id=' + taskId).then(function(d){
-        var r=((d.pipelines||[])[0]||{}).run||{};
-        return {ok:r.status==='completed',msg:'pipeline='+( r.status||'none')};
+        var r = ((d.pipelines||[])[0]||{}).run||{};
+        return {ok: r.status==='completed', msg:'pipeline='+(r.status||'none')};
       }),
       get('/api/alerts?limit=500').then(function(d){
-        var al=(d.alerts||[]).filter(function(a){return a.task_id===taskId;});
-        return {ok:al.length>0,msg:'alerts='+al.length+(al[0]?' id='+al[0].id:'')};
+        var al = (d.alerts||[]).filter(function(a){return a.task_id===taskId;});
+        return {ok: al.length>0, msg:'alerts='+al.length+(al[0]?' id='+al[0].id:'')};
       }),
       get('/api/task-completed?task_id=' + taskId).then(function(d){
-        var it=d.items||[];
-        return {ok:it.length>0,msg:'runs='+it.length};
+        var it = d.items||[];
+        return {ok: it.length>0, msg:'runs='+it.length};
       }),
       get('/api/task-preview?task_id=' + taskId + (runId?'&run_id='+runId:'')).then(function(d){
-        var out=d.output_text||'';
-        return {ok:out.length>0,msg:'output='+out.length+'c'};
+        var out = d.output_text||'';
+        return {ok: out.length>0, msg:'output='+out.length+'c'};
       })
     ];
     Promise.all(checks).then(function(results) {
       S[trace].checks = results;
       refreshCard(trace);
+      if (selectedTrace === trace) renderDetail(trace);
       var all = results.every(function(r){return r.ok;});
-      gstatus(trace + ' validated — ' + (all?'all 5 passed ✅':'some failed ❌'), all?'#4ade80':'#f87171');
+      gstatus(trace + ' \u2014 ' + (all ? 'all 5 passed' : 'some failed'), all ? 'var(--ok)' : 'var(--fail)');
     });
   };
 
   window.refreshStatus = function() {
-    gstatus('Refreshing…','#475569');
+    gstatus('Refreshing\u2026', 'var(--muted)');
+    var done = 0;
     TRACES.forEach(function(t) {
-      var taskId = S[t.trace].task_id; if (!taskId) return;
+      var taskId = S[t.trace].task_id; if (!taskId) { done++; return; }
       get('/api/task-pipelines?task_id=' + taskId).then(function(d) {
-        var p=(d.pipelines||[])[0]||{}, r=p.run||{};
-        if (r.status) { S[t.trace].status = r.status; }
-        if (r.id)     { S[t.trace].run_id = r.id; }
-        refreshCard(t.trace);
-      });
+        var p = (d.pipelines||[])[0]||{}, r = p.run||{};
+        if (r.status) S[t.trace].status = r.status;
+        if (r.id)     S[t.trace].run_id  = r.id;
+        saveState(t.trace); refreshCard(t.trace);
+        if (selectedTrace === t.trace) renderDetail(t.trace);
+        done++;
+        if (done >= TRACES.length) { renderNav(); gstatus('Refreshed', 'var(--muted)'); }
+      }).catch(function(){ done++; if (done >= TRACES.length) { renderNav(); gstatus('Refreshed (some errors)', 'var(--fail)'); } });
     });
-    setTimeout(function(){gstatus('Refreshed','#475569');},500);
   };
 
   window.runAll = function() {
-    gstatus('Running all 6…','#60a5fa');
-    var i=0;
-    function next(){
-      if(i>=TRACES.length){gstatus('All 6 complete','#4ade80');return;}
+    gstatus('Running all\u2026', 'var(--accent)');
+    var i = 0;
+    function next() {
+      if (i >= TRACES.length) { gstatus('All runs dispatched', 'var(--ok)'); return; }
       window.doRun(TRACES[i++].trace);
-      setTimeout(next,800);
+      setTimeout(next, 1200);
     }
     next();
   };
 
   window.validateAll = function() {
-    gstatus('Validating all 6…','#22d3ee');
-    TRACES.forEach(function(t,i){
-      setTimeout(function(){window.doValidate(t.trace);},i*250);
-    });
+    gstatus('Validating all\u2026', '#22d3ee');
+    TRACES.forEach(function(t,i){ setTimeout(function(){ window.doValidate(t.trace); }, i * 300); });
+  };
+
+  window.setAutoRefresh = function(val) {
+    if (autoTimer) { clearInterval(autoTimer); autoTimer = null; }
+    localStorage.setItem('tld_auto', val);
+    var ms = parseInt(val, 10);
+    if (ms > 0) { autoTimer = setInterval(refreshStatus, ms); }
   };
 
   /* ── Init ───────────────────────────────────────────────────── */
   buildCards();
+  renderNav();
+  renderDetail(selectedTrace);
+
+  // Restore auto-refresh preference
+  var savedAuto = localStorage.getItem('tld_auto') || '0';
+  var sel = document.getElementById('tld-auto-sel');
+  if (sel) {
+    sel.value = savedAuto;
+    if (parseInt(savedAuto,10) > 0) { setAutoRefresh(savedAuto); }
+  }
+
+  // Initial status load
   refreshStatus();
 
 })();
