@@ -2,416 +2,733 @@
 {% block title %}Tasked Live Docs{% endblock %}
 {% block content %}
 <style>
-/* ── Layout ──────────────────────────────────────────────────────────── */
-.tld-shell {
-  display: grid;
-  grid-template-columns: 380px 1fr;
-  grid-template-rows: auto 1fr;
-  gap: 0;
-  height: calc(100vh - 100px);
-  min-height: 600px;
-  margin: -1.25rem;
-  overflow: hidden;
+/* ═══════════════════════════════════════════════════
+   TASKED LIVE DOCUMENTATION — Full Redesign
+   ═══════════════════════════════════════════════════ */
+
+/* ── Shell ─────────────────────────────────────── */
+.tld { display:flex; flex-direction:column; height:calc(100vh - 102px); margin:-1.25rem; overflow:hidden; background:#08080d; }
+
+/* ── Top bar ───────────────────────────────────── */
+.tld-topbar {
+  display:flex; align-items:center; gap:0.75rem; padding:0.55rem 1.1rem;
+  background:#0d0d14; border-bottom:1px solid rgba(255,255,255,0.07);
+  flex-shrink:0; flex-wrap:wrap;
 }
-.tld-sidebar {
-  grid-column: 1;
-  grid-row: 1 / -1;
-  background: #0e0e12;
-  border-right: 1px solid rgba(255,255,255,0.07);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+.tld-topbar-title { font-size:0.9rem; font-weight:700; color:#e2e8f0; letter-spacing:-0.01em; }
+.tld-topbar-subtitle { font-size:0.7rem; color:#64748b; margin-left:0.25rem; }
+
+/* ── Tab bar ───────────────────────────────────── */
+.tld-tabs {
+  display:flex; gap:0; padding:0 1.1rem; background:#0d0d14;
+  border-bottom:1px solid rgba(255,255,255,0.07); flex-shrink:0;
 }
-.tld-sidebar-body {
-  flex: 1;
-  overflow-y: auto;
-  padding: 1rem;
-  font-size: 0.82rem;
+.tld-tab {
+  padding:0.5rem 1rem; font-size:0.75rem; font-weight:600; color:#64748b;
+  cursor:pointer; border:none; background:none; border-bottom:2px solid transparent;
+  transition:all 0.15s; letter-spacing:0.01em;
 }
-.tld-main {
-  grid-column: 2;
-  grid-row: 1 / -1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: #0a0a0f;
-}
-.tld-toolbar {
-  background: #111118;
-  border-bottom: 1px solid rgba(255,255,255,0.07);
-  padding: 0.6rem 1rem;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-  flex-shrink: 0;
-}
-.tld-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
+.tld-tab:hover { color:#94a3b8; }
+.tld-tab.active { color:#22d3ee; border-bottom-color:#22d3ee; }
+
+/* ── Body below tabs ───────────────────────────── */
+.tld-body { flex:1; overflow:hidden; display:flex; }
+
+/* ══════════════════════════════════════════════════
+   TAB 1 — DOCUMENTATION
+   ══════════════════════════════════════════════════ */
+.tld-doc-panel {
+  width:100%; height:100%; overflow-y:auto; padding:1.25rem 1.5rem;
+  display:flex; flex-direction:column; gap:1.5rem;
 }
 
-/* ── Sidebar sections ─────────────────────────────────────────────── */
-.tld-sidebar-title {
-  font-size: 0.7rem;
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
-  color: var(--muted);
-  padding: 0.75rem 0 0.4rem;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
-  margin-bottom: 0.5rem;
-}
-.tld-type-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  font-size: 0.72rem;
-  padding: 0.2rem 0.55rem;
-  border-radius: 12px;
-  font-weight: 600;
-  margin-bottom: 0.25rem;
-  cursor: pointer;
-  border: none;
-  transition: opacity 0.15s;
-}
-.tld-type-pill:hover { opacity: 0.8; }
-.tld-type-pill.output   { background: #1a3a2a; color: #4ade80; }
-.tld-type-pill.alert    { background: #3a2a0a; color: #fbbf24; }
-.tld-type-pill.action   { background: #1a2a3a; color: #60a5fa; }
-.tld-type-pill.hook     { background: #2a1a3a; color: #c084fc; }
-.tld-type-pill.combined { background: #3a1a1a; color: #f87171; }
-.tld-type-pill.sandbox  { background: #0a2a2a; color: #22d3ee; }
+/* Section heading */
+.tld-doc-h1 { font-size:0.65rem; text-transform:uppercase; letter-spacing:0.1em; color:#475569; font-weight:700; margin-bottom:0.75rem; }
 
-.tld-trace-row {
-  display: grid;
-  grid-template-columns: 80px 1fr 60px;
-  gap: 0.3rem;
-  font-size: 0.72rem;
-  padding: 0.3rem 0;
-  border-bottom: 1px solid rgba(255,255,255,0.04);
-  align-items: center;
-}
-.tld-trace-row:hover { background: rgba(255,255,255,0.02); }
-.tld-trace-id   { color: var(--accent); font-weight: 600; font-family: monospace; font-size: 0.68rem; }
-.tld-trace-name { color: var(--fg); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.tld-trace-ok   { color: #4ade80; font-size: 0.68rem; }
+/* Type cards grid */
+.tld-type-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(340px, 1fr)); gap:1rem; }
 
-.tld-step-list { list-style: none; padding: 0; margin: 0; }
-.tld-step-list li {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.25rem 0;
-  font-size: 0.75rem;
-  color: var(--muted);
+.tld-type-card {
+  border-radius:10px; overflow:hidden; border:1px solid rgba(255,255,255,0.07);
+  background:#0f0f18; display:flex; flex-direction:column;
 }
-.tld-step-list li::before { content: "→"; color: var(--accent); font-weight: bold; }
-.tld-step-list li b { color: var(--fg); }
+.tld-type-card-header {
+  padding:0.8rem 1rem 0.7rem; display:flex; align-items:center; gap:0.75rem;
+  border-bottom:1px solid rgba(255,255,255,0.05);
+}
+.tld-type-icon { font-size:1.25rem; flex-shrink:0; }
+.tld-type-badge {
+  font-size:0.68rem; font-weight:700; padding:0.15rem 0.5rem; border-radius:20px;
+  letter-spacing:0.04em; text-transform:uppercase;
+}
+.tld-type-card-body { padding:0.85rem 1rem; display:flex; flex-direction:column; gap:0.8rem; }
 
-/* ── Type cards ───────────────────────────────────────────────────── */
-.tld-type-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 0.75rem;
+/* Flow steps */
+.tld-flow {
+  display:flex; align-items:center; flex-wrap:wrap; gap:0.25rem; font-size:0.68rem;
 }
-.tld-card {
-  background: #111118;
-  border: 1px solid rgba(255,255,255,0.07);
-  border-radius: 8px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
+.tld-flow-step {
+  display:flex; align-items:center; gap:0.25rem;
+  background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.07);
+  border-radius:5px; padding:0.2rem 0.45rem; color:#94a3b8;
 }
-.tld-card-header {
-  padding: 0.65rem 0.85rem;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-  border-bottom: 1px solid rgba(255,255,255,0.06);
-}
-.tld-card-title { font-weight: 700; font-size: 0.85rem; color: var(--fg); }
-.tld-card-desc  { font-size: 0.72rem; color: var(--muted); margin-top: 0.15rem; }
-.tld-card-body  { padding: 0.75rem 0.85rem; flex: 1; display: flex; flex-direction: column; gap: 0.5rem; }
+.tld-flow-step.active { color:#e2e8f0; border-color:rgba(255,255,255,0.15); background:rgba(255,255,255,0.07); }
+.tld-flow-arrow { color:#334155; font-size:0.6rem; }
 
-.tld-status-row {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  font-size: 0.72rem;
-}
-.tld-status-dot {
-  width: 8px; height: 8px;
-  border-radius: 50%;
-  background: var(--muted);
-  flex-shrink: 0;
-}
-.tld-status-dot.running  { background: #3b82f6; box-shadow: 0 0 6px #3b82f6; animation: pulse 1s infinite; }
-.tld-status-dot.completed { background: #4ade80; }
-.tld-status-dot.failed   { background: #f87171; }
-.tld-status-dot.idle     { background: #6b7280; }
+/* Info rows */
+.tld-info-grid { display:grid; grid-template-columns:120px 1fr; gap:0.2rem 0.5rem; font-size:0.72rem; }
+.tld-info-key   { color:#64748b; padding:0.15rem 0; }
+.tld-info-val   { color:#cbd5e1; padding:0.15rem 0; font-family:monospace; font-size:0.68rem; word-break:break-all; }
+.tld-info-val.text { font-family:inherit; font-size:0.72rem; }
 
-.tld-ids {
-  font-family: monospace;
-  font-size: 0.68rem;
-  color: var(--muted);
-  background: rgba(0,0,0,0.3);
-  border-radius: 4px;
-  padding: 0.35rem 0.5rem;
-  line-height: 1.6;
+/* Code blocks */
+.tld-code {
+  background:#050509; border:1px solid rgba(255,255,255,0.06); border-radius:6px;
+  padding:0.65rem 0.75rem; font-family:monospace; font-size:0.67rem;
+  color:#7dd3fc; line-height:1.7; overflow-x:auto; white-space:pre;
 }
-.tld-ids span { color: var(--accent); }
+.tld-code .cm { color:#475569; }
+.tld-code .kw { color:#c084fc; }
+.tld-code .st { color:#86efac; }
+.tld-code .nu { color:#fbbf24; }
 
-.tld-output-pre {
-  background: #050508;
-  border: 1px solid rgba(255,255,255,0.06);
-  border-radius: 4px;
-  padding: 0.5rem;
-  font-family: monospace;
-  font-size: 0.68rem;
-  color: #a0a0b0;
-  max-height: 160px;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  word-break: break-word;
-  flex: 1;
-}
-.tld-output-pre.empty { color: var(--muted); font-style: italic; }
+/* Type colours */
+.output-accent  { color:#4ade80; } .output-bg  { background:#052c14; border-color:#14532d; }
+.alert-accent   { color:#fbbf24; } .alert-bg   { background:#2c1a00; border-color:#78350f; }
+.action-accent  { color:#60a5fa; } .action-bg  { background:#0a1628; border-color:#1e3a5f; }
+.hook-accent    { color:#c084fc; } .hook-bg    { background:#1a0a28; border-color:#4c1d95; }
+.combined-accent{ color:#f87171; } .combined-bg{ background:#28080a; border-color:#7f1d1d; }
+.sandbox-accent { color:#22d3ee; } .sandbox-bg { background:#03181e; border-color:#164e63; }
 
-.tld-link-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-  margin-top: 0.25rem;
-}
-.tld-link {
-  font-size: 0.68rem;
-  color: var(--accent);
-  text-decoration: none;
-  padding: 0.15rem 0.4rem;
-  border: 1px solid rgba(99,179,237,0.25);
-  border-radius: 4px;
-  background: rgba(99,179,237,0.06);
-  transition: background 0.15s;
-}
-.tld-link:hover { background: rgba(99,179,237,0.15); }
+/* Lifecycle table */
+.tld-lc-table { width:100%; border-collapse:collapse; font-size:0.72rem; }
+.tld-lc-table th { color:#475569; font-size:0.65rem; text-transform:uppercase; letter-spacing:0.06em; padding:0.4rem 0.6rem; border-bottom:1px solid rgba(255,255,255,0.06); text-align:left; }
+.tld-lc-table td { padding:0.35rem 0.6rem; border-bottom:1px solid rgba(255,255,255,0.04); color:#94a3b8; vertical-align:top; }
+.tld-lc-table td:first-child { color:#e2e8f0; font-weight:600; font-family:monospace; font-size:0.68rem; width:90px; }
+.tld-lc-table td:nth-child(2) { color:#22d3ee; font-family:monospace; font-size:0.67rem; }
+.tld-lc-table tr:last-child td { border-bottom:none; }
+.tld-lc-table tr:hover td { background:rgba(255,255,255,0.02); }
 
+/* Trace table */
+.tld-trace-table { width:100%; border-collapse:collapse; font-size:0.72rem; }
+.tld-trace-table th { color:#475569; font-size:0.65rem; text-transform:uppercase; letter-spacing:0.06em; padding:0.4rem 0.7rem; border-bottom:1px solid rgba(255,255,255,0.06); text-align:left; background:#0d0d14; position:sticky; top:0; }
+.tld-trace-table td { padding:0.4rem 0.7rem; border-bottom:1px solid rgba(255,255,255,0.04); color:#94a3b8; font-family:monospace; font-size:0.68rem; }
+.tld-trace-table td:first-child { color:#22d3ee; font-weight:700; }
+.tld-trace-table tr:hover td { background:rgba(255,255,255,0.025); }
+.tld-pill-sm { font-size:0.62rem; font-weight:700; padding:0.1rem 0.4rem; border-radius:10px; }
+
+/* ══════════════════════════════════════════════════
+   TAB 2 — LIVE TESTING
+   ══════════════════════════════════════════════════ */
+.tld-live-panel {
+  width:100%; height:100%; overflow-y:auto; padding:1rem 1.25rem;
+  display:flex; flex-direction:column; gap:1rem;
+}
+
+/* Live card grid */
+.tld-live-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(360px,1fr)); gap:0.85rem; }
+
+.tld-live-card {
+  border-radius:8px; overflow:hidden; border:1px solid rgba(255,255,255,0.07);
+  background:#0f0f18; display:flex; flex-direction:column; transition:border-color 0.2s;
+}
+.tld-live-card:hover { border-color:rgba(255,255,255,0.13); }
+.tld-live-card.running { border-color:rgba(59,130,246,0.4); }
+.tld-live-card.completed { border-color:rgba(74,222,128,0.25); }
+.tld-live-card.failed { border-color:rgba(248,113,113,0.35); }
+
+.tld-live-card-header {
+  padding:0.6rem 0.85rem; display:flex; align-items:center; gap:0.6rem;
+  border-bottom:1px solid rgba(255,255,255,0.05);
+}
+.tld-live-card-title { font-size:0.78rem; font-weight:700; color:#e2e8f0; flex:1; min-width:0; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.tld-live-card-body { padding:0.7rem 0.85rem; flex:1; display:flex; flex-direction:column; gap:0.55rem; }
+
+/* Status bar */
+.tld-status-bar { display:flex; align-items:center; gap:0.5rem; }
+.tld-dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; background:#334155; transition:background 0.3s; }
+.tld-dot.idle      { background:#334155; }
+.tld-dot.running   { background:#3b82f6; box-shadow:0 0 0 3px rgba(59,130,246,0.2); animation:tld-pulse 1.2s ease-in-out infinite; }
+.tld-dot.completed { background:#4ade80; }
+.tld-dot.failed    { background:#f87171; }
+.tld-dot.cancelled { background:#94a3b8; }
+@keyframes tld-pulse { 0%,100%{opacity:1} 50%{opacity:0.35} }
+
+.tld-status-label { font-size:0.72rem; color:#64748b; }
+.tld-status-label.running  { color:#60a5fa; }
+.tld-status-label.completed{ color:#4ade80; }
+.tld-status-label.failed   { color:#f87171; }
+
+/* ID chips */
+.tld-id-row { display:flex; flex-wrap:wrap; gap:0.3rem; }
+.tld-id-chip {
+  font-family:monospace; font-size:0.64rem; color:#94a3b8;
+  background:rgba(0,0,0,0.35); border:1px solid rgba(255,255,255,0.06);
+  border-radius:4px; padding:0.15rem 0.4rem; line-height:1.5;
+}
+.tld-id-chip b { color:#7dd3fc; font-weight:600; margin-right:0.15rem; }
+
+/* Action buttons */
+.tld-actions { display:flex; gap:0.35rem; flex-wrap:wrap; }
 .tld-btn {
-  font-size: 0.72rem;
-  padding: 0.3rem 0.65rem;
-  border-radius: 5px;
-  border: 1px solid transparent;
-  cursor: pointer;
-  font-weight: 600;
-  transition: opacity 0.15s;
-  white-space: nowrap;
+  font-size:0.69rem; font-weight:700; padding:0.28rem 0.6rem;
+  border-radius:5px; border:1px solid transparent; cursor:pointer;
+  transition:opacity 0.15s, transform 0.1s; letter-spacing:0.02em;
+  white-space:nowrap;
 }
-.tld-btn:hover { opacity: 0.8; }
-.tld-btn:disabled { opacity: 0.4; cursor: not-allowed; }
-.tld-btn.run     { background: #1a3a2a; color: #4ade80; border-color: #4ade8040; }
-.tld-btn.stop    { background: #3a1a1a; color: #f87171; border-color: #f8717140; }
-.tld-btn.restart { background: #1a2a3a; color: #60a5fa; border-color: #60a5fa40; }
-.tld-btn.create  { background: #2a1a3a; color: #c084fc; border-color: #c084fc40; }
-.tld-btn.validate{ background: #1a2a1a; color: #34d399; border-color: #34d39940; }
-.tld-btn.sm      { padding: 0.2rem 0.45rem; font-size: 0.68rem; }
+.tld-btn:hover:not(:disabled) { opacity:0.82; transform:translateY(-1px); }
+.tld-btn:active:not(:disabled){ transform:translateY(0); }
+.tld-btn:disabled { opacity:0.35; cursor:not-allowed; }
+.tld-btn.run      { background:#052c14; color:#4ade80; border-color:#14532d; }
+.tld-btn.stop     { background:#28080a; color:#f87171; border-color:#7f1d1d; }
+.tld-btn.restart  { background:#0a1628; color:#60a5fa; border-color:#1e3a5f; }
+.tld-btn.redo     { background:#1a0a28; color:#c084fc; border-color:#4c1d95; }
+.tld-btn.validate { background:#03181e; color:#22d3ee; border-color:#164e63; }
 
-.tld-val-row {
-  display: flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-size: 0.7rem;
+/* Output */
+.tld-output {
+  background:#050509; border:1px solid rgba(255,255,255,0.05); border-radius:5px;
+  padding:0.5rem 0.65rem; font-family:monospace; font-size:0.66rem; color:#94a3b8;
+  max-height:180px; overflow-y:auto; white-space:pre-wrap; word-break:break-word;
+  line-height:1.55; flex-shrink:0;
 }
-.tld-val-icon { font-size: 0.85rem; }
-.tld-val-ok   { color: #4ade80; }
-.tld-val-fail { color: #f87171; }
-.tld-val-wait { color: var(--muted); }
+.tld-output.empty { color:#334155; font-style:italic; }
+.tld-output::-webkit-scrollbar { width:4px; }
+.tld-output::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.08); border-radius:2px; }
 
-/* toolbar inputs */
-.tld-label { font-size: 0.72rem; color: var(--muted); }
-.tld-input, .tld-select {
-  background: #1a1a22;
-  border: 1px solid rgba(255,255,255,0.12);
-  color: var(--fg);
-  font-size: 0.75rem;
-  padding: 0.3rem 0.5rem;
-  border-radius: 4px;
-  outline: none;
-}
-.tld-input:focus, .tld-select:focus { border-color: var(--accent); }
+/* Validation checks */
+.tld-checks { display:flex; flex-direction:column; gap:0.25rem; }
+.tld-check { display:flex; align-items:center; gap:0.4rem; font-size:0.69rem; }
+.tld-check-icon { font-size:0.8rem; flex-shrink:0; }
+.tld-check-ok   { color:#4ade80; }
+.tld-check-fail { color:#f87171; }
+.tld-check-wait { color:#334155; }
+.tld-check-msg  { color:#64748b; font-size:0.66rem; margin-left:auto; }
 
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50%       { opacity: 0.4; }
+/* Trace links */
+.tld-links { display:flex; flex-wrap:wrap; gap:0.3rem; }
+.tld-link {
+  font-size:0.64rem; color:#7dd3fc; text-decoration:none;
+  padding:0.12rem 0.38rem; border:1px solid rgba(125,211,252,0.18);
+  border-radius:4px; background:rgba(125,211,252,0.05);
+  transition:background 0.15s;
 }
+.tld-link:hover { background:rgba(125,211,252,0.12); color:#bae6fd; }
+
+/* Step flow mini */
+.tld-mini-flow { display:flex; align-items:center; gap:0.2rem; flex-wrap:wrap; }
+.tld-mini-step {
+  font-size:0.62rem; padding:0.1rem 0.35rem; border-radius:3px;
+  border:1px solid rgba(255,255,255,0.07); color:#64748b; background:rgba(255,255,255,0.03);
+}
+.tld-mini-step.done { color:#4ade80; border-color:rgba(74,222,128,0.25); background:rgba(74,222,128,0.05); }
+.tld-mini-arr { color:#1e293b; font-size:0.6rem; }
+
+/* Toolbar */
+.tld-live-toolbar {
+  display:flex; align-items:center; gap:0.6rem; flex-wrap:wrap;
+  background:#0d0d14; border-bottom:1px solid rgba(255,255,255,0.06);
+  padding:0.55rem 1.25rem; flex-shrink:0;
+}
+.tld-live-toolbar .tld-btn { font-size:0.72rem; padding:0.32rem 0.75rem; }
+
+/* Global status */
+#tld-gstatus { font-size:0.71rem; color:#475569; margin-left:auto; }
+
+/* Scrollbar global */
+.tld-doc-panel::-webkit-scrollbar,
+.tld-live-panel::-webkit-scrollbar { width:5px; }
+.tld-doc-panel::-webkit-scrollbar-thumb,
+.tld-live-panel::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.07); border-radius:3px; }
 </style>
 
-<div class="tld-shell">
+<div class="tld">
 
-  <!-- ── LEFT SIDEBAR: Documentation ─────────────────────────────── -->
-  <aside class="tld-sidebar">
-    <div class="tld-sidebar-body">
-
-      <div style="font-size:0.9rem;font-weight:700;color:var(--fg);padding-bottom:0.5rem;border-bottom:1px solid rgba(255,255,255,0.1);">
-        📋 Tasked Live Documentation
-      </div>
-
-      <!-- Type reference -->
-      <div class="tld-sidebar-title">Tasked Types</div>
-      <div style="display:flex;flex-direction:column;gap:0.35rem;margin-bottom:0.75rem;">
-        <div>
-          <span class="tld-type-pill output">▶ output</span>
-          <div style="font-size:0.7rem;color:var(--muted);padding-left:0.25rem;">LLM produces readable text or data. Goes to C1b (chat) or sandbox.</div>
-        </div>
-        <div>
-          <span class="tld-type-pill alert">⚡ alert</span>
-          <div style="font-size:0.7rem;color:var(--muted);padding-left:0.25rem;">Evaluates condition (JSON trigger). Fires alert when <code>{"triggered":true}</code>.</div>
-        </div>
-        <div>
-          <span class="tld-type-pill action">⚙ action</span>
-          <div style="font-size:0.7rem;color:var(--muted);padding-left:0.25rem;">Runs shell commands on C12b sandbox. Returns stdout/exit_code.</div>
-        </div>
-        <div>
-          <span class="tld-type-pill hook">🔗 hook</span>
-          <div style="font-size:0.7rem;color:var(--muted);padding-left:0.25rem;">Triggers external systems / generates webhook payloads.</div>
-        </div>
-        <div>
-          <span class="tld-type-pill combined">✦ combined</span>
-          <div style="font-size:0.7rem;color:var(--muted);padding-left:0.25rem;">All types: output + alert + action in one run.</div>
-        </div>
-        <div>
-          <span class="tld-type-pill sandbox">🖥 sandbox</span>
-          <div style="font-size:0.7rem;color:var(--muted);padding-left:0.25rem;">mode=sandbox sends commands directly to <code>POST C12b:8210/exec</code>.</div>
-        </div>
-      </div>
-
-      <!-- Workflow steps -->
-      <div class="tld-sidebar-title">Workflow Steps (per task)</div>
-      <ul class="tld-step-list">
-        <li><b>trigger</b> — marks start, records timestamp</li>
-        <li><b>chat / sandbox</b> — executes LLM or shell command</li>
-        <li><b>alert</b> — fires alert record if trigger condition met</li>
-        <li><b>complete</b> — closes run, sets terminal_reason</li>
-      </ul>
-
-      <!-- C12b sandbox flow -->
-      <div class="tld-sidebar-title">C12b Sandbox Flow (action mode)</div>
-      <div style="font-family:monospace;font-size:0.67rem;color:#a0a0b0;background:#050508;border-radius:4px;padding:0.5rem;line-height:1.7;margin-bottom:0.5rem;">
-        C9b → POST :8210/exec<br>
-        &nbsp;&nbsp;{command: "..."}<br>
-        ← {stdout, stderr,<br>
-        &nbsp;&nbsp;&nbsp;exit_code, session_id}
-      </div>
-
-      <!-- Trace table -->
-      <div class="tld-sidebar-title">Trace Quick Reference</div>
-      <div class="tld-trace-row" style="font-size:0.68rem;color:var(--muted);font-weight:600;">
-        <span>Trace #</span><span>task_id / name</span><span>Status</span>
-      </div>
-      <div class="tld-trace-row">
-        <span class="tld-trace-id">TRACE-001</span>
-        <span class="tld-trace-name" title="NEW-T1 Python Tips Output — output/chat">T1 output/chat</span>
-        <span class="tld-trace-ok">✅</span>
-      </div>
-      <div class="tld-trace-row">
-        <span class="tld-trace-id">TRACE-002</span>
-        <span class="tld-trace-name" title="NEW-T2 CPU Alert Check — alert/chat">T2 alert/chat</span>
-        <span class="tld-trace-ok">✅</span>
-      </div>
-      <div class="tld-trace-row">
-        <span class="tld-trace-id">TRACE-003</span>
-        <span class="tld-trace-name" title="NEW-T3 Disk Check — action/sandbox">T3 action/sandbox</span>
-        <span class="tld-trace-ok">✅</span>
-      </div>
-      <div class="tld-trace-row">
-        <span class="tld-trace-id">TRACE-004</span>
-        <span class="tld-trace-name" title="NEW-T4 Slack Webhook — hook/chat">T4 hook/chat</span>
-        <span class="tld-trace-ok">✅</span>
-      </div>
-      <div class="tld-trace-row">
-        <span class="tld-trace-id">TRACE-005</span>
-        <span class="tld-trace-name" title="NEW-T5 Security Audit — combined/chat">T5 combined/chat</span>
-        <span class="tld-trace-ok">✅</span>
-      </div>
-      <div class="tld-trace-row">
-        <span class="tld-trace-id">TRACE-010</span>
-        <span class="tld-trace-name" title="C12b Linux Probe — action/sandbox">T10 action/sandbox</span>
-        <span class="tld-trace-ok">✅</span>
-      </div>
-
-      <!-- Lifecycle ops -->
-      <div class="tld-sidebar-title">Lifecycle API Calls</div>
-      <div style="font-family:monospace;font-size:0.67rem;color:#a0a0b0;background:#050508;border-radius:4px;padding:0.5rem;line-height:1.8;margin-bottom:0.5rem;">
-        POST /api/tasks            <span style="color:#4ade80;">create</span><br>
-        POST /api/tasks/{id}/run   <span style="color:#4ade80;">start</span><br>
-        POST /api/tasks/{id}/stop  <span style="color:#f87171;">stop</span><br>
-        POST /api/tasks/{id}/pause <span style="color:#fbbf24;">pause</span><br>
-        POST /api/tasks/{id}/resume<span style="color:#60a5fa;">resume</span><br>
-        POST /api/tasks/{id}/restart<span style="color:#60a5fa;">restart</span><br>
-        POST /api/tasks/{id}/redo  <span style="color:#c084fc;">redo</span><br>
-        POST /api/tasks/{id}/clone <span style="color:#c084fc;">clone</span><br>
-        POST /api/tasks/{id}/archive<span style="color:#f87171;">archive</span><br>
-        DELETE /api/tasks/{id}     <span style="color:#f87171;">delete</span>
-      </div>
-
-      <!-- Monitoring pages -->
-      <div class="tld-sidebar-title">Monitoring Pages</div>
-      <div style="display:flex;flex-direction:column;gap:0.3rem;font-size:0.72rem;">
-        <a href="/tasked" class="tld-link">📝 Tasked — create / manage</a>
-        <a href="/piplinetask" class="tld-link">🔀 Piplinetask — run steps</a>
-        <a href="/alerts" class="tld-link">🔔 Alerts — fired alerts</a>
-        <a href="/task-completed" class="tld-link">✅ Task Completed — terminal runs</a>
-        <a href="/tasked-preview" class="tld-link">👁 Preview — output + steps</a>
-      </div>
-
-    </div>
-  </aside>
-
-  <!-- ── RIGHT MAIN: Live testing panels ──────────────────────────── -->
-  <div class="tld-main">
-
-    <!-- toolbar -->
-    <div class="tld-toolbar">
-      <span style="font-weight:700;font-size:0.85rem;color:var(--fg);">Live Testing</span>
-      <span class="tld-label">—</span>
-      <button class="tld-btn run" onclick="runAll()">▶ Run All 6</button>
-      <button class="tld-btn validate" onclick="validateAll()">✓ Validate All</button>
-      <button class="tld-btn create sm" onclick="refreshAll()">↻ Refresh Status</button>
-      <span id="tld-global-status" style="font-size:0.72rem;color:var(--muted);margin-left:auto;"></span>
-    </div>
-
-    <!-- cards -->
-    <div class="tld-content">
-      <div class="tld-type-grid" id="tld-cards"></div>
-
-      <!-- Validation summary -->
-      <div id="tld-val-summary" style="display:none;background:#111118;border:1px solid rgba(255,255,255,0.07);border-radius:8px;padding:0.75rem 1rem;">
-        <div style="font-weight:700;font-size:0.8rem;color:var(--fg);margin-bottom:0.5rem;">Validation Results</div>
-        <div id="tld-val-rows" style="display:flex;flex-direction:column;gap:0.35rem;"></div>
-      </div>
-    </div>
-
+  <!-- ══ TOP BAR ══════════════════════════════════════════════════ -->
+  <div class="tld-topbar">
+    <span class="tld-topbar-title">📋 Tasked Live Documentation</span>
+    <span class="tld-topbar-subtitle">— create · run · trace · validate · 5 types · 6 traces</span>
+    <span style="margin-left:auto;font-size:0.7rem;color:#475569;">
+      C9b:6090 → C1b:8000 (chat) · C12b:8210 (sandbox)
+    </span>
   </div>
-</div>
+
+  <!-- ══ TABS ════════════════════════════════════════════════════ -->
+  <div class="tld-tabs">
+    <button class="tld-tab active" onclick="showTab('doc')" id="tab-doc">📖 Documentation</button>
+    <button class="tld-tab" onclick="showTab('live')" id="tab-live">⚡ Live Testing</button>
+  </div>
+
+  <!-- ══ BODY ════════════════════════════════════════════════════ -->
+  <div class="tld-body">
+
+    <!-- ══════════════════════════════════════════════════════════
+         TAB 1 — DOCUMENTATION
+         ══════════════════════════════════════════════════════════ -->
+    <div id="panel-doc" class="tld-doc-panel">
+
+      <!-- ── Overview ─────────────────────────────────────────── -->
+      <div>
+        <div class="tld-doc-h1">How the System Works</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:0.65rem;">
+          <div style="background:#0f0f18;border:1px solid rgba(255,255,255,0.06);border-radius:7px;padding:0.75rem;">
+            <div style="font-size:0.78rem;font-weight:700;color:#22d3ee;margin-bottom:0.35rem;">1. task_id</div>
+            <div style="font-size:0.72rem;color:#64748b;line-height:1.5;">Created when you <code style="color:#7dd3fc">POST /api/tasks</code>. Permanent anchor — never changes across all runs, alerts and steps.</div>
+          </div>
+          <div style="background:#0f0f18;border:1px solid rgba(255,255,255,0.06);border-radius:7px;padding:0.75rem;">
+            <div style="font-size:0.78rem;font-weight:700;color:#c084fc;margin-bottom:0.35rem;">2. run_id</div>
+            <div style="font-size:0.72rem;color:#64748b;line-height:1.5;">Created on each <code style="color:#7dd3fc">POST /api/tasks/{id}/run</code>. Each execution gets a unique <code style="color:#7dd3fc">trun_xxxxxxxx</code>.</div>
+          </div>
+          <div style="background:#0f0f18;border:1px solid rgba(255,255,255,0.06);border-radius:7px;padding:0.75rem;">
+            <div style="font-size:0.78rem;font-weight:700;color:#fbbf24;margin-bottom:0.35rem;">3. alert_id</div>
+            <div style="font-size:0.72rem;color:#64748b;line-height:1.5;">Integer created when the alert step fires. Only created if <code style="color:#7dd3fc">trigger_mode=always</code> or JSON returns <code style="color:#7dd3fc">triggered:true</code>.</div>
+          </div>
+          <div style="background:#0f0f18;border:1px solid rgba(255,255,255,0.06);border-radius:7px;padding:0.75rem;">
+            <div style="font-size:0.78rem;font-weight:700;color:#4ade80;margin-bottom:0.35rem;">4. step_id</div>
+            <div style="font-size:0.72rem;color:#64748b;line-height:1.5;">Each step in the workflow has a fixed ID (e.g. <code style="color:#7dd3fc">t1_chat</code>). Results stored per step per run.</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── The 4-step workflow ───────────────────────────────── -->
+      <div>
+        <div class="tld-doc-h1">Universal 4-Step Workflow (all task types)</div>
+        <div style="background:#0f0f18;border:1px solid rgba(255,255,255,0.06);border-radius:8px;padding:1rem;">
+          <div style="display:flex;align-items:stretch;gap:0;overflow-x:auto;">
+
+            <div style="flex:1;min-width:130px;padding:0.6rem 0.75rem;border-right:1px solid rgba(255,255,255,0.06);">
+              <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;color:#475569;margin-bottom:0.35rem;">Step 1 · trigger</div>
+              <div style="font-size:0.78rem;font-weight:700;color:#94a3b8;margin-bottom:0.3rem;">Start</div>
+              <div style="font-size:0.69rem;color:#475569;line-height:1.5;">Records timestamp, schedule kind, marks run as <code style="color:#7dd3fc">queued→running</code>. No external call.</div>
+            </div>
+
+            <div style="flex:2;min-width:170px;padding:0.6rem 0.75rem;border-right:1px solid rgba(255,255,255,0.06);">
+              <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;color:#475569;margin-bottom:0.35rem;">Step 2 · chat or sandbox</div>
+              <div style="font-size:0.78rem;font-weight:700;color:#60a5fa;margin-bottom:0.3rem;">Execute</div>
+              <div style="font-size:0.69rem;color:#475569;line-height:1.5;">
+                <b style="color:#94a3b8">chat:</b> POST C1b:8000/v1/chat/completions → LLM text<br>
+                <b style="color:#94a3b8">sandbox:</b> POST C12b:8210/exec → stdout/exit_code
+              </div>
+            </div>
+
+            <div style="flex:1.5;min-width:140px;padding:0.6rem 0.75rem;border-right:1px solid rgba(255,255,255,0.06);">
+              <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;color:#475569;margin-bottom:0.35rem;">Step 3 · alert</div>
+              <div style="font-size:0.78rem;font-weight:700;color:#fbbf24;margin-bottom:0.3rem;">Fire Alert</div>
+              <div style="font-size:0.69rem;color:#475569;line-height:1.5;">
+                <b style="color:#94a3b8">always:</b> alert fires unconditionally<br>
+                <b style="color:#94a3b8">json:</b> fires only if output contains <code style="color:#7dd3fc">{"triggered":true}</code>
+              </div>
+            </div>
+
+            <div style="flex:1;min-width:120px;padding:0.6rem 0.75rem;">
+              <div style="font-size:0.65rem;text-transform:uppercase;letter-spacing:0.08em;color:#475569;margin-bottom:0.35rem;">Step 4 · complete</div>
+              <div style="font-size:0.78rem;font-weight:700;color:#4ade80;margin-bottom:0.3rem;">Close</div>
+              <div style="font-size:0.69rem;color:#475569;line-height:1.5;">Sets <code style="color:#7dd3fc">terminal_reason=workflow-complete</code>, status=completed. Run is final.</div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+
+      <!-- ── 5 Type cards ──────────────────────────────────────── -->
+      <div>
+        <div class="tld-doc-h1">The 5 Tasked Types — Deep Reference</div>
+        <div class="tld-type-grid">
+
+          <!-- OUTPUT -->
+          <div class="tld-type-card">
+            <div class="tld-type-card-header output-bg" style="background:#052c14;border-color:#14532d;">
+              <span class="tld-type-icon">▶</span>
+              <div style="flex:1;">
+                <div style="display:flex;align-items:center;gap:0.5rem;">
+                  <span class="tld-type-badge output-bg output-accent" style="background:#064e1a;">output</span>
+                  <span style="font-size:0.75rem;font-weight:700;color:#e2e8f0;">Output Task</span>
+                </div>
+                <div style="font-size:0.68rem;color:#4ade80;margin-top:0.15rem;">LLM produces readable text or structured data</div>
+              </div>
+            </div>
+            <div class="tld-type-card-body">
+              <div class="tld-info-grid">
+                <span class="tld-info-key">How created</span>
+                <span class="tld-info-val">POST /api/tasks · tasked_type="output" · mode="chat"</span>
+                <span class="tld-info-key">How triggered</span>
+                <span class="tld-info-val text">Manual (Run Now button) or schedule. trigger_mode="always"</span>
+                <span class="tld-info-key">Execution</span>
+                <span class="tld-info-val text">C9b → POST C1b:8000/v1/chat/completions with planner+executor prompts → LLM returns text</span>
+                <span class="tld-info-key">Alert fires</span>
+                <span class="tld-info-val text">Yes — always fires (trigger_mode=always). Creates alert_id.</span>
+                <span class="tld-info-key">Completion</span>
+                <span class="tld-info-val">terminal_reason=workflow-complete · status=completed</span>
+                <span class="tld-info-key">Where to see</span>
+                <span class="tld-info-val text">Tasked (definition) · Piplinetask (steps) · Alerts (fired) · Completed (run) · Preview (full output)</span>
+              </div>
+              <div class="tld-flow">
+                <div class="tld-flow-step">POST /api/tasks</div><div class="tld-flow-arrow">→</div>
+                <div class="tld-flow-step active">task_id created</div><div class="tld-flow-arrow">→</div>
+                <div class="tld-flow-step">POST /api/tasks/{id}/run</div><div class="tld-flow-arrow">→</div>
+                <div class="tld-flow-step active">C1b LLM call</div><div class="tld-flow-arrow">→</div>
+                <div class="tld-flow-step active">alert fired</div><div class="tld-flow-arrow">→</div>
+                <div class="tld-flow-step active">run_id + alert_id</div>
+              </div>
+              <div class="tld-code"><span class="cm"># Create + run (output type)</span>
+<span class="kw">curl</span> -X POST :6090/api/tasks -d <span class="st">'{"name":"My Output","mode":"chat",
+  "tasked_type":"output","trigger_mode":"always",
+  "planner_prompt":"Summarise 3 Python tips.",
+  "executor_prompt":"Be concise, 3 bullet points.",
+  "steps":[
+    {"id":"s1","name":"Trigger","kind":"trigger","position":1},
+    {"id":"s2","name":"Chat","kind":"chat","position":2},
+    {"id":"s3","name":"Alert","kind":"alert","position":3},
+    {"id":"s4","name":"Complete","kind":"complete","position":4}
+  ]}'</span>
+<span class="cm"># → {"task":{"id":"task_xxxxxxxx",...}}</span>
+<span class="kw">curl</span> -X POST :6090/api/tasks/task_xxxxxxxx/run
+<span class="cm"># → {"run_id":"trun_xxx","alert_id":N,"status":"completed"}</span></div>
+              <div style="font-size:0.68rem;color:#334155;font-weight:600;margin-top:0.25rem;">TRACE-001 · task_97baeced · trun_83871f0d · alert=430</div>
+            </div>
+          </div>
+
+          <!-- ALERT -->
+          <div class="tld-type-card">
+            <div class="tld-type-card-header" style="background:#2c1a00;border-color:#78350f;">
+              <span class="tld-type-icon">⚡</span>
+              <div style="flex:1;">
+                <div style="display:flex;align-items:center;gap:0.5rem;">
+                  <span class="tld-type-badge" style="background:#431e00;color:#fbbf24;">alert</span>
+                  <span style="font-size:0.75rem;font-weight:700;color:#e2e8f0;">Alert Task</span>
+                </div>
+                <div style="font-size:0.68rem;color:#fbbf24;margin-top:0.15rem;">Evaluates a condition — fires alert only when triggered</div>
+              </div>
+            </div>
+            <div class="tld-type-card-body">
+              <div class="tld-info-grid">
+                <span class="tld-info-key">How created</span>
+                <span class="tld-info-val">POST /api/tasks · tasked_type="alert" · trigger_mode="json"</span>
+                <span class="tld-info-key">How triggered</span>
+                <span class="tld-info-val text">Manual run. LLM must return JSON: {"triggered":true,"reason":"..."} to fire alert.</span>
+                <span class="tld-info-key">Execution</span>
+                <span class="tld-info-val text">C9b sends planner question to C1b. Response parsed for "triggered":true field.</span>
+                <span class="tld-info-key">Alert fires</span>
+                <span class="tld-info-val text">Conditional — only when JSON response contains triggered:true. severity=warning typically.</span>
+                <span class="tld-info-key">Completion</span>
+                <span class="tld-info-val">Same: terminal_reason=workflow-complete · status=completed</span>
+                <span class="tld-info-key">Key difference</span>
+                <span class="tld-info-val text">trigger_mode="json" vs "always". Use for threshold checks, anomaly detection.</span>
+              </div>
+              <div class="tld-flow">
+                <div class="tld-flow-step">planner asks condition</div><div class="tld-flow-arrow">→</div>
+                <div class="tld-flow-step active">C1b evaluates</div><div class="tld-flow-arrow">→</div>
+                <div class="tld-flow-step active">parse {"triggered":true}</div><div class="tld-flow-arrow">→</div>
+                <div class="tld-flow-step active">alert fired if true</div>
+              </div>
+              <div class="tld-code"><span class="cm"># planner_prompt forces JSON response</span>
+<span class="st">"planner_prompt": "Is CPU 95% > threshold 80%?</span>
+<span class="st"> Respond ONLY as JSON: {\"triggered\":true,\"reason\":\"...\"}"</span>
+<span class="st">"trigger_mode": "json"</span>  <span class="cm">← key setting</span></div>
+              <div style="font-size:0.68rem;color:#334155;font-weight:600;margin-top:0.25rem;">TRACE-002 · task_adc06130 · trun_eae69a71 · alert=432</div>
+            </div>
+          </div>
+
+          <!-- ACTION -->
+          <div class="tld-type-card">
+            <div class="tld-type-card-header" style="background:#0a1628;border-color:#1e3a5f;">
+              <span class="tld-type-icon">⚙</span>
+              <div style="flex:1;">
+                <div style="display:flex;align-items:center;gap:0.5rem;">
+                  <span class="tld-type-badge" style="background:#0d2040;color:#60a5fa;">action</span>
+                  <span style="font-size:0.75rem;font-weight:700;color:#e2e8f0;">Action Task</span>
+                </div>
+                <div style="font-size:0.68rem;color:#60a5fa;margin-top:0.15rem;">Runs shell commands on C12b sandbox — returns raw stdout</div>
+              </div>
+            </div>
+            <div class="tld-type-card-body">
+              <div class="tld-info-grid">
+                <span class="tld-info-key">How created</span>
+                <span class="tld-info-val">POST /api/tasks · tasked_type="action" · mode="sandbox" · executor_target="C12b"</span>
+                <span class="tld-info-key">How triggered</span>
+                <span class="tld-info-val text">Manual run. C9b calls POST C12b:8210/exec with the command string.</span>
+                <span class="tld-info-key">Execution</span>
+                <span class="tld-info-val text">C12b runs the shell command in /workspace. Returns stdout, stderr, exit_code, session_id. exit_code≠0 → failed.</span>
+                <span class="tld-info-key">C12b response</span>
+                <span class="tld-info-val">{"stdout":"...","stderr":"","exit_code":0,"session_id":"c12b_xxx"}</span>
+                <span class="tld-info-key">Validation</span>
+                <span class="tld-info-val text">Optional validation_command and test_command also sent to C12b separately.</span>
+                <span class="tld-info-key">Completion</span>
+                <span class="tld-info-val">Execution:completed · Validation:completed · Test:completed</span>
+              </div>
+              <div class="tld-flow">
+                <div class="tld-flow-step">mode=sandbox</div><div class="tld-flow-arrow">→</div>
+                <div class="tld-flow-step active">POST C12b:8210/exec</div><div class="tld-flow-arrow">→</div>
+                <div class="tld-flow-step active">stdout + exit_code=0</div><div class="tld-flow-arrow">→</div>
+                <div class="tld-flow-step active">validation cmd</div><div class="tld-flow-arrow">→</div>
+                <div class="tld-flow-step active">alert + complete</div>
+              </div>
+              <div class="tld-code"><span class="cm"># C12b direct call (what C9b does internally)</span>
+<span class="kw">curl</span> -X POST http://localhost:<span class="nu">8210</span>/exec \
+  -d <span class="st">'{"command":"df -h /workspace && echo DONE"}'</span>
+<span class="cm"># ← {"stdout":"...","exit_code":0,"session_id":"c12b_xxx"}</span>
+
+<span class="cm"># As a C9 tasked action task</span>
+<span class="st">"mode"</span>: <span class="st">"sandbox"</span>, <span class="st">"executor_target"</span>: <span class="st">"C12b"</span>
+<span class="st">"steps"</span>: [{<span class="st">"kind"</span>:<span class="st">"sandbox"</span>,<span class="st">"config"</span>:{<span class="st">"command"</span>:<span class="st">"df -h"</span>}}]</div>
+              <div style="font-size:0.68rem;color:#334155;font-weight:600;margin-top:0.25rem;">TRACE-003 · task_f0642138 · trun_6167744c · alert=433 · TRACE-010 · task_fe608355 · trun_6edf884a · alert=457</div>
+            </div>
+          </div>
+
+          <!-- HOOK -->
+          <div class="tld-type-card">
+            <div class="tld-type-card-header" style="background:#1a0a28;border-color:#4c1d95;">
+              <span class="tld-type-icon">🔗</span>
+              <div style="flex:1;">
+                <div style="display:flex;align-items:center;gap:0.5rem;">
+                  <span class="tld-type-badge" style="background:#230e35;color:#c084fc;">hook</span>
+                  <span style="font-size:0.75rem;font-weight:700;color:#e2e8f0;">Hook Task</span>
+                </div>
+                <div style="font-size:0.68rem;color:#c084fc;margin-top:0.15rem;">Generates webhook payloads — triggers external systems</div>
+              </div>
+            </div>
+            <div class="tld-type-card-body">
+              <div class="tld-info-grid">
+                <span class="tld-info-key">How created</span>
+                <span class="tld-info-val">POST /api/tasks · tasked_type="hook" · mode="chat"</span>
+                <span class="tld-info-key">How triggered</span>
+                <span class="tld-info-val text">Manual run. Planner instructs LLM to generate a webhook JSON payload.</span>
+                <span class="tld-info-key">Execution</span>
+                <span class="tld-info-val text">C9b calls C1b with hook-specific prompt. LLM generates JSON payload (e.g. Slack, GitHub, CI/CD webhook body).</span>
+                <span class="tld-info-key">Alert fires</span>
+                <span class="tld-info-val text">Yes — trigger_mode=always. Alert confirms the hook was dispatched.</span>
+                <span class="tld-info-key">Completion</span>
+                <span class="tld-info-val">terminal_reason=workflow-complete · output contains webhook JSON</span>
+                <span class="tld-info-key">Extension</span>
+                <span class="tld-info-val text">Payload from output can be forwarded to external URLs in future sandbox steps.</span>
+              </div>
+              <div class="tld-flow">
+                <div class="tld-flow-step">planner: "generate webhook"</div><div class="tld-flow-arrow">→</div>
+                <div class="tld-flow-step active">C1b generates JSON payload</div><div class="tld-flow-arrow">→</div>
+                <div class="tld-flow-step active">alert: hook dispatched</div><div class="tld-flow-arrow">→</div>
+                <div class="tld-flow-step active">complete</div>
+              </div>
+              <div class="tld-code"><span class="cm"># Hook planner instructs LLM to act as dispatcher</span>
+<span class="st">"planner_prompt"</span>: <span class="st">"Generate a Slack webhook payload</span>
+<span class="st"> for a build-success notification."</span>
+<span class="st">"executor_prompt"</span>: <span class="st">"You are a CI/CD dispatcher.</span>
+<span class="st"> Produce valid Slack webhook JSON."</span>
+<span class="cm"># Output: {"text":"Build passed ✅","attachments":[...]}</span></div>
+              <div style="font-size:0.68rem;color:#334155;font-weight:600;margin-top:0.25rem;">TRACE-004 · task_f7632723 · trun_f0c82c94 · alert=435</div>
+            </div>
+          </div>
+
+          <!-- COMBINED -->
+          <div class="tld-type-card" style="grid-column:span 2;">
+            <div class="tld-type-card-header" style="background:#28080a;border-color:#7f1d1d;">
+              <span class="tld-type-icon">✦</span>
+              <div style="flex:1;">
+                <div style="display:flex;align-items:center;gap:0.5rem;">
+                  <span class="tld-type-badge" style="background:#3d0a0d;color:#f87171;">combined</span>
+                  <span style="font-size:0.75rem;font-weight:700;color:#e2e8f0;">Combined Task</span>
+                </div>
+                <div style="font-size:0.68rem;color:#f87171;margin-top:0.15rem;">All types in one run: output + alert + action + hook paths exercised</div>
+              </div>
+            </div>
+            <div class="tld-type-card-body">
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
+                <div class="tld-info-grid">
+                  <span class="tld-info-key">How created</span>
+                  <span class="tld-info-val">POST /api/tasks · tasked_type="combined"</span>
+                  <span class="tld-info-key">How triggered</span>
+                  <span class="tld-info-val text">Manual run. Planner requests a structured multi-section report.</span>
+                  <span class="tld-info-key">Execution</span>
+                  <span class="tld-info-val text">C1b LLM generates structured output (SUMMARY + ACTION + SEVERITY). All paths covered.</span>
+                  <span class="tld-info-key">Alert fires</span>
+                  <span class="tld-info-val text">Always — severity=high. Combined tasks typically produce critical-level alerts.</span>
+                  <span class="tld-info-key">Completion</span>
+                  <span class="tld-info-val text">Longest running type due to structured full-context LLM generation (7m 40s observed).</span>
+                </div>
+                <div>
+                  <div class="tld-code" style="height:100%;"><span class="cm"># Combined uses multi-section prompt</span>
+<span class="st">"planner_prompt"</span>: <span class="st">"Produce a security audit</span>
+<span class="st"> covering FINDINGS, RISK_LEVEL,</span>
+<span class="st"> and REMEDIATION_STEPS."</span>
+
+<span class="st">"executor_prompt"</span>: <span class="st">"You are a security auditor.</span>
+<span class="st"> Label each section clearly.</span>
+<span class="st"> FINDINGS / RISK_LEVEL / REMEDIATION."</span>
+
+<span class="cm"># severity=high forces priority alert</span>
+<span class="st">"alert_policy"</span>: {<span class="st">"severity"</span>:<span class="st">"high"</span>}</div>
+                  <div style="font-size:0.68rem;color:#334155;font-weight:600;margin-top:0.5rem;">TRACE-005 · task_0f1c9b39 · trun_84413c8c · alert=438 · duration=7m40s</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- ── Trace reference table ──────────────────────────────── -->
+      <div>
+        <div class="tld-doc-h1">Trace Reference Table — All 6 Traces</div>
+        <div style="background:#0f0f18;border:1px solid rgba(255,255,255,0.06);border-radius:8px;overflow:hidden;">
+          <table class="tld-trace-table">
+            <thead>
+              <tr>
+                <th>Trace #</th><th>Task Name</th><th>task_id</th><th>Type</th><th>Mode</th>
+                <th>run_id</th><th>alert_id</th><th>Status</th><th>Duration</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>TRACE-001</td>
+                <td style="font-family:inherit;color:#94a3b8;">Python Tips Output</td>
+                <td>task_97baeced</td>
+                <td><span class="tld-pill-sm output-bg output-accent">output</span></td>
+                <td style="color:#64748b;">chat</td>
+                <td>trun_83871f0d</td><td>430</td>
+                <td style="color:#4ade80;">✅ completed</td><td style="color:#64748b;">1m 40s</td>
+              </tr>
+              <tr>
+                <td>TRACE-002</td>
+                <td style="font-family:inherit;color:#94a3b8;">CPU Alert Check</td>
+                <td>task_adc06130</td>
+                <td><span class="tld-pill-sm alert-bg alert-accent">alert</span></td>
+                <td style="color:#64748b;">chat</td>
+                <td>trun_eae69a71</td><td>432</td>
+                <td style="color:#4ade80;">✅ completed</td><td style="color:#64748b;">47s</td>
+              </tr>
+              <tr>
+                <td>TRACE-003</td>
+                <td style="font-family:inherit;color:#94a3b8;">Disk Check Action</td>
+                <td>task_f0642138</td>
+                <td><span class="tld-pill-sm action-bg action-accent">action</span></td>
+                <td style="color:#22d3ee;">sandbox</td>
+                <td>trun_6167744c</td><td>433</td>
+                <td style="color:#4ade80;">✅ completed</td><td style="color:#64748b;">~0s</td>
+              </tr>
+              <tr>
+                <td>TRACE-004</td>
+                <td style="font-family:inherit;color:#94a3b8;">Slack Webhook</td>
+                <td>task_f7632723</td>
+                <td><span class="tld-pill-sm hook-bg hook-accent">hook</span></td>
+                <td style="color:#64748b;">chat</td>
+                <td>trun_f0c82c94</td><td>435</td>
+                <td style="color:#4ade80;">✅ completed</td><td style="color:#64748b;">27s</td>
+              </tr>
+              <tr>
+                <td>TRACE-005</td>
+                <td style="font-family:inherit;color:#94a3b8;">Security Audit Combined</td>
+                <td>task_0f1c9b39</td>
+                <td><span class="tld-pill-sm combined-bg combined-accent">combined</span></td>
+                <td style="color:#64748b;">chat</td>
+                <td>trun_84413c8c</td><td>438</td>
+                <td style="color:#4ade80;">✅ completed</td><td style="color:#64748b;">7m 40s</td>
+              </tr>
+              <tr>
+                <td>TRACE-010</td>
+                <td style="font-family:inherit;color:#94a3b8;">C12b Linux Probe</td>
+                <td>task_fe608355</td>
+                <td><span class="tld-pill-sm action-bg action-accent">action</span></td>
+                <td style="color:#22d3ee;">sandbox</td>
+                <td>trun_6edf884a</td><td>457</td>
+                <td style="color:#4ade80;">✅ completed</td><td style="color:#64748b;">~10s</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── Lifecycle operations ───────────────────────────────── -->
+      <div>
+        <div class="tld-doc-h1">Lifecycle Operations — All API Calls</div>
+        <div style="background:#0f0f18;border:1px solid rgba(255,255,255,0.06);border-radius:8px;overflow:hidden;">
+          <table class="tld-lc-table">
+            <thead><tr><th>Operation</th><th>API Call</th><th>Result</th><th>Notes</th></tr></thead>
+            <tbody>
+              <tr><td>create</td><td>POST /api/tasks</td><td style="color:#4ade80;">new task_id</td><td>Permanent definition. Steps saved to DB.</td></tr>
+              <tr><td>run</td><td>POST /api/tasks/{id}/run</td><td style="color:#4ade80;">run_id + alert_id</td><td>Executes workflow. Creates task_run record.</td></tr>
+              <tr><td>stop</td><td>POST /api/tasks/{id}/stop</td><td style="color:#f87171;">status=cancelled</td><td>Cancels in-progress or latest run.</td></tr>
+              <tr><td>pause</td><td>POST /api/tasks/{id}/pause</td><td style="color:#fbbf24;">active=false</td><td>Freezes scheduler. Existing runs finish.</td></tr>
+              <tr><td>resume</td><td>POST /api/tasks/{id}/resume</td><td style="color:#4ade80;">active=true</td><td>Re-enables scheduling.</td></tr>
+              <tr><td>restart</td><td>POST /api/tasks/{id}/restart</td><td style="color:#60a5fa;">new run_id</td><td>Stop + immediate re-run. New IDs.</td></tr>
+              <tr><td>redo</td><td>POST /api/tasks/{id}/redo</td><td style="color:#c084fc;">new run_id</td><td>Re-run without stopping first.</td></tr>
+              <tr><td>clone</td><td>POST /api/tasks/{id}/clone</td><td style="color:#22d3ee;">new task_id</td><td>Copy with no run history. Editable.</td></tr>
+              <tr><td>archive</td><td>POST /api/tasks/{id}/archive</td><td style="color:#94a3b8;">lifecycle=archived</td><td>Soft-hide. History preserved.</td></tr>
+              <tr><td>delete</td><td>DELETE /api/tasks/{id}</td><td style="color:#f87171;">permanent</td><td>Removes task + all runs + alerts.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- ── 5 monitoring pages ─────────────────────────────────── -->
+      <div>
+        <div class="tld-doc-h1">5 Monitoring Domains</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:0.65rem;margin-bottom:1rem;">
+          <a href="/tasked" target="_blank" style="background:#0f0f18;border:1px solid rgba(255,255,255,0.06);border-radius:7px;padding:0.75rem;text-decoration:none;display:block;">
+            <div style="font-size:0.78rem;font-weight:700;color:#e2e8f0;margin-bottom:0.3rem;">📝 Tasked</div>
+            <div style="font-size:0.68rem;color:#64748b;line-height:1.5;">Create · edit · run · clone · archive · delete task definitions. URL: <code style="color:#7dd3fc">/tasked?task_id=</code></div>
+          </a>
+          <a href="/piplinetask" target="_blank" style="background:#0f0f18;border:1px solid rgba(255,255,255,0.06);border-radius:7px;padding:0.75rem;text-decoration:none;display:block;">
+            <div style="font-size:0.78rem;font-weight:700;color:#e2e8f0;margin-bottom:0.3rem;">🔀 Piplinetask</div>
+            <div style="font-size:0.68rem;color:#64748b;line-height:1.5;">Step-by-step execution view. Step flow diagram + trace grid. URL: <code style="color:#7dd3fc">/piplinetask?task_id=</code></div>
+          </a>
+          <a href="/alerts" target="_blank" style="background:#0f0f18;border:1px solid rgba(255,255,255,0.06);border-radius:7px;padding:0.75rem;text-decoration:none;display:block;">
+            <div style="font-size:0.78rem;font-weight:700;color:#e2e8f0;margin-bottom:0.3rem;">🔔 Alerts</div>
+            <div style="font-size:0.68rem;color:#64748b;line-height:1.5;">All fired alerts. Ack · resolve · snooze. Linked to run_id. URL: <code style="color:#7dd3fc">/alerts</code></div>
+          </a>
+          <a href="/task-completed" target="_blank" style="background:#0f0f18;border:1px solid rgba(255,255,255,0.06);border-radius:7px;padding:0.75rem;text-decoration:none;display:block;">
+            <div style="font-size:0.78rem;font-weight:700;color:#e2e8f0;margin-bottom:0.3rem;">✅ Task Completed</div>
+            <div style="font-size:0.68rem;color:#64748b;line-height:1.5;">Terminal runs only (completed/failed/cancelled). Redo · clone buttons. URL: <code style="color:#7dd3fc">/task-completed?task_id=</code></div>
+          </a>
+          <a href="/tasked-preview" target="_blank" style="background:#0f0f18;border:1px solid rgba(255,255,255,0.06);border-radius:7px;padding:0.75rem;text-decoration:none;display:block;">
+            <div style="font-size:0.78rem;font-weight:700;color:#e2e8f0;margin-bottom:0.3rem;">👁 Preview</div>
+            <div style="font-size:0.68rem;color:#64748b;line-height:1.5;">Full output + all step results for a specific run. URL: <code style="color:#7dd3fc">/tasked-preview?task_id=&run_id=</code></div>
+          </a>
+        </div>
+      </div>
+
+    </div><!-- end panel-doc -->
+
+    <!-- ══════════════════════════════════════════════════════════
+         TAB 2 — LIVE TESTING
+         ══════════════════════════════════════════════════════════ -->
+    <div id="panel-live" class="tld-live-panel" style="display:none;">
+      <div class="tld-live-toolbar">
+        <span style="font-size:0.8rem;font-weight:700;color:#e2e8f0;">Live Testing</span>
+        <button class="tld-btn run" onclick="runAll()">▶ Run All 6</button>
+        <button class="tld-btn validate" onclick="validateAll()">✓ Validate All</button>
+        <button class="tld-btn restart" onclick="refreshStatus()">↻ Refresh</button>
+        <span id="tld-gstatus"></span>
+      </div>
+      <div class="tld-live-grid" id="tld-cards"></div>
+    </div>
+
+  </div><!-- end tld-body -->
+</div><!-- end tld -->
 
 <script>
 (function() {
   'use strict';
 
-  // ── Known tasks (TRACE-001 to TRACE-010) ──────────────────────────
+  /* ── Tab switching ──────────────────────────────────────────── */
+  window.showTab = function(name) {
+    ['doc','live'].forEach(function(t) {
+      document.getElementById('panel-' + t).style.display = t === name ? '' : 'none';
+      var tab = document.getElementById('tab-' + t);
+      if (tab) tab.className = 'tld-tab' + (t === name ? ' active' : '');
+    });
+    if (name === 'live') refreshStatus();
+  };
+
+  /* ── Trace definitions ──────────────────────────────────────── */
   var TRACES = [
     {
-      trace: 'TRACE-001', type: 'output', mode: 'chat',
-      task_id: 'task_97baeced', run_id: 'trun_83871f0d', alert_id: 430,
-      name: 'NEW-T1 — Python Tips Output',
-      desc: 'LLM generates 3 Python tips via C1b',
-      planner: 'List 3 essential Python tips for writing cleaner code.',
-      executor: 'You are a senior Python developer. Give exactly 3 concise tips, one sentence each.',
-      trigger_mode: 'always',
-      steps: [
+      trace:'TRACE-001', type:'output', mode:'chat', typeColor:'#4ade80',
+      task_id:'task_97baeced', run_id:'trun_83871f0d', alert_id:430,
+      name:'NEW-T1 — Python Tips Output',
+      desc:'output · chat → C1b · always alert',
+      planner:'List 3 essential Python tips for writing cleaner code.',
+      executor:'You are a senior Python developer. Give exactly 3 concise tips, one sentence each.',
+      trigger_mode:'always',
+      steps:[
         {id:'nt1_trigger',name:'Trigger',kind:'trigger',position:1},
         {id:'nt1_chat',name:'Generate Tips',kind:'chat',position:2,config:{prompt:'List 3 Python tips'}},
         {id:'nt1_alert',name:'Output Alert',kind:'alert',position:3,config:{title:'T1 Output Ready',severity:'info',summary:'Tips generated'}},
@@ -419,14 +736,14 @@
       ]
     },
     {
-      trace: 'TRACE-002', type: 'alert', mode: 'chat',
-      task_id: 'task_adc06130', run_id: 'trun_eae69a71', alert_id: 432,
-      name: 'NEW-T2 — CPU Alert Check',
-      desc: 'Evaluates condition via LLM, fires alert on JSON trigger',
-      planner: 'Check: is CPU usage at 95% above the 80% threshold? JSON: {"triggered":true,"reason":"..."}',
-      executor: 'You are a monitoring system. Evaluate and confirm the condition.',
-      trigger_mode: 'json',
-      steps: [
+      trace:'TRACE-002', type:'alert', mode:'chat', typeColor:'#fbbf24',
+      task_id:'task_adc06130', run_id:'trun_eae69a71', alert_id:432,
+      name:'NEW-T2 — CPU Alert Check',
+      desc:'alert · chat → C1b · json trigger (threshold)',
+      planner:'Is CPU 95% > threshold 80%? JSON ONLY: {"triggered":true,"reason":"..."}',
+      executor:'You are a monitoring system. Evaluate the condition precisely.',
+      trigger_mode:'json',
+      steps:[
         {id:'nt2_trigger',name:'Trigger',kind:'trigger',position:1},
         {id:'nt2_condition',name:'Condition Check',kind:'chat',position:2,config:{prompt:'Is CPU 95% > 80%?'}},
         {id:'nt2_alert',name:'CPU Alert',kind:'alert',position:3,config:{title:'CPU Threshold Exceeded',severity:'warning',summary:'95% > 80%'}},
@@ -434,15 +751,14 @@
       ]
     },
     {
-      trace: 'TRACE-003', type: 'action', mode: 'sandbox',
-      task_id: 'task_f0642138', run_id: 'trun_6167744c', alert_id: 433,
-      name: 'NEW-T3 — Disk Check Action',
-      desc: 'Runs shell commands on C12b sandbox, returns stdout',
-      planner: 'Run: df -h /workspace && ls /workspace | wc -l',
-      executor: 'Execute shell and report disk + file count.',
-      trigger_mode: 'always',
-      executor_target: 'C12b',
-      steps: [
+      trace:'TRACE-003', type:'action', mode:'sandbox', typeColor:'#60a5fa',
+      task_id:'task_f0642138', run_id:'trun_6167744c', alert_id:433,
+      name:'NEW-T3 — Disk Check Action',
+      desc:'action · sandbox → C12b:8210 · shell command',
+      planner:'Run: df -h /workspace && ls /workspace | wc -l',
+      executor:'Execute shell and report disk usage and file count.',
+      trigger_mode:'always', executor_target:'C12b',
+      steps:[
         {id:'nt3_trigger',name:'Trigger',kind:'trigger',position:1},
         {id:'nt3_sandbox',name:'Disk Action',kind:'sandbox',position:2,config:{command:'df -h /workspace && echo files=$(ls /workspace | wc -l) && echo DONE'}},
         {id:'nt3_alert',name:'Disk Alert',kind:'alert',position:3,config:{title:'Disk Check Done',severity:'info',summary:'C12b disk probe complete'}},
@@ -450,14 +766,14 @@
       ]
     },
     {
-      trace: 'TRACE-004', type: 'hook', mode: 'chat',
-      task_id: 'task_f7632723', run_id: 'trun_f0c82c94', alert_id: 435,
-      name: 'NEW-T4 — Slack Webhook Trigger',
-      desc: 'Generates Slack webhook JSON payload via LLM',
-      planner: 'Generate a Slack webhook payload for a build-success notification.',
-      executor: 'You are a CI/CD dispatcher. Produce valid Slack webhook JSON.',
-      trigger_mode: 'always',
-      steps: [
+      trace:'TRACE-004', type:'hook', mode:'chat', typeColor:'#c084fc',
+      task_id:'task_f7632723', run_id:'trun_f0c82c94', alert_id:435,
+      name:'NEW-T4 — Slack Webhook Trigger',
+      desc:'hook · chat → C1b · generates webhook JSON payload',
+      planner:'Generate a Slack webhook payload for a build-success notification.',
+      executor:'You are a CI/CD dispatcher. Produce valid Slack webhook JSON.',
+      trigger_mode:'always',
+      steps:[
         {id:'nt4_trigger',name:'Trigger',kind:'trigger',position:1},
         {id:'nt4_hook',name:'Slack Webhook',kind:'chat',position:2,config:{prompt:'Generate Slack build-success webhook JSON'}},
         {id:'nt4_alert',name:'Hook Alert',kind:'alert',position:3,config:{title:'Slack Hook Dispatched',severity:'info',summary:'Payload generated'}},
@@ -465,429 +781,298 @@
       ]
     },
     {
-      trace: 'TRACE-005', type: 'combined', mode: 'chat',
-      task_id: 'task_0f1c9b39', run_id: 'trun_84413c8c', alert_id: 438,
-      name: 'NEW-T5 — Security Audit Combined',
-      desc: 'Combined: output + alert + action. FINDINGS / RISK_LEVEL / REMEDIATION',
-      planner: 'Produce a security audit: FINDINGS, RISK_LEVEL, REMEDIATION_STEPS for an API with no rate limiting.',
-      executor: 'You are a security auditor. Structure with FINDINGS, RISK_LEVEL, REMEDIATION_STEPS.',
-      trigger_mode: 'always',
-      steps: [
+      trace:'TRACE-005', type:'combined', mode:'chat', typeColor:'#f87171',
+      task_id:'task_0f1c9b39', run_id:'trun_84413c8c', alert_id:438,
+      name:'NEW-T5 — Security Audit Combined',
+      desc:'combined · chat → C1b · all paths · severity=high',
+      planner:'Produce a security audit: FINDINGS, RISK_LEVEL, REMEDIATION_STEPS.',
+      executor:'You are a security auditor. Label each section clearly.',
+      trigger_mode:'always',
+      steps:[
         {id:'nt5_trigger',name:'Trigger',kind:'trigger',position:1},
-        {id:'nt5_chat',name:'Audit Report',kind:'chat',position:2,config:{prompt:'Security audit with FINDINGS, RISK_LEVEL, REMEDIATION_STEPS'}},
+        {id:'nt5_chat',name:'Audit Report',kind:'chat',position:2,config:{prompt:'Security audit: FINDINGS, RISK_LEVEL, REMEDIATION_STEPS'}},
         {id:'nt5_alert',name:'Audit Alert',kind:'alert',position:3,config:{title:'Security Audit Ready',severity:'high',summary:'Review findings'}},
         {id:'nt5_complete',name:'Complete',kind:'complete',position:4}
       ]
     },
     {
-      trace: 'TRACE-010', type: 'action', mode: 'sandbox',
-      task_id: 'task_fe608355', run_id: 'trun_6edf884a', alert_id: 457,
-      name: 'TRACE-010 — C12b Linux System Probe',
-      desc: 'Sends 12-section probe to C12b. Shows exact commands sent → stdout returned.',
-      planner: 'Run Linux system probe: hostname, kernel, OS, CPU, memory, disk, Python, Node, Git, timestamp.',
-      executor: 'Execute probe and return stdout verbatim.',
-      trigger_mode: 'always',
-      executor_target: 'C12b',
-      validation_command: 'python3 --version && node --version && echo VALIDATION_OK',
-      test_command: 'ls /workspace | wc -l && echo TEST_OK',
-      steps: [
+      trace:'TRACE-010', type:'action', mode:'sandbox', typeColor:'#22d3ee',
+      task_id:'task_fe608355', run_id:'trun_6edf884a', alert_id:457,
+      name:'TRACE-010 — C12b Linux System Probe',
+      desc:'action · sandbox → C12b:8210 · 9-section system probe',
+      planner:'Run Linux system probe: hostname, kernel, OS, CPU, memory, disk, Python, Node, timestamp.',
+      executor:'Execute each probe command with a section header. Return stdout verbatim.',
+      trigger_mode:'always', executor_target:'C12b',
+      validation_command:'python3 --version && node --version && echo VALIDATION_OK',
+      test_command:'ls /workspace | wc -l && echo TEST_OK',
+      steps:[
         {id:'tr10_trigger',name:'Trigger',kind:'trigger',position:1},
         {id:'tr10_sandbox',name:'C12b Probe',kind:'sandbox',position:2,config:{command:"echo '=== 1. HOSTNAME ===' && hostname && echo '=== 2. KERNEL ===' && uname -srm && echo '=== 3. OS ===' && grep PRETTY_NAME /etc/os-release && echo '=== 4. CPU ===' && uname -m && nproc && echo '=== 5. MEMORY ===' && awk '/MemTotal|MemAvailable/{print}' /proc/meminfo && echo '=== 6. DISK ===' && df -h /workspace && echo '=== 7. PYTHON ===' && python3 --version && echo '=== 8. NODE ===' && node --version && echo '=== 9. TIMESTAMP ===' && date -u +%Y-%m-%dT%H:%M:%SZ && echo '=== PROBE_COMPLETE ==='" }},
-        {id:'tr10_alert',name:'Probe Alert',kind:'alert',position:3,config:{title:'C12b Probe Complete',severity:'info',summary:'12-section probe done'}},
+        {id:'tr10_alert',name:'Probe Alert',kind:'alert',position:3,config:{title:'C12b Probe Complete',severity:'info',summary:'9-section probe done'}},
         {id:'tr10_complete',name:'Complete',kind:'complete',position:4}
       ]
     }
   ];
 
-  // ── State per trace ───────────────────────────────────────────────
-  var state = {};
+  /* ── State ──────────────────────────────────────────────────── */
+  var S = {};
   TRACES.forEach(function(t) {
-    state[t.trace] = {
-      task_id: t.task_id,
-      run_id: t.run_id,
-      alert_id: t.alert_id,
-      status: 'idle',
-      output: '',
-      validated: null   // true/false/null
-    };
+    S[t.trace] = { task_id:t.task_id, run_id:t.run_id, alert_id:t.alert_id,
+                   status:'idle', output:'', checks:null };
   });
 
-  // ── Type colour helper ────────────────────────────────────────────
-  function typeClass(type) {
-    var m = {output:'output',alert:'alert',action:'action',hook:'hook',combined:'combined',sandbox:'sandbox'};
-    return m[type] || 'output';
+  /* ── Helpers ───────────────────────────────────────────────── */
+  function esc(s) {
+    return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
   }
-  function typeBg(type) {
-    var m = {output:'#1a3a2a',alert:'#3a2a0a',action:'#1a2a3a',hook:'#2a1a3a',combined:'#3a1a1a',sandbox:'#0a2a2a'};
-    return m[type] || '#1a3a2a';
+  function post(url, body) {
+    return fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}).then(function(r){return r.json();});
   }
-  function typeColor(type) {
-    var m = {output:'#4ade80',alert:'#fbbf24',action:'#60a5fa',hook:'#c084fc',combined:'#f87171',sandbox:'#22d3ee'};
-    return m[type] || '#4ade80';
+  function get(url)  { return fetch(url).then(function(r){return r.json();}); }
+  function gstatus(msg,c) {
+    var el=document.getElementById('tld-gstatus');
+    if(el){el.textContent=msg;el.style.color=c||'#475569';}
   }
 
-  // ── Build cards ───────────────────────────────────────────────────
+  /* ── Build all cards ────────────────────────────────────────── */
   function buildCards() {
-    var container = document.getElementById('tld-cards');
-    container.innerHTML = '';
-    TRACES.forEach(function(t) {
-      var card = document.createElement('div');
-      card.className = 'tld-card';
-      card.id = 'card-' + t.trace;
-      card.innerHTML = cardHTML(t);
-      container.appendChild(card);
-    });
+    var c = document.getElementById('tld-cards');
+    if (!c) return;
+    c.innerHTML = '';
+    TRACES.forEach(function(t) { c.appendChild(makeCard(t)); });
   }
 
-  function cardHTML(t) {
-    var s = state[t.trace];
-    var tc = typeClass(t.type);
-    var output = s.output || '';
-    var outputEmpty = !output;
-    return [
-      '<div class="tld-card-header">',
-        '<div>',
-          '<div class="tld-card-title">' + esc(t.name) + '</div>',
-          '<div class="tld-card-desc">' + esc(t.desc) + '</div>',
-        '</div>',
-        '<span class="tld-type-pill ' + tc + '">' + t.type + '</span>',
+  function makeCard(t) {
+    var div = document.createElement('div');
+    div.id = 'card-' + t.trace;
+    div.className = 'tld-live-card';
+    renderCard(t, div);
+    return div;
+  }
+
+  function renderCard(t, div) {
+    var s = S[t.trace];
+    div.className = 'tld-live-card ' + s.status;
+
+    var stepFlow = t.steps.map(function(st,i) {
+      var done = s.status === 'completed' || s.status === 'failed';
+      return '<span class="tld-mini-step' + (done?' done':'') + '">' + esc(st.kind) + '</span>' +
+             (i < t.steps.length-1 ? '<span class="tld-mini-arr">→</span>' : '');
+    }).join('');
+
+    var checkHtml = '';
+    if (s.checks) {
+      var names = ['Tasked','Pipeline','Alert','Completed','Preview'];
+      checkHtml = '<div class="tld-checks">' +
+        s.checks.map(function(c,i) {
+          return '<div class="tld-check">' +
+            '<span class="tld-check-icon">' + (c.ok?'✅':'❌') + '</span>' +
+            '<span class="' + (c.ok?'tld-check-ok':'tld-check-fail') + '">' + names[i] + '</span>' +
+            '<span class="tld-check-msg">' + esc(c.msg) + '</span>' +
+          '</div>';
+        }).join('') +
+      '</div>';
+    }
+
+    var tid = s.task_id || '—';
+    var rid = s.run_id  || '—';
+    var aid = s.alert_id ? String(s.alert_id) : '—';
+
+    div.innerHTML = [
+      /* header */
+      '<div class="tld-live-card-header">',
+        '<div style="width:10px;height:10px;border-radius:50%;background:' + t.typeColor + ';flex-shrink:0;"></div>',
+        '<span class="tld-live-card-title" title="' + esc(t.name) + '">' + esc(t.trace) + ' — ' + esc(t.name) + '</span>',
       '</div>',
-      '<div class="tld-card-body">',
-
-        // Status row
-        '<div class="tld-status-row">',
-          '<div class="tld-status-dot ' + s.status + '" id="dot-' + t.trace + '"></div>',
-          '<span id="status-txt-' + t.trace + '" style="color:var(--muted);font-size:0.72rem;">' + statusLabel(s.status) + '</span>',
+      /* body */
+      '<div class="tld-live-card-body">',
+        '<div style="font-size:0.68rem;color:#475569;">' + esc(t.desc) + '</div>',
+        /* status */
+        '<div class="tld-status-bar">',
+          '<div class="tld-dot ' + s.status + '" id="dot-' + t.trace + '"></div>',
+          '<span class="tld-status-label ' + s.status + '" id="slbl-' + t.trace + '">' + statusLabel(s.status) + '</span>',
+          '<div class="tld-mini-flow" style="margin-left:auto;">' + stepFlow + '</div>',
         '</div>',
-
-        // IDs
-        '<div class="tld-ids">',
-          'trace: <span>' + t.trace + '</span><br>',
-          'task_id: <span id="tid-' + t.trace + '">' + (s.task_id||'—') + '</span><br>',
-          'run_id: <span id="rid-' + t.trace + '">' + (s.run_id||'—') + '</span><br>',
-          'alert_id: <span id="aid-' + t.trace + '">' + (s.alert_id||'—') + '</span>',
+        /* IDs */
+        '<div class="tld-id-row">',
+          '<span class="tld-id-chip"><b>task_id</b>' + esc(tid) + '</span>',
+          '<span class="tld-id-chip"><b>run_id</b><span id="rid-' + t.trace + '">' + esc(rid) + '</span></span>',
+          '<span class="tld-id-chip"><b>alert</b><span id="aid-' + t.trace + '">' + esc(aid) + '</span></span>',
         '</div>',
-
-        // Buttons
-        '<div style="display:flex;gap:0.35rem;flex-wrap:wrap;">',
-          '<button class="tld-btn run sm" onclick="runTrace(\'' + t.trace + '\')" id="btn-run-' + t.trace + '">▶ Run</button>',
-          '<button class="tld-btn stop sm" onclick="stopTrace(\'' + t.trace + '\')" id="btn-stop-' + t.trace + '">■ Stop</button>',
-          '<button class="tld-btn restart sm" onclick="restartTrace(\'' + t.trace + '\')" id="btn-restart-' + t.trace + '">↺ Restart</button>',
-          '<button class="tld-btn validate sm" onclick="validateTrace(\'' + t.trace + '\')" id="btn-val-' + t.trace + '">✓ Validate</button>',
+        /* buttons */
+        '<div class="tld-actions">',
+          '<button class="tld-btn run"      onclick="doRun(\'' + t.trace + '\')">▶ Run</button>',
+          '<button class="tld-btn stop"     onclick="doStop(\'' + t.trace + '\')">■ Stop</button>',
+          '<button class="tld-btn restart"  onclick="doRestart(\'' + t.trace + '\')">↺ Restart</button>',
+          '<button class="tld-btn redo"     onclick="doRedo(\'' + t.trace + '\')">⟳ Redo</button>',
+          '<button class="tld-btn validate" onclick="doValidate(\'' + t.trace + '\')">✓ Validate</button>',
         '</div>',
-
-        // Output
-        '<div class="tld-output-pre' + (outputEmpty?' empty':'') + '" id="output-' + t.trace + '">' +
-          (outputEmpty ? 'No output yet. Click ▶ Run to execute.' : esc(output.substring(0,400))) +
+        /* output */
+        '<div class="tld-output' + (!s.output?' empty':'') + '" id="out-' + t.trace + '">' +
+          esc(s.output ? s.output.substring(0,500) : 'No output yet. Click ▶ Run to execute.') +
         '</div>',
-
-        // Validation badge
-        '<div id="val-badge-' + t.trace + '" style="display:' + (s.validated===null?'none':'flex') + ';" class="tld-val-row">',
-          '<span class="tld-val-icon">' + (s.validated?'✅':'❌') + '</span>',
-          '<span class="' + (s.validated?'tld-val-ok':'tld-val-fail') + '">' +
-            (s.validated ? 'Validation passed' : 'Validation failed') +
-          '</span>',
+        /* validation checks */
+        checkHtml,
+        /* links */
+        '<div class="tld-links">',
+          '<a class="tld-link" href="/tasked?task_id=' + esc(tid) + '" target="_blank">📝 Tasked</a>',
+          '<a class="tld-link" href="/piplinetask?task_id=' + esc(tid) + '" target="_blank">🔀 Pipeline</a>',
+          '<a class="tld-link" href="/alerts" target="_blank">🔔 Alerts</a>',
+          '<a class="tld-link" href="/task-completed?task_id=' + esc(tid) + '" target="_blank">✅ Completed</a>',
+          '<a class="tld-link" href="/tasked-preview?task_id=' + esc(tid) + '&run_id=' + esc(rid) + '" target="_blank">👁 Preview</a>',
         '</div>',
-
-        // Links
-        '<div class="tld-link-row">',
-          '<a class="tld-link" href="/tasked?task_id=' + (s.task_id||'') + '" target="_blank">Tasked</a>',
-          '<a class="tld-link" href="/piplinetask?task_id=' + (s.task_id||'') + '" target="_blank">Pipeline</a>',
-          '<a class="tld-link" href="/alerts" target="_blank">Alerts</a>',
-          '<a class="tld-link" href="/task-completed?task_id=' + (s.task_id||'') + '" target="_blank">Completed</a>',
-          '<a class="tld-link" href="/tasked-preview?task_id=' + (s.task_id||'') + '&run_id=' + (s.run_id||'') + '" target="_blank">Preview</a>',
-        '</div>',
-
       '</div>'
     ].join('');
   }
 
   function statusLabel(s) {
-    var m = {idle:'Idle',running:'Running…',completed:'Completed',failed:'Failed',cancelled:'Cancelled'};
-    return m[s] || s;
+    return {idle:'Idle',running:'Running…',completed:'Completed',failed:'Failed',cancelled:'Cancelled'}[s]||s;
   }
 
-  function esc(str) {
-    if (!str) return '';
-    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  function refreshCard(trace) {
+    var t = TRACES.find(function(x){return x.trace===trace;});
+    var div = document.getElementById('card-' + trace);
+    if (t && div) renderCard(t, div);
   }
 
-  // ── Update card after state change ───────────────────────────────
-  function updateCard(trace) {
-    var card = document.getElementById('card-' + trace);
-    var t = TRACES.find(function(x){ return x.trace === trace; });
-    if (card && t) card.innerHTML = cardHTML(t);
-  }
-
-  function setStatus(trace, st) {
-    state[trace].status = st;
-    var dot = document.getElementById('dot-' + trace);
-    var txt = document.getElementById('status-txt-' + trace);
-    if (dot) { dot.className = 'tld-status-dot ' + st; }
-    if (txt) { txt.textContent = statusLabel(st); }
-    setGlobal('');
-  }
-
-  function setOutput(trace, text) {
-    state[trace].output = text;
-    var el = document.getElementById('output-' + trace);
-    if (el) {
-      el.className = 'tld-output-pre';
-      el.textContent = (text||'').substring(0, 600);
-    }
-  }
-
-  function setIds(trace, tid, rid, aid) {
-    if (tid) state[trace].task_id = tid;
-    if (rid) state[trace].run_id  = rid;
-    if (aid) state[trace].alert_id = aid;
-    var tidEl = document.getElementById('tid-' + trace);
-    var ridEl = document.getElementById('rid-' + trace);
-    var aidEl = document.getElementById('aid-' + trace);
-    if (tidEl && tid) tidEl.textContent = tid;
-    if (ridEl && rid) ridEl.textContent = rid;
-    if (aidEl && aid) aidEl.textContent = aid;
-    // update links
-    updateCard(trace);
-  }
-
-  function setGlobal(msg) {
-    var el = document.getElementById('tld-global-status');
-    if (el) el.textContent = msg;
-  }
-
-  // ── API helpers ──────────────────────────────────────────────────
-  function apiPost(url, body) {
-    return fetch(url, {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body || {})
-    }).then(function(r){ return r.json(); });
-  }
-  function apiDelete(url) {
-    return fetch(url, {method: 'DELETE'}).then(function(r){ return r.json(); });
-  }
-
-  // ── Find trace object by trace string ────────────────────────────
-  function findTrace(traceId) {
-    return TRACES.find(function(t){ return t.trace === traceId; });
-  }
-
-  // ── Create a fresh task, return new task_id ───────────────────────
-  function createTask(t) {
-    var payload = {
-      name: t.name,
-      mode: t.mode,
-      schedule_kind: 'manual',
-      tasked_type: t.type,
-      planner_prompt: t.planner,
-      executor_prompt: t.executor || 'Execute the task.',
-      trigger_mode: t.trigger_mode || 'always',
-      steps: t.steps
-    };
-    if (t.executor_target) payload.executor_target = t.executor_target;
-    if (t.validation_command) payload.validation_command = t.validation_command;
-    if (t.test_command) payload.test_command = t.test_command;
-    return apiPost('/api/tasks', payload).then(function(d){
-      return (d.task || {}).id || null;
-    });
-  }
-
-  // ── Run a trace ───────────────────────────────────────────────────
-  function runTrace(traceId) {
-    var t = findTrace(traceId);
+  /* ── Operations ─────────────────────────────────────────────── */
+  function ensureTask(trace, cb) {
+    var t = TRACES.find(function(x){return x.trace===trace;});
     if (!t) return;
-    var taskId = state[traceId].task_id;
-    if (!taskId) {
-      setGlobal('Creating task for ' + traceId + '…');
-      createTask(t).then(function(newId) {
-        if (!newId) { setGlobal('Create failed for ' + traceId); return; }
-        state[traceId].task_id = newId;
-        setGlobal('Running ' + traceId + '…');
-        doRun(traceId, newId);
-      });
-    } else {
-      setGlobal('Running ' + traceId + '…');
-      doRun(traceId, taskId);
-    }
-  }
-
-  function doRun(traceId, taskId) {
-    setStatus(traceId, 'running');
-    apiPost('/api/tasks/' + taskId + '/run', {}).then(function(d) {
-      var status = d.status || 'failed';
-      setStatus(traceId, status);
-      setIds(traceId, d.task_id, d.run_id, d.alert_id ? String(d.alert_id) : null);
-      setOutput(traceId, d.text || d.error || '(no output)');
-      setGlobal(traceId + ' → ' + status);
-    }).catch(function(e) {
-      setStatus(traceId, 'failed');
-      setOutput(traceId, 'Error: ' + e.message);
+    if (S[trace].task_id) { cb(S[trace].task_id, t); return; }
+    var payload = {
+      name:t.name, mode:t.mode, schedule_kind:'manual', tasked_type:t.type,
+      planner_prompt:t.planner, executor_prompt:t.executor||'Execute the task.',
+      trigger_mode:t.trigger_mode, steps:t.steps
+    };
+    if (t.executor_target)      payload.executor_target      = t.executor_target;
+    if (t.validation_command)   payload.validation_command   = t.validation_command;
+    if (t.test_command)         payload.test_command         = t.test_command;
+    post('/api/tasks', payload).then(function(d) {
+      var newId = (d.task||{}).id;
+      if (newId) { S[trace].task_id = newId; cb(newId, t); }
+      else { gstatus('Create failed: ' + trace,'#f87171'); }
     });
   }
 
-  // ── Stop a trace ─────────────────────────────────────────────────
-  function stopTrace(traceId) {
-    var taskId = state[traceId].task_id;
-    if (!taskId) return;
-    apiPost('/api/tasks/' + taskId + '/stop', {}).then(function(d) {
-      setStatus(traceId, d.status || 'cancelled');
-      setGlobal(traceId + ' stopped');
+  window.doRun = function(trace) {
+    gstatus('Running ' + trace + '…','#60a5fa');
+    S[trace].status = 'running'; S[trace].output = ''; refreshCard(trace);
+    ensureTask(trace, function(taskId) {
+      post('/api/tasks/' + taskId + '/run', {}).then(function(d) {
+        S[trace].status   = d.status || 'failed';
+        S[trace].output   = d.text || d.error || '(no output)';
+        if (d.run_id)   S[trace].run_id   = d.run_id;
+        if (d.alert_id) S[trace].alert_id = String(d.alert_id);
+        refreshCard(trace);
+        gstatus(trace + ' → ' + S[trace].status, S[trace].status==='completed'?'#4ade80':'#f87171');
+      }).catch(function(e){ S[trace].status='failed'; refreshCard(trace); gstatus('Error: '+e.message,'#f87171'); });
     });
-  }
+  };
 
-  // ── Restart a trace ───────────────────────────────────────────────
-  function restartTrace(traceId) {
-    var taskId = state[traceId].task_id;
-    if (!taskId) return;
-    setStatus(traceId, 'running');
-    setGlobal('Restarting ' + traceId + '…');
-    apiPost('/api/tasks/' + taskId + '/restart', {}).then(function(d) {
-      var status = d.status || 'failed';
-      setStatus(traceId, status);
-      setIds(traceId, d.task_id, d.run_id, d.alert_id ? String(d.alert_id) : null);
-      setOutput(traceId, d.text || d.error || '(no output)');
-      setGlobal(traceId + ' restarted → ' + status);
-    }).catch(function(e) {
-      setStatus(traceId, 'failed');
+  window.doStop = function(trace) {
+    var taskId = S[trace].task_id; if (!taskId) return;
+    post('/api/tasks/' + taskId + '/stop', {}).then(function(d) {
+      S[trace].status = d.status || 'cancelled'; refreshCard(trace);
+      gstatus(trace + ' stopped','#f87171');
     });
-  }
+  };
 
-  // ── Validate a trace ──────────────────────────────────────────────
-  function validateTrace(traceId) {
-    var taskId = state[traceId].task_id;
-    var runId  = state[traceId].run_id;
-    if (!taskId) { setGlobal('No task_id for ' + traceId + ' — run first'); return; }
-
-    var checks = [];
-
-    // Check 1: task exists with completed status
-    var p1 = fetch('/api/tasks').then(function(r){ return r.json(); }).then(function(d) {
-      var tasks = d.tasks || [];
-      var t = tasks.find(function(x){ return x.id === taskId; });
-      return t ? {ok: t.last_status === 'completed', msg: 'Tasked status: ' + (t.last_status||'?')} : {ok:false, msg:'Task not found'};
+  window.doRestart = function(trace) {
+    var taskId = S[trace].task_id; if (!taskId) return;
+    gstatus('Restarting ' + trace + '…','#60a5fa');
+    S[trace].status='running'; S[trace].output=''; refreshCard(trace);
+    post('/api/tasks/' + taskId + '/restart', {}).then(function(d) {
+      S[trace].status = d.status||'failed'; S[trace].output = d.text||d.error||'';
+      if (d.run_id)   S[trace].run_id   = d.run_id;
+      if (d.alert_id) S[trace].alert_id = String(d.alert_id);
+      refreshCard(trace);
+      gstatus(trace + ' restarted → ' + S[trace].status, S[trace].status==='completed'?'#4ade80':'#f87171');
     });
-    checks.push(p1);
+  };
 
-    // Check 2: pipeline has a completed run
-    var p2 = fetch('/api/task-pipelines?task_id=' + taskId).then(function(r){ return r.json(); }).then(function(d) {
-      var pipes = d.pipelines || [];
-      var latest = pipes[0] || {};
-      var run = latest.run || {};
-      return {ok: run.status === 'completed', msg: 'Pipeline status: ' + (run.status||'none')};
+  window.doRedo = function(trace) {
+    var taskId = S[trace].task_id; if (!taskId) return;
+    gstatus('Redo ' + trace + '…','#c084fc');
+    S[trace].status='running'; refreshCard(trace);
+    post('/api/tasks/' + taskId + '/redo', {}).then(function(d) {
+      S[trace].status = d.status||'failed'; S[trace].output = d.text||d.error||'';
+      if (d.run_id)   S[trace].run_id   = d.run_id;
+      if (d.alert_id) S[trace].alert_id = String(d.alert_id);
+      refreshCard(trace);
+      gstatus(trace + ' redo → ' + S[trace].status, '#c084fc');
     });
-    checks.push(p2);
+  };
 
-    // Check 3: alert exists for this task
-    var p3 = fetch('/api/alerts?limit=500').then(function(r){ return r.json(); }).then(function(d) {
-      var alerts = (d.alerts || []).filter(function(a){ return a.task_id === taskId; });
-      return {ok: alerts.length > 0, msg: 'Alerts found: ' + alerts.length + (alerts[0]?' (id='+alerts[0].id+', '+alerts[0].severity+')':'')};
-    });
-    checks.push(p3);
-
-    // Check 4: completed run exists
-    var p4 = fetch('/api/task-completed?task_id=' + taskId).then(function(r){ return r.json(); }).then(function(d) {
-      var items = d.items || [];
-      return {ok: items.length > 0, msg: 'Completed runs: ' + items.length};
-    });
-    checks.push(p4);
-
-    // Check 5: preview has output
-    var previewUrl = '/api/task-preview?task_id=' + taskId + (runId ? '&run_id=' + runId : '');
-    var p5 = fetch(previewUrl).then(function(r){ return r.json(); }).then(function(d) {
-      var out = d.output_text || '';
-      return {ok: out.length > 0, msg: 'Preview output: ' + (out.length > 0 ? out.length + ' chars' : 'empty')};
-    });
-    checks.push(p5);
-
+  window.doValidate = function(trace) {
+    var taskId = S[trace].task_id; var runId = S[trace].run_id;
+    if (!taskId) { gstatus('No task_id — run first','#f87171'); return; }
+    gstatus('Validating ' + trace + '…','#22d3ee');
+    var checks = [
+      get('/api/tasks').then(function(d){
+        var t=((d.tasks||[]).find(function(x){return x.id===taskId;}))||{};
+        return {ok:t.last_status==='completed',msg:'status='+( t.last_status||'?')};
+      }),
+      get('/api/task-pipelines?task_id=' + taskId).then(function(d){
+        var r=((d.pipelines||[])[0]||{}).run||{};
+        return {ok:r.status==='completed',msg:'pipeline='+( r.status||'none')};
+      }),
+      get('/api/alerts?limit=500').then(function(d){
+        var al=(d.alerts||[]).filter(function(a){return a.task_id===taskId;});
+        return {ok:al.length>0,msg:'alerts='+al.length+(al[0]?' id='+al[0].id:'')};
+      }),
+      get('/api/task-completed?task_id=' + taskId).then(function(d){
+        var it=d.items||[];
+        return {ok:it.length>0,msg:'runs='+it.length};
+      }),
+      get('/api/task-preview?task_id=' + taskId + (runId?'&run_id='+runId:'')).then(function(d){
+        var out=d.output_text||'';
+        return {ok:out.length>0,msg:'output='+out.length+'c'};
+      })
+    ];
     Promise.all(checks).then(function(results) {
-      var allOk = results.every(function(r){ return r.ok; });
-      state[traceId].validated = allOk;
-      var badge = document.getElementById('val-badge-' + traceId);
-      if (badge) {
-        badge.style.display = 'flex';
-        badge.innerHTML = '<span class="tld-val-icon">' + (allOk?'✅':'❌') + '</span>' +
-          '<span class="' + (allOk?'tld-val-ok':'tld-val-fail') + '">' +
-            (allOk ? 'All 5 checks passed' : 'Some checks failed') +
-          '</span>';
-      }
-      // Show details in summary
-      showValSummary(traceId, results);
+      S[trace].checks = results;
+      refreshCard(trace);
+      var all = results.every(function(r){return r.ok;});
+      gstatus(trace + ' validated — ' + (all?'all 5 passed ✅':'some failed ❌'), all?'#4ade80':'#f87171');
     });
-  }
+  };
 
-  function showValSummary(traceId, results) {
-    var summary = document.getElementById('tld-val-summary');
-    var rows    = document.getElementById('tld-val-rows');
-    var checks  = ['Tasked status=completed','Pipeline run=completed','Alert exists','Completed run exists','Preview has output'];
-    if (!summary || !rows) return;
-    summary.style.display = 'block';
-    var html = '<div style="font-size:0.72rem;color:var(--muted);margin-bottom:0.35rem;">' + traceId + ' validation:</div>';
-    results.forEach(function(r, i) {
-      html += '<div class="tld-val-row"><span class="tld-val-icon">' + (r.ok?'✅':'❌') + '</span>' +
-        '<span class="' + (r.ok?'tld-val-ok':'tld-val-fail') + '">' + esc(checks[i]) + '</span>' +
-        '<span style="color:var(--muted);margin-left:0.5rem;font-size:0.68rem;">' + esc(r.msg) + '</span>' +
-        '</div>';
-    });
-    rows.innerHTML = html;
-  }
-
-  // ── Refresh status of all traces ──────────────────────────────────
-  function refreshAll() {
-    setGlobal('Refreshing…');
+  window.refreshStatus = function() {
+    gstatus('Refreshing…','#475569');
     TRACES.forEach(function(t) {
-      var taskId = state[t.trace].task_id;
-      if (!taskId) return;
-      fetch('/api/task-pipelines?task_id=' + taskId).then(function(r){ return r.json(); }).then(function(d) {
-        var pipes = d.pipelines || [];
-        var pipe = pipes[0] || {};
-        var run = pipe.run || {};
-        var st = run.status || 'idle';
-        setStatus(t.trace, st);
-        if (run.id)       state[t.trace].run_id   = run.id;
-        if (run.alert_id) state[t.trace].alert_id  = String(run.alert_id);
+      var taskId = S[t.trace].task_id; if (!taskId) return;
+      get('/api/task-pipelines?task_id=' + taskId).then(function(d) {
+        var p=(d.pipelines||[])[0]||{}, r=p.run||{};
+        if (r.status) { S[t.trace].status = r.status; }
+        if (r.id)     { S[t.trace].run_id = r.id; }
+        refreshCard(t.trace);
       });
     });
-    setTimeout(function(){ setGlobal('Refreshed'); }, 600);
-  }
+    setTimeout(function(){gstatus('Refreshed','#475569');},500);
+  };
 
-  // ── Run all 6 sequentially ────────────────────────────────────────
-  function runAll() {
-    setGlobal('Running all 6 traces…');
-    var i = 0;
-    function next() {
-      if (i >= TRACES.length) { setGlobal('All 6 runs complete'); return; }
-      var t = TRACES[i++];
-      runTrace(t.trace);
-      setTimeout(next, 1500);
+  window.runAll = function() {
+    gstatus('Running all 6…','#60a5fa');
+    var i=0;
+    function next(){
+      if(i>=TRACES.length){gstatus('All 6 complete','#4ade80');return;}
+      window.doRun(TRACES[i++].trace);
+      setTimeout(next,800);
     }
     next();
-  }
+  };
 
-  // ── Validate all 6 ───────────────────────────────────────────────
-  function validateAll() {
-    setGlobal('Validating all…');
-    var summary = document.getElementById('tld-val-summary');
-    var rows    = document.getElementById('tld-val-rows');
-    if (summary) summary.style.display = 'none';
-    if (rows) rows.innerHTML = '';
-    TRACES.forEach(function(t, i) {
-      setTimeout(function(){ validateTrace(t.trace); }, i * 300);
+  window.validateAll = function() {
+    gstatus('Validating all 6…','#22d3ee');
+    TRACES.forEach(function(t,i){
+      setTimeout(function(){window.doValidate(t.trace);},i*250);
     });
-  }
+  };
 
-  // ── Expose to HTML onclick ───────────────────────────────────────
-  window.runTrace      = runTrace;
-  window.stopTrace     = stopTrace;
-  window.restartTrace  = restartTrace;
-  window.validateTrace = validateTrace;
-  window.refreshAll    = refreshAll;
-  window.runAll        = runAll;
-  window.validateAll   = validateAll;
-
-  // ── Init ─────────────────────────────────────────────────────────
+  /* ── Init ───────────────────────────────────────────────────── */
   buildCards();
-  refreshAll();
+  refreshStatus();
 
 })();
 </script>
