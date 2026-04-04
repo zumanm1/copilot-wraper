@@ -825,3 +825,338 @@ NEW-T5 combined:
 | **archive** | T1 Clone | `lifecycle_state=archived`, `archived_at` set |
 | **delete** | T1 Clone | `{ ok: true, deleted: "task_5bc7b30d" }` |
 | **edit** | T1 | Notes updated via `POST /api/tasks` with `id` |
+
+---
+
+## 13. NEW-T1 to NEW-T5 — Full Per-Task Monitoring Guide
+
+> Each task has a **Trace Number** (TRACE-001 to TRACE-005) as a stable reference ID
+> across all 5 monitoring domains. Use it when cross-referencing pages.
+
+---
+
+### TRACE-001 — NEW-T1 | `output` | chat
+
+| Field | Value |
+|-------|-------|
+| **Trace Number** | `TRACE-001` |
+| `task_id` | `task_97baeced` |
+| `run_id` | `trun_83871f0d` |
+| `alert_id` | `430` |
+| `tasked_type` | `output` |
+| `mode` | `chat` (via C1b:8000) |
+| `status` | `completed` / `workflow-complete` |
+| `duration` | 1m 40s |
+
+#### How to Create (curl)
+```bash
+curl -s -X POST "http://localhost:6090/api/tasks" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "NEW-T1 — Python Tips Output",
+    "mode": "chat",
+    "schedule_kind": "manual",
+    "tasked_type": "output",
+    "planner_prompt": "List 3 essential Python tips for writing cleaner code.",
+    "executor_prompt": "You are a senior Python developer. Give exactly 3 concise tips, one sentence each.",
+    "context_handoff": "Output-type task: produces LLM text output",
+    "trigger_mode": "always",
+    "steps": [
+      {"id":"nt1_trigger","name":"Trigger","kind":"trigger","position":1},
+      {"id":"nt1_chat","name":"Generate Tips","kind":"chat","position":2,"config":{"prompt":"List 3 essential Python tips"}},
+      {"id":"nt1_alert","name":"Output Alert","kind":"alert","position":3,"config":{"title":"NEW-T1 Output Ready","severity":"info","summary":"Python tips generated"}},
+      {"id":"nt1_complete","name":"Complete","kind":"complete","position":4}
+    ]
+  }'
+# Copy task_id from response, then run:
+curl -s -X POST "http://localhost:6090/api/tasks/{task_id}/run"
+```
+
+#### How to Monitor on Each Page
+
+**1. Tasked** — `http://localhost:6090/tasked?task_id=task_97baeced`
+- Find the row for `NEW-T1 — Python Tips Output`
+- Columns to check: `Type=output`, `Mode=chat`, `Status=completed`, `Steps=4`
+- Actions available: Run Now, Edit, Clone, Archive, Delete
+- Live observed: `last_status=completed`, `tasked_type=output`, `steps=4`
+
+**2. Piplinetask** — `http://localhost:6090/piplinetask?task_id=task_97baeced`
+- API: `GET /api/task-pipelines?task_id=task_97baeced`
+- Shows: run badge (green=completed), 4-step flow diagram, trace grid
+- Live observed: `run_id=trun_83871f0d`, `status=completed`, `terminal=workflow-complete`
+- Step flow: `nt1_trigger → nt1_chat → nt1_alert → nt1_complete` (all completed)
+
+**3. Alerts** — `http://localhost:6090/alerts`
+- Filter by task or severity `info`
+- API: `GET /api/alerts?limit=500` → filter `task_id=task_97baeced`
+- Live observed: `alert_id=430`, `title="NEW-T1 — Python Tips Output"`, `severity=info`, `status=open`
+- Actions: Acknowledge → `POST /api/alerts/430/status {"status":"acknowledged"}`
+
+**4. Task Completed** — `http://localhost:6090/task-completed?task_id=task_97baeced`
+- API: `GET /api/task-completed?task_id=task_97baeced`
+- Live observed: `run_id=trun_83871f0d`, `status=completed`, `duration=1m 40s`
+- Actions: Redo, Clone Task, Open Pipeline, Preview Output
+
+**5. Preview** — `http://localhost:6090/tasked-preview?task_id=task_97baeced&run_id=trun_83871f0d`
+- API: `GET /api/task-preview?task_id=task_97baeced&run_id=trun_83871f0d`
+- Live observed: 4 step_results, output starts: *"Here are 3 essential Python tips that make a big difference..."*
+
+---
+
+### TRACE-002 — NEW-T2 | `alert` | chat
+
+| Field | Value |
+|-------|-------|
+| **Trace Number** | `TRACE-002` |
+| `task_id` | `task_adc06130` |
+| `run_id` | `trun_eae69a71` |
+| `alert_id` | `432` |
+| `tasked_type` | `alert` |
+| `mode` | `chat` (via C1b:8000) |
+| `status` | `completed` / `workflow-complete` |
+| `duration` | 47s |
+
+#### How to Create (curl)
+```bash
+curl -s -X POST "http://localhost:6090/api/tasks" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "NEW-T2 — CPU Alert Check",
+    "mode": "chat",
+    "schedule_kind": "manual",
+    "tasked_type": "alert",
+    "planner_prompt": "Check: is CPU usage at 95% above the warning threshold of 80%? Respond only as JSON: {\"triggered\": true, \"reason\": \"CPU 95% exceeds 80% threshold\"}",
+    "executor_prompt": "You are a monitoring system. Evaluate the condition and confirm the alert reason clearly.",
+    "context_handoff": "Alert-type task: fires alerts based on JSON condition evaluation",
+    "trigger_mode": "json",
+    "steps": [
+      {"id":"nt2_trigger","name":"Trigger","kind":"trigger","position":1},
+      {"id":"nt2_condition","name":"Condition Check","kind":"chat","position":2,"config":{"prompt":"Is CPU 95% > threshold 80%?"}},
+      {"id":"nt2_alert","name":"CPU Alert","kind":"alert","position":3,"config":{"title":"NEW-T2 CPU Threshold Exceeded","severity":"warning","summary":"CPU usage 95% exceeds 80% warning threshold"}},
+      {"id":"nt2_complete","name":"Complete","kind":"complete","position":4}
+    ]
+  }'
+curl -s -X POST "http://localhost:6090/api/tasks/{task_id}/run"
+```
+
+#### How to Monitor on Each Page
+
+**1. Tasked** — `http://localhost:6090/tasked?task_id=task_adc06130`
+- Live observed: `last_status=completed`, `tasked_type=alert`, `mode=chat`, `steps=4`
+- Note: `trigger_mode=json` means alert fires only when LLM returns `{"triggered": true}`
+
+**2. Piplinetask** — `http://localhost:6090/piplinetask?task_id=task_adc06130`
+- Live observed: `run_id=trun_eae69a71`, `status=completed`, `terminal=workflow-complete`
+- Step flow: `nt2_trigger → nt2_condition → nt2_alert → nt2_complete`
+
+**3. Alerts** — `http://localhost:6090/alerts`
+- Live observed: `alert_id=432`, `title="NEW-T2 CPU Threshold Exceeded"`, `severity=warning`, `status=open`
+- Note: severity=`warning` (amber badge) — higher urgency than info
+- Acknowledge: `POST /api/alerts/432/status {"status":"acknowledged"}`
+
+**4. Task Completed** — `http://localhost:6090/task-completed?task_id=task_adc06130`
+- Live observed: `run_id=trun_eae69a71`, `status=completed`, `duration=47s`
+
+**5. Preview** — `http://localhost:6090/tasked-preview?task_id=task_adc06130&run_id=trun_eae69a71`
+- Live observed: 4 step_results, output: *"Yes. ✅ 95% is greater than the 80% threshold, so the condition is true."*
+
+---
+
+### TRACE-003 — NEW-T3 | `action` | sandbox (C12b)
+
+| Field | Value |
+|-------|-------|
+| **Trace Number** | `TRACE-003` |
+| `task_id` | `task_f0642138` |
+| `run_id` | `trun_6167744c` |
+| `alert_id` | `433` |
+| `tasked_type` | `action` |
+| `mode` | `sandbox` (via C12b:8210) |
+| `status` | `completed` / `workflow-complete` |
+| `duration` | 0s (fast shell exec) |
+
+#### How to Create (curl)
+```bash
+curl -s -X POST "http://localhost:6090/api/tasks" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "NEW-T3 — Disk Check Action",
+    "mode": "sandbox",
+    "schedule_kind": "manual",
+    "tasked_type": "action",
+    "planner_prompt": "Run disk check: df -h /workspace and count files in /workspace.",
+    "executor_prompt": "Execute shell commands and report disk usage and file count.",
+    "context_handoff": "Action-type task: runs shell commands in C12b sandbox",
+    "trigger_mode": "always",
+    "executor_target": "C12b",
+    "workspace_dir": "/workspace",
+    "validation_command": "echo disk_check_ok",
+    "steps": [
+      {"id":"nt3_trigger","name":"Trigger","kind":"trigger","position":1},
+      {"id":"nt3_sandbox","name":"Disk Action","kind":"sandbox","position":2,"config":{"command":"df -h /workspace && echo files=$(ls /workspace | wc -l) && echo DISK_CHECK_DONE"}},
+      {"id":"nt3_alert","name":"Disk Alert","kind":"alert","position":3,"config":{"title":"NEW-T3 Disk Check Complete","severity":"info","summary":"Disk usage and file count reported from C12b"}},
+      {"id":"nt3_complete","name":"Complete","kind":"complete","position":4}
+    ]
+  }'
+curl -s -X POST "http://localhost:6090/api/tasks/{task_id}/run"
+```
+
+#### How to Monitor on Each Page
+
+**1. Tasked** — `http://localhost:6090/tasked?task_id=task_f0642138`
+- Live observed: `last_status=completed`, `tasked_type=action`, `mode=sandbox`, `steps=4`
+- Note: `executor_target=C12b` — execution route goes through C12b:8210, not C1b
+
+**2. Piplinetask** — `http://localhost:6090/piplinetask?task_id=task_f0642138`
+- Live observed: `run_id=trun_6167744c`, `status=completed`, `terminal=workflow-complete`
+- Step flow: `nt3_trigger → nt3_sandbox → nt3_alert → nt3_complete`
+- The sandbox step shows raw shell output in the step_results panel
+
+**3. Alerts** — `http://localhost:6090/alerts`
+- Live observed: `alert_id=433`, `title="NEW-T3 Disk Check Complete"`, `severity=info`, `status=open`
+
+**4. Task Completed** — `http://localhost:6090/task-completed?task_id=task_f0642138`
+- Live observed: `run_id=trun_6167744c`, `status=completed`, `duration=0s`
+
+**5. Preview** — `http://localhost:6090/tasked-preview?task_id=task_f0642138&run_id=trun_6167744c`
+- Live observed: 4 step_results, output: *"Sandbox target: C12b Lean Sandbox / Workspace: /workspace / Execution: completed / Validation: completed / Filesystem ... DISK_CHECK_DONE"*
+
+---
+
+### TRACE-004 — NEW-T4 | `hook` | chat
+
+| Field | Value |
+|-------|-------|
+| **Trace Number** | `TRACE-004` |
+| `task_id` | `task_f7632723` |
+| `run_id` | `trun_f0c82c94` |
+| `alert_id` | `435` |
+| `tasked_type` | `hook` |
+| `mode` | `chat` (via C1b:8000) |
+| `status` | `completed` / `workflow-complete` |
+| `duration` | 27s |
+
+#### How to Create (curl)
+```bash
+curl -s -X POST "http://localhost:6090/api/tasks" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "NEW-T4 — Slack Webhook Trigger",
+    "mode": "chat",
+    "schedule_kind": "manual",
+    "tasked_type": "hook",
+    "planner_prompt": "Generate a Slack webhook payload JSON for a build-success notification.",
+    "executor_prompt": "You are a CI/CD notification dispatcher. Produce a valid Slack webhook JSON payload with text, username, icon_emoji, and attachments fields.",
+    "context_handoff": "Hook-type task: generates and simulates external webhook dispatch",
+    "trigger_mode": "always",
+    "steps": [
+      {"id":"nt4_trigger","name":"Trigger","kind":"trigger","position":1},
+      {"id":"nt4_hook","name":"Slack Webhook","kind":"chat","position":2,"config":{"prompt":"Generate Slack build-success webhook JSON payload"}},
+      {"id":"nt4_alert","name":"Hook Alert","kind":"alert","position":3,"config":{"title":"NEW-T4 Slack Hook Dispatched","severity":"info","summary":"Slack build-success webhook payload generated"}},
+      {"id":"nt4_complete","name":"Complete","kind":"complete","position":4}
+    ]
+  }'
+curl -s -X POST "http://localhost:6090/api/tasks/{task_id}/run"
+```
+
+#### How to Monitor on Each Page
+
+**1. Tasked** — `http://localhost:6090/tasked?task_id=task_f7632723`
+- Live observed: `last_status=completed`, `tasked_type=hook`, `mode=chat`, `steps=4`
+- Hook tasks simulate external system triggers — the LLM generates the payload that would be dispatched
+
+**2. Piplinetask** — `http://localhost:6090/piplinetask?task_id=task_f7632723`
+- Live observed: `run_id=trun_f0c82c94`, `status=completed`, `terminal=workflow-complete`
+- Step flow: `nt4_trigger → nt4_hook → nt4_alert → nt4_complete`
+
+**3. Alerts** — `http://localhost:6090/alerts`
+- Live observed: `alert_id=435`, `title="NEW-T4 — Slack Webhook Trigger"`, `severity=info`, `status=open`
+- Acknowledge: `POST /api/alerts/435/status {"status":"acknowledged"}`
+
+**4. Task Completed** — `http://localhost:6090/task-completed?task_id=task_f7632723`
+- Live observed: `run_id=trun_f0c82c94`, `status=completed`, `duration=27s`
+
+**5. Preview** — `http://localhost:6090/tasked-preview?task_id=task_f7632723&run_id=trun_f0c82c94`
+- Live observed: 4 step_results, output: *"Below is a ready-to-use Slack Incoming Webhook JSON payload for a successful build notification, using Block Kit..."*
+
+---
+
+### TRACE-005 — NEW-T5 | `combined` | chat
+
+| Field | Value |
+|-------|-------|
+| **Trace Number** | `TRACE-005` |
+| `task_id` | `task_0f1c9b39` |
+| `run_id` | `trun_84413c8c` |
+| `alert_id` | `438` |
+| `tasked_type` | `combined` |
+| `mode` | `chat` (via C1b:8000) |
+| `status` | `completed` / `workflow-complete` |
+| `duration` | 7m 40s |
+
+#### How to Create (curl)
+```bash
+curl -s -X POST "http://localhost:6090/api/tasks" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "NEW-T5 — Security Audit Combined",
+    "mode": "chat",
+    "schedule_kind": "manual",
+    "tasked_type": "combined",
+    "planner_prompt": "Produce a security audit summary covering FINDINGS, RISK_LEVEL, and REMEDIATION_STEPS for a web API with no rate limiting and plain-text password storage.",
+    "executor_prompt": "You are a security auditor. Structure your response with clearly labeled FINDINGS, RISK_LEVEL (Critical/High/Medium/Low), and REMEDIATION_STEPS sections.",
+    "context_handoff": "Combined-type task: generates structured output, fires alert, and logs action steps",
+    "trigger_mode": "always",
+    "steps": [
+      {"id":"nt5_trigger","name":"Trigger","kind":"trigger","position":1},
+      {"id":"nt5_chat","name":"Audit Report","kind":"chat","position":2,"config":{"prompt":"Generate security audit with FINDINGS, RISK_LEVEL, REMEDIATION_STEPS"}},
+      {"id":"nt5_alert","name":"Audit Alert","kind":"alert","position":3,"config":{"title":"NEW-T5 Security Audit Ready","severity":"high","summary":"Security audit report generated — review FINDINGS and REMEDIATION_STEPS"}},
+      {"id":"nt5_complete","name":"Complete","kind":"complete","position":4}
+    ]
+  }'
+curl -s -X POST "http://localhost:6090/api/tasks/{task_id}/run"
+```
+
+#### How to Monitor on Each Page
+
+**1. Tasked** — `http://localhost:6090/tasked?task_id=task_0f1c9b39`
+- Live observed: `last_status=completed`, `tasked_type=combined`, `mode=chat`, `steps=4`
+- Combined tasks exercise all paths: output generation + alert firing + structured action reporting
+
+**2. Piplinetask** — `http://localhost:6090/piplinetask?task_id=task_0f1c9b39`
+- Live observed: `run_id=trun_84413c8c`, `status=completed`, `terminal=workflow-complete`
+- Step flow: `nt5_trigger → nt5_chat → nt5_alert → nt5_complete`
+- Note: duration 7m 40s — longest run due to large structured output from C1b
+
+**3. Alerts** — `http://localhost:6090/alerts`
+- Live observed: `alert_id=438`, `title="NEW-T5 — Security Audit Combined"`, `severity=high`, `status=open`
+- Note: severity=`high` (red badge) — highest severity in the new set
+- Acknowledge: `POST /api/alerts/438/status {"status":"acknowledged"}`
+
+**4. Task Completed** — `http://localhost:6090/task-completed?task_id=task_0f1c9b39`
+- Live observed: `run_id=trun_84413c8c`, `status=completed`, `duration=7m 40s`
+
+**5. Preview** — `http://localhost:6090/tasked-preview?task_id=task_0f1c9b39&run_id=trun_84413c8c`
+- Live observed: 4 step_results, output: *"Below is a generic security audit report... FINDINGS / RISK_LEVEL / REMEDIATION_STEPS..."*
+
+---
+
+## 14. Trace Number Quick Reference
+
+| Trace # | Task Name | `task_id` | `tasked_type` | `run_id` | `alert_id` | Duration |
+|---------|-----------|-----------|--------------|----------|-----------|---------|
+| `TRACE-001` | NEW-T1 Python Tips Output | `task_97baeced` | `output` | `trun_83871f0d` | 430 | 1m 40s |
+| `TRACE-002` | NEW-T2 CPU Alert Check | `task_adc06130` | `alert` | `trun_eae69a71` | 432 | 47s |
+| `TRACE-003` | NEW-T3 Disk Check Action | `task_f0642138` | `action` | `trun_6167744c` | 433 | 0s |
+| `TRACE-004` | NEW-T4 Slack Webhook Trigger | `task_f7632723` | `hook` | `trun_f0c82c94` | 435 | 27s |
+| `TRACE-005` | NEW-T5 Security Audit Combined | `task_0f1c9b39` | `combined` | `trun_84413c8c` | 438 | 7m 40s |
+
+### Domain Monitoring Cheat Sheet (use Trace # to look up IDs above)
+
+| Domain | URL Pattern | API Endpoint | Key Fields to Check |
+|--------|-------------|-------------|---------------------|
+| **Tasked** | `/tasked?task_id={task_id}` | `GET /api/tasks` | `last_status`, `tasked_type`, `mode`, `steps` |
+| **Piplinetask** | `/piplinetask?task_id={task_id}` | `GET /api/task-pipelines?task_id=` | `run_id`, `status`, `terminal_reason`, step flow |
+| **Alerts** | `/alerts` (filter by task) | `GET /api/alerts?limit=500` | `alert_id`, `title`, `severity`, `status` |
+| **Task Completed** | `/task-completed?task_id={task_id}` | `GET /api/task-completed?task_id=` | `run_id`, `status`, `duration_label` |
+| **Preview** | `/tasked-preview?task_id={task_id}&run_id={run_id}` | `GET /api/task-preview?task_id=&run_id=` | `step_results`, `output_text` |
