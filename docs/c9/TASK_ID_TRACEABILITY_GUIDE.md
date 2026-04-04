@@ -1143,13 +1143,14 @@ curl -s -X POST "http://localhost:6090/api/tasks/{task_id}/run"
 
 ## 14. Trace Number Quick Reference
 
-| Trace # | Task Name | `task_id` | `tasked_type` | `run_id` | `alert_id` | Duration |
-|---------|-----------|-----------|--------------|----------|-----------|---------|
-| `TRACE-001` | NEW-T1 Python Tips Output | `task_97baeced` | `output` | `trun_83871f0d` | 430 | 1m 40s |
-| `TRACE-002` | NEW-T2 CPU Alert Check | `task_adc06130` | `alert` | `trun_eae69a71` | 432 | 47s |
-| `TRACE-003` | NEW-T3 Disk Check Action | `task_f0642138` | `action` | `trun_6167744c` | 433 | 0s |
-| `TRACE-004` | NEW-T4 Slack Webhook Trigger | `task_f7632723` | `hook` | `trun_f0c82c94` | 435 | 27s |
-| `TRACE-005` | NEW-T5 Security Audit Combined | `task_0f1c9b39` | `combined` | `trun_84413c8c` | 438 | 7m 40s |
+| Trace # | Task Name | `task_id` | `tasked_type` | `mode` | `run_id` | `alert_id` | `status` | Duration |
+|---------|-----------|-----------|--------------|--------|----------|-----------|---------|---------|
+| `TRACE-001` | NEW-T1 Python Tips Output | `task_97baeced` | `output` | chat | `trun_83871f0d` | 430 | ✅ completed | 1m 40s |
+| `TRACE-002` | NEW-T2 CPU Alert Check | `task_adc06130` | `alert` | chat | `trun_eae69a71` | 432 | ✅ completed | 47s |
+| `TRACE-003` | NEW-T3 Disk Check Action | `task_f0642138` | `action` | sandbox | `trun_6167744c` | 433 | ✅ completed | 0s |
+| `TRACE-004` | NEW-T4 Slack Webhook Trigger | `task_f7632723` | `hook` | chat | `trun_f0c82c94` | 435 | ✅ completed | 27s |
+| `TRACE-005` | NEW-T5 Security Audit Combined | `task_0f1c9b39` | `combined` | chat | `trun_84413c8c` | 438 | ✅ completed | 7m 40s |
+| `TRACE-010` | C12b Linux System Probe | `task_fe608355` | `action` | sandbox | `trun_6edf884a` | 457 | ✅ completed | ~10s |
 
 ### Domain Monitoring Cheat Sheet (use Trace # to look up IDs above)
 
