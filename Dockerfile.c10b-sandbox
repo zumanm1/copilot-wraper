@@ -1,0 +1,46 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# C10b: Lean Coding/Test Sandbox (Agent & Multi-Agento Workspace)
+#
+# Cloned from C12b with different ports to avoid conflicts.
+# Purpose:
+#   - Shared sandbox for both /agent and /multi-agento pages
+#   - Non-root user "sandbox" running in /workspace
+#   - Python 3.11, pip, uv, Node.js 20, npm, git, bash, curl
+#   - FastAPI REST API on port 8310
+#   - Resource limits enforced via docker-compose (mem: 768m, cpus: 0.5)
+#
+# API endpoints: /health /tooling /exec /file/write /file/read /file/ls
+#                /file/delete /workspace/reset /sessions
+# ──────────────────────────────────────────────────────────────────────────────
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    curl \
+    git \
+    gcc \
+    g++ \
+    make \
+    ca-certificates \
+    gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m -s /bin/bash sandbox \
+    && mkdir -p /workspace \
+    && chown sandbox:sandbox /workspace
+
+COPY c10b_sandbox/requirements.txt /tmp/c10b_requirements.txt
+RUN pip install --no-cache-dir uv -r /tmp/c10b_requirements.txt
+
+COPY c10b_sandbox/app.py /app/app.py
+RUN chown sandbox:sandbox /app/app.py
+
+USER sandbox
+WORKDIR /workspace
+
+ENV WORKSPACE=/workspace
+
+EXPOSE 8310
+CMD ["uvicorn", "app:app", "--app-dir", "/app", "--host", "0.0.0.0", "--port", "8310"]

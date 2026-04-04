@@ -542,6 +542,8 @@ services:
       - C11_URL=http://c11-sandbox:8200
       - C12_URL=http://c12-sandbox:8080
       - C12B_URL=http://c12b-sandbox:8210
+      - C10B_URL=http://c10b-sandbox:8310
+      - C10B_URL=http://c10b-sandbox:8310
     volumes:
       - ./c9_jokes:/app/c9_jokes
       - c9-data:/app/data
@@ -710,6 +712,60 @@ services:
       start_period: 10s
       retries: 3
 
+  # C10b: Lean coding/test sandbox (shared by /agent and /multi-agento)
+  # Port 8310 (different from C12b:8210 and C10:8100)
+  c10b-sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile.c10b-sandbox
+    image: copilot-c10b-sandbox:latest
+    container_name: C10b_sandbox
+    profiles: ["optional"]
+    mem_limit: 768m
+    cpus: 0.5
+    ports:
+      - "8310:8310"
+    environment:
+      - WORKSPACE=/workspace
+    volumes:
+      - c10b-workspace:/workspace
+    networks:
+      - copilot-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8310/health >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  # C10b: Lean coding/test sandbox (shared by /agent and /multi-agento)
+  # Port 8310 (different from C12b:8210 and C10:8100)
+  c10b-sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile.c10b-sandbox
+    image: copilot-c10b-sandbox:latest
+    container_name: C10b_sandbox
+    profiles: ["optional"]
+    mem_limit: 768m
+    cpus: 0.5
+    ports:
+      - "8310:8310"
+    environment:
+      - WORKSPACE=/workspace
+    volumes:
+      - c10b-workspace:/workspace
+    networks:
+      - copilot-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8310/health >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
 # ── Shared network ────────────────────────────────────────────
 # All containers communicate via this bridge network.
 # C1_copilot-api:8000 | C7a_openclaw-gateway:18789 | C3_browser-auth:8001 | C9_jokes:6090
@@ -730,3 +786,5 @@ volumes:
   c10-workspace:
   # C11 multi-agent workspace — per-session isolation, persists between runs
   c11-workspace:
+  # C10b shared workspace — used by both /agent and /multi-agento pages
+  c10b-workspace:
