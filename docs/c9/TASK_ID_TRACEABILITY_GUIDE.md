@@ -1160,3 +1160,603 @@ curl -s -X POST "http://localhost:6090/api/tasks/{task_id}/run"
 | **Alerts** | `/alerts` (filter by task) | `GET /api/alerts?limit=500` | `alert_id`, `title`, `severity`, `status` |
 | **Task Completed** | `/task-completed?task_id={task_id}` | `GET /api/task-completed?task_id=` | `run_id`, `status`, `duration_label` |
 | **Preview** | `/tasked-preview?task_id={task_id}&run_id={run_id}` | `GET /api/task-preview?task_id=&run_id=` | `step_results`, `output_text` |
+
+---
+
+## 15. Complete Operations Guide — Create, Update, Start, Stop, Restart, Resume, and Trace
+
+> This section is a self-contained reference for the full task lifecycle.
+> Every operation is shown as both a **UI action** and a **curl API call**.
+> Use the TRACE-001–005 IDs in Section 14 as concrete examples throughout.
+
+---
+
+### 15.1 CREATE a Task
+
+#### Via UI
+1. Open `http://localhost:6090/tasked`
+2. Fill the left-side builder form:
+
+| Field | Input | Notes |
+|-------|-------|-------|
+| Task Name | e.g. `"My New Task"` | Required. Shows in all pages. |
+| Mode | `chat` / `sandbox` / `agent` | `chat` = C1b LLM. `sandbox` = C12b shell. |
+| Output Type (`tasked_type`) | `output` / `alert` / `action` / `hook` / `combined` | Determines how output is handled and what alert is fired. |
+| Schedule | `manual` | Once-off. Other options: `interval`, `cron`. |
+| Planner Prompt | Your question or instruction | What the task should do. |
+| Executor Prompt | Role/persona for the LLM | How the LLM should respond. |
+| Alert Trigger | `always` / `json` | `always` = alert every run. `json` = alert only if output contains `{"triggered":true}`. |
+| Alert Severity | `info` / `warning` / `high` / `critical` | Sets badge colour on Alerts page. |
+
+3. Click **`+ Add Step`** to build the workflow:
+
+```
+Step 1  kind=trigger   → marks the start point
+Step 2  kind=chat      → executes LLM (or kind=sandbox for shell)
+Step 3  kind=alert     → fires the alert record
+Step 4  kind=complete  → closes the run
+```
+
+4. Click **Save Tasked** → new `task_id` appears in the task table on the right.
+
+#### Via API
+```bash
+curl -s -X POST "http://localhost:6090/api/tasks" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "My New Task",
+    "mode": "chat",
+    "schedule_kind": "manual",
+    "tasked_type": "output",
+    "planner_prompt": "List 3 key facts about Docker networking.",
+    "executor_prompt": "You are a concise DevOps engineer. Answer in 3 bullet points.",
+    "context_handoff": "Output task producing DevOps notes",
+    "trigger_mode": "always",
+    "steps": [
+      {"id":"my_trigger", "name":"Trigger",  "kind":"trigger",  "position":1},
+      {"id":"my_chat",    "name":"Execute",  "kind":"chat",     "position":2, "config":{"prompt":"List 3 Docker networking facts"}},
+      {"id":"my_alert",   "name":"Alert",    "kind":"alert",    "position":3, "config":{"title":"Task Done","severity":"info","summary":"Output ready"}},
+      {"id":"my_complete","name":"Complete", "kind":"complete", "position":4}
+    ]
+  }'
+```
+**Response:**
+```json
+{ "ok": true, "task": { "id": "task_xxxxxxxx", "name": "My New Task", ... } }
+```
+Copy the `task_id` — you will use it for every subsequent operation.
+
+---
+
+### 15.2 UPDATE (Edit) a Task
+
+#### Via UI
+1. Open `http://localhost:6090/tasked?task_id={task_id}`
+2. The builder form pre-fills with the task's current values.
+3. Edit any field (name, prompts, steps, schedule, alert settings).
+4. Click **Save Tasked** — the same `task_id` is preserved; only the fields you changed are updated.
+
+#### Via API
+Pass the existing `id` in the body — the API treats it as an update:
+```bash
+# Update name and executor prompt
+curl -s -X POST "http://localhost:6090/api/tasks" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "task_97baeced",
+    "name": "NEW-T1 — Python Tips Output (v2)",
+    "executor_prompt": "You are a Python expert. Give 3 tips with one code example each.",
+    "notes": "Updated 2026-04-04: added code examples to executor prompt"
+  }'
+```
+**Response:** `{ "ok": true, "task": { "id": "task_97baeced", ... updated fields ... } }`
+
+> The `task_id` never changes. All existing `run_id` and `alert_id` records remain linked.
+
+---
+
+### 15.3 START (Run) a Task
+
+#### Via UI
+- On the Tasked page task row: click **Run Now** button.
+- Or open the task and click the **Run** button in the detail panel.
+
+#### Via API
+```bash
+curl -s -X POST "http://localhost:6090/api/tasks/task_97baeced/run"
+```
+**Response:**
+```json
+{
+  "ok": true,
+  "task_id": "task_97baeced",
+  "run_id": "trun_83871f0d",
+  "status": "completed",
+  "alert_id": 430,
+  "terminal_reason": "workflow-complete",
+  "text": "Here are 3 essential Python tips..."
+}
+```
+- A new `run_id` is created for every execution.
+- A new `alert_id` is created if the trigger condition is met.
+- Status progresses: `queued → running → completed | failed | cancelled`
+
+---
+
+### 15.4 STOP a Task
+
+Use when a task is **currently running** and you need to cancel it immediately.
+
+#### Via UI
+- On Tasked or Piplinetask page: click **Stop** button on the running task row.
+
+#### Via API
+```bash
+curl -s -X POST "http://localhost:6090/api/tasks/task_adc06130/stop"
+```
+**Response:**
+```json
+{ "ok": true, "task_id": "task_adc06130", "status": "cancelled" }
+```
+- The current run's status becomes `cancelled`.
+- The task definition remains active — it can be re-run at any time.
+- If called on an already-completed task, it sets that run's status to `cancelled`.
+
+---
+
+### 15.5 PAUSE a Task
+
+Use to **freeze scheduling** — the task will not auto-run on its next interval until resumed.
+
+#### Via UI
+- On Tasked page: click the **Pause** toggle or button on the task row.
+
+#### Via API
+```bash
+curl -s -X POST "http://localhost:6090/api/tasks/task_f7632723/pause"
+```
+**Response fields to check:**
+```json
+{ "ok": true, "task": { "last_status": "paused", "active": false, ... } }
+```
+- `active=false` stops the scheduler from queuing new runs.
+- Existing in-progress runs continue to completion.
+- Demonstrated live: T4 (`task_f7632723`) paused → `last_status=paused`.
+
+---
+
+### 15.6 RESUME a Task
+
+Reverses a pause — re-enables the task for scheduling and manual runs.
+
+#### Via UI
+- On Tasked page: click **Resume** on a paused task.
+
+#### Via API
+```bash
+curl -s -X POST "http://localhost:6090/api/tasks/task_f7632723/resume"
+```
+**Response fields to check:**
+```json
+{ "ok": true, "task": { "last_status": "idle", "active": true, ... } }
+```
+- `active=true` means the scheduler will queue runs again.
+- Demonstrated live: T4 resumed → `last_status=idle`.
+
+---
+
+### 15.7 RESTART a Task
+
+Combines **stop + immediate re-run** in one call. Creates a brand-new `run_id`.
+
+#### Via UI
+- On Tasked or Piplinetask page: click **Restart** button.
+
+#### Via API
+```bash
+curl -s -X POST "http://localhost:6090/api/tasks/task_f0642138/restart"
+```
+**Response:**
+```json
+{
+  "ok": true,
+  "task_id": "task_f0642138",
+  "run_id": "trun_e37fb4d1",
+  "status": "completed",
+  "alert_id": 425,
+  "terminal_reason": "workflow-complete"
+}
+```
+- Produces a new `run_id` and new `alert_id`.
+- Demonstrated live: T3 (`task_f0642138`) restarted → `run_id=trun_e37fb4d1`, `alert_id=425`.
+
+---
+
+### 15.8 REDO a Task
+
+Re-runs the task using exactly the same definition. Creates a new `run_id` (does not stop anything first).
+
+#### Via UI
+- On Task Completed page: click **Redo** button on any completed run row.
+
+#### Via API
+```bash
+curl -s -X POST "http://localhost:6090/api/tasks/task_3f950f6e/redo"
+```
+**Response:** same shape as `/run` — new `run_id`, new `alert_id`.
+- Demonstrated live: T1 redo → `run_id=trun_1a6a8905`, `alert_id=424`.
+
+---
+
+### 15.9 CLONE a Task
+
+Creates a full copy of the task definition with a new unique `task_id`. The clone starts with `last_status=idle` — it has no run history.
+
+#### Via API
+```bash
+curl -s -X POST "http://localhost:6090/api/tasks/task_97baeced/clone"
+```
+**Response:**
+```json
+{
+  "ok": true,
+  "task": { "id": "task_NEWID", "name": "NEW-T1 — Python Tips Output (Clone)", ... },
+  "source_task_id": "task_97baeced"
+}
+```
+- New task gets all the same steps, prompts, and settings.
+- The note field includes `"Cloned from task_97baeced."`.
+- You can immediately edit and run the clone independently.
+
+---
+
+### 15.10 ARCHIVE a Task
+
+Soft-disables a task. It disappears from the active task list but all run history is preserved.
+
+#### Via API
+```bash
+curl -s -X POST "http://localhost:6090/api/tasks/{task_id}/archive"
+```
+**Response fields to check:**
+```json
+{ "ok": true, "task": { "lifecycle_state": "archived", "active": false, "archived_at": "2026-04-04T..." } }
+```
+
+---
+
+### 15.11 DELETE a Task
+
+Permanently removes the task and all linked run records, alerts, and step results.
+
+#### Via API
+```bash
+curl -s -X DELETE "http://localhost:6090/api/tasks/{task_id}"
+```
+**Response:**
+```json
+{ "ok": true, "deleted": "task_xxxxxxxx", "name": "Task Name" }
+```
+> **Warning:** This is irreversible. Archive instead if you might need the history.
+
+---
+
+### 15.12 TRACE a Task Through All 5 Pages
+
+Once a task has been created and run, trace it using its `task_id` and `run_id`.
+Use TRACE-001 (`task_97baeced` / `trun_83871f0d`) as the worked example throughout.
+
+---
+
+#### PAGE 1 — Tasked (`/tasked`)
+
+**Purpose:** View and manage the task *definition*. This is where you create, edit, clone, archive, and delete tasks.
+
+**URL:**
+```
+http://localhost:6090/tasked?task_id=task_97baeced
+```
+
+**What to check on this page:**
+
+| Column / Field | Meaning | Expected (TRACE-001) |
+|----------------|---------|----------------------|
+| Task Name | Identifier | `NEW-T1 — Python Tips Output` |
+| Type | `tasked_type` | `output` |
+| Mode | Execution route | `chat` |
+| Last Status | Most recent run result | `completed` |
+| Steps | Workflow step count | `4` |
+| Last Run | Timestamp of last execution | shown |
+| Actions | Run, Edit, Clone, Archive, Delete | all available |
+
+**API equivalent:**
+```bash
+curl -s "http://localhost:6090/api/tasks" | python3 -c "
+import sys, json
+tasks = json.load(sys.stdin).get('tasks', [])
+t = next(t for t in tasks if t['id']=='task_97baeced')
+print('name:', t['name'])
+print('type:', t['tasked_type'])
+print('mode:', t['mode'])
+print('status:', t['last_status'])
+print('steps:', len(t.get('steps',[])))
+"
+```
+
+---
+
+#### PAGE 2 — Piplinetask (`/piplinetask`)
+
+**Purpose:** Monitor the *execution pipeline* of a task. Shows every step, their status, timing, and events for each run.
+
+**URL:**
+```
+http://localhost:6090/piplinetask?task_id=task_97baeced
+```
+Or filter by specific run:
+```
+http://localhost:6090/piplinetask?run_id=trun_83871f0d
+```
+
+**What to check on this page:**
+
+| Panel | Meaning | Expected (TRACE-001) |
+|-------|---------|----------------------|
+| Status badge | Run status (colour-coded) | Green = `completed` |
+| Run ID | Which execution | `trun_83871f0d` |
+| Terminal reason | Why the run ended | `workflow-complete` |
+| Step flow diagram | Visual step → step graph | 4 nodes, all green |
+| Step results | Per-step output and timing | 4 steps completed |
+| Trace grid | Orchestrator, planner, executor, alert, completion panels | all populated |
+| Timeline | Ordered event log | trigger → chat → alert → complete |
+
+**API equivalent:**
+```bash
+curl -s "http://localhost:6090/api/task-pipelines?task_id=task_97baeced" | python3 -c "
+import sys, json
+pipes = json.load(sys.stdin).get('pipelines', [])
+p = pipes[0]
+r = p.get('run') or {}
+print('run_id:', r.get('id'))
+print('status:', r.get('status'))
+print('terminal:', r.get('terminal_reason'))
+for s in p.get('step_results', []):
+    print(f'  step {s.get(\"step_id\")}: {s.get(\"status\")}')
+"
+```
+
+---
+
+#### PAGE 3 — Alerts (`/alerts`)
+
+**Purpose:** View and action alerts fired by task runs. Each run that meets the trigger condition creates one alert record.
+
+**URL:**
+```
+http://localhost:6090/alerts
+```
+Then use the page's filter to select by status (`open`), severity, or search by task name.
+
+**What to check on this page:**
+
+| Field | Meaning | Expected (TRACE-001) |
+|-------|---------|----------------------|
+| Alert ID | Unique integer | `430` |
+| Title | Alert title from step config | `NEW-T1 — Python Tips Output` |
+| Severity | `info` / `warning` / `high` / `critical` | `info` (blue badge) |
+| Status | `open` / `acknowledged` / `resolved` / `snoozed` | `open` |
+| Task link | Opens Tasked for this task | → `task_97baeced` |
+| Pipeline link | Opens Piplinetask for this run | → `trun_83871f0d` |
+| Preview link | Opens Preview for this run | → `task_id + run_id` |
+
+**Alert actions (buttons on each card):**
+
+| Button | API Call | Result |
+|--------|----------|--------|
+| Acknowledge | `POST /api/alerts/430/status {"status":"acknowledged"}` | Badge changes to grey |
+| Resolve | `POST /api/alerts/430/status {"status":"resolved"}` | Removed from open list |
+| Snooze 30m | `POST /api/alerts/430/status {"status":"snoozed","snooze_minutes":30}` | Hidden for 30 minutes |
+| Reopen | `POST /api/alerts/430/status {"status":"open"}` | Returns to open list |
+
+**API equivalent:**
+```bash
+curl -s "http://localhost:6090/api/alerts?limit=500" | python3 -c "
+import sys, json
+alerts = json.load(sys.stdin).get('alerts', [])
+for a in alerts:
+    if a.get('task_id') == 'task_97baeced':
+        print('alert_id:', a['id'])
+        print('title:', a['title'])
+        print('severity:', a['severity'])
+        print('status:', a['status'])
+        print('run_id:', a.get('run_id'))
+"
+```
+
+---
+
+#### PAGE 4 — Task Completed (`/task-completed`)
+
+**Purpose:** View all **terminal** runs — `completed`, `failed`, or `cancelled`. This is the post-run history and the entry point for redo and re-run actions.
+
+**URL:**
+```
+http://localhost:6090/task-completed?task_id=task_97baeced
+```
+
+**What to check on this page:**
+
+| Field | Meaning | Expected (TRACE-001) |
+|-------|---------|----------------------|
+| Run ID | Which execution completed | `trun_83871f0d` |
+| Status | Terminal state | `completed` (green) |
+| Terminal Reason | How it ended | `workflow-complete` |
+| Duration | How long the run took | `1m 40s` |
+| Output Excerpt | First ~200 chars of LLM output | `"Here are 3 essential Python tips..."` |
+| Alert badge | Alert that fired for this run | `alert_id=430, info` |
+
+**Actions available:**
+
+| Button | API Call | What it does |
+|--------|----------|-------------|
+| Redo | `POST /api/tasks/task_97baeced/redo` | Re-runs task, new run_id + alert_id |
+| Clone Task | `POST /api/tasks/task_97baeced/clone` | Creates copy with new task_id |
+| Open Pipeline | links to `/piplinetask?task_id=task_97baeced` | See step-by-step execution detail |
+| Preview Output | links to `/tasked-preview?task_id=task_97baeced&run_id=trun_83871f0d` | Full output and step results |
+
+**API equivalent:**
+```bash
+curl -s "http://localhost:6090/api/task-completed?task_id=task_97baeced" | python3 -c "
+import sys, json
+items = json.load(sys.stdin).get('items', [])
+for item in items:
+    r = item.get('run') or {}
+    print('run_id:', r.get('id'))
+    print('status:', r.get('status'))
+    print('duration:', r.get('duration_label'))
+    print('terminal:', r.get('terminal_reason'))
+"
+```
+
+---
+
+#### PAGE 5 — Preview (`/tasked-preview`)
+
+**Purpose:** Inspect the *full compiled output* of a specific run — every step's input, output, timing, and the final LLM response. Always include `run_id` to pin to the exact run.
+
+**URL:**
+```
+http://localhost:6090/tasked-preview?task_id=task_97baeced&run_id=trun_83871f0d
+```
+
+**What to check on this page:**
+
+| Section | Content | Expected (TRACE-001) |
+|---------|---------|----------------------|
+| Task Definition panel | Name, mode, prompts, schedule | `NEW-T1`, `chat`, `output` |
+| Run selector | Dropdown of all runs for this task | `trun_83871f0d` selected |
+| Step Results | Per-step: status, duration, input, output | 4 steps, all completed |
+| Output Text | Full compiled LLM response | Complete Python tips text |
+| Recent Runs | Last 20 runs for this task | All runs listed |
+
+**API equivalent:**
+```bash
+curl -s "http://localhost:6090/api/task-preview?task_id=task_97baeced&run_id=trun_83871f0d" | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+r = d.get('run') or {}
+print('run_id:', r.get('id'))
+print('steps:', len(d.get('step_results', [])))
+print('output (first 200):', (d.get('output_text') or '')[:200])
+for s in d.get('step_results', []):
+    print(f'  step {s.get(\"step_id\")}: status={s.get(\"status\")} duration={s.get(\"duration_label\")}')
+"
+```
+
+---
+
+### 15.13 Full End-to-End Workflow Walkthrough
+
+> Follow these steps to take any task from zero to fully traced in all 5 pages.
+
+```
+STEP 1 — CREATE
+  POST /api/tasks  →  get task_id
+
+STEP 2 — VERIFY on Tasked
+  http://localhost:6090/tasked?task_id={task_id}
+  Confirm: name, type, mode, steps visible
+
+STEP 3 — RUN
+  POST /api/tasks/{task_id}/run  →  get run_id + alert_id
+
+STEP 4 — TRACE on Piplinetask
+  http://localhost:6090/piplinetask?task_id={task_id}
+  Confirm: status=completed, all steps green, terminal=workflow-complete
+
+STEP 5 — TRACE on Alerts
+  http://localhost:6090/alerts  (filter to open)
+  Confirm: alert_id present, severity correct, status=open
+  Action: Acknowledge the alert
+
+STEP 6 — TRACE on Task Completed
+  http://localhost:6090/task-completed?task_id={task_id}
+  Confirm: run_id listed, status=completed, duration shown
+
+STEP 7 — TRACE on Preview
+  http://localhost:6090/tasked-preview?task_id={task_id}&run_id={run_id}
+  Confirm: step results visible, output_text populated
+
+STEP 8 — LIFECYCLE OPERATIONS (optional, to test controls)
+  STOP:    POST /api/tasks/{task_id}/stop
+  PAUSE:   POST /api/tasks/{task_id}/pause
+  RESUME:  POST /api/tasks/{task_id}/resume
+  RESTART: POST /api/tasks/{task_id}/restart  →  new run_id
+  REDO:    POST /api/tasks/{task_id}/redo     →  new run_id
+  CLONE:   POST /api/tasks/{task_id}/clone   →  new task_id
+  ARCHIVE: POST /api/tasks/{task_id}/archive
+  DELETE:  DELETE /api/tasks/{task_id}        ← permanent
+```
+
+---
+
+### 15.14 Worked Example with TRACE-001 (NEW-T1)
+
+```bash
+# 1. Create
+curl -s -X POST "http://localhost:6090/api/tasks" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"NEW-T1 — Python Tips Output","mode":"chat","schedule_kind":"manual",
+       "tasked_type":"output","planner_prompt":"List 3 essential Python tips for writing cleaner code.",
+       "executor_prompt":"You are a senior Python developer. Give exactly 3 concise tips, one sentence each.",
+       "trigger_mode":"always",
+       "steps":[
+         {"id":"nt1_trigger","name":"Trigger","kind":"trigger","position":1},
+         {"id":"nt1_chat","name":"Generate Tips","kind":"chat","position":2,"config":{"prompt":"List 3 Python tips"}},
+         {"id":"nt1_alert","name":"Output Alert","kind":"alert","position":3,"config":{"title":"Tips Ready","severity":"info","summary":"Python tips generated"}},
+         {"id":"nt1_complete","name":"Complete","kind":"complete","position":4}
+       ]}'
+# → task_id: task_97baeced
+
+# 2. Run
+curl -s -X POST "http://localhost:6090/api/tasks/task_97baeced/run"
+# → run_id: trun_83871f0d  alert_id: 430  status: completed
+
+# 3. Check Piplinetask
+curl -s "http://localhost:6090/api/task-pipelines?task_id=task_97baeced"
+# → status: completed  terminal: workflow-complete  4 steps
+
+# 4. Check Alert
+curl -s "http://localhost:6090/api/alerts?limit=500" | python3 -c "
+import sys,json; [print(a['id'],a['severity'],a['status']) for a in json.load(sys.stdin)['alerts'] if a.get('task_id')=='task_97baeced']"
+# → 430  info  open
+
+# 5. Acknowledge Alert
+curl -s -X POST "http://localhost:6090/api/alerts/430/status" \
+  -H "Content-Type: application/json" -d '{"status":"acknowledged"}'
+# → status: acknowledged
+
+# 6. Check Completed
+curl -s "http://localhost:6090/api/task-completed?task_id=task_97baeced"
+# → run_id: trun_83871f0d  status: completed  duration: 1m 40s
+
+# 7. Preview
+curl -s "http://localhost:6090/api/task-preview?task_id=task_97baeced&run_id=trun_83871f0d"
+# → 4 step_results  output_text: "Here are 3 essential Python tips..."
+
+# 8. Redo (new run)
+curl -s -X POST "http://localhost:6090/api/tasks/task_97baeced/redo"
+# → run_id: trun_1a6a8905  alert_id: 424  status: completed
+
+# 9. Clone
+curl -s -X POST "http://localhost:6090/api/tasks/task_97baeced/clone"
+# → new task_id: task_5bc7b30d
+
+# 10. Archive clone
+curl -s -X POST "http://localhost:6090/api/tasks/task_5bc7b30d/archive"
+# → lifecycle_state: archived
+
+# 11. Delete clone
+curl -s -X DELETE "http://localhost:6090/api/tasks/task_5bc7b30d"
+# → deleted: task_5bc7b30d
+```
