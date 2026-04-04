@@ -747,20 +747,70 @@ curl -X POST http://localhost:6090/api/alerts/{alert_id}/status \
 
 ## 12. Master Summary Table — All Tasks, Creation to Finish
 
-Recorded: 2026-04-04
+### Original Set (Session 1 — 2026-04-03/04)
 
-| # | Task Name | `task_id` | `tasked_type` | `mode` | `run_id` | `alert_id` | Final Status | Pages Traced |
-|---|-----------|-----------|--------------|--------|----------|-----------|-------------|-------------|
-| T1 | Daily LLM Output Summary | `task_3f950f6e` | `output` | chat | `trun_32293732` | 364 | ✅ completed | Tasked, Pipeline, Alerts, Completed, Preview |
-| T1-redo | Same task, redo run | `task_3f950f6e` | `output` | chat | `trun_1a6a8905` | 424 | ✅ completed | Pipeline, Alerts, Preview |
-| T2 | Alert: Threshold Check | `task_21dffb26` | `alert` | chat | `trun_bcdaa631` | 420 | ✅ completed | Tasked, Pipeline, Alerts, Completed, Preview |
-| T3 | Action: Sandbox Shell | `task_00843dbb` | `action` | sandbox | `trun_5468fcc6` | 421 | ✅ completed | Tasked, Pipeline, Alerts, Completed, Preview |
-| T3-restart | Same task, restart | `task_00843dbb` | `action` | sandbox | `trun_e37fb4d1` | 425 | ✅ completed | Pipeline, Preview |
-| T4 | Hook: External Trigger | `task_814e3f3b` | `hook` | chat | `trun_96a073f5` | 422 | ✅ completed | Tasked, Pipeline, Alerts, Completed, Preview |
-| T5 | Combined: Full Pipeline | `task_80986663` | `combined` | chat | `trun_6b571b78` | 423 | ✅ completed | Tasked, Pipeline, Alerts, Completed, Preview |
-| Clone | T1 Clone (lifecycle demo) | `task_5bc7b30d` | `output` | chat | — | — | archived → deleted | — |
+| # | Task Name | `task_id` | `tasked_type` | `mode` | `run_id` | `alert_id` | Final Status |
+|---|-----------|-----------|--------------|--------|----------|-----------|-------------|
+| T1 | Daily LLM Output Summary | `task_3f950f6e` | `output` | chat | `trun_32293732` | 364 | ✅ completed |
+| T1-redo | Same task, redo | `task_3f950f6e` | `output` | chat | `trun_1a6a8905` | 424 | ✅ completed |
+| T2 | Alert: Threshold Check | `task_21dffb26` | `alert` | chat | `trun_bcdaa631` | 420 | ✅ completed |
+| T3 | Action: Sandbox Shell | `task_00843dbb` | `action` | sandbox | `trun_5468fcc6` | 421 | ✅ completed |
+| T3-restart | Same task, restart | `task_00843dbb` | `action` | sandbox | `trun_e37fb4d1` | 425 | ✅ completed |
+| T4 | Hook: External Trigger | `task_814e3f3b` | `hook` | chat | `trun_96a073f5` | 422 | ✅ completed |
+| T5 | Combined: Full Pipeline | `task_80986663` | `combined` | chat | `trun_6b571b78` | 423 | ✅ completed |
+| Clone | T1 Clone (lifecycle demo) | `task_5bc7b30d` | `output` | chat | — | — | archived → deleted |
 
-### Lifecycle Operations Demonstrated
+---
+
+### New Unique Set (Session 2 — 2026-04-04)
+
+All 5 brand-new tasks with unique `task_id`s — no clones, no recreations.
+
+| # | Task Name | `task_id` | `tasked_type` | `mode` | `run_id` | `alert_id` | Final Status |
+|---|-----------|-----------|--------------|--------|----------|-----------|-------------|
+| NEW-T1 | Python Tips Output | `task_97baeced` | `output` | chat | `trun_83871f0d` | 430 | ✅ completed |
+| NEW-T2 | CPU Alert Check | `task_adc06130` | `alert` | chat | `trun_eae69a71` | 432 | ✅ completed |
+| NEW-T3 | Disk Check Action | `task_f0642138` | `action` | sandbox | `trun_6167744c` | 433 | ✅ completed |
+| NEW-T4 | Slack Webhook Trigger | `task_f7632723` | `hook` | chat | `trun_f0c82c94` | 435 | ✅ completed |
+| NEW-T5 | Security Audit Combined | `task_0f1c9b39` | `combined` | chat | `trun_84413c8c` | 438 | ✅ completed |
+
+**Traceability URLs for New Set:**
+
+```
+NEW-T1 output:
+  Tasked:    http://localhost:6090/tasked?task_id=task_97baeced
+  Pipeline:  http://localhost:6090/piplinetask?task_id=task_97baeced
+  Preview:   http://localhost:6090/tasked-preview?task_id=task_97baeced&run_id=trun_83871f0d
+  Completed: http://localhost:6090/task-completed?task_id=task_97baeced
+
+NEW-T2 alert:
+  Tasked:    http://localhost:6090/tasked?task_id=task_adc06130
+  Pipeline:  http://localhost:6090/piplinetask?task_id=task_adc06130
+  Preview:   http://localhost:6090/tasked-preview?task_id=task_adc06130&run_id=trun_eae69a71
+  Completed: http://localhost:6090/task-completed?task_id=task_adc06130
+
+NEW-T3 action (sandbox):
+  Tasked:    http://localhost:6090/tasked?task_id=task_f0642138
+  Pipeline:  http://localhost:6090/piplinetask?task_id=task_f0642138
+  Preview:   http://localhost:6090/tasked-preview?task_id=task_f0642138&run_id=trun_6167744c
+  Completed: http://localhost:6090/task-completed?task_id=task_f0642138
+
+NEW-T4 hook:
+  Tasked:    http://localhost:6090/tasked?task_id=task_f7632723
+  Pipeline:  http://localhost:6090/piplinetask?task_id=task_f7632723
+  Preview:   http://localhost:6090/tasked-preview?task_id=task_f7632723&run_id=trun_f0c82c94
+  Completed: http://localhost:6090/task-completed?task_id=task_f7632723
+
+NEW-T5 combined:
+  Tasked:    http://localhost:6090/tasked?task_id=task_0f1c9b39
+  Pipeline:  http://localhost:6090/piplinetask?task_id=task_0f1c9b39
+  Preview:   http://localhost:6090/tasked-preview?task_id=task_0f1c9b39&run_id=trun_84413c8c
+  Completed: http://localhost:6090/task-completed?task_id=task_0f1c9b39
+```
+
+---
+
+### Lifecycle Operations Demonstrated (Session 1)
 
 | Operation | Task | Result |
 |-----------|------|--------|
