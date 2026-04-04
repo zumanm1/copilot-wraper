@@ -1760,3 +1760,329 @@ curl -s -X POST "http://localhost:6090/api/tasks/task_5bc7b30d/archive"
 curl -s -X DELETE "http://localhost:6090/api/tasks/task_5bc7b30d"
 # → deleted: task_5bc7b30d
 ```
+
+---
+
+## 16. TRACE-010 — C12b Linux System Probe (Full Command ↔ Response Trace)
+
+> **Why TRACE-010 exists:**
+> TRACE-001 through TRACE-004 use `mode=chat` — they call C1b (the LLM API), not C12b.
+> There are no Linux shell commands sent to C12b in those tasks.
+> TRACE-010 uses `mode=sandbox` with `executor_target=C12b`, making every command
+> and every response from C12b fully visible and traceable.
+
+---
+
+### 16.1 Task Identity
+
+| Field | Value |
+|-------|-------|
+| **Trace Number** | `TRACE-010` |
+| `task_id` | `task_fe608355` |
+| `run_id` | `trun_6edf884a` |
+| `alert_id` | `457` |
+| `tasked_type` | `action` |
+| `mode` | `sandbox` |
+| `executor_target` | `C12b` (container `C12b_sandbox`, port `8210`) |
+| `workspace_dir` | `/workspace` |
+| `status` | `completed` |
+| `terminal_reason` | `workflow-complete` |
+| `validation` | `completed` (`python3 --version && node --version && echo VALIDATION_OK`) |
+| `test` | `completed` (`ls /workspace \| wc -l && echo TEST_OK`) |
+| Recorded | `2026-04-04` |
+
+---
+
+### 16.2 How the Sandbox Pipeline Works
+
+```
+C9b (localhost:6090)
+   │
+   │  Task runner reads step config: kind=sandbox, command=<shell>
+   │
+   ├─► POST http://localhost:8210/exec          ← COMMAND SENT TO C12b
+   │     Content-Type: application/json
+   │     Body: { "command": "<shell commands>" }
+   │
+   │◄── HTTP 200 JSON response from C12b        ← RESPONSE FROM C12b
+   │     {
+   │       "stdout":   "<all terminal output>",
+   │       "stderr":   "",
+   │       "exit_code": 0,
+   │       "timed_out": false,
+   │       "session_id": "c12b_xxxxxxxx",
+   │       "cwd": "/workspace",
+   │       "command": "<echo of sent command>",
+   │       "requested_timeout_s": 30
+   │     }
+   │
+   │  C9b checks exit_code:
+   │     0  → Execution: completed
+   │    ≠0  → Execution: failed  (task status → failed)
+   │
+   └─► validation_command sent to C12b separately
+   └─► test_command sent to C12b separately
+```
+
+---
+
+### 16.3 Command Sent to C12b (TRACE-010)
+
+This is the exact `command` string sent in the `POST /exec` body:
+
+```bash
+# === SECTION 1 ===
+echo '=== 1. HOSTNAME ===' && hostname &&
+# === SECTION 2 ===
+echo '=== 2. KERNEL ===' && uname -srm &&
+# === SECTION 3 ===
+echo '=== 3. OS RELEASE ===' && grep -E 'PRETTY_NAME|VERSION_ID|VERSION_CODENAME' /etc/os-release &&
+# === SECTION 4 ===
+echo '=== 4. CPU / CORES ===' && uname -m && nproc &&
+# === SECTION 5 ===
+echo '=== 5. MEMORY ===' && awk '/MemTotal|MemFree|MemAvailable/{print}' /proc/meminfo &&
+# === SECTION 6 ===
+echo '=== 6. DISK ===' && df -h /workspace &&
+# === SECTION 7 ===
+echo '=== 7. WORKSPACE FILES ===' && ls -la /workspace | head -20 &&
+# === SECTION 8 ===
+echo '=== 8. PYTHON ===' && python3 --version && python3 -c 'import sys; print("exec:",sys.executable)' &&
+# === SECTION 9 ===
+echo '=== 9. NODE / NPM ===' && node --version && npm --version &&
+# === SECTION 10 ===
+echo '=== 10. GIT ===' && git --version &&
+# === SECTION 11 ===
+echo '=== 11. TIMESTAMP (UTC) ===' && date -u +%Y-%m-%dT%H:%M:%SZ &&
+# === SECTION 12 ===
+echo '=== 12. USER / ID ===' && whoami && id &&
+echo '=== PROBE_COMPLETE ==='
+```
+
+**As a single-line API payload (how C9b actually sends it):**
+```json
+POST http://localhost:8210/exec
+{
+  "command": "echo '=== 1. HOSTNAME ===' && hostname && echo '=== 2. KERNEL ===' && uname -srm && echo '=== 3. OS RELEASE ===' && grep -E 'PRETTY_NAME|VERSION_ID|VERSION_CODENAME' /etc/os-release && echo '=== 4. CPU / CORES ===' && uname -m && nproc && echo '=== 5. MEMORY ===' && awk '/MemTotal|MemFree|MemAvailable/{print}' /proc/meminfo && echo '=== 6. DISK ===' && df -h /workspace && echo '=== 7. WORKSPACE FILES ===' && ls -la /workspace | head -20 && echo '=== 8. PYTHON ===' && python3 --version && python3 -c 'import sys; print(\"exec:\",sys.executable)' && echo '=== 9. NODE / NPM ===' && node --version && npm --version && echo '=== 10. GIT ===' && git --version && echo '=== 11. TIMESTAMP (UTC) ===' && date -u +%Y-%m-%dT%H:%M:%SZ && echo '=== 12. USER / ID ===' && whoami && id && echo '=== PROBE_COMPLETE ==='"
+}
+```
+
+---
+
+### 16.4 Response Returned FROM C12b (TRACE-010)
+
+This is the exact JSON response C12b returned to C9b:
+
+```json
+{
+  "stdout": "=== 1. HOSTNAME ===\nd398eeaa78e2\n=== 2. KERNEL ===\nLinux 6.10.14-linuxkit aarch64\n=== 3. OS RELEASE ===\nPRETTY_NAME=\"Debian GNU/Linux 13 (trixie)\"\nVERSION_ID=\"13\"\nVERSION_CODENAME=trixie\n=== 4. CPU / CORES ===\naarch64\n8\n=== 5. MEMORY ===\nMemTotal:        4013480 kB\nMemFree:          108952 kB\nMemAvailable:     309872 kB\n=== 6. DISK ===\nFilesystem            Size  Used Avail Use%  Mounted on\n/run/host_mark/Users  229G  222G  6.9G  98%  /workspace\n=== 7. WORKSPACE FILES ===\ntotal 96\n...(file listing)...\n=== 8. PYTHON ===\nPython 3.11.15\nexec: /usr/local/bin/python3\n=== 9. NODE / NPM ===\nv20.20.2\n10.8.2\n=== 10. GIT ===\ngit version 2.47.3\n=== 11. TIMESTAMP (UTC) ===\n2026-04-04T10:06:14Z\n=== 12. USER / ID ===\nsandbox\nuid=1000(sandbox) gid=1000(sandbox) groups=1000(sandbox)\n=== PROBE_COMPLETE ===",
+  "stderr": "",
+  "exit_code": 0,
+  "timed_out": false,
+  "session_id": "c12b_8d930c219e",
+  "cwd": "/workspace",
+  "requested_timeout_s": 30,
+  "adaptive_timeout_s": 30
+}
+```
+
+**Interpreted stdout from C12b — section by section:**
+
+| Section | Command | C12b Output |
+|---------|---------|-------------|
+| 1. Hostname | `hostname` | `d398eeaa78e2` |
+| 2. Kernel | `uname -srm` | `Linux 6.10.14-linuxkit aarch64` |
+| 3. OS | `grep /etc/os-release` | `Debian GNU/Linux 13 (trixie)` |
+| 4. CPU / Cores | `uname -m && nproc` | `aarch64` / `8 cores` |
+| 5. Memory | `awk /proc/meminfo` | `MemTotal: 4013480 kB` / `MemAvailable: 309872 kB` |
+| 6. Disk | `df -h /workspace` | `229G total, 222G used, 6.9G free (98%)` |
+| 7. Workspace | `ls -la /workspace` | `17 items: README.md, app.py, ask_helper.py, ...` |
+| 8. Python | `python3 --version` | `Python 3.11.15` at `/usr/local/bin/python3` |
+| 9. Node/npm | `node --version` | `v20.20.2` / npm `10.8.2` |
+| 10. Git | `git --version` | `git version 2.47.3` |
+| 11. Timestamp | `date -u` | `2026-04-04T10:06:14Z` |
+| 12. User | `whoami && id` | `sandbox` / `uid=1000(sandbox)` |
+
+---
+
+### 16.5 Validation and Test Commands (also sent to C12b)
+
+After the main command, C9b sends two additional commands to C12b:
+
+**Validation command:**
+```bash
+# SENT TO C12b:
+python3 --version && node --version && echo VALIDATION_OK
+
+# RETURNED FROM C12b:
+Python 3.11.15
+v20.20.2
+VALIDATION_OK
+# exit_code: 0  →  Validation: completed
+```
+
+**Test command:**
+```bash
+# SENT TO C12b:
+ls /workspace | wc -l && echo TEST_OK
+
+# RETURNED FROM C12b:
+13
+TEST_OK
+# exit_code: 0  →  Test: completed
+```
+
+---
+
+### 16.6 How to Call C12b Directly (Bypass C9b)
+
+You can send commands directly to C12b without going through C9b:
+
+```bash
+# Direct C12b API call (no task needed)
+curl -s -X POST "http://localhost:8210/exec" \
+  -H "Content-Type: application/json" \
+  -d '{"command": "echo hello from C12b && uname -a"}' | python3 -m json.tool
+
+# Response structure:
+# {
+#   "stdout": "hello from C12b\nLinux d398eeaa78e2 ...",
+#   "stderr": "",
+#   "exit_code": 0,
+#   "timed_out": false,
+#   "session_id": "c12b_xxxxxxxx",
+#   "cwd": "/workspace",
+#   "requested_timeout_s": 30
+# }
+
+# Check C12b health
+curl -s "http://localhost:8210/health" | python3 -m json.tool
+
+# List available tools on C12b
+curl -s "http://localhost:8210/tooling" | python3 -m json.tool
+
+# List active sessions
+curl -s "http://localhost:8210/sessions" | python3 -m json.tool
+```
+
+**C12b API Routes:**
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `GET` | `/health` | Container health, file count, session stats, tool versions |
+| `GET` | `/tooling` | Available tools (python3, node, git, pip, uv, npm) |
+| `POST` | `/exec` | Execute a shell command, get stdout/stderr/exit_code |
+| `GET` | `/sessions` | List all execution sessions |
+| `GET` | `/sessions/{id}` | Get detail for a specific session |
+| `POST` | `/file/write` | Write a file into /workspace |
+| `GET` | `/file/read` | Read a file from /workspace |
+| `POST` | `/file/ls` | List files |
+| `DELETE` | `/file/delete` | Delete a file |
+| `POST` | `/workspace/reset` | Reset the workspace |
+
+---
+
+### 16.7 How to Create TRACE-010 (curl / Python)
+
+```bash
+# Using Python to avoid shell quoting issues with complex commands:
+python3 - << 'PYEOF'
+import json, urllib.request
+
+FIXED_CMD = (
+    "echo '=== 1. HOSTNAME ===' && hostname && "
+    "echo '=== 2. KERNEL ===' && uname -srm && "
+    "echo '=== 3. OS RELEASE ===' && grep -E 'PRETTY_NAME|VERSION_ID|VERSION_CODENAME' /etc/os-release && "
+    "echo '=== 4. CPU / CORES ===' && uname -m && nproc && "
+    "echo '=== 5. MEMORY ===' && awk '/MemTotal|MemFree|MemAvailable/{print}' /proc/meminfo && "
+    "echo '=== 6. DISK ===' && df -h /workspace && "
+    "echo '=== 7. WORKSPACE FILES ===' && ls -la /workspace | head -20 && "
+    "echo '=== 8. PYTHON ===' && python3 --version && "
+    "echo '=== 9. NODE / NPM ===' && node --version && npm --version && "
+    "echo '=== 10. GIT ===' && git --version && "
+    "echo '=== 11. TIMESTAMP (UTC) ===' && date -u +%Y-%m-%dT%H:%M:%SZ && "
+    "echo '=== 12. USER / ID ===' && whoami && id && "
+    "echo '=== PROBE_COMPLETE ==='"
+)
+
+payload = {
+    "name": "TRACE-010 — C12b Linux System Probe",
+    "mode": "sandbox",
+    "schedule_kind": "manual",
+    "tasked_type": "action",
+    "planner_prompt": "Run a full Linux system probe on C12b.",
+    "executor_prompt": "Execute each probe command with a section header. Return stdout verbatim.",
+    "trigger_mode": "always",
+    "executor_target": "C12b",
+    "workspace_dir": "/workspace",
+    "validation_command": "python3 --version && node --version && echo VALIDATION_OK",
+    "test_command": "ls /workspace | wc -l && echo TEST_OK",
+    "steps": [
+        {"id": "tr10_trigger",  "name": "Trigger",         "kind": "trigger",  "position": 1},
+        {"id": "tr10_sandbox",  "name": "C12b Linux Probe", "kind": "sandbox",  "position": 2,
+         "config": {"command": FIXED_CMD}},
+        {"id": "tr10_alert",    "name": "Probe Alert",      "kind": "alert",    "position": 3,
+         "config": {"title": "TRACE-010 Probe Done", "severity": "info",
+                    "summary": "C12b Linux probe complete — 12 sections"}},
+        {"id": "tr10_complete", "name": "Complete",         "kind": "complete", "position": 4},
+    ]
+}
+data = json.dumps(payload).encode()
+req = urllib.request.Request("http://localhost:6090/api/tasks",
+    data=data, headers={"Content-Type": "application/json"}, method="POST")
+resp = json.loads(urllib.request.urlopen(req).read())
+task_id = resp["task"]["id"]
+print("task_id:", task_id)
+
+# Run it
+req2 = urllib.request.Request(f"http://localhost:6090/api/tasks/{task_id}/run",
+    data=b'{}', headers={"Content-Type": "application/json"}, method="POST")
+try:
+    r = json.loads(urllib.request.urlopen(req2).read())
+except Exception as e:
+    import urllib.error
+    if hasattr(e, 'read'): r = json.loads(e.read())
+    else: raise
+print("run_id:", r.get("run_id"))
+print("alert_id:", r.get("alert_id"))
+print("status:", r.get("status"))
+PYEOF
+```
+
+> **Note:** Use Python (not bash heredoc with curl) for sandbox tasks whose commands
+> contain single quotes — shell quoting conflicts cause JSON parse errors.
+
+---
+
+### 16.8 Monitor TRACE-010 on All 5 Pages
+
+**1. Tasked** — `http://localhost:6090/tasked?task_id=task_fe608355`
+- `tasked_type=action`, `mode=sandbox`, `executor_target=C12b`, `last_status=completed`
+
+**2. Piplinetask** — `http://localhost:6090/piplinetask?task_id=task_fe608355`
+- `run_id=trun_6edf884a`, `status=completed`, `terminal=workflow-complete`
+- Step flow: `tr10_trigger → tr10_sandbox → tr10_alert → tr10_complete`
+- The sandbox step's output panel shows the full 12-section C12b stdout
+
+**3. Alerts** — `http://localhost:6090/alerts`
+- `alert_id=457`, `title="TRACE-010 C12b Probe Complete"`, `severity=info`, `status=open`
+
+**4. Task Completed** — `http://localhost:6090/task-completed?task_id=task_fe608355`
+- `run_id=trun_6edf884a`, `status=completed`
+
+**5. Preview** — `http://localhost:6090/tasked-preview?task_id=task_fe608355&run_id=trun_6edf884a`
+- 4 step_results visible
+- Output text includes full C12b stdout: hostname, kernel, OS, CPU, memory, disk, files, Python, Node, Git, timestamp, user
+- Execution: completed / Validation: completed / Test: completed
+
+---
+
+### 16.9 Why TRACE-001 Has No C12b Commands
+
+| Property | TRACE-001 | TRACE-010 |
+|----------|-----------|-----------|
+| `mode` | `chat` | `sandbox` |
+| `executor_target` | C1b (LLM API) | C12b (shell) |
+| Commands sent | Natural language prompt to LLM | Shell commands to `POST /exec` |
+| Response type | LLM text generation | `stdout` + `stderr` + `exit_code` |
+| C12b involved? | **No** | **Yes** |
+| Output | AI-generated bullet points | Raw Linux terminal output |
+| Validation | None | Shell command exit code check |
