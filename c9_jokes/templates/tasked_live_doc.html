@@ -3,7 +3,7 @@
 {% block content %}
 <style>
 /* ═══════════════════════════════════════════════════════════════
-   TASKED LIVE DOCUMENTATION — Brilliant 3-Panel Redesign
+   TASKED LIVE DOCUMENTATION — Brilliant 3-Panel (v3 Polished)
    Uses app design system variables from style.css
    ═══════════════════════════════════════════════════════════════ */
 
@@ -20,7 +20,11 @@
   padding: 0.5rem 1rem; background: var(--card);
   border-bottom: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap;
 }
-.tld-topbar-title { font-size: 0.85rem; font-weight: 700; color: var(--fg); }
+.tld-topbar-title {
+  font-size: 0.92rem; font-weight: 700; letter-spacing: -0.02em;
+  background: linear-gradient(90deg, var(--fg) 0%, rgba(245,245,247,0.7) 100%);
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+}
 .tld-topbar-sep { color: var(--border); font-size: 0.8rem; }
 .tld-topbar-sub { font-size: 0.72rem; color: var(--muted); }
 .tld-topbar-chips { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-left: auto; }
@@ -55,7 +59,9 @@
   cursor: pointer; border: none; background: none; text-align: left; width: 100%;
   border-left: 2px solid transparent; transition: all 0.12s; text-decoration: none;
 }
-.tld-nav-item:hover { background: rgba(245,245,247,0.04); color: var(--fg); }
+.tld-nav-item:hover { background: rgba(245,245,247,0.07); color: var(--fg); }
+.tld-nav-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.tld-btn:focus-visible, .tld-nav-refresh:focus-visible, .tld-tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .tld-nav-item.active { color: var(--accent); border-left-color: var(--accent); background: rgba(10,132,255,0.07); }
 .tld-nav-item.nav-trace { font-size: 0.73rem; padding: 0.25rem 0.7rem 0.25rem 0.85rem; }
 .tld-nav-item.nav-trace.sel { color: var(--fg); border-left-color: var(--accent); background: rgba(10,132,255,0.07); }
@@ -114,9 +120,9 @@
 .tld-detail {
   width: 300px; flex-shrink: 0; background: var(--card);
   border-left: 1px solid var(--border); display: flex; flex-direction: column;
-  overflow: hidden; transition: width 0.2s;
+  overflow: hidden; transition: width 0.2s, opacity 0.15s;
 }
-.tld-detail.collapsed { width: 0; overflow: hidden; }
+.tld-detail.collapsed { width: 0; overflow: hidden; opacity: 0; }
 .tld-detail-header {
   display: flex; align-items: center; gap: 0.5rem;
   padding: 0.5rem 0.75rem; border-bottom: 1px solid var(--border);
@@ -141,11 +147,11 @@
 .tld-detail-output {
   background: rgba(0,0,0,0.4); border: 1px solid var(--border);
   border-radius: 5px; padding: 0.5rem 0.6rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.7rem; color: var(--muted); max-height: 160px; overflow-y: auto;
+  font-size: 0.7rem; color: var(--muted); max-height: 200px; overflow-y: auto;
   white-space: pre-wrap; word-break: break-word; line-height: 1.5;
 }
-.tld-detail-output::-webkit-scrollbar { width: 3px; }
-.tld-detail-output::-webkit-scrollbar-thumb { background: var(--border); }
+.tld-detail-output::-webkit-scrollbar { width: 4px; }
+.tld-detail-output::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 .tld-detail-output.empty { color: rgba(142,142,147,0.4); font-style: italic; }
 
 /* ── Section headings (doc) ─────────────────────────────────── */
@@ -169,10 +175,11 @@
 
 /* ── Stepper ────────────────────────────────────────────────── */
 .tld-stepper {
-  display: flex; align-items: stretch; background: rgba(245,245,247,0.03);
+  display: flex; align-items: stretch; flex-wrap: wrap;
+  background: rgba(245,245,247,0.03);
   border: 1px solid var(--border); border-radius: 8px; overflow: hidden;
 }
-.tld-step { flex: 1; padding: 0.75rem 0.85rem; border-right: 1px solid var(--border); }
+.tld-step { flex: 1; min-width: 180px; padding: 0.75rem 0.85rem; border-right: 1px solid var(--border); }
 .tld-step:last-child { border-right: none; }
 .tld-step-num { font-size: 0.65rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); opacity: 0.6; margin-bottom: 0.25rem; }
 .tld-step-kind { font-size: 0.82rem; font-weight: 700; color: var(--fg); margin-bottom: 0.35rem; }
@@ -181,7 +188,7 @@
 .tld-step-desc b { color: rgba(245,245,247,0.7); }
 
 /* ── Type cards grid ────────────────────────────────────────── */
-.tld-type-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 1rem; }
+.tld-type-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 1rem; }
 .tld-type-card {
   border-radius: 8px; overflow: hidden; border: 1px solid var(--border);
   background: rgba(245,245,247,0.02); display: flex; flex-direction: column;
@@ -210,14 +217,14 @@
   background: rgba(245,245,247,0.04); border: 1px solid var(--border);
   border-radius: 4px; padding: 0.18rem 0.4rem; color: var(--muted);
 }
-.tld-flow-step.on { color: var(--fg); border-color: rgba(245,245,247,0.2); background: rgba(245,245,247,0.08); }
+.tld-flow-step.on { color: var(--fg); border-color: rgba(245,245,247,0.25); background: rgba(245,245,247,0.13); font-weight: 600; }
 .tld-flow-arr { color: rgba(245,245,247,0.2); font-size: 0.6rem; }
 
 /* Code blocks */
 .tld-code {
   background: rgba(0,0,0,0.5); border: 1px solid var(--border); border-radius: 6px;
-  padding: 0.6rem 0.75rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.7rem; color: #7dd3fc; line-height: 1.7; overflow-x: auto; white-space: pre;
+  padding: 0.65rem 0.85rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78rem; color: #7dd3fc; line-height: 1.75; overflow-x: auto; white-space: pre;
 }
 .tld-code .cm { color: rgba(142,142,147,0.6); }
 .tld-code .kw { color: #c084fc; }
@@ -230,7 +237,7 @@
 .tld-type-footer { display: flex; align-items: center; justify-content: space-between; padding-top: 0.35rem; border-top: 1px solid var(--border); }
 
 /* ── Tables ─────────────────────────────────────────────────── */
-.tld-table-wrap { background: rgba(245,245,247,0.02); border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+.tld-table-wrap { background: rgba(245,245,247,0.02); border: 1px solid var(--border); border-radius: 8px; overflow-y: auto; max-height: 420px; }
 .tld-table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
 .tld-table th {
   font-size: 0.67rem; text-transform: uppercase; letter-spacing: 0.07em;
@@ -250,6 +257,7 @@
 .tld-pill {
   font-size: 0.65rem; font-weight: 700; padding: 0.1rem 0.38rem;
   border-radius: 8px; text-transform: uppercase; letter-spacing: 0.03em;
+  background: rgba(245,245,247,0.08); color: var(--fg);
 }
 
 /* ── Monitoring cards ───────────────────────────────────────── */
@@ -289,7 +297,7 @@
 }
 .tld-live-card:hover { border-color: rgba(245,245,247,0.16); }
 .tld-live-card.sel { box-shadow: 0 0 0 2px var(--accent); border-color: var(--accent); }
-.tld-live-card.running { border-color: rgba(10,132,255,0.45); }
+.tld-live-card.running { border-color: rgba(10,132,255,0.45); box-shadow: 0 0 0 1px rgba(10,132,255,0.2), 0 0 12px rgba(10,132,255,0.08); }
 .tld-live-card.completed { border-left-color: var(--ok) !important; }
 .tld-live-card.failed { border-color: rgba(255,59,48,0.35); }
 
@@ -329,18 +337,18 @@
   font-size: 0.65rem; padding: 0.08rem 0.32rem; border-radius: 3px;
   border: 1px solid var(--border); color: var(--muted); background: rgba(245,245,247,0.02);
 }
-.tld-mini-step.done { color: var(--ok); border-color: rgba(48,209,88,0.3); background: rgba(48,209,88,0.05); }
+.tld-mini-step.done { color: var(--ok); border-color: rgba(48,209,88,0.4); background: rgba(48,209,88,0.15); font-weight: 600; }
 .tld-mini-arr { color: rgba(245,245,247,0.15); font-size: 0.6rem; }
 
 /* Output preview */
 .tld-out-preview {
   background: rgba(0,0,0,0.4); border: 1px solid var(--border); border-radius: 5px;
   padding: 0.45rem 0.6rem; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 0.69rem; color: var(--muted); max-height: 100px; overflow-y: auto;
+  font-size: 0.69rem; color: var(--muted); max-height: 120px; overflow-y: auto;
   white-space: pre-wrap; word-break: break-word; line-height: 1.5;
 }
-.tld-out-preview::-webkit-scrollbar { width: 3px; }
-.tld-out-preview::-webkit-scrollbar-thumb { background: var(--border); }
+.tld-out-preview::-webkit-scrollbar { width: 4px; }
+.tld-out-preview::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
 .tld-out-preview.empty { color: rgba(142,142,147,0.35); font-style: italic; }
 
 /* Action buttons */
@@ -408,10 +416,60 @@
 .bl-combined { border-left-color: #f87171  !important; }
 .bl-sandbox  { border-left-color: #22d3ee  !important; }
 
+/* Progress bar per live card */
+.tld-card-progress {
+  height: 2px; width: 100%; flex-shrink: 0;
+  background: rgba(245,245,247,0.05); overflow: hidden;
+}
+.tld-card-progress-bar {
+  height: 100%; width: 0%; transition: width 0.4s ease, background-color 0.3s;
+  background: var(--accent);
+}
+.tld-live-card.running  .tld-card-progress-bar { width: 60%; animation: tld-progress-pulse 2s ease-in-out infinite; }
+.tld-live-card.completed .tld-card-progress-bar { width: 100%; background: var(--ok); }
+.tld-live-card.failed   .tld-card-progress-bar { width: 100%; background: var(--fail); }
+@keyframes tld-progress-pulse { 0%{width:20%} 50%{width:75%} 100%{width:20%} }
+
+/* How-to-use callout */
+.tld-how-to {
+  display: flex; align-items: flex-start; gap: 1rem; flex-wrap: wrap;
+  background: rgba(10,132,255,0.05); border: 1px solid rgba(10,132,255,0.15);
+  border-radius: 7px; padding: 0.65rem 0.85rem; margin-bottom: 0.85rem;
+  font-size: 0.75rem; color: var(--muted); line-height: 1.5;
+}
+.tld-how-to-step {
+  display: flex; align-items: center; gap: 0.4rem; flex-shrink: 0;
+}
+.tld-how-to-num {
+  width: 18px; height: 18px; border-radius: 50%;
+  background: rgba(10,132,255,0.2); color: var(--accent);
+  font-size: 0.65rem; font-weight: 700; display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.tld-how-to-arrow { color: rgba(245,245,247,0.2); font-size: 0.7rem; }
+
+/* Glossary row */
+.tld-glossary {
+  display: flex; gap: 0.5rem; flex-wrap: wrap; margin-left: auto;
+  align-items: center;
+}
+.tld-glossary-item {
+  font-size: 0.67rem; color: var(--muted);
+  padding: 0.08rem 0.5rem; border-radius: 4px;
+  border: 1px solid var(--border); background: rgba(245,245,247,0.03);
+  white-space: nowrap;
+}
+.tld-glossary-item b { color: var(--fg); }
+
 /* Responsive */
 @media (max-width: 1100px) {
   .tld-detail { display: none; }
   .tld-nav { width: 168px; }
+}
+@media (max-width: 960px) {
+  .tld-detail { display: none; }
+  .tld-live-grid { grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+  .tld-type-grid  { grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
 }
 @media (max-width: 780px) {
   .tld-nav { display: none; }
@@ -426,6 +484,11 @@
     <span class="tld-topbar-title">Tasked Live Documentation</span>
     <span class="tld-topbar-sep">|</span>
     <span class="tld-topbar-sub">C9b:6090 &rarr; C1b:8000 (chat) &middot; C12b:8210 (sandbox)</span>
+    <div class="tld-glossary">
+      <span class="tld-glossary-item"><b>C9b</b> = orchestrator :6090</span>
+      <span class="tld-glossary-item"><b>C1b</b> = LLM API :8000</span>
+      <span class="tld-glossary-item"><b>C12b</b> = sandbox :8210</span>
+    </div>
     <div class="tld-topbar-chips">
       <span class="tld-type-chip bg-output"><span class="dot" style="background:#4ade80"></span>output</span>
       <span class="tld-type-chip bg-alert"><span class="dot" style="background:#fbbf24"></span>alert</span>
@@ -466,8 +529,8 @@
     <!-- ═══ MAIN ════════════════════════════════════════════════════ -->
     <div class="tld-main">
       <div class="tld-tabs">
-        <button class="tld-tab active" id="tab-doc"  onclick="showTab('doc')">Documentation</button>
-        <button class="tld-tab"        id="tab-live" onclick="showTab('live')">Live Testing</button>
+        <button class="tld-tab active" id="tab-doc"  onclick="showTab('doc')"  role="tab" aria-selected="true">Documentation</button>
+        <button class="tld-tab"        id="tab-live" onclick="showTab('live')" role="tab" aria-selected="false">Live Testing</button>
       </div>
 
       <div class="tld-content">
@@ -916,11 +979,21 @@
         <!-- ══ LIVE PANEL ════════════════════════════════════════════ -->
         <div id="panel-live" class="tld-panel">
 
+          <div class="tld-how-to">
+            <div class="tld-how-to-step"><div class="tld-how-to-num">1</div>Click <strong>Run</strong> on a card</div>
+            <div class="tld-how-to-arrow">&rarr;</div>
+            <div class="tld-how-to-step"><div class="tld-how-to-num">2</div>Watch status dot go blue (running)</div>
+            <div class="tld-how-to-arrow">&rarr;</div>
+            <div class="tld-how-to-step"><div class="tld-how-to-num">3</div>Click <strong>Validate</strong> to run 5-domain checks</div>
+            <div class="tld-how-to-arrow">&rarr;</div>
+            <div class="tld-how-to-step"><div class="tld-how-to-num">4</div>Click card header to inspect detail panel</div>
+          </div>
+
           <div class="tld-live-toolbar">
             <button class="tld-btn rst" onclick="refreshStatus()">Refresh Status</button>
             <button class="tld-btn run" onclick="runAll()">Run All</button>
             <button class="tld-btn val" onclick="validateAll()">Validate All</button>
-            <span style="font-size:0.72rem;color:var(--muted);">Auto:</span>
+            <label for="tld-auto-sel" style="font-size:0.72rem;color:var(--muted);">Auto:</label>
             <select id="tld-auto-sel" onchange="setAutoRefresh(this.value)"
               style="font-size:0.72rem;padding:0.22rem 0.4rem;background:rgba(245,245,247,0.04);
                      border:1px solid var(--border);border-radius:5px;color:var(--fg);cursor:pointer;">
@@ -929,7 +1002,7 @@
               <option value="30000">30s</option>
               <option value="60000">1 min</option>
             </select>
-            <span id="tld-gstatus" class="tld-gstatus"></span>
+            <span id="tld-gstatus" class="tld-gstatus" aria-live="polite"></span>
           </div>
 
           <div class="tld-live-grid" id="tld-cards"></div>
@@ -1078,7 +1151,13 @@
   function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
   function post(url,body) { return fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}).then(function(r){return r.json();}); }
   function get(url)       { return fetch(url).then(function(r){return r.json();}); }
-  function gstatus(msg,c) { var el=document.getElementById('tld-gstatus'); if(el){el.textContent=msg; el.style.color=c||'var(--muted)';} }
+  var _gstatusTimer = null;
+  function gstatus(msg,c) {
+    var el=document.getElementById('tld-gstatus'); if(!el) return;
+    el.textContent=msg; el.style.color=c||'var(--muted)';
+    if (_gstatusTimer) clearTimeout(_gstatusTimer);
+    if (msg) { _gstatusTimer = setTimeout(function(){ el.textContent=''; el.style.color='var(--muted)'; }, 4000); }
+  }
   function saveState(trace) {
     if (S[trace].run_id)  localStorage.setItem('tld_sr_' + trace, S[trace].run_id);
     if (S[trace].status)  localStorage.setItem('tld_ss_' + trace, S[trace].status);
@@ -1093,7 +1172,7 @@
       var p = document.getElementById('panel-' + t);
       var b = document.getElementById('tab-' + t);
       if (p) p.className = 'tld-panel' + (t === name ? ' active' : '');
-      if (b) b.className = 'tld-tab' + (t === name ? ' active' : '');
+      if (b) { b.className = 'tld-tab' + (t === name ? ' active' : ''); b.setAttribute('aria-selected', t === name ? 'true' : 'false'); }
     });
     if (name === 'live') refreshStatus();
   };
@@ -1163,6 +1242,7 @@
     var aid = esc(s.alert_id ? String(s.alert_id) : '—');
 
     el.innerHTML =
+      '<div class="tld-card-progress"><div class="tld-card-progress-bar"></div></div>' +
       '<div class="tld-live-card-header" onclick="selectTrace(\'' + t.trace + '\')">' +
         '<div style="width:9px;height:9px;border-radius:50%;background:' + t.typeColor + ';flex-shrink:0;"></div>' +
         '<span class="tld-live-card-title">' + esc(t.trace) + ' &mdash; ' + esc(t.name) + '</span>' +
@@ -1176,9 +1256,9 @@
           '<div class="tld-mini-flow" style="margin-left:auto;">' + stepFlow + '</div>' +
         '</div>' +
         '<div class="tld-chip-row">' +
-          '<span class="tld-chip" onclick="copyText(\'' + (s.task_id||'') + '\')"><b>task</b>' + esc((s.task_id||'').substring(5)) + '</span>' +
-          '<span class="tld-chip" id="rid-' + t.trace + '" onclick="copyText(\'' + (s.run_id||'') + '\')"><b>run</b>' + esc((s.run_id||'—').substring(5)) + '</span>' +
-          '<span class="tld-chip" id="aid-' + t.trace + '"><b>alert</b>' + aid + '</span>' +
+          '<span class="tld-chip" onclick="copyText(\'' + (s.task_id||'') + '\')" title="Click to copy: ' + esc(s.task_id||'') + '"><b>task</b>' + esc((s.task_id||'').substring(5)) + '</span>' +
+          '<span class="tld-chip" id="rid-' + t.trace + '" onclick="copyText(\'' + (s.run_id||'') + '\')" title="Click to copy: ' + esc(s.run_id||'') + '"><b>run</b>' + esc((s.run_id||'—').substring(5)) + '</span>' +
+          '<span class="tld-chip" id="aid-' + t.trace + '" title="alert_id: ' + aid + '"><b>alert</b>' + aid + '</span>' +
         '</div>' +
         '<div class="tld-actions">' +
           '<button class="tld-btn run"  onclick="doRun(\'' + t.trace + '\')">Run</button>' +
@@ -1187,9 +1267,14 @@
           '<button class="tld-btn redo" onclick="doRedo(\'' + t.trace + '\')">Redo</button>' +
           '<button class="tld-btn val"  onclick="doValidate(\'' + t.trace + '\')">Validate</button>' +
         '</div>' +
-        '<div class="tld-out-preview' + (!s.output?' empty':'') + '" id="out-' + t.trace + '">' +
-          esc(s.output ? s.output.substring(0, 400) : 'No output yet. Click Run to execute.') +
-        '</div>' +
+        (function() {
+          var raw = s.output || '';
+          var preview = raw ? raw.substring(0, 400) : '';
+          var hint = (raw.length > 400) ? '\n\u2026 (+' + (raw.length - 400) + ' chars, see detail panel)' : '';
+          return '<div class="tld-out-preview' + (!raw?' empty':'') + '" id="out-' + t.trace + '">' +
+            esc(preview ? preview + hint : 'No output yet. Click Run to execute.') +
+          '</div>';
+        })() +
         '<div class="tld-links">' +
           '<a class="tld-link" href="/tasked?task_id=' + (s.task_id||'') + '" target="_blank">Tasked</a>' +
           '<a class="tld-link" href="/piplinetask?task_id=' + (s.task_id||'') + '" target="_blank">Pipeline</a>' +
@@ -1296,7 +1381,9 @@
 
   window.collapseDetail = function() {
     var d = document.getElementById('tld-detail');
-    if (d) d.classList.toggle('collapsed');
+    if (!d) return;
+    d.classList.toggle('collapsed');
+    localStorage.setItem('tld_detail_open', d.classList.contains('collapsed') ? '0' : '1');
   };
 
   /* ── Operations ─────────────────────────────────────────────── */
@@ -1338,6 +1425,7 @@
 
   window.doStop = function(trace) {
     var taskId = S[trace].task_id; if (!taskId) return;
+    if (!confirm('Stop ' + trace + '?')) return;
     post('/api/tasks/' + taskId + '/stop', {}).then(function(d) {
       S[trace].status = d.status || 'cancelled'; saveState(trace); refreshCard(trace); renderNav();
       if (selectedTrace === trace) renderDetail(trace);
@@ -1408,7 +1496,12 @@
     });
   };
 
+  var _isRefreshing = false;
   window.refreshStatus = function() {
+    if (_isRefreshing) return;
+    _isRefreshing = true;
+    var btn = document.querySelector('.tld-live-toolbar .tld-btn.rst[onclick="refreshStatus()"]');
+    if (btn) { btn.disabled = true; }
     gstatus('Refreshing\u2026', 'var(--muted)');
     var done = 0;
     TRACES.forEach(function(t) {
@@ -1420,8 +1513,8 @@
         saveState(t.trace); refreshCard(t.trace);
         if (selectedTrace === t.trace) renderDetail(t.trace);
         done++;
-        if (done >= TRACES.length) { renderNav(); gstatus('Refreshed', 'var(--muted)'); }
-      }).catch(function(){ done++; if (done >= TRACES.length) { renderNav(); gstatus('Refreshed (some errors)', 'var(--fail)'); } });
+        if (done >= TRACES.length) { renderNav(); gstatus('Refreshed', 'var(--muted)'); _isRefreshing=false; if(btn)btn.disabled=false; }
+      }).catch(function(){ done++; if (done >= TRACES.length) { renderNav(); gstatus('Refreshed (some errors)', 'var(--fail)'); _isRefreshing=false; if(btn)btn.disabled=false; } });
     });
   };
 
@@ -1431,7 +1524,7 @@
     function next() {
       if (i >= TRACES.length) { gstatus('All runs dispatched', 'var(--ok)'); return; }
       window.doRun(TRACES[i++].trace);
-      setTimeout(next, 1200);
+      setTimeout(next, 2000);
     }
     next();
   };
@@ -1452,6 +1545,12 @@
   buildCards();
   renderNav();
   renderDetail(selectedTrace);
+
+  // Restore detail panel collapse state
+  if (localStorage.getItem('tld_detail_open') === '0') {
+    var det = document.getElementById('tld-detail');
+    if (det) det.classList.add('collapsed');
+  }
 
   // Restore auto-refresh preference
   var savedAuto = localStorage.getItem('tld_auto') || '0';
