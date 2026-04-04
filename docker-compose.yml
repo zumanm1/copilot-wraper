@@ -543,7 +543,6 @@ services:
       - C12_URL=http://c12-sandbox:8080
       - C12B_URL=http://c12b-sandbox:8210
       - C10B_URL=http://c10b-sandbox:8310
-      - C10B_URL=http://c10b-sandbox:8310
     volumes:
       - ./c9_jokes:/app/c9_jokes
       - c9-data:/app/data
@@ -707,60 +706,6 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://localhost:8210/health >/dev/null"]
-      interval: 30s
-      timeout: 5s
-      start_period: 10s
-      retries: 3
-
-  # C10b: Lean coding/test sandbox (shared by /agent and /multi-agento)
-  # Port 8310 (different from C12b:8210 and C10:8100)
-  c10b-sandbox:
-    build:
-      context: .
-      dockerfile: Dockerfile.c10b-sandbox
-    image: copilot-c10b-sandbox:latest
-    container_name: C10b_sandbox
-    profiles: ["optional"]
-    mem_limit: 768m
-    cpus: 0.5
-    ports:
-      - "8310:8310"
-    environment:
-      - WORKSPACE=/workspace
-    volumes:
-      - c10b-workspace:/workspace
-    networks:
-      - copilot-net
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8310/health >/dev/null"]
-      interval: 30s
-      timeout: 5s
-      start_period: 10s
-      retries: 3
-
-  # C10b: Lean coding/test sandbox (shared by /agent and /multi-agento)
-  # Port 8310 (different from C12b:8210 and C10:8100)
-  c10b-sandbox:
-    build:
-      context: .
-      dockerfile: Dockerfile.c10b-sandbox
-    image: copilot-c10b-sandbox:latest
-    container_name: C10b_sandbox
-    profiles: ["optional"]
-    mem_limit: 768m
-    cpus: 0.5
-    ports:
-      - "8310:8310"
-    environment:
-      - WORKSPACE=/workspace
-    volumes:
-      - c10b-workspace:/workspace
-    networks:
-      - copilot-net
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8310/health >/dev/null"]
       interval: 30s
       timeout: 5s
       start_period: 10s

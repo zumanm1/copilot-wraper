@@ -27,8 +27,8 @@ from starlette.templating import Jinja2Templates
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DB = Path(os.environ.get("DATABASE_PATH", "/app/data/c9.db"))
 
-# ── C10 Sandbox URL (single-agent /agent workspace) ──────────────────────────
-C10_URL = os.environ.get("C10_URL", "http://c10-sandbox:8100").rstrip("/")
+# ── C10 Sandbox URL (agent workspace — uses C10b shared sandbox) ─────────────
+C10_URL = os.environ.get("C10B_URL", os.environ.get("C10_URL", "http://c10b-sandbox:8210")).rstrip("/")
 
 # ── C11 Sandbox URL (multi-agent /multi-Agento, session-scoped workspace) ────
 C11_URL = os.environ.get("C11_URL", "http://c11-sandbox:8200").rstrip("/")
@@ -37,10 +37,7 @@ C11_URL = os.environ.get("C11_URL", "http://c11-sandbox:8200").rstrip("/")
 C12B_URL = os.environ.get("C12B_URL", "http://c12b-sandbox:8210").rstrip("/")
 
 # ── C10b Sandbox URL (shared coding sandbox for /agent + /multi-agento) ──────
-C10B_URL = os.environ.get("C10B_URL", "http://c10b-sandbox:8310").rstrip("/")
-
-# ── C10b Sandbox URL (shared coding sandbox for /agent + /multi-agento) ──────
-C10B_URL = os.environ.get("C10B_URL", "http://c10b-sandbox:8310").rstrip("/")
+C10B_URL = os.environ.get("C10B_URL", "http://c10b-sandbox:8210").rstrip("/")
 
 # ── Container targets ─────────────────────────────────────────────────────────
 TARGETS = {
@@ -52,12 +49,10 @@ TARGETS = {
     "c7a": {"env": "C7A_URL", "default": "http://localhost:18789", "label": "C7a openclaw-gateway", "health": "/healthz"},
     "c7b": {"env": "C7B_URL", "default": "http://localhost:8080",  "label": "C7b openclaw-cli",     "health": "/health"},
     "c8":  {"env": "C8_URL",  "default": "http://localhost:8080",  "label": "C8 hermes-agent",      "health": "/health"},
-    "c10": {"env": "C10_URL", "default": "http://c10-sandbox:8100", "label": "C10 agent sandbox",  "health": "/health"},
+    "c10": {"env": "C10_URL", "default": "http://c10b-sandbox:8210", "label": "C10 agent sandbox (C10b)",  "health": "/health"},
     "c11": {"env": "C11_URL", "default": "http://c11-sandbox:8200", "label": "C11 multi-agent sandbox", "health": "/health"},
     "c12b": {"env": "C12B_URL", "default": "http://c12b-sandbox:8210", "label": "C12b lean sandbox", "health": "/health"},
-    "c10b": {"env": "C10B_URL", "default": "http://c10b-sandbox:8310", "label": "C10b shared sandbox", "health": "/health"},
-    "c10b": {"env": "C10B_URL", "default": "http://c10b-sandbox:8310", "label": "C10b shared sandbox", "health": "/health"},
-    "c10b": {"env": "C10B_URL", "default": "http://c10b-sandbox:8310", "label": "C10b shared sandbox", "health": "/health"},
+    "c10b": {"env": "C10B_URL", "default": "http://c10b-sandbox:8210", "label": "C10b shared sandbox", "health": "/health"},
 }
 
 # ── AI agents that can chat ───────────────────────────────────────────────────
@@ -8559,16 +8554,18 @@ async def api_agent_run(
 
     async def generate():
         nonlocal task, session_id
+        # Persistent HTTP client for the lifetime of this SSE stream
+        _http_agent = httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=360.0, write=10.0, pool=10.0))
 
-        # Check C10 is reachable
-        client = _get_http()
+        # Check C10/C10b is reachable (use fresh client to avoid stale connections)
         try:
-            health_r = await client.get(f"{C10_URL}/health", timeout=5)
-            if health_r.status_code != 200:
-                yield _sse("error", {"message": f"C10 sandbox unhealthy (HTTP {health_r.status_code}). Is c10-sandbox running?"})
-                return
+            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0)) as _hc:
+                health_r = await _hc.get(f"{C10_URL}/health", timeout=5)
+                if health_r.status_code != 200:
+                    yield _sse("error", {"message": f"C10b sandbox unhealthy (HTTP {health_r.status_code}). Is c10b-sandbox running?"})
+                    return
         except Exception as exc:
-            yield _sse("error", {"message": f"C10 sandbox unreachable: {exc}. Run: docker compose up c10-sandbox -d"})
+            yield _sse("error", {"message": f"C10b sandbox unreachable ({C10_URL}): {exc}"})
             return
 
         # ── Auth pre-flight: verify M365 session BEFORE sending any task ─────
@@ -8576,10 +8573,12 @@ async def api_agent_run(
         # Copilot is actually reachable and responding (not just authenticated).
         c3_url = _urls().get("c3", "http://browser-auth:8001")
         _session_status = "unknown"
+        _auth_data = {}
         try:
-            _auth_r = await client.get(f"{c3_url}/session-health", timeout=8)
-            _auth_data = _auth_r.json() if _auth_r.status_code == 200 else {}
-            _session_status = _auth_data.get("session", "unknown")
+            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0)) as _ac:
+                _auth_r = await _ac.get(f"{c3_url}/session-health", timeout=8)
+                _auth_data = _auth_r.json() if _auth_r.status_code == 200 else {}
+                _session_status = _auth_data.get("session", "unknown")
         except Exception as _auth_exc:
             _auth_data = {"reason": str(_auth_exc)}
 
@@ -8603,7 +8602,7 @@ async def api_agent_run(
             "experiencing high demand", "we're experiencing",
         )
         try:
-            _hi_r = await client.post(
+            _hi_r = await _http_agent.post(
                 f"{c1}/v1/chat/completions",
                 headers={"Content-Type": "application/json", "X-Agent-ID": f"{agent_id}-preflight"},
                 json={"model": "copilot", "messages": [{"role": "user", "content": "hi"}], "stream": False},
