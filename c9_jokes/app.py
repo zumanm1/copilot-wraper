@@ -30,8 +30,12 @@ DEFAULT_DB = Path(os.environ.get("DATABASE_PATH", "/app/data/c9.db"))
 # ── C10 Sandbox URL (agent workspace — uses C10b shared sandbox) ─────────────
 C10_URL = os.environ.get("C10B_URL", os.environ.get("C10_URL", "http://c10b-sandbox:8210")).rstrip("/")
 
-# ── C11 Sandbox URL (multi-agent /multi-Agento, session-scoped workspace) ────
-C11_URL = os.environ.get("C11_URL", "http://c11-sandbox:8200").rstrip("/")
+# ── C11 Sandbox URL (multi-agent /multi-Agento → now uses C11b) ──────────────
+C11_URL = os.environ.get("C11B_URL", os.environ.get("C11_URL", "http://c11b-sandbox:8200")).rstrip("/")
+
+# -- C11b Sandbox URL (multi-agent session-scoped workspace) -------------------
+C11B_URL = os.environ.get("C11B_URL", "http://c11b-sandbox:8200").rstrip("/")
+# ── C11b Sandbox URL (multi-agent session-scoped workspace) ──────────────────
 
 # ── C12b Sandbox URL (lean coding/test sandbox) ──────────────────────────────
 C12B_URL = os.environ.get("C12B_URL", "http://c12b-sandbox:8210").rstrip("/")
@@ -50,7 +54,8 @@ TARGETS = {
     "c7b": {"env": "C7B_URL", "default": "http://localhost:8080",  "label": "C7b openclaw-cli",     "health": "/health"},
     "c8":  {"env": "C8_URL",  "default": "http://localhost:8080",  "label": "C8 hermes-agent",      "health": "/health"},
     "c10": {"env": "C10_URL", "default": "http://c10b-sandbox:8210", "label": "C10 agent sandbox (C10b)",  "health": "/health"},
-    "c11": {"env": "C11_URL", "default": "http://c11-sandbox:8200", "label": "C11 multi-agent sandbox", "health": "/health"},
+    "c11": {"env": "C11_URL", "default": "http://c11b-sandbox:8200", "label": "C11 multi-agent sandbox (C11b)", "health": "/health"},
+    "c11b": {"env": "C11B_URL", "default": "http://c11b-sandbox:8200", "label": "C11b multi-agent sandbox", "health": "/health"},
     "c12b": {"env": "C12B_URL", "default": "http://c12b-sandbox:8210", "label": "C12b lean sandbox", "health": "/health"},
     "c10b": {"env": "C10B_URL", "default": "http://c10b-sandbox:8210", "label": "C10b shared sandbox", "health": "/health"},
 }
@@ -9471,9 +9476,9 @@ async def api_sandbox_exec(request: Request):
 # ── Container control API (start/stop optional containers) ───────────────────
 
 # Containers that can be toggled on/off to save resources
-_OPTIONAL_CONTAINERS = {"C2_agent-terminal", "C5_claude-code", "C7a_openclaw-gateway", "C7b_openclaw-cli", "C8_hermes-agent", "C12_sandbox", "C12b_sandbox", "C10b_sandbox"}
+_OPTIONAL_CONTAINERS = {"C2_agent-terminal", "C5_claude-code", "C7a_openclaw-gateway", "C7b_openclaw-cli", "C8_hermes-agent", "C12b_sandbox"}
 # Containers that must stay running
-_CORE_CONTAINERS = {"C1_copilot-api", "C3_browser-auth", "C6_kilocode", "C9_jokes", "C10_sandbox", "C11_sandbox"}
+_CORE_CONTAINERS = {"C1b_copilot-api", "C3b_browser-auth", "C6_kilocode", "C9b_jokes", "C10b_sandbox", "C11b_sandbox"}
 
 
 @app.get("/api/containers", name="api_containers")
@@ -10432,13 +10437,16 @@ async def api_ma_run(
     max_steps: int = 8,
     chat_mode: str = "auto",
     work_mode: str = "work",
+    agent_id: str = "c6-kilocode",
 ):
-    """SSE stream for /multi-Agento parallel execution using C11 session-scoped workspace."""
+    """SSE stream for /multi-Agento parallel execution using C11b session-scoped workspace."""
     if not task.strip():
         return JSONResponse({"error": "task required"}, status_code=400)
 
     c1 = _urls().get("c1", "http://localhost:8000")
-    agent_id = "c9-jokes"
+    _MA_TEST_AGENTS = {"c2-aider", "c6-kilocode"}
+    if agent_id not in _MA_TEST_AGENTS:
+        agent_id = "c6-kilocode"
     max_steps = max(2, min(12, max_steps))
 
     if not session_id:
@@ -10451,6 +10459,28 @@ async def api_ma_run(
             return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
         yield _sse("session", {"session_id": session_id, "roles": active_roles})
+
+        # ── C3b M365 auth guard (mirrors /api/agent/run pattern) ──────────────
+        c3_url = _urls().get("c3", "http://browser-auth:8001")
+        _session_status = "unknown"
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=5.0, read=8.0, write=5.0, pool=5.0)) as _ac:
+                _auth_r = await _ac.get(f"{c3_url}/session-health", timeout=8)
+                _auth_body = _auth_r.json() if _auth_r.status_code == 200 else {}
+                _session_status = _auth_body.get("session", "unknown")
+        except Exception:
+            _session_status = "unknown"
+
+        if _session_status != "active":
+            yield _sse("auth_required", {
+                "message": (
+                    f"M365 Copilot is not authenticated (status: {_session_status}). "
+                    f"Please sign in via the browser at localhost:6080"
+                ),
+                "session_status": _session_status,
+                "auth_url": "http://localhost:6080/?resize=scale&autoconnect=true",
+            })
+            return
 
         # Persist session start
         now = datetime.now(timezone.utc).isoformat()
@@ -10558,6 +10588,10 @@ async def api_ma_run(
             pane_id = f"ma-{r}"
             yield _sse("pane_init", {"pane_id": pane_id, "role": r, "assignment": assignments[r],
                                       "label": _MA_ROLES.get(r, {}).get("label", r.title())})
+
+        # Yield initial token estimate after supervisor step
+        _sup_tokens = _estimate_tokens([{"role": "user", "content": sup_prompt}])
+        yield _sse("token_estimate", {"tokens": _sup_tokens, "step": 0, "budget": TOKEN_BUDGET})
 
         # Run all roles concurrently
         event_queue: asyncio.Queue = asyncio.Queue()
@@ -10811,7 +10845,7 @@ async def api_ma_project_delete(name: str = "", session_id: str = ""):
 @app.get("/api/ma/preview", name="api_ma_preview")
 async def api_ma_preview(port: int = 3000, path: str = "/"):
     """Proxy to a web server running inside C11 sandbox."""
-    c11_host = C11_URL.split("://")[-1].split(":")[0]  # e.g. "c11-sandbox"
+    c11_host = C11_URL.split("://")[-1].split(":")[0]  # e.g. "c11b-sandbox"
     target = f"http://{c11_host}:{port}{path}"
     client = _get_http()
     try:
@@ -10822,7 +10856,7 @@ async def api_ma_preview(port: int = 3000, path: str = "/"):
         return HTMLResponse(
             f"<html><body style='font-family:system-ui;background:#0f1419;color:#e6edf3;padding:2rem'>"
             f"<h3>🔌 Preview not available</h3>"
-            f"<p>Could not reach <code>http://c11-sandbox:{port}/</code></p>"
+            f"<p>Could not reach <code>http://c11b-sandbox:{port}/</code></p>"
             f"<p style='color:#8b949e'>{exc}</p>"
             f"<p>The web server may still be starting. Wait a moment and refresh.</p>"
             f"</body></html>",
