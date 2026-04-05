@@ -141,15 +141,18 @@
 (function(){
   var EXECUTOR_TARGET_LABELS = Object.fromEntries(({{ task_executor_targets|safe }} || []).map(function(item){ return [item.id, item.label]; }));
   var AGENT_TARGET_LABELS = Object.fromEntries(({{ task_agent_targets|safe }} || []).map(function(item){ return [item.id, item.label]; }));
-  var listEl = document.getElementById('pipeline-list');
-  var taskIdEl = document.getElementById('pipeline-task-id');
-  var runIdEl = document.getElementById('pipeline-run-id');
-  var statusEl = document.getElementById('pipeline-status-filter');
+  var listEl    = document.getElementById('pipeline-list');
+  var taskIdEl  = document.getElementById('pipeline-task-id');
+  var runIdEl   = document.getElementById('pipeline-run-id');
+  var statusEl  = document.getElementById('pipeline-status-filter');
   var liveToggleEl = document.getElementById('pipeline-live-toggle');
-  var noteEl = document.getElementById('pipeline-monitor-note');
+  var noteEl    = document.getElementById('pipeline-monitor-note');
   var runtimeEl = document.getElementById('pipeline-runtime');
+  var pipelineIsLoading   = false;   /* declare early — used in loadPipelines guard */
+  var pipelineRefreshTimer  = null;
+  var pipelineRuntimeTimer  = null;
   var initialTaskId = new URLSearchParams(window.location.search).get('task_id') || '';
-  var initialRunId = new URLSearchParams(window.location.search).get('run_id') || '';
+  var initialRunId  = new URLSearchParams(window.location.search).get('run_id')  || '';
   function esc(v){ return String(v == null ? '' : v).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
   function fmtTs(ts){ if(!ts) return '—'; try { return new Date(ts).toLocaleString(); } catch(_) { return ts; } }
   function fmtJson(value){ try { return JSON.stringify(value || {}, null, 2); } catch (_) { return String(value || ''); } }
@@ -186,6 +189,91 @@
     return '<div class="pipeline-event">' +
       '<div class="pipeline-event-head"><strong>Recovery session ' + esc(item.id || '—') + '</strong><div class="pipeline-event-meta">' + esc(item.status || 'unknown') + ' · ' + esc(fmtTs(item.updated_at)) + '</div></div>' +
       '<div class="pipeline-event-pre">Operation: ' + esc(item.operation || '—') + '\nUpstream: ' + esc(item.upstream || '—') + '\nRetries: ' + esc(item.retry_count || 0) + '/' + esc(item.max_retries || 0) + '\nNext retry: ' + esc(fmtTs(item.next_retry_at)) + '\nError: ' + esc(item.last_error || '—') + '</div>' +
+    '</div>';
+  }
+
+  /* ── Step flow diagram ─────────────────────────────────────────
+     Called by renderItem(). Renders the horizontal node→node flow
+     strip using .pipeline-step-flow-node + connector CSS classes.
+     Was referenced but never implemented — caused the page crash.
+  ──────────────────────────────────────────────────────────────── */
+  function renderStepFlow(steps) {
+    if (!steps || !steps.length) return '';
+    var ICONS = { trigger:'⚡', chat:'💬', sandbox:'🖥️', alert:'🚨', complete:'✅', hook:'🔗', action:'⚙️', condition:'🔍' };
+    return steps.map(function(step, i) {
+      var kind   = step.step_kind || step.kind || '';
+      var icon   = ICONS[kind] || '⚙️';
+      var status = step.status || 'queued';
+      var label  = step.step_name || step.step_id || kind || 'Step';
+      return (
+        '<div class="pipeline-step-flow-node">' +
+          '<span class="flow-icon">' + icon + '</span>' +
+          '<span class="flow-label" title="' + esc(label) + '">' + esc(label) + '</span>' +
+          '<span class="flow-status ' + esc(status) + '">' + esc(status) + '</span>' +
+        '</div>' +
+        (i < steps.length - 1 ? '<div class="pipeline-step-flow-connector"></div>' : '')
+      );
+    }).join('');
+  }
+
+  /* ── Timeline renderer ─────────────────────────────────────────
+     Called by renderItem(). Builds a chronological event list from
+     run start / step results / alerts / run completion.
+     Was referenced but never implemented — caused the page crash.
+  ──────────────────────────────────────────────────────────────── */
+  function renderTimeline(item) {
+    var run    = item.run    || {};
+    var steps  = item.steps  || [];
+    var alerts = item.alerts || [];
+    var events = [];
+
+    if (run.started_at) {
+      events.push({ ts: run.started_at, label: 'Run started', status: 'running',
+                    detail: 'Run ID: ' + (run.id || '—') });
+    }
+    steps.forEach(function(step) {
+      var ts = step.started_at || step.finished_at;
+      if (!ts) return;
+      events.push({
+        ts: ts,
+        label: step.step_name || step.step_id || step.step_kind || 'Step',
+        status: step.status || 'queued',
+        detail: (step.step_kind || '') + (step.duration_label ? ' · ' + step.duration_label : '')
+      });
+    });
+    alerts.forEach(function(alert) {
+      if (!alert.created_at) return;
+      events.push({
+        ts: alert.created_at,
+        label: 'Alert: ' + (alert.title || 'Alert'),
+        status: 'alert-open',
+        detail: 'ID: ' + (alert.id || '—') + (alert.severity ? ' · ' + alert.severity : '')
+      });
+    });
+    if (run.completed_at) {
+      events.push({ ts: run.completed_at,
+                    label: 'Run ' + (run.status || 'completed'),
+                    status: run.status || 'completed',
+                    detail: run.terminal_reason || '' });
+    }
+
+    events.sort(function(a, b) { return new Date(a.ts) - new Date(b.ts); });
+
+    if (!events.length) {
+      return '<div class="pipeline-empty"><div class="pipeline-empty-icon">📅</div>' +
+             '<div class="pipeline-empty-text">No timeline events recorded.</div></div>';
+    }
+    return '<div class="pipeline-timeline">' +
+      events.map(function(ev) {
+        var stCls = 'status-' + (ev.status || 'idle').replace(/[^a-z-]/g, '-');
+        return '<div class="pipeline-timeline-item ' + esc(stCls) + '">' +
+          '<div style="display:flex;justify-content:space-between;gap:.5rem;">' +
+            '<strong style="font-size:.82rem;">' + esc(ev.label) + '</strong>' +
+            '<span style="font-size:.72rem;color:var(--muted);">' + esc(fmtTs(ev.ts)) + '</span>' +
+          '</div>' +
+          (ev.detail ? '<div style="font-size:.75rem;color:var(--muted);margin-top:.15rem;">' + esc(ev.detail) + '</div>' : '') +
+        '</div>';
+      }).join('') +
     '</div>';
   }
 
@@ -301,9 +389,6 @@
 
   loadPipelines().catch(function(){ listEl.innerHTML = '<div class="pipeline-empty">Failed to load task pipelines.</div>'; });
   loadRuntime().catch(function(){ runtimeEl.innerHTML = '<span class="pipeline-runtime-pill">Sandbox runtime unavailable.</span>'; });
-  var pipelineRefreshTimer = null;
-  var pipelineRuntimeTimer = null;
-  var pipelineIsLoading = false;
   function fmtPipelineRefreshInterval(ms) {
     if (ms < 60000) return Math.round(ms / 1000) + 's';
     return Math.round(ms / 60000) + 'min';
