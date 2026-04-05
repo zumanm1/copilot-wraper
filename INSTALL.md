@@ -16,7 +16,7 @@
 8. [Start the Full Stack](#8-start-the-full-stack)
 9. [Verify All Containers](#9-verify-all-containers)
 10. [Access the Services](#10-access-the-services)
-11. [Using Agent Containers (C2, C5, C6, C7a/b, C8)](#11-using-agent-containers)
+11. [Using Agent Containers (C2b, C5b, C6b, C7ab/C7bb, C8b)](#11-using-agent-containers)
 12. [Updating](#12-updating)
 13. [Uninstall](#13-uninstall)
 14. [Linux-Specific Notes](#14-linux-specific-notes)
@@ -32,14 +32,14 @@ This project wraps Microsoft Copilot behind a standard OpenAI- and Anthropic-com
 | # | Container | Port(s) | What it does |
 |---|---|---|---|
 | C1 | `app` | **8000** | FastAPI server — `/v1/chat/completions` (OpenAI) and `/v1/messages` (Anthropic) |
-| C2 | `agent-terminal` | — | Aider + OpenCode coding agents (interactive terminal) |
-| C3 | `browser-auth` | **6080**, **8001** | Headless Chromium + noVNC — cookie extraction and M365 browser proxy |
-| C5 | `claude-code-terminal` | — | Claude Code CLI (routes to C1) |
-| C6 | `kilocode-terminal` | — | KiloCode CLI (routes to C1) |
-| C7a | `openclaw-gateway` | **18789** | OpenClaw WebSocket gateway |
-| C7b | `openclaw-cli` | — | OpenClaw CLI / TUI |
-| C8 | `hermes-agent` | — | Hermes Agent — persistent memory, skills, cron jobs |
-| C9 | `c9-jokes` | **6090** | Validation console — chat UI, batch pairs, logs, health dashboard |
+| C2b | `agent-terminal` | — | Aider + OpenCode coding agents (interactive terminal) |
+| C3b | `browser-auth` | **6080**, **8001** | Headless Chromium + noVNC — cookie extraction and M365 browser proxy |
+| C5b | `claude-code-terminal` | — | Claude Code CLI (routes to C1) |
+| C6b | `kilocode-terminal` | — | KiloCode CLI (routes to C1) |
+| C7ab | `openclaw-gateway` | **18789** | OpenClaw WebSocket gateway |
+| C7bb | `openclaw-cli` | — | OpenClaw CLI / TUI |
+| C8b | `hermes-agent` | — | Hermes Agent — persistent memory, skills, cron jobs |
+| C9b | `c9-jokes` | **6090** | Validation console — chat UI, batch pairs, logs, health dashboard |
 | C10 | `c10-sandbox` | — | Internal agent workspace sandbox used by C9 `/api/agent/*` |
 | C11 | `c11-sandbox` | — | Internal multi-agent sandbox used by C9 `/api/multi-agent/*` |
 
@@ -453,7 +453,7 @@ docker compose exec hermes-agent         curl -sf http://localhost:8080/health
 
 ## 11. Using Agent Containers
 
-All agent containers (C2, C5, C6, C7b, C8) run in **standby mode** by default. A lightweight health server listens on port 8080 inside the container. You attach interactively with `docker compose exec` or use `cluster-start.sh`.
+All agent containers (C2b, C5b, C6b, C7bb, C8b) run in **standby mode** by default. A lightweight health server listens on port 8080 inside the container. You attach interactively with `docker compose exec` or use `cluster-start.sh`.
 
 ### Interactive attach
 
