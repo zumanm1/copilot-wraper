@@ -113,17 +113,18 @@ C1 receives prompt → POST C3 /chat → Playwright types in M365 UI → SignalR
 
 | Container | Name | Image | Port(s) | Purpose |
 |---|---|---|---|---|
-| C1b | `C1b_copilot-api` | `copilot-api:latest` | `8000` | FastAPI — OpenAI + Anthropic API |
-| C3b | `C3b_browser-auth` | `copilot-browser-auth:latest` | `6080`, `8001` | Cookie extraction via headless Chrome |
-| C2b | `C2b_agent-terminal` | `copilot-agent-terminal:latest` | `8080` (health) | Aider + OpenCode AI agent terminal |
-| C5b | `C5b_claude-code` | `copilot-claude-code-terminal:latest` | `8080` (health) | Claude Code CLI (Anthropic format) |
-| C6b | `C6b_kilocode` | `copilot-kilocode-terminal:latest` | `8080` (health) | KiloCode CLI terminal |
-| C7ab | `C7ab_openclaw-gateway` | `copilot-openclaw-gateway:latest` | `18789` | OpenClaw gateway (WebSocket hub) |
-| C7bb | `C7bb_openclaw-cli` | `copilot-openclaw-cli:latest` | `8080` (health) | OpenClaw CLI / TUI |
-| C8b | `C8b_hermes-agent` | `copilot-hermes-agent:latest` | `8080` (health) | Hermes Agent (memory, skills, cron) |
-| C9b | `C9b_jokes` | `copilot-c9-jokes:latest` | `6090` | Validation console — chat, pairs, logs, health UI |
-| C10 | `C10_sandbox` | `copilot-c10-sandbox:latest` | (internal `8100`) | Agent workspace shell/file sandbox for `/agent` flows |
-| C11 | `C11_sandbox` | `copilot-c11-sandbox:latest` | (internal `8200`) | Session-scoped sandbox for `/multi-Agento` |
+| C1b | `C1b_copilot-api` | `copilot-api:latest` | `8000` (host) | FastAPI — OpenAI + Anthropic API |
+| C3b | `C3b_browser-auth` | `copilot-browser-auth:latest` | `6080` noVNC, `8001` API | Cookie extraction via headless Chrome |
+| C2b | `C2b_agent-terminal` | `copilot-agent-terminal:latest` | `8080` (internal health) | Aider + OpenCode AI agent terminal |
+| C5b | `C5b_claude-code` | `copilot-claude-code-terminal:latest` | `8080` (internal health) | Claude Code CLI (Anthropic format) |
+| C6b | `C6b_kilocode` | `copilot-kilocode-terminal:latest` | `8080` (internal health) | KiloCode CLI terminal |
+| C7ab | `C7ab_openclaw-gateway` | `copilot-openclaw-gateway:latest` | `18789` (host) | OpenClaw gateway (WebSocket hub) |
+| C7bb | `C7bb_openclaw-cli` | `copilot-openclaw-cli:latest` | `8080` (internal health) | OpenClaw CLI / TUI |
+| C8b | `C8b_hermes-agent` | `copilot-hermes-agent:latest` | `8080` (internal health) | Hermes Agent (memory, skills, cron) |
+| C9b | `C9b_jokes` | `copilot-c9-jokes:latest` | `6090` (host) | Validation console — chat, agent, multi-agento, logs, health UI |
+| C10b | `C10b_sandbox` | `copilot-c12b-sandbox:latest` | `8310:8210` (host:internal) | Agent workspace sandbox for `/api/agent/*` flows |
+| C11b | `C11b_sandbox` | `copilot-c11-sandbox:latest` | `8410:8200` (host:internal) | Session-scoped sandbox for `/api/multi-Agento/*` |
+| C12b | `C12b_sandbox` | `copilot-c12b-sandbox:latest` | `8210` (host) | Lean coding/test sandbox for Tasked pipelines |
 | CT | `CT_tests` | `copilot-openai-wrapper-test:latest` | — | Playwright automated test suite |
 
 ### Architecture Diagram
@@ -271,7 +272,7 @@ curl -X POST http://localhost:8000/v1/messages \
 ### Step 6 — Build and start the full stack (all 9 containers)
 
 ```bash
-# Build all images — C2, C5, C6, C7a, C7b, C8, C9 (~10–20 min first run)
+# Build all images — C2b, C5b, C6b, C7ab, C7bb, C8b, C9b (~10–20 min first run)
 docker compose build
 
 # Start all 9 containers
@@ -313,16 +314,19 @@ docker compose exec hermes-agent        curl -sf http://localhost:8080/health
 
 | Container | Service Name | Host URL | Expected |
 |---|---|---|---|
-| C1 | `app` | `http://localhost:8000/health` | `{"status":"ok"}` |
-| C2 | `agent-terminal` | (exec only — no host port) | `ok` |
-| C3 API | `browser-auth` | `http://localhost:8001/health` | `{"status":"ok"}` |
-| C3 noVNC | `browser-auth` | `http://localhost:6080/` | HTML |
-| C5 | `claude-code-terminal` | (exec only) | `ok` |
-| C6 | `kilocode-terminal` | (exec only) | `ok` |
-| C7a | `openclaw-gateway` | `http://localhost:18789/healthz` | `{"status":"ok"}` |
-| C7b | `openclaw-cli` | (exec only) | `ok` |
-| C8 | `hermes-agent` | (exec only) | `ok` |
-| C9 | `c9-jokes` | `http://localhost:6090/api/status` | JSON dict |
+| C1b | `app` | `http://localhost:8000/health` | `{"status":"ok"}` |
+| C2b | `agent-terminal` | (exec only — no host port) | `ok` |
+| C3b API | `browser-auth` | `http://localhost:8001/health` | `{"status":"ok"}` |
+| C3b noVNC | `browser-auth` | `http://localhost:6080/` | HTML |
+| C5b | `claude-code-terminal` | (exec only) | `ok` |
+| C6b | `kilocode-terminal` | (exec only) | `ok` |
+| C7ab | `openclaw-gateway` | `http://localhost:18789/healthz` | `{"status":"ok"}` |
+| C7bb | `openclaw-cli` | (exec only) | `ok` |
+| C8b | `hermes-agent` | (exec only) | `ok` |
+| C9b | `c9-jokes` | `http://localhost:6090/api/status` | JSON dict |
+| C10b | `c10b-sandbox` | `http://localhost:8310/health` | `{"status":"ok"}` |
+| C11b | `c11b-sandbox` | `http://localhost:8410/health` | `{"status":"ok"}` |
+| C12b | `c12b-sandbox` | `http://localhost:8210/health` | `{"status":"ok"}` |
 
 ### Step 8 — Open the C9 Validation Console
 
@@ -683,7 +687,7 @@ requests.post(f"{BASE}/v1/agent/stop")
 
 ## 8. AI Agent Containers
 
-All agent containers (C2, C5, C6, C7a, C7b, C8) run in **standby mode** by default: a lightweight health server listens on port 8080 so Docker can report them as healthy. You attach interactively with `docker compose exec` or run one-shot commands with `docker compose run --rm`.
+All agent containers (C2b, C5b, C6b, C7ab, C7bb, C8b) run in **standby mode** by default: a lightweight health server listens on port 8080 so Docker can report them as healthy. You attach interactively with `docker compose exec` or run one-shot commands with `docker compose run --rm`.
 
 **Detailed setup guides:**
 - [C2 Aider Setup Guide](docs/C2-Aider-Setup-Guide.md)
@@ -694,12 +698,12 @@ All agent containers (C2, C5, C6, C7a, C7b, C8) run in **standby mode** by defau
 
 | Container | API Path | Agent ID | Status |
 |-----------|----------|----------|--------|
-| C2 Aider | OpenAI `/v1/chat/completions` | `c2-aider` | ✅ Validated |
-| C5 Claude Code | Anthropic `/v1/messages` | `c5-claude-code` | ✅ Validated |
-| C6 KiloCode | OpenAI `/v1/chat/completions` | `c6-kilocode` | ✅ Validated |
-| C7b OpenClaw CLI | OpenAI `/v1/chat/completions` | `c7-openclaw` | ✅ Validated |
-| C7a OpenClaw GW | Gateway standby `:18789/healthz` | `c7-openclaw` | ✅ Validated (standby) |
-| C8 Hermes Agent | OpenAI `/v1/chat/completions` | `c8-hermes` | ✅ Validated |
+| C2b Aider | OpenAI `/v1/chat/completions` | `c2-aider` | ✅ Validated |
+| C5b Claude Code | Anthropic `/v1/messages` | `c5-claude-code` | ✅ Validated |
+| C6b KiloCode | OpenAI `/v1/chat/completions` | `c6-kilocode` | ✅ Validated |
+| C7bb OpenClaw CLI | OpenAI `/v1/chat/completions` | `c7-openclaw` | ✅ Validated |
+| C7ab OpenClaw GW | Gateway standby `:18789/healthz` | `c7-openclaw` | ✅ Validated (standby) |
+| C8b Hermes Agent | OpenAI `/v1/chat/completions` | `c8-hermes` | ✅ Validated |
 
 ### C2 — Agent Terminal (Aider + OpenCode)
 

@@ -27,21 +27,22 @@
 
 ## 1. Overview
 
-This project wraps Microsoft Copilot behind a standard OpenAI- and Anthropic-compatible REST API. Eleven runtime containers handle the full stack:
+This project wraps Microsoft Copilot behind a standard OpenAI- and Anthropic-compatible REST API. Thirteen runtime containers handle the full stack (c3btest project):
 
 | # | Container | Port(s) | What it does |
 |---|---|---|---|
-| C1 | `app` | **8000** | FastAPI server — `/v1/chat/completions` (OpenAI) and `/v1/messages` (Anthropic) |
-| C2b | `agent-terminal` | — | Aider + OpenCode coding agents (interactive terminal) |
+| C1b | `app` | **8000** (host) | FastAPI server — `/v1/chat/completions` (OpenAI) and `/v1/messages` (Anthropic) |
+| C2b | `agent-terminal` | — (internal 8080) | Aider + OpenCode coding agents (interactive terminal) |
 | C3b | `browser-auth` | **6080**, **8001** | Headless Chromium + noVNC — cookie extraction and M365 browser proxy |
-| C5b | `claude-code-terminal` | — | Claude Code CLI (routes to C1) |
-| C6b | `kilocode-terminal` | — | KiloCode CLI (routes to C1) |
+| C5b | `claude-code-terminal` | — (internal 8080) | Claude Code CLI (routes to C1b) |
+| C6b | `kilocode-terminal` | — (internal 8080) | KiloCode CLI (routes to C1b) |
 | C7ab | `openclaw-gateway` | **18789** | OpenClaw WebSocket gateway |
-| C7bb | `openclaw-cli` | — | OpenClaw CLI / TUI |
-| C8b | `hermes-agent` | — | Hermes Agent — persistent memory, skills, cron jobs |
-| C9b | `c9-jokes` | **6090** | Validation console — chat UI, batch pairs, logs, health dashboard |
-| C10 | `c10-sandbox` | — | Internal agent workspace sandbox used by C9 `/api/agent/*` |
-| C11 | `c11-sandbox` | — | Internal multi-agent sandbox used by C9 `/api/multi-agent/*` |
+| C7bb | `openclaw-cli` | — (internal 8080) | OpenClaw CLI / TUI |
+| C8b | `hermes-agent` | — (internal 8080) | Hermes Agent — persistent memory, skills, cron jobs |
+| C9b | `c9-jokes` | **6090** (host) | Validation console — chat, agent, multi-agento, logs, tasked, health UI |
+| C10b | `c10b-sandbox` | **8310** (host) / 8210 (internal) | Agent workspace sandbox for C9b `/api/agent/*` |
+| C11b | `c11b-sandbox` | **8410** (host) / 8200 (internal) | Multi-agent session sandbox for C9b `/api/multi-Agento/*` |
+| C12b | `c12b-sandbox` | **8210** (host) | Lean coding/test sandbox for Tasked pipeline `/api/sandbox/exec` |
 
 All containers share the `copilot-net` Docker bridge network. Only the ports listed above are exposed to the host.
 
@@ -386,17 +387,18 @@ curl http://localhost:8001/health
 curl -sf http://localhost:6080/ | head -3
 # → HTML (noVNC page)
 
-# ── C7a — OpenClaw gateway ───────────────────────────────────
+# ── C7ab — OpenClaw gateway ──────────────────────────────────
 curl http://localhost:18789/healthz
 # → {"status":"ok"} or {"alive":true}
 
-# ── C9 — Validation console ──────────────────────────────────
+# ── C9b — Validation console ─────────────────────────────────
 curl http://localhost:6090/api/status
 # → JSON dict with keys for each container
 
-# ── C10 / C11 — Internal sandboxes ───────────────────────────
-docker compose exec c10-sandbox curl -sf http://localhost:8100/health
-docker compose exec c11-sandbox curl -sf http://localhost:8200/health
+# ── C10b / C11b / C12b — Sandboxes (host-exposed in c3btest) ─
+curl -sf http://localhost:8310/health   # C10b agent sandbox
+curl -sf http://localhost:8410/health   # C11b multi-agent sandbox
+curl -sf http://localhost:8210/health   # C12b lean sandbox
 
 # ── Agent containers (health via exec) ───────────────────────
 docker compose exec agent-terminal       curl -sf http://localhost:8080/health
@@ -410,18 +412,19 @@ docker compose exec hermes-agent         curl -sf http://localhost:8080/health
 
 | Container | Service | Check | Expected |
 |---|---|---|---|
-| C1 | `app` | `curl http://localhost:8000/health` | `{"status":"ok"}` |
-| C2 | `agent-terminal` | `docker compose exec agent-terminal curl -sf http://localhost:8080/health` | `ok` |
-| C3 | `browser-auth` | `curl http://localhost:8001/health` | `{"status":"ok"}` |
-| C3 noVNC | `browser-auth` | `curl -sf http://localhost:6080/` | HTML |
-| C5 | `claude-code-terminal` | `docker compose exec claude-code-terminal curl -sf http://localhost:8080/health` | `ok` |
-| C6 | `kilocode-terminal` | `docker compose exec kilocode-terminal curl -sf http://localhost:8080/health` | `ok` |
-| C7a | `openclaw-gateway` | `curl http://localhost:18789/healthz` | `{"status":"ok"}` |
-| C7b | `openclaw-cli` | `docker compose exec openclaw-cli curl -sf http://localhost:8080/health` | `ok` |
-| C8 | `hermes-agent` | `docker compose exec hermes-agent curl -sf http://localhost:8080/health` | `ok` |
-| C9 | `c9-jokes` | `curl http://localhost:6090/api/status` | JSON dict |
-| C10 | `c10-sandbox` | `docker compose exec c10-sandbox curl -sf http://localhost:8100/health` | `200 OK` JSON |
-| C11 | `c11-sandbox` | `docker compose exec c11-sandbox curl -sf http://localhost:8200/health` | `200 OK` JSON |
+| C1b | `app` | `curl http://localhost:8000/health` | `{"status":"ok"}` |
+| C2b | `agent-terminal` | `docker compose exec agent-terminal curl -sf http://localhost:8080/health` | `ok` |
+| C3b | `browser-auth` | `curl http://localhost:8001/health` | `{"status":"ok"}` |
+| C3b noVNC | `browser-auth` | `curl -sf http://localhost:6080/` | HTML |
+| C5b | `claude-code-terminal` | `docker compose exec claude-code-terminal curl -sf http://localhost:8080/health` | `ok` |
+| C6b | `kilocode-terminal` | `docker compose exec kilocode-terminal curl -sf http://localhost:8080/health` | `ok` |
+| C7ab | `openclaw-gateway` | `curl http://localhost:18789/healthz` | `{"status":"ok"}` |
+| C7bb | `openclaw-cli` | `docker compose exec openclaw-cli curl -sf http://localhost:8080/health` | `ok` |
+| C8b | `hermes-agent` | `docker compose exec hermes-agent curl -sf http://localhost:8080/health` | `ok` |
+| C9b | `c9-jokes` | `curl http://localhost:6090/api/status` | JSON dict |
+| C10b | `c10b-sandbox` | `curl -sf http://localhost:8310/health` | `200 OK` JSON |
+| C11b | `c11b-sandbox` | `curl -sf http://localhost:8410/health` | `200 OK` JSON |
+| C12b | `c12b-sandbox` | `curl -sf http://localhost:8210/health` | `200 OK` JSON |
 
 ---
 
@@ -435,8 +438,9 @@ docker compose exec hermes-agent         curl -sf http://localhost:8080/health
 | **C3 Setup** | `http://localhost:8001/setup` | Portal profile configuration form |
 | **C7a Gateway** | `http://localhost:18789` | OpenClaw WebSocket gateway |
 | **C9 Console** | `http://localhost:6090` | Validation dashboard — chat, pairs, logs, health |
-| **C10 Sandbox** | Internal only (`c10-sandbox:8100`) | Used by C9 `GET /api/agent/run` and related `/api/agent/*` APIs |
-| **C11 Sandbox** | Internal only (`c11-sandbox:8200`) | Used by C9 `GET /api/multi-agent/run` and related `/api/multi-agent/*` APIs |
+| **C10b Sandbox** | `http://localhost:8310` (host) | Agent workspace sandbox — used by C9b `/api/agent/*` APIs |
+| **C11b Sandbox** | `http://localhost:8410` (host) | Multi-agent session sandbox — used by C9b `/api/multi-Agento/*` APIs |
+| **C12b Sandbox** | `http://localhost:8210` (host) | Lean coding/test sandbox — used by Tasked pipeline `/api/sandbox/exec` |
 
 **C9 Pages:**
 

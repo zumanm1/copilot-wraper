@@ -1,9 +1,9 @@
 # ============================================================
 # Copilot OpenAI-Compatible API Wrapper — Docker Compose
 #
-# Container naming: Cy_name (C = Container, y = number)
+# Container naming: Cyb_name (C = Container, y = number, b = branch suffix)
 #
-#   C1_copilot-api        — FastAPI OpenAI-compatible API
+#   C1b_copilot-api       — FastAPI OpenAI-compatible API
 #                           Wraps Microsoft Copilot via WebSocket
 #                           Exposes: http://localhost:8000
 #
@@ -538,11 +538,12 @@ services:
       - C7B_URL=http://openclaw-cli:8080
       - C8_URL=http://hermes-agent:8080
       - DATABASE_PATH=/app/data/c9.db
-      - C10_URL=http://c10-sandbox:8100
-      - C11_URL=http://c11-sandbox:8200
-      - C12_URL=http://c12-sandbox:8080
+      # Legacy aliases — overridden by docker-compose.c3test.yml in c3btest project
+      # c3test active values: C10B→c10b-sandbox:8210, C11B→c11b-sandbox:8200, C12B→c12b-sandbox:8210
+      - C10_URL=http://c10b-sandbox:8210
+      - C11_URL=http://c11b-sandbox:8200
       - C12B_URL=http://c12b-sandbox:8210
-      - C10B_URL=http://c10b-sandbox:8310
+      - C10B_URL=http://c10b-sandbox:8210
     volumes:
       - ./c9_jokes:/app/c9_jokes
       - c9-data:/app/data
@@ -562,17 +563,9 @@ services:
       retries: 3
 
   # ──────────────────────────────────────────────────────────
-  # C10: AI Agent Sandbox (internal only — no host port)
-  #
-  # Isolated execution environment for the AI agent workspace.
-  # The agent can create files, run code, install packages, test,
-  # and validate results — all sandboxed from the host system.
-  #
-  # REST API on :8100 (internal Docker network only)
-  # Resource limits: 512 MB RAM, 0.5 CPU
-  # Non-root user: sandbox | Workspace: /workspace (named volume)
-  # ──────────────────────────────────────────────────────────
-  # C11: Multi-Agent Session-Scoped Sandbox (internal only — no host port)
+  # C11 (base): Multi-Agent Session-Scoped Sandbox (base image definition)
+  # NOTE: In c3btest project this is REPLACED by C11b_sandbox (c3test override).
+  # C11b uses image copilot-c11-sandbox:latest on internal port :8200, host :8410.
   #
   # Dedicated execution environment for /multi-Agento workspace.
   # Each multi-agent session is isolated in /workspace/{session_id}/
@@ -611,6 +604,8 @@ services:
     container_name: C10_sandbox
     mem_limit: 512m
     cpus: 0.5
+    # NOTE: In c3btest project this service is REPLACED by C10b_sandbox (c3test override).
+    # C10b uses image copilot-c12b-sandbox:latest on internal port :8210, host :8310.
     # No host port binding — accessible only via copilot-net as c10-sandbox:8100
     environment:
       - WORKSPACE=/workspace

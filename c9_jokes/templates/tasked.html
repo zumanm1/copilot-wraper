@@ -709,6 +709,7 @@ Alert config example:
     if (kind === 'complete') return {};
     if (kind === 'sandbox') return { executor_target: 'c12b', workspace_dir: fields.workspaceDir.value || '/workspace', command: fields.executor.value || '', validation_command: fields.validateCommand.value || '', test_command: fields.testCommand.value || '' };
     if (kind === 'agent' || kind === 'multi-agent' || kind === 'multi-agento') return { prompt: fields.executor.value || '', agent_id: 'c6-kilocode' };
+    if (kind === 'chat') return { prompt: fields.executor.value || fields.planner.value || '', agent_id: 'c6-kilocode' };
     return { prompt: fields.executor.value || fields.planner.value || '' };
   }
   function createStep(kind) {
@@ -765,7 +766,7 @@ Alert config example:
           '<label>On failure<input data-step-field="on_failure_step_id" data-step-index="' + index + '" value="' + esc(step.on_failure_step_id || '') + '" placeholder="optional"></label>' +
         '</div>' +
         '<label>Config JSON<textarea data-step-field="config" data-step-index="' + index + '">' + esc(JSON.stringify(step.config || {}, null, 2)) + '</textarea></label>' +
-        '<div class="tasked-inline-note">Kinds: trigger, condition, chat, sandbox, agent, multi-agent, multi-agento, alert, complete. Use <code>agent_id: "c6-kilocode"</code> for the live low-memory path on this machine.</div>' +
+        '<div class="tasked-inline-note">Kinds: trigger, condition, chat, sandbox, agent, multi-agent, multi-agento, alert, complete. Use <code>agent_id: "c6-kilocode"</code> (C2 aider, C6 kilocode, etc.) for chat and agent steps.</div>' +
       '</article>';
     }).join('');
     stepsListEl.querySelectorAll('[data-step-field]').forEach(function(el) {

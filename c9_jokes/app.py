@@ -1775,169 +1775,6 @@ async def _c10b_exec(
             }
 
 
-# ── C10b Sandbox helpers (shared coding sandbox for /agent + /multi-agento) ──
-
-async def _c10b_exec(
-    command: str,
-    timeout: int = 30,
-    cwd: str = ".",
-    session_id: str = "",
-    *,
-    step_id: str = "",
-    scope: str = "sandbox",
-    page: str = "sandbox",
-    owner_id: str = "",
-    task_id: str = "",
-    run_id: str = "",
-    operation: str = "exec",
-    recovery_session_id: str = "",
-    max_retries: int = 2,
-) -> dict:
-    client = _get_http()
-    base_timeout_ms = max(1000, int(timeout * 1000))
-    adaptive_timeout_ms = _session_manager_timeout_ms(scope, "c10b", operation, base_timeout_ms)
-    resume_payload = {
-        "scope": scope,
-        "page": page,
-        "owner_id": owner_id,
-        "task_id": task_id,
-        "run_id": run_id,
-        "step_id": step_id,
-        "upstream": "c10b",
-        "operation": operation,
-        "command": command,
-        "cwd": cwd,
-        "session_id": session_id,
-    }
-    session = _session_manager_create(
-        scope=scope,
-        page=page,
-        owner_id=owner_id or session_id,
-        task_id=task_id,
-        run_id=run_id,
-        upstream="c10b",
-        operation=operation,
-        timeout_ms=base_timeout_ms,
-        adaptive_timeout_ms=adaptive_timeout_ms,
-        max_retries=max_retries,
-        resume_payload=resume_payload,
-        state={"cwd": cwd, "command": command},
-        external_session_id=session_id,
-        session_id=recovery_session_id,
-    )
-    timeout_s = max(timeout, int((adaptive_timeout_ms + 999) / 1000))
-    attempts = 0
-    while True:
-        t0 = time.monotonic()
-        try:
-            r = await client.post(
-                f"{C10B_URL}/exec",
-                json={"command": command, "timeout": timeout_s, "cwd": cwd, "session_id": session_id},
-                timeout=timeout_s + 10,
-            )
-            elapsed_ms = int((time.monotonic() - t0) * 1000)
-            try:
-                payload = r.json()
-            except Exception:
-                payload = {"stdout": "", "stderr": r.text[:2000], "exit_code": -1, "timed_out": False}
-            payload["session_manager_id"] = session["id"]
-            payload["adaptive_timeout_ms"] = adaptive_timeout_ms
-            payload["timeout_used_ms"] = timeout_s * 1000
-            transient = bool(payload.get("timed_out")) or (r.status_code >= 500)
-            if transient and attempts < 1:
-                attempts += 1
-                timeout_s = max(timeout_s + 15, int((adaptive_timeout_ms * 1.35 + 999) / 1000))
-                _session_manager_update(
-                    session["id"],
-                    status="retrying",
-                    last_error="timeout or server error — retrying",
-                    last_elapsed_ms=elapsed_ms,
-                    adaptive_timeout_ms=timeout_s * 1000,
-                    state={"cwd": cwd, "command": command, "attempts": attempts},
-                )
-                continue
-            if transient:
-                current = _session_manager_get(session["id"]) or session
-                if int(current.get("retry_count") or 0) < int(current.get("max_retries") or max_retries):
-                    pending = _session_manager_mark_retryable(
-                        session["id"],
-                        elapsed_ms=elapsed_ms,
-                        error_text="timeout or server error",
-                        resume_payload=resume_payload,
-                        state={"cwd": cwd, "command": command, "timed_out": bool(payload.get("timed_out")), "attempts": attempts + 1},
-                    ) or current
-                    payload["retryable"] = True
-                    payload["resumable"] = True
-                    payload["session_manager"] = pending
-                    return payload
-            status = "completed" if int(payload.get("exit_code") or 0) == 0 and not payload.get("timed_out") and 200 <= r.status_code < 300 else "failed"
-            _session_manager_finish(
-                session["id"],
-                status=status,
-                elapsed_ms=elapsed_ms,
-                last_error=(payload.get("stderr") or f"HTTP {r.status_code}")[:1500] if status != "completed" else "",
-                state={"cwd": cwd, "command": command, "exit_code": payload.get("exit_code"), "timed_out": bool(payload.get("timed_out"))},
-                external_session_id=str(payload.get("session_id") or session_id),
-            )
-            return payload
-        except Exception as exc:
-            elapsed_ms = int((time.monotonic() - t0) * 1000)
-            error_text = str(exc)
-            transient = _is_timeoutish(error_text) or _is_networkish(error_text)
-            if transient and attempts < 1:
-                attempts += 1
-                timeout_s = max(timeout_s + 15, int((adaptive_timeout_ms * 1.35 + 999) / 1000))
-                _session_manager_update(
-                    session["id"],
-                    status="retrying",
-                    last_error=error_text[:1500],
-                    last_elapsed_ms=elapsed_ms,
-                    adaptive_timeout_ms=timeout_s * 1000,
-                    state={"cwd": cwd, "command": command, "attempts": attempts},
-                )
-                continue
-            if transient:
-                current = _session_manager_get(session["id"]) or session
-                if int(current.get("retry_count") or 0) < int(current.get("max_retries") or max_retries):
-                    pending = _session_manager_mark_retryable(
-                        session["id"],
-                        elapsed_ms=elapsed_ms,
-                        error_text=error_text,
-                        resume_payload=resume_payload,
-                        state={"cwd": cwd, "command": command, "attempts": attempts + 1},
-                    ) or current
-                    return {
-                        "stdout": "",
-                        "stderr": error_text,
-                        "exit_code": -1,
-                        "timed_out": _is_timeoutish(error_text),
-                        "session_id": session_id,
-                        "session_manager_id": session["id"],
-                        "adaptive_timeout_ms": adaptive_timeout_ms,
-                        "retryable": True,
-                        "resumable": True,
-                        "session_manager": pending,
-                    }
-            _session_manager_finish(
-                session["id"],
-                status="failed",
-                elapsed_ms=elapsed_ms,
-                last_error=error_text,
-                state={"cwd": cwd, "command": command, "attempts": attempts + 1},
-                external_session_id=session_id,
-            )
-            return {
-                "stdout": "",
-                "stderr": error_text,
-                "exit_code": -1,
-                "timed_out": _is_timeoutish(error_text),
-                "session_id": session_id,
-                "session_manager_id": session["id"],
-                "adaptive_timeout_ms": adaptive_timeout_ms,
-                "retryable": False,
-            }
-
-
 # ── Agentic loop — system prompt ──────────────────────────────────────────────
 
 AGENT_SYSTEM_PROMPT = """You are an AI coding assistant with access to a live Linux sandbox (Python 3.11, Node.js 20, pip, npm, bash).
@@ -5780,11 +5617,13 @@ def _task_mark_terminal(task_row: dict, run_id: str, *, status: str, text: str =
 
 
 async def _task_execute_chat_step(task_row: dict, step: dict, context: dict, *, run_id: str = "", recovery_session_id: str = "") -> dict:
-    prompt = str(_json_load_object(step.get("config")).get("prompt") or task_row.get("executor_prompt") or task_row.get("planner_prompt") or "").strip()
+    config = _json_load_object(step.get("config"))
+    prompt = str(config.get("prompt") or task_row.get("executor_prompt") or task_row.get("planner_prompt") or "").strip()
+    agent_id = str(config.get("agent_id") or "c6-kilocode")
     if not prompt:
         return {"ok": False, "error": "chat prompt required", "text": ""}
     return await _chat_one(
-        "c9-jokes-task",
+        agent_id,
         prompt,
         _urls()["c1"],
         chat_mode="deep",
