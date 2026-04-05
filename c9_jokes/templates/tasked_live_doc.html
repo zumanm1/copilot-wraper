@@ -7,18 +7,29 @@
    Uses app design system variables from style.css
    ═══════════════════════════════════════════════════════════════ */
 
-/* ── Full-width override — base.html main is 980px max-width  ── */
-/* This page is a 3-panel full-viewport layout; remove the cap   */
+/* ══ Full-viewport layout overrides (this page only) ══════════
+   base.html: main { max-width:980px; padding:1.25rem }
+   We replace all of that for this 3-panel app page.
+   Uses proper flex-fill instead of brittle calc(100vh - Npx).
+   ═══════════════════════════════════════════════════════════ */
+html, body { height: 100%; }
+body        { display: flex; flex-direction: column; }
+footer      { display: none !important; }   /* shown on all other pages */
 main {
   max-width: 100% !important;
   padding: 0 !important;
   margin: 0 !important;
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
 }
 
 /* ── Shell ──────────────────────────────────────────────────── */
 .tld {
   display: flex; flex-direction: column;
-  height: calc(100vh - 102px); margin: 0;
+  flex: 1;          /* fills main — no magic calc() needed       */
+  margin: 0;
   overflow: hidden; background: var(--bg);
 }
 
@@ -48,7 +59,7 @@ main {
 
 /* ── Left Nav ───────────────────────────────────────────────── */
 .tld-nav {
-  width: 200px; flex-shrink: 0; overflow-y: auto;
+  width: 220px; flex-shrink: 0; overflow-y: auto;
   background: var(--card); border-right: 1px solid var(--border);
   display: flex; flex-direction: column;
 }
@@ -126,7 +137,7 @@ main {
 
 /* ── Right Detail Panel ─────────────────────────────────────── */
 .tld-detail {
-  width: 300px; flex-shrink: 0; background: var(--card);
+  width: 340px; flex-shrink: 0; background: var(--card);
   border-left: 1px solid var(--border); display: flex; flex-direction: column;
   overflow: hidden; transition: width 0.2s, opacity 0.15s;
 }
@@ -472,7 +483,7 @@ main {
 /* Responsive */
 @media (max-width: 1100px) {
   .tld-detail { display: none; }
-  .tld-nav { width: 168px; }
+  .tld-nav { width: 180px; }
 }
 @media (max-width: 960px) {
   .tld-detail { display: none; }
@@ -1260,6 +1271,12 @@ main {
   window.switchToLive = function(trace) {
     showTab('live');
     selectTrace(trace);
+    // Auto-expand detail panel if it was collapsed — user clicked "Test in Live"
+    var det = document.getElementById('tld-detail');
+    if (det && det.classList.contains('collapsed')) {
+      det.classList.remove('collapsed');
+      localStorage.setItem('tld_detail_open', '1');
+    }
     var card = document.getElementById('card-' + trace);
     if (card) card.scrollIntoView({behavior:'smooth', block:'center'});
   };
@@ -1270,8 +1287,10 @@ main {
     var panel = document.getElementById('panel-doc');
     if (el && panel) {
       panel.scrollTop = el.offsetTop - 16;
-      // highlight nav item
+      // Clear all active states then highlight the matched nav item
       document.querySelectorAll('.tld-nav-item').forEach(function(n){ n.classList.remove('active'); });
+      var target = document.querySelector('.tld-nav-item[onclick="navDoc(\'' + anchor + '\')"]');
+      if (target) target.classList.add('active');
     }
   };
 
