@@ -7,10 +7,18 @@
    Uses app design system variables from style.css
    ═══════════════════════════════════════════════════════════════ */
 
+/* ── Full-width override — base.html main is 980px max-width  ── */
+/* This page is a 3-panel full-viewport layout; remove the cap   */
+main {
+  max-width: 100% !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
 /* ── Shell ──────────────────────────────────────────────────── */
 .tld {
   display: flex; flex-direction: column;
-  height: calc(100vh - 102px); margin: -1.25rem;
+  height: calc(100vh - 102px); margin: 0;
   overflow: hidden; background: var(--bg);
 }
 
