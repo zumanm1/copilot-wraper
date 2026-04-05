@@ -112,13 +112,13 @@
 <table>
   <thead><tr><th>Container</th><th>Internal URL</th><th>Health path</th></tr></thead>
   <tbody>
-  {% for key, t in targets.items() %}
+  {% for key, t in targets.items() %}{% if not t.get('hidden') %}
     <tr>
       <td><strong>{{ t.label }}</strong></td>
       <td><code>{{ urls[key] }}</code></td>
       <td><code>{{ t.health }}</code></td>
     </tr>
-  {% endfor %}
+  {% endif %}{% endfor %}
   </tbody>
 </table>
 

@@ -53,11 +53,11 @@ TARGETS = {
     "c7a": {"env": "C7A_URL", "default": "http://localhost:18789", "label": "C7ab openclaw-gateway", "health": "/healthz"},
     "c7b": {"env": "C7B_URL", "default": "http://localhost:8080",  "label": "C7bb openclaw-cli",     "health": "/health"},
     "c8":  {"env": "C8_URL",  "default": "http://localhost:8080",  "label": "C8b hermes-agent",      "health": "/health"},
-    "c10": {"env": "C10_URL", "default": "http://c10b-sandbox:8210", "label": "C10 agent sandbox (C10b)",  "health": "/health"},
-    "c11": {"env": "C11_URL", "default": "http://c11b-sandbox:8200", "label": "C11 multi-agent sandbox (C11b)", "health": "/health"},
+    "c10":  {"env": "C10_URL",  "default": "http://c10b-sandbox:8210", "label": "C10b agent sandbox",       "health": "/health", "hidden": True},
+    "c10b": {"env": "C10B_URL", "default": "http://c10b-sandbox:8210", "label": "C10b agent sandbox",       "health": "/health"},
+    "c11":  {"env": "C11_URL",  "default": "http://c11b-sandbox:8200", "label": "C11b multi-agent sandbox", "health": "/health", "hidden": True},
     "c11b": {"env": "C11B_URL", "default": "http://c11b-sandbox:8200", "label": "C11b multi-agent sandbox", "health": "/health"},
-    "c12b": {"env": "C12B_URL", "default": "http://c12b-sandbox:8210", "label": "C12b lean sandbox", "health": "/health"},
-    "c10b": {"env": "C10B_URL", "default": "http://c10b-sandbox:8210", "label": "C10b shared sandbox", "health": "/health"},
+    "c12b": {"env": "C12B_URL", "default": "http://c12b-sandbox:8210", "label": "C12b lean sandbox",        "health": "/health"},
 }
 
 # ── AI agents that can chat ───────────────────────────────────────────────────
