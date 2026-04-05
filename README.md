@@ -113,15 +113,15 @@ C1 receives prompt → POST C3 /chat → Playwright types in M365 UI → SignalR
 
 | Container | Name | Image | Port(s) | Purpose |
 |---|---|---|---|---|
-| C1 | `C1_copilot-api` | `copilot-api:latest` | `8000` | FastAPI — OpenAI + Anthropic API |
-| C3 | `C3_browser-auth` | `copilot-browser-auth:latest` | `6080`, `8001` | Cookie extraction via headless Chrome |
-| C2 | `C2_agent-terminal` | `copilot-agent-terminal:latest` | `8080` (health) | Aider + OpenCode AI agent terminal |
-| C5 | `C5_claude-code` | `copilot-claude-code-terminal:latest` | `8080` (health) | Claude Code CLI (Anthropic format) |
-| C6 | `C6_kilocode` | `copilot-kilocode-terminal:latest` | `8080` (health) | KiloCode CLI terminal |
-| C7a | `C7a_openclaw-gateway` | `copilot-openclaw-gateway:latest` | `18789` | OpenClaw gateway (WebSocket hub) |
-| C7b | `C7b_openclaw-cli` | `copilot-openclaw-cli:latest` | `8080` (health) | OpenClaw CLI / TUI |
-| C8 | `C8_hermes-agent` | `copilot-hermes-agent:latest` | `8080` (health) | Hermes Agent (memory, skills, cron) |
-| C9 | `C9_jokes` | `copilot-c9-jokes:latest` | `6090` | Validation console — chat, pairs, logs, health UI |
+| C1b | `C1b_copilot-api` | `copilot-api:latest` | `8000` | FastAPI — OpenAI + Anthropic API |
+| C3b | `C3b_browser-auth` | `copilot-browser-auth:latest` | `6080`, `8001` | Cookie extraction via headless Chrome |
+| C2b | `C2b_agent-terminal` | `copilot-agent-terminal:latest` | `8080` (health) | Aider + OpenCode AI agent terminal |
+| C5b | `C5b_claude-code` | `copilot-claude-code-terminal:latest` | `8080` (health) | Claude Code CLI (Anthropic format) |
+| C6b | `C6b_kilocode` | `copilot-kilocode-terminal:latest` | `8080` (health) | KiloCode CLI terminal |
+| C7ab | `C7ab_openclaw-gateway` | `copilot-openclaw-gateway:latest` | `18789` | OpenClaw gateway (WebSocket hub) |
+| C7bb | `C7bb_openclaw-cli` | `copilot-openclaw-cli:latest` | `8080` (health) | OpenClaw CLI / TUI |
+| C8b | `C8b_hermes-agent` | `copilot-hermes-agent:latest` | `8080` (health) | Hermes Agent (memory, skills, cron) |
+| C9b | `C9b_jokes` | `copilot-c9-jokes:latest` | `6090` | Validation console — chat, pairs, logs, health UI |
 | C10 | `C10_sandbox` | `copilot-c10-sandbox:latest` | (internal `8100`) | Agent workspace shell/file sandbox for `/agent` flows |
 | C11 | `C11_sandbox` | `copilot-c11-sandbox:latest` | (internal `8200`) | Session-scoped sandbox for `/multi-Agento` |
 | CT | `CT_tests` | `copilot-openai-wrapper-test:latest` | — | Playwright automated test suite |
@@ -147,12 +147,12 @@ Host Machine
 │  C1 copilot-api :8000                                              │
 │  /v1/chat/completions  /v1/messages  /v1/agent/*                   │
 │                      ▲                                             │
-│  C2 agent-terminal ──┤  (Aider, OpenCode)                          │
-│  C5 claude-code ─────┤  (Claude Code — Anthropic /v1)              │
-│  C6 kilocode ────────┤  (KiloCode)                                 │
-│  C7a openclaw-gw ────┤  :18789 (OpenClaw Gateway)                  │
-│  C7b openclaw-cli ───┤  (OpenClaw CLI)                             │
-│  C8 hermes-agent ────┘  (Hermes — memory, skills, cron)            │
+│  C2b agent-terminal ─┤  (Aider, OpenCode)                          │
+│  C5b claude-code ────┤  (Claude Code — Anthropic /v1)              │
+│  C6b kilocode ───────┤  (KiloCode)                                 │
+│  C7ab openclaw-gw ───┤  :18789 (OpenClaw Gateway)                  │
+│  C7bb openclaw-cli ──┤  (OpenClaw CLI)                             │
+│  C8b hermes-agent ───┘  (Hermes — memory, skills, cron)            │
 │                                                                    │
 │  CT tests ─────────HTTP tests──────► C1                            │
 └────────────────────────────────────────────────────────────────────┘
@@ -854,7 +854,7 @@ Hermes features available in C8:
 
 ```bash
 # Interactive Hermes CLI (persistent memory, skills, cron)
-docker compose exec C8_hermes-agent hermes
+docker compose exec C8b_hermes-agent hermes
 
 # One-shot ask (fast, via ask_helper → C1)
 docker compose run --rm hermes-agent ask "Summarise the Copilot API wrapper project"
@@ -1074,7 +1074,7 @@ docker compose run --rm hermes-agent status
 docker compose run --rm hermes-agent bash
 
 # Attach to the running standby container and open Hermes CLI
-docker compose exec C8_hermes-agent hermes
+docker compose exec C8b_hermes-agent hermes
 ```
 
 ---

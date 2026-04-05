@@ -11,8 +11,8 @@ OpenClaw is split across two containers:
 
 | Container | Service name | Port | Role |
 |---|---|---|---|
-| **C7a** `C7a_openclaw-gateway` | `openclaw-gateway` | **18789** (host + internal) | WebSocket gateway — multiplexes CLI clients through C1 |
-| **C7b** `C7b_openclaw-cli` | `openclaw-cli` | 8080 (internal health) | CLI / TUI — connects to C7a gateway |
+| **C7ab** `C7ab_openclaw-gateway` | `openclaw-gateway` | **18789** (host + internal) | WebSocket gateway — multiplexes CLI clients through C1 |
+| **C7bb** `C7bb_openclaw-cli` | `openclaw-cli` | 8080 (internal health) | CLI / TUI — connects to C7ab gateway |
 
 **Agent ID:** `c7-openclaw`
 **Base image:** `node:22-alpine` (requires Node ≥ 22.16 — native addon compilation)

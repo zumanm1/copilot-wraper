@@ -7,17 +7,17 @@
 #                           Wraps Microsoft Copilot via WebSocket
 #                           Exposes: http://localhost:8000
 #
-#   C2_agent-terminal     — Interactive AI Agent Terminal
+#   C2b_agent-terminal    — Interactive AI Agent Terminal
 #                           Runs Aider / OpenCode
 #                           Uses C1 for inference
 #
-#   C3_browser-auth       — Headless Chrome Cookie Extractor
-#   C5_claude-code        — Claude Code CLI Terminal
-#   C6_kilocode           — KiloCode CLI Terminal
-#   C7a_openclaw-gateway  — OpenClaw Gateway
-#   C7b_openclaw-cli      — OpenClaw CLI / TUI
-#   C8_hermes-agent       — Hermes Agent (persistent memory, skills, cron)
-#   C9_jokes              — Flask validation UI + API (port 6090)
+#   C3b_browser-auth      — Headless Chrome Cookie Extractor
+#   C5b_claude-code       — Claude Code CLI Terminal
+#   C6b_kilocode          — KiloCode CLI Terminal
+#   C7ab_openclaw-gateway — OpenClaw Gateway
+#   C7bb_openclaw-cli     — OpenClaw CLI / TUI
+#   C8b_hermes-agent      — Hermes Agent (persistent memory, skills, cron)
+#   C9b_jokes             — Flask validation UI + API (port 6090)
 #   CT_tests              — Playwright automated test suite
 #
 # ── Quick start ───────────────────────────────────────────────
@@ -49,7 +49,7 @@ services:
       dockerfile: Dockerfile
       target: runtime
     image: copilot-api:latest
-    container_name: C1_copilot-api
+    container_name: C1b_copilot-api
     ports:
       - "8000:8000"
     env_file:
@@ -112,7 +112,7 @@ services:
       context: .
       dockerfile: Dockerfile.agent
     image: copilot-agent-terminal:latest
-    container_name: C2_agent-terminal
+    container_name: C2b_agent-terminal
     profiles: ["optional"]
     depends_on:
       app:
@@ -135,7 +135,7 @@ services:
       - ./workspace:/workspace
     networks:
       - copilot-net
-    # Default: standby health server. Interactive: docker compose exec C2_agent-terminal bash
+    # Default: standby health server. Interactive: docker compose exec C2b_agent-terminal bash
     command: ["standby"]
     stdin_open: true
     tty: true
@@ -174,7 +174,7 @@ services:
       context: .
       dockerfile: Dockerfile.openclaw-gw
     image: copilot-openclaw-gateway:latest
-    container_name: C7a_openclaw-gateway
+    container_name: C7ab_openclaw-gateway
     profiles: ["optional"]
     depends_on:
       app:
@@ -232,7 +232,7 @@ services:
       context: .
       dockerfile: Dockerfile.openclaw-cli
     image: copilot-openclaw-cli:latest
-    container_name: C7b_openclaw-cli
+    container_name: C7bb_openclaw-cli
     profiles: ["optional"]
     depends_on:
       - openclaw-gateway
@@ -277,7 +277,7 @@ services:
       context: .
       dockerfile: Dockerfile.claude-code
     image: copilot-claude-code-terminal:latest
-    container_name: C5_claude-code
+    container_name: C5b_claude-code
     profiles: ["optional"]
     depends_on:
       app:
@@ -326,7 +326,7 @@ services:
       context: .
       dockerfile: Dockerfile.kilocode
     image: copilot-kilocode-terminal:latest
-    container_name: C6_kilocode
+    container_name: C6b_kilocode
     depends_on:
       app:
         condition: service_healthy
@@ -371,8 +371,8 @@ services:
   #
   # Standby (default): health server on :8080, exec in for interactive use
   # Interactive:
-  #   docker compose exec C8_hermes-agent hermes
-  #   docker compose exec C8_hermes-agent bash
+  #   docker compose exec C8b_hermes-agent hermes
+  #   docker compose exec C8b_hermes-agent bash
   # One-shot ask:
   #   docker compose run --rm hermes-agent ask "question"
   #   docker compose run --rm hermes-agent hermes-chat "question"
@@ -382,7 +382,7 @@ services:
       context: .
       dockerfile: Dockerfile.hermes
     image: copilot-hermes-agent:latest
-    container_name: C8_hermes-agent
+    container_name: C8b_hermes-agent
     profiles: ["optional"]
     depends_on:
       app:
@@ -411,7 +411,7 @@ services:
       - ./workspace:/workspace
     networks:
       - copilot-net
-    # Default: standby health server. Interactive: docker compose exec C8_hermes-agent hermes
+    # Default: standby health server. Interactive: docker compose exec C8b_hermes-agent hermes
     command: ["standby"]
     stdin_open: true
     tty: true
@@ -480,7 +480,7 @@ services:
       context: .
       dockerfile: Dockerfile.browser
     image: copilot-browser-auth:latest
-    container_name: C3_browser-auth
+    container_name: C3b_browser-auth
     ports:
       - "6080:6080"    # noVNC web UI
       - "8001:8001"    # Cookie extractor API
@@ -524,7 +524,7 @@ services:
       context: .
       dockerfile: Dockerfile.c9-jokes
     image: copilot-c9-jokes:latest
-    container_name: C9_jokes
+    container_name: C9b_jokes
     ports:
       - "6090:6090"
     environment:
@@ -713,7 +713,7 @@ services:
 
 # ── Shared network ────────────────────────────────────────────
 # All containers communicate via this bridge network.
-# C1_copilot-api:8000 | C7a_openclaw-gateway:18789 | C3_browser-auth:8001 | C9_jokes:6090
+# C1b_copilot-api:8000 | C7ab_openclaw-gateway:18789 | C3b_browser-auth:8001 | C9b_jokes:6090
 networks:
   copilot-net:
     driver: bridge

@@ -45,14 +45,14 @@ C10B_URL = os.environ.get("C10B_URL", "http://c10b-sandbox:8210").rstrip("/")
 
 # ── Container targets ─────────────────────────────────────────────────────────
 TARGETS = {
-    "c1":  {"env": "C1_URL",  "default": "http://localhost:8000",  "label": "C1 copilot-api",       "health": "/health"},
-    "c2":  {"env": "C2_URL",  "default": "http://localhost:8080",  "label": "C2 agent-terminal",    "health": "/health"},
-    "c3":  {"env": "C3_URL",  "default": "http://localhost:8001",  "label": "C3 browser-auth",      "health": "/health"},
-    "c5":  {"env": "C5_URL",  "default": "http://localhost:8080",  "label": "C5 claude-code",       "health": "/health"},
-    "c6":  {"env": "C6_URL",  "default": "http://localhost:8080",  "label": "C6 kilocode",          "health": "/health"},
-    "c7a": {"env": "C7A_URL", "default": "http://localhost:18789", "label": "C7a openclaw-gateway", "health": "/healthz"},
-    "c7b": {"env": "C7B_URL", "default": "http://localhost:8080",  "label": "C7b openclaw-cli",     "health": "/health"},
-    "c8":  {"env": "C8_URL",  "default": "http://localhost:8080",  "label": "C8 hermes-agent",      "health": "/health"},
+    "c1":  {"env": "C1_URL",  "default": "http://localhost:8000",  "label": "C1b copilot-api",       "health": "/health"},
+    "c2":  {"env": "C2_URL",  "default": "http://localhost:8080",  "label": "C2b agent-terminal",    "health": "/health"},
+    "c3":  {"env": "C3_URL",  "default": "http://localhost:8001",  "label": "C3b browser-auth",      "health": "/health"},
+    "c5":  {"env": "C5_URL",  "default": "http://localhost:8080",  "label": "C5b claude-code",       "health": "/health"},
+    "c6":  {"env": "C6_URL",  "default": "http://localhost:8080",  "label": "C6b kilocode",          "health": "/health"},
+    "c7a": {"env": "C7A_URL", "default": "http://localhost:18789", "label": "C7ab openclaw-gateway", "health": "/healthz"},
+    "c7b": {"env": "C7B_URL", "default": "http://localhost:8080",  "label": "C7bb openclaw-cli",     "health": "/health"},
+    "c8":  {"env": "C8_URL",  "default": "http://localhost:8080",  "label": "C8b hermes-agent",      "health": "/health"},
     "c10": {"env": "C10_URL", "default": "http://c10b-sandbox:8210", "label": "C10 agent sandbox (C10b)",  "health": "/health"},
     "c11": {"env": "C11_URL", "default": "http://c11b-sandbox:8200", "label": "C11 multi-agent sandbox (C11b)", "health": "/health"},
     "c11b": {"env": "C11B_URL", "default": "http://c11b-sandbox:8200", "label": "C11b multi-agent sandbox", "health": "/health"},
@@ -62,12 +62,12 @@ TARGETS = {
 
 # ── AI agents that can chat ───────────────────────────────────────────────────
 AGENTS = [
-    {"id": "c2-aider",       "label": "C2 Aider (OpenAI)"},
-    {"id": "c5-claude-code", "label": "C5 Claude Code (Anthropic)"},
-    {"id": "c6-kilocode",    "label": "C6 KiloCode (OpenAI)"},
-    {"id": "c7-openclaw",    "label": "C7b OpenClaw"},
-    {"id": "c8-hermes",      "label": "C8 Hermes Agent"},
-    {"id": "c9-jokes",       "label": "C9 (generic session)"},
+    {"id": "c2-aider",       "label": "C2b Aider (OpenAI)"},
+    {"id": "c5-claude-code", "label": "C5b Claude Code (Anthropic)"},
+    {"id": "c6-kilocode",    "label": "C6b KiloCode (OpenAI)"},
+    {"id": "c7-openclaw",    "label": "C7bb OpenClaw"},
+    {"id": "c8-hermes",      "label": "C8b Hermes Agent"},
+    {"id": "c9-jokes",       "label": "C9b (generic session)"},
 ]
 
 TASK_MODE_OPTIONS = [
@@ -103,12 +103,12 @@ TASKED_TYPE_OPTIONS = [
 ]
 
 TASK_AGENT_TARGET_OPTIONS = [
-    {"id": "c2-aider", "label": "C2"},
-    {"id": "c5-claude-code", "label": "C5"},
-    {"id": "c6-kilocode", "label": "C6"},
-    {"id": "c7-openclaw", "label": "C7b"},
-    {"id": "c8-hermes", "label": "C8"},
-    {"id": "c9-jokes", "label": "C9 Generic"},
+    {"id": "c2-aider", "label": "C2b"},
+    {"id": "c5-claude-code", "label": "C5b"},
+    {"id": "c6-kilocode", "label": "C6b"},
+    {"id": "c7-openclaw", "label": "C7bb"},
+    {"id": "c8-hermes", "label": "C8b"},
+    {"id": "c9-jokes", "label": "C9b Generic"},
 ]
 
 TASK_SANDBOX_DEFAULTS = {
@@ -9476,9 +9476,9 @@ async def api_sandbox_exec(request: Request):
 # ── Container control API (start/stop optional containers) ───────────────────
 
 # Containers that can be toggled on/off to save resources
-_OPTIONAL_CONTAINERS = {"C2_agent-terminal", "C5_claude-code", "C7a_openclaw-gateway", "C7b_openclaw-cli", "C8_hermes-agent", "C12b_sandbox"}
+_OPTIONAL_CONTAINERS = {"C2b_agent-terminal", "C5b_claude-code", "C7ab_openclaw-gateway", "C7bb_openclaw-cli", "C8b_hermes-agent", "C12b_sandbox"}
 # Containers that must stay running
-_CORE_CONTAINERS = {"C1b_copilot-api", "C3b_browser-auth", "C6_kilocode", "C9b_jokes", "C10b_sandbox", "C11b_sandbox"}
+_CORE_CONTAINERS = {"C1b_copilot-api", "C3b_browser-auth", "C6b_kilocode", "C9b_jokes", "C10b_sandbox", "C11b_sandbox"}
 
 
 @app.get("/api/containers", name="api_containers")

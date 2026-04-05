@@ -76,14 +76,14 @@
         <td>List all Docker containers with status and toggleable flag.<br>
         Returns: <code>{"ok":true,"containers":[{"name":"…","status":"…","state":"running","toggleable":true,"core":false}]}</code></td></tr>
     <tr><td>POST</td><td><code>/api/container/toggle</code></td>
-        <td>Start or stop an optional container (C2, C5, C7a, C7b, C8 only — core containers are protected).<br>
-        Body: <code>{"name":"C2_agent-terminal","action":"stop"}</code><br>
+        <td>Start or stop an optional container (C2b, C5b, C7ab, C7bb, C8b only — core containers are protected).<br>
+        Body: <code>{"name":"C2b_agent-terminal","action":"stop"}</code><br>
         Returns: <code>{"ok":true,"name":"…","action":"stop","output":"…"}</code></td></tr>
   </tbody>
 </table>
 <p style="font-size:.8rem;color:var(--muted);">
-  <strong>Core containers</strong> (always protected, cannot be toggled): C1, C3, C6, C9, C10, C11<br>
-  <strong>Optional containers</strong> (can be started/stopped): C2, C5, C7a, C7b, C8
+  <strong>Core containers</strong> (always protected, cannot be toggled): C1b, C3b, C6b, C9b, C10b, C11b<br>
+  <strong>Optional containers</strong> (can be started/stopped): C2b, C5b, C7ab, C7bb, C8b
 </p>
 
 <h3>SSE Streaming — Event Reference</h3>
@@ -138,7 +138,7 @@
 <h3>Example: Stop a Container</h3>
 <pre>curl -sS -X POST http://localhost:6090/api/container/toggle \
   -H "Content-Type: application/json" \
-  -d '{"name":"C2_agent-terminal","action":"stop"}'</pre>
+  -d '{"name":"C2b_agent-terminal","action":"stop"}'</pre>
 
 <h3>Example: Direct C1 Call (streaming)</h3>
 <pre>curl -sS -X POST {{ urls.c1 }}/v1/chat/completions \
@@ -160,12 +160,12 @@
 <table>
   <thead><tr><th>Agent</th><th>X-Agent-ID</th><th>Protocol path</th></tr></thead>
   <tbody>
-    <tr><td>C2 Aider</td><td><code>c2-aider</code></td><td>OpenAI → C1 → Copilot</td></tr>
-    <tr><td>C5 Claude Code</td><td><code>c5-claude-code</code></td><td>Anthropic → C1 → Copilot</td></tr>
-    <tr><td>C6 KiloCode</td><td><code>c6-kilocode</code></td><td>OpenAI → C1 → Copilot</td></tr>
-    <tr><td>C7b OpenClaw</td><td><code>c7-openclaw</code></td><td>OpenClaw → C1 → Copilot</td></tr>
-    <tr><td>C8 Hermes</td><td><code>c8-hermes</code></td><td>OpenAI → C1 → Copilot</td></tr>
-    <tr><td>C9 Generic</td><td><code>c9-jokes</code></td><td>Direct → C1 → Copilot</td></tr>
+    <tr><td>C2b Aider</td><td><code>c2-aider</code></td><td>OpenAI → C1 → Copilot</td></tr>
+    <tr><td>C5b Claude Code</td><td><code>c5-claude-code</code></td><td>Anthropic → C1 → Copilot</td></tr>
+    <tr><td>C6b KiloCode</td><td><code>c6-kilocode</code></td><td>OpenAI → C1 → Copilot</td></tr>
+    <tr><td>C7bb OpenClaw</td><td><code>c7-openclaw</code></td><td>OpenClaw → C1 → Copilot</td></tr>
+    <tr><td>C8b Hermes</td><td><code>c8-hermes</code></td><td>OpenAI → C1 → Copilot</td></tr>
+    <tr><td>C9b Generic</td><td><code>c9-jokes</code></td><td>Direct → C1 → Copilot</td></tr>
   </tbody>
 </table>
 {% endblock %}

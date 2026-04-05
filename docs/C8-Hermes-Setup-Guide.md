@@ -52,7 +52,7 @@ docker compose run --rm hermes-agent hermes-chat "What is 2+2?"
 # 5. Interactive Hermes agent session
 docker compose run --rm hermes-agent hermes
 # Or attach to the running standby container:
-docker compose exec C8_hermes-agent hermes
+docker compose exec C8b_hermes-agent hermes
 
 # 6. Bash shell with helpers
 docker compose run --rm hermes-agent bash
@@ -113,7 +113,7 @@ Data survives container restarts and rebuilds.
 
 ## Hermes Interactive Commands
 
-Once inside the Hermes CLI (`hermes` or `docker compose exec C8_hermes-agent hermes`):
+Once inside the Hermes CLI (`hermes` or `docker compose exec C8b_hermes-agent hermes`):
 
 | Command | Description |
 |---------|-------------|

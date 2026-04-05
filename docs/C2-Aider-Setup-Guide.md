@@ -68,7 +68,7 @@ docker compose run --rm agent-terminal bash
 # Then run: aider
 
 # Option 3: Exec into running C2
-docker compose exec C2_agent-terminal bash
+docker compose exec C2b_agent-terminal bash
 # Then run: aider
 ```
 
