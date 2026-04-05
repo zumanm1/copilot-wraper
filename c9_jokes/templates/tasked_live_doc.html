@@ -841,6 +841,51 @@
                 </div>
               </div>
 
+              <!-- TRACE-006: curl Timing Metrics (output · sandbox) -->
+              <div class="tld-type-card bl-output" id="type-trace006">
+                <div class="tld-type-card-header">
+                  <div class="tld-type-meta">
+                    <span class="tld-type-pill bg-output">output</span>
+                    <span class="tld-type-pill" style="background:rgba(34,211,238,0.15);color:#22d3ee;border-color:#22d3ee40;">sandbox</span>
+                    <span class="tld-type-pill" style="background:rgba(34,211,238,0.08);color:#22d3ee;border-color:#22d3ee30;font-family:monospace;font-size:0.68rem;">C12b</span>
+                  </div>
+                  <div class="tld-type-title">curl Timing Metrics <span class="muted" style="font-size:0.8rem;">TRACE-006</span></div>
+                  <div class="tld-type-desc">Real network timing metrics for <code>https://google.co.za</code> — executed live in C12b sandbox. Returns <code>remote_ip</code>, <code>dns</code>, <code>connect</code>, <code>tls</code>, <code>ttfb</code>, <code>total</code>, <code>url_effective</code>.</div>
+                </div>
+                <div class="tld-type-body">
+                  <div class="tld-detail-section">
+                    <span class="tld-info-key">Mode</span><span class="tld-info-val" style="color:#22d3ee;">sandbox → C12b Lean Sandbox (:8210)</span>
+                    <span class="tld-info-key">Type</span><span class="tld-info-val">output — stdout is the result</span>
+                    <span class="tld-info-key">Executor prompt</span><span class="tld-info-val mono" style="font-size:0.72rem;word-break:break-all;">curl -L -o /dev/null -s -w "remote_ip: %{remote_ip}\n..." https://google.co.za</span>
+                    <span class="tld-info-key">Real output</span><span class="tld-info-val mono" style="font-size:0.72rem;">remote_ip: 142.251.150.119 · redirects: 2 · dns: 0.025s · tls: 0.719s · total: 2.525s</span>
+                    <span class="tld-info-key">Duration</span><span class="tld-info-val">2s (actual network round-trip — not AI inference)</span>
+                    <span class="tld-info-key">Key difference</span><span class="tld-info-val">Unlike chat-mode tasks, this runs a real shell command. Output is live data, not AI-generated text.</span>
+                  </div>
+                  <div class="tld-flow">
+                    <span class="tld-flow-step">POST /api/tasks</span><span class="tld-flow-arr">&rarr;</span>
+                    <span class="tld-flow-step on">task_id created</span><span class="tld-flow-arr">&rarr;</span>
+                    <span class="tld-flow-step">POST /run</span><span class="tld-flow-arr">&rarr;</span>
+                    <span class="tld-flow-step on" style="color:#22d3ee;">C12b curl exec</span><span class="tld-flow-arr">&rarr;</span>
+                    <span class="tld-flow-step on">alert fired</span><span class="tld-flow-arr">&rarr;</span>
+                    <span class="tld-flow-step on">completed</span>
+                  </div>
+                  <div class="tld-code"><span class="cm"># Create sandbox output task (curl metrics)</span>
+<span class="kw">curl</span> -X POST :6090/api/tasks -d <span class="st">'{"name":"curl timing metrics","mode":"sandbox",
+  "executor_target":"c12b","workspace_dir":"/workspace",
+  "executor_prompt":"curl -L -o /dev/null -s -w \"remote_ip: %{remote_ip}\\n...\" https://google.co.za",
+  "steps":[
+    {"id":"s1","kind":"trigger","position":1},
+    {"id":"s2","kind":"sandbox","position":2},
+    {"id":"s3","kind":"alert","position":3},
+    {"id":"s4","kind":"complete","position":4}]}'</span>
+<span class="kw">curl</span> -X POST :6090/api/tasks/<span class="ky">task_0fa71c05</span>/run</div>
+                  <div class="tld-type-footer">
+                    <span class="tld-type-trace-ids">TRACE-006 &middot; task_0fa71c05 &middot; trun_8f96588e &middot; alert=663 &middot; 2s</span>
+                    <button class="tld-btn run sm" onclick="switchToLive('TRACE-006')">Test in Live</button>
+                  </div>
+                </div>
+              </div>
+
             </div><!-- end type grid -->
           </div>
 
@@ -900,6 +945,15 @@
                     <td class="muted">chat</td>
                     <td class="mono">trun_84413c8c</td><td class="mono">438</td>
                     <td class="ok">completed</td><td class="muted">7m 40s</td>
+                  </tr>
+                  <tr>
+                    <td class="accent">TRACE-006</td>
+                    <td>curl Timing Metrics — google.co.za</td>
+                    <td class="mono">task_0fa71c05</td>
+                    <td><span class="tld-pill bg-output">output</span></td>
+                    <td style="color:#22d3ee;">sandbox</td>
+                    <td class="mono">trun_8f96588e</td><td class="mono">663</td>
+                    <td class="ok">completed</td><td class="muted">2s</td>
                   </tr>
                   <tr>
                     <td class="accent">TRACE-010</td>
@@ -1111,6 +1165,24 @@
         {id:'nt5_chat',name:'Audit Report',kind:'chat',position:2},
         {id:'nt5_alert',name:'Audit Alert',kind:'alert',position:3,config:{title:'Security Audit Ready',severity:'high',summary:'Review findings'}},
         {id:'nt5_complete',name:'Complete',kind:'complete',position:4}
+      ]
+    },
+    {
+      trace:'TRACE-006', type:'output', typeColor:'#4ade80', typeCls:'sandbox',
+      mode:'sandbox', target:'C12b',
+      task_id:'task_0fa71c05', run_id:'trun_8f96588e', alert_id:663,
+      name:'curl Timing Metrics — google.co.za',
+      desc:'output · sandbox → C12b:8210 · real curl timing metrics for google.co.za',
+      planner:'Execute the curl command directly in the C12b sandbox. Return the raw stdout output as the task result.',
+      executor:'curl -L -o /dev/null -s -w "remote_ip: %{remote_ip}\\nnum_redirects: %{num_redirects}\\ndns: %{time_namelookup}\\nconnect: %{time_connect}\\ntls: %{time_appconnect}\\nttfb: %{time_starttransfer}\\ntotal: %{time_total}\\nurl_effective: %{url_effective}\\n" https://google.co.za',
+      trigger_mode:'always', executor_target:'c12b',
+      validation_command:'',
+      test_command:'',
+      steps:[
+        {id:'tr6_trigger',name:'Trigger',kind:'trigger',position:1},
+        {id:'tr6_sandbox',name:'curl Probe',kind:'sandbox',position:2,config:{command:"curl -L -o /dev/null -s -w 'remote_ip: %{remote_ip}\\nnum_redirects: %{num_redirects}\\ndns: %{time_namelookup}\\nconnect: %{time_connect}\\ntls: %{time_appconnect}\\nttfb: %{time_starttransfer}\\ntotal: %{time_total}\\nurl_effective: %{url_effective}\\n' https://google.co.za",target:'c12b'}},
+        {id:'tr6_alert',name:'Metrics Alert',kind:'alert',position:3,config:{title:'curl Metrics Ready',severity:'info',summary:'Live timing metrics from google.co.za'}},
+        {id:'tr6_complete',name:'Complete',kind:'complete',position:4}
       ]
     },
     {
