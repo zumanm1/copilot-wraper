@@ -622,54 +622,6 @@ services:
       retries: 3
 
   # ──────────────────────────────────────────────────────────
-  # C12: AIO Sandbox (optional, host-exposed)
-  #
-  # Official upstream image: ghcr.io/agent-infra/sandbox:latest
-  # Purpose: general-purpose code/test sandbox reachable from the host via
-  # the AIO Sandbox SDK on http://localhost:8080.
-  #
-  # This branch keeps C12 optional because memory is constrained. It uses the
-  # officially documented low-cost feature flags:
-  #   - DISABLE_CODE_SERVER=true
-  #   - DISABLE_JUPYTER=true
-  #
-  # Notes:
-  #   - Browser disabling is not wired here because that flag is not
-  #     documented in the official upstream compose/runtime surface.
-  #   - Workspace is bind-mounted to ./workspace so files remain visible on
-  #     the host and across container restarts.
-  # ──────────────────────────────────────────────────────────
-  c12-sandbox:
-    image: ghcr.io/agent-infra/sandbox:latest
-    container_name: C12_sandbox
-    profiles: ["optional"]
-    security_opt:
-      - seccomp:unconfined
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    mem_limit: 1g
-    cpus: 2.0
-    shm_size: 512m
-    ports:
-      - "8080:8080"
-    environment:
-      - WORKSPACE=/home/gem
-      - DISABLE_CODE_SERVER=true
-      - DISABLE_JUPYTER=true
-      - TZ=Africa/Johannesburg
-    volumes:
-      - ./workspace:/home/gem
-    networks:
-      - copilot-net
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "curl -sf http://localhost:8080/v1/docs >/dev/null"]
-      interval: 30s
-      timeout: 10s
-      start_period: 30s
-      retries: 5
-
-  # ──────────────────────────────────────────────────────────
   # C12b: Lean coding/test sandbox (optional, host-exposed)
   #
   # Lightweight branch-only alternative to the full upstream AIO Sandbox.
