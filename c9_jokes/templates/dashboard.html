@@ -1,0 +1,449 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+
+<!-- ── System Overview Banner ─────────────────────────────────────────────── -->
+<div id="system-banner" style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;margin-bottom:1rem;">
+  <!-- C3 / 6080 status -->
+  <div class="card" id="c3-banner-card" style="padding:0.75rem 1rem;display:flex;align-items:center;gap:0.75rem;">
+    <span id="c3-banner-dot" style="width:12px;height:12px;border-radius:50%;background:var(--muted);flex-shrink:0;"></span>
+    <div>
+      <div style="font-size:0.82rem;color:var(--muted);margin-bottom:0.1rem;">App 6080 — C3 browser-auth</div>
+      <div id="c3-banner-label" style="font-weight:600;font-size:0.95rem;">Checking…</div>
+    </div>
+  </div>
+  <!-- M365 session status -->
+  <div class="card" id="m365-banner-card" style="padding:0.75rem 1rem;display:flex;align-items:center;gap:0.75rem;">
+    <span id="m365-banner-dot" style="width:12px;height:12px;border-radius:50%;background:var(--muted);flex-shrink:0;"></span>
+    <div>
+      <div style="font-size:0.82rem;color:var(--muted);margin-bottom:0.1rem;">M365 Session — Copilot Auth</div>
+      <div id="m365-banner-label" style="font-weight:600;font-size:0.95rem;">Checking…</div>
+    </div>
+  </div>
+</div>
+<script>
+(function() {
+  function updateBannerCard(dotId, labelId, cardId, ok, label) {
+    var dot   = document.getElementById(dotId);
+    var lbl   = document.getElementById(labelId);
+    var card  = document.getElementById(cardId);
+    if (!dot) return;
+    var color = ok ? 'var(--ok)' : 'var(--fail)';
+    dot.style.background = color;
+    if (ok) dot.style.animation = '';
+    else dot.style.animation = 'led-pulse 1.2s ease-in-out infinite';
+    lbl.textContent = label;
+    lbl.style.color = color;
+    card.style.borderColor = ok ? 'rgba(48,209,88,0.35)' : 'rgba(255,59,48,0.35)';
+  }
+  function refreshBanner() {
+    fetch('/api/runtime-status').then(function(r){return r.json();}).then(function(d){
+      var c3 = (d.components || {}).c3 || {};
+      var pool = (d.components || {}).c3_pool || {};
+      var c3Ok = c3.state === 'ok' || c3.state === 'slow';
+      var poolLabel = pool.pool_initialized ? (' · pool ' + (pool.pool_available||0) + '/' + (pool.pool_size||0)) : '';
+      var c3Label = c3Ok ? ((c3.state === 'slow' ? 'Slow' : 'Online') + ' · ' + (c3.elapsed_ms || 0) + 'ms' + poolLabel)
+                         : (c3.message || 'DOWN');
+      updateBannerCard('c3-banner-dot','c3-banner-label','c3-banner-card', c3Ok, c3Label);
+      var m365 = (d.components || {}).m365 || {};
+      var active = m365.state === 'active';
+      var mode = m365.chat_mode ? (' · ' + m365.chat_mode.charAt(0).toUpperCase() + m365.chat_mode.slice(1)) : '';
+      updateBannerCard('m365-banner-dot','m365-banner-label','m365-banner-card',
+        active, active ? ('Authenticated' + mode) : (m365.message || 'Unknown'));
+    }).catch(function(){
+      updateBannerCard('c3-banner-dot','c3-banner-label','c3-banner-card', false, 'Status check failed');
+      updateBannerCard('m365-banner-dot','m365-banner-label','m365-banner-card', false, 'Unreachable');
+    });
+  }
+  refreshBanner();
+  setInterval(refreshBanner, 15000);
+})();
+</script>
+
+<div class="status-bar{% if up == total %} bar-ok{% elif up == 0 %} bar-fail{% else %} bar-warn{% endif %}" id="status-bar">
+  <span id="summary-text">
+    <strong id="up-count">{{ up }}</strong> / <strong>{{ total }}</strong> containers UP
+  </span>
+  <span class="status-ts" id="status-ts">Last checked: —</span>
+  <button type="button" id="refresh-btn" class="btn-sm">Refresh now</button>
+</div>
+
+<div class="card-grid" id="card-grid">
+{% for p in probes %}
+  <div class="card probe-card" id="card-{{ loop.index0 }}" data-key="{{ loop.index0 }}">
+    <div class="card-header">
+      <strong>{{ p.name }}</strong>
+      <span class="badge {{ 'ok' if p.ok else 'fail' }}" id="badge-{{ loop.index0 }}">{{ 'UP' if p.ok else 'DOWN' }}</span>
+    </div>
+    <p class="card-url"><small id="url-{{ loop.index0 }}">{{ p.url }}</small></p>
+    <div class="card-meta muted" id="meta-{{ loop.index0 }}">
+      {% if p.elapsed_ms is defined %}{{ p.elapsed_ms }}ms{% endif %}
+    </div>
+    {% if p.error %}
+      <pre id="body-{{ loop.index0 }}">{{ p.error }}</pre>
+    {% elif p.body %}
+      <pre id="body-{{ loop.index0 }}">{{ p.body | tojson(indent=2) if p.body is mapping else p.body }}</pre>
+    {% else %}
+      <pre id="body-{{ loop.index0 }}">—</pre>
+    {% endif %}
+  </div>
+{% endfor %}
+</div>
+
+<p><a href="{{ url_for('api_status') }}">JSON: /api/status</a></p>
+
+<!-- ── Container Resource Manager ─────────────────────────────────────────── -->
+<style>
+.ctm-section{margin-top:1.5rem;}
+.ctm-group{margin-bottom:1.2rem;}
+.ctm-group-header{display:flex;align-items:center;gap:0.6rem;margin-bottom:0.5rem;padding-bottom:0.3rem;border-bottom:1px solid var(--border);}
+.ctm-group-title{font-size:0.9rem;font-weight:700;margin:0;}
+.ctm-group-note{font-size:0.72rem;color:var(--muted);}
+.ctm-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:0.55rem;}
+.ctm-card{background:var(--card);border:1px solid var(--border);border-radius:9px;padding:0.7rem 0.9rem;}
+.ctm-card.ctm-running{border-color:rgba(48,209,88,0.4);}
+.ctm-card.ctm-stopped{border-color:rgba(255,59,48,0.25);opacity:0.8;}
+.ctm-card.ctm-core{border-color:rgba(10,132,255,0.35);background:rgba(10,132,255,0.03);}
+.ctm-card.ctm-busy{border-color:rgba(255,159,10,0.5);background:rgba(255,159,10,0.04);}
+.ctm-top{display:flex;align-items:center;gap:0.55rem;margin-bottom:0.45rem;}
+.ctm-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;transition:background 0.3s;}
+.ctm-dot.up{background:var(--ok);}
+.ctm-dot.down{background:var(--fail);}
+.ctm-dot.core{background:var(--accent);}
+.ctm-dot.busy{background:#ff9f0a;animation:led-pulse 0.8s ease-in-out infinite;}
+.ctm-name{font-size:0.83rem;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ctm-state{font-size:0.7rem;color:var(--muted);white-space:nowrap;}
+.ctm-actions{display:flex;flex-wrap:wrap;gap:0.3rem;margin-top:0.35rem;}
+.ctm-btn{background:var(--surface2);border:1px solid var(--border);color:var(--fg);border-radius:5px;font-size:0.7rem;padding:0.18rem 0.55rem;cursor:pointer;white-space:nowrap;transition:border-color 0.15s,color 0.15s;}
+.ctm-btn:hover{border-color:var(--accent);color:var(--accent);}
+.ctm-btn.ctm-btn-danger:hover{border-color:#ff3b30;color:#ff3b30;}
+.ctm-btn.ctm-btn-warn:hover{border-color:#ff9f0a;color:#ff9f0a;}
+.ctm-btn:disabled{opacity:0.4;pointer-events:none;}
+.ctm-progress{margin-top:0.4rem;font-size:0.7rem;color:var(--muted);display:none;}
+.ctm-progress.visible{display:block;}
+.ctm-log{background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:0.35rem 0.5rem;font-size:0.68rem;font-family:monospace;max-height:120px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;margin-top:0.3rem;display:none;}
+.ctm-log.visible{display:block;}
+.ctm-msg{font-size:0.78rem;margin-top:0.6rem;min-height:1.2em;}
+</style>
+
+<div class="ctm-section">
+  <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem;">
+    <h3 style="margin:0;font-size:1rem;">🐳 Container Manager</h3>
+    <button type="button" id="ct-refresh-btn" class="btn-sm" style="margin-left:auto;">↺ Refresh</button>
+  </div>
+
+  <!-- CORE group -->
+  <div class="ctm-group" id="ctm-group-core">
+    <div class="ctm-group-header">
+      <span class="ctm-group-title">🔷 CORE</span>
+      <span class="ctm-group-note">C1b · C3b · C6b · C9b — Always on. Restart only.</span>
+    </div>
+    <div class="ctm-cards" id="ctm-cards-core"><div style="color:var(--muted);font-size:0.8rem;">Loading…</div></div>
+  </div>
+
+  <!-- AGENTS group -->
+  <div class="ctm-group" id="ctm-group-agent">
+    <div class="ctm-group-header">
+      <span class="ctm-group-title">🤖 AI AGENTS</span>
+      <span class="ctm-group-note">C2b · C5b · C7ab · C7bb · C8b — Start on demand to save CPU/memory.</span>
+    </div>
+    <div class="ctm-cards" id="ctm-cards-agent"><div style="color:var(--muted);font-size:0.8rem;">Loading…</div></div>
+  </div>
+
+  <!-- SANDBOX group -->
+  <div class="ctm-group" id="ctm-group-sandbox">
+    <div class="ctm-group-header">
+      <span class="ctm-group-title">📦 SANDBOX</span>
+      <span class="ctm-group-note">C10b · C11b · C12b — Bring up only when a page needs it.</span>
+    </div>
+    <div class="ctm-cards" id="ctm-cards-sandbox"><div style="color:var(--muted);font-size:0.8rem;">Loading…</div></div>
+  </div>
+
+  <div class="ctm-msg" id="ctm-msg"></div>
+</div>
+
+<script>
+(function(){
+  var msgEl = document.getElementById('ctm-msg');
+  var _polling = {};   // name → intervalId for health polling
+
+  function showMsg(text, ok) {
+    msgEl.textContent = text;
+    msgEl.style.color = ok ? 'var(--ok)' : 'var(--fail)';
+    clearTimeout(msgEl._t);
+    msgEl._t = setTimeout(function(){ msgEl.textContent = ''; }, 5000);
+  }
+
+  function ctLabel(name) {
+    var short = name.replace(/^C\d+[a-z]*_/i, '').replace(/_/g, '-');
+    return name.split('_')[0] + ' ' + short;
+  }
+
+  function renderCard(ct) {
+    var running = ct.state === 'running';
+    var isCore  = ct.group === 'core';
+    var cardCls = isCore ? 'ctm-card ctm-core' : (running ? 'ctm-card ctm-running' : 'ctm-card ctm-stopped');
+    var dotCls  = isCore ? 'ctm-dot core' : (running ? 'ctm-dot up' : 'ctm-dot down');
+    var label   = ctLabel(ct.name);
+    var safe    = ct.name.replace(/[^a-zA-Z0-9]/g, '_');
+
+    var actions = '';
+    if (isCore) {
+      actions = '<button class="ctm-btn ctm-btn-warn" data-name="' + ct.name + '" data-action="restart">↺ Restart</button>'
+              + '<span style="font-size:0.68rem;color:var(--muted);margin-left:0.2rem;">🔒 Core</span>';
+    } else {
+      if (!running) actions += '<button class="ctm-btn" data-name="' + ct.name + '" data-action="start">▶ Start</button>';
+      if (running)  actions += '<button class="ctm-btn ctm-btn-danger" data-name="' + ct.name + '" data-action="stop">⏹ Stop</button>';
+      actions += '<button class="ctm-btn ctm-btn-warn" data-name="' + ct.name + '" data-action="restart">↺ Restart</button>';
+      actions += '<button class="ctm-btn" data-name="' + ct.name + '" data-action="rebuild">🔨 Rebuild &amp; Start</button>';
+      actions += '<button class="ctm-btn ctm-btn-danger" data-name="' + ct.name + '" data-action="delete">🗑 Delete</button>';
+      actions += '<button class="ctm-btn" data-name="' + ct.name + '" data-action="logs">📋 Logs</button>';
+    }
+
+    return '<div class="' + cardCls + '" id="ctm-card-' + safe + '">'
+      + '<div class="ctm-top">'
+      + '<span class="' + dotCls + '" id="ctm-dot-' + safe + '"></span>'
+      + '<div style="flex:1;min-width:0;">'
+      + '<div class="ctm-name" title="' + ct.name + '">' + label + '</div>'
+      + '<div class="ctm-state" id="ctm-state-' + safe + '">' + (ct.status || ct.state || '—') + '</div>'
+      + '</div>'
+      + '</div>'
+      + '<div class="ctm-actions">' + actions + '</div>'
+      + '<div class="ctm-progress" id="ctm-prog-' + safe + '"></div>'
+      + '<pre class="ctm-log" id="ctm-log-' + safe + '"></pre>'
+      + '</div>';
+  }
+
+  function renderGroup(groupId, containers) {
+    var el = document.getElementById('ctm-cards-' + groupId);
+    if (!el) return;
+    if (!containers.length) {
+      el.innerHTML = '<div style="color:var(--muted);font-size:0.8rem;padding:0.3rem;">No containers found in this group.</div>';
+      return;
+    }
+    el.innerHTML = containers.map(renderCard).join('');
+    attachHandlers(el);
+  }
+
+  function startHealthPoll(name, safe) {
+    if (_polling[name]) return;
+    var elapsed = 0;
+    var progEl  = document.getElementById('ctm-prog-' + safe);
+    var dotEl   = document.getElementById('ctm-dot-' + safe);
+    var stateEl = document.getElementById('ctm-state-' + safe);
+    var cardEl  = document.getElementById('ctm-card-' + safe);
+    if (dotEl) { dotEl.className = 'ctm-dot busy'; }
+    _polling[name] = setInterval(function() {
+      elapsed += 2;
+      if (progEl) { progEl.className = 'ctm-progress visible'; progEl.textContent = 'Starting… (' + elapsed + 's)'; }
+      fetch('/api/containers').then(function(r){ return r.json(); }).then(function(d) {
+        var found = (d.containers || []).find(function(c){ return c.name === name; });
+        if (found && found.state === 'running') {
+          clearInterval(_polling[name]);
+          delete _polling[name];
+          if (dotEl)  { dotEl.className = found.group === 'core' ? 'ctm-dot core' : 'ctm-dot up'; }
+          if (stateEl){ stateEl.textContent = found.status || 'running'; }
+          if (progEl) { progEl.textContent = '✓ Running'; progEl.style.color = 'var(--ok)'; }
+          if (cardEl) { cardEl.className = cardEl.className.replace('ctm-stopped','ctm-running').replace('ctm-busy','ctm-running'); }
+          showMsg('✓ ' + name + ' is running', true);
+        }
+        if (elapsed >= 90) {
+          clearInterval(_polling[name]);
+          delete _polling[name];
+          if (progEl) { progEl.textContent = 'Timeout — check logs'; progEl.style.color = 'var(--fail)'; }
+        }
+      });
+    }, 2000);
+  }
+
+  function doToggle(name, action, safe) {
+    var progEl = document.getElementById('ctm-prog-' + safe);
+    var logEl  = document.getElementById('ctm-log-' + safe);
+    if (progEl) { progEl.className = 'ctm-progress visible'; progEl.style.color = 'var(--muted)'; progEl.textContent = action + 'ing…'; }
+    fetch('/api/container/toggle', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({name: name, action: action}),
+    }).then(function(r){ return r.json(); }).then(function(d) {
+      if (d.ok) {
+        if (action === 'start' || action === 'restart') {
+          startHealthPoll(name, safe);
+        } else {
+          if (progEl) { progEl.textContent = '✓ ' + action + 'ped'; progEl.style.color = 'var(--ok)'; }
+          showMsg('✓ ' + name + ' ' + action + 'ped', true);
+          setTimeout(loadContainers, 1500);
+        }
+      } else {
+        if (progEl) { progEl.textContent = 'Error: ' + (d.error || 'unknown'); progEl.style.color = 'var(--fail)'; }
+        showMsg('Error: ' + (d.error || 'unknown'), false);
+      }
+    }).catch(function(e) {
+      if (progEl) { progEl.textContent = 'Request failed'; progEl.style.color = 'var(--fail)'; }
+      showMsg('Request failed: ' + e.message, false);
+    });
+  }
+
+  function doAction(name, action, safe) {
+    var progEl = document.getElementById('ctm-prog-' + safe);
+    var logEl  = document.getElementById('ctm-log-' + safe);
+    var confirmed = true;
+    if (action === 'delete') {
+      confirmed = confirm('Delete container ' + name + '?\nThis removes the container. The image is kept.');
+    }
+    if (!confirmed) return;
+    if (progEl) { progEl.className = 'ctm-progress visible'; progEl.style.color = 'var(--muted)'; }
+    if (action === 'rebuild') {
+      if (progEl) progEl.textContent = '🔨 Building image… (may take 1–5 min)';
+    } else {
+      if (progEl) progEl.textContent = action + 'ing…';
+    }
+    if (logEl)  { logEl.className = 'ctm-log visible'; logEl.textContent = ''; }
+    fetch('/api/container/action', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({name: name, action: action}),
+    }).then(function(r){ return r.json(); }).then(function(d) {
+      if (logEl && d.output) { logEl.textContent = d.output; logEl.scrollTop = logEl.scrollHeight; }
+      if (d.ok) {
+        if (action === 'rebuild') {
+          if (progEl) progEl.textContent = '🔨 Build done — starting…';
+          startHealthPoll(name, safe);
+        } else {
+          if (progEl) { progEl.textContent = '✓ ' + action + 'd'; progEl.style.color = 'var(--ok)'; }
+          showMsg('✓ ' + name + ' ' + action + 'd', true);
+          setTimeout(loadContainers, 1500);
+        }
+      } else {
+        if (progEl) { progEl.textContent = 'Error: ' + (d.error || d.output || 'unknown'); progEl.style.color = 'var(--fail)'; }
+        showMsg('Error on ' + action + ': ' + (d.error || 'see log'), false);
+      }
+    }).catch(function(e) {
+      if (progEl) { progEl.textContent = 'Request failed'; progEl.style.color = 'var(--fail)'; }
+      showMsg('Request failed: ' + e.message, false);
+    });
+  }
+
+  function doLogs(name, safe) {
+    var logEl = document.getElementById('ctm-log-' + safe);
+    if (!logEl) return;
+    var isOpen = logEl.classList.contains('visible');
+    if (isOpen) { logEl.className = 'ctm-log'; logEl.textContent = ''; return; }
+    logEl.className = 'ctm-log visible';
+    logEl.textContent = 'Loading logs…';
+    fetch('/api/container/logs?name=' + encodeURIComponent(name) + '&lines=50')
+      .then(function(r){ return r.json(); })
+      .then(function(d){ logEl.textContent = d.lines || '(no output)'; logEl.scrollTop = logEl.scrollHeight; })
+      .catch(function(e){ logEl.textContent = 'Error: ' + e.message; });
+  }
+
+  function attachHandlers(root) {
+    root.querySelectorAll('[data-action]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var name   = btn.dataset.name;
+        var action = btn.dataset.action;
+        var safe   = name.replace(/[^a-zA-Z0-9]/g, '_');
+        // Disable all buttons in this card during operation
+        var card = document.getElementById('ctm-card-' + safe);
+        if (card) card.querySelectorAll('[data-action]').forEach(function(b){ b.disabled = true; });
+        setTimeout(function() {
+          if (card) card.querySelectorAll('[data-action]').forEach(function(b){ b.disabled = false; });
+        }, 3000);
+        if (action === 'logs') { doLogs(name, safe); return; }
+        if (action === 'rebuild' || action === 'delete') { doAction(name, action, safe); }
+        else { doToggle(name, action, safe); }
+      });
+    });
+  }
+
+  function renderContainers(containers) {
+    var groups = {core:[], agent:[], sandbox:[]};
+    (containers || []).forEach(function(ct) {
+      var g = ct.group || 'other';
+      if (groups[g]) groups[g].push(ct);
+    });
+    renderGroup('core',    groups.core);
+    renderGroup('agent',   groups.agent);
+    renderGroup('sandbox', groups.sandbox);
+  }
+
+  function loadContainers() {
+    fetch('/api/containers').then(function(r){ return r.json(); }).then(function(d) {
+      renderContainers(d.containers || []);
+    }).catch(function(e) {
+      ['core','agent','sandbox'].forEach(function(g) {
+        var el = document.getElementById('ctm-cards-' + g);
+        if (el) el.innerHTML = '<div style="color:var(--fail);font-size:0.8rem;">Failed to load: ' + e.message + '</div>';
+      });
+    });
+  }
+
+  document.getElementById('ct-refresh-btn').addEventListener('click', loadContainers);
+  loadContainers();
+})();
+</script>
+
+<script>
+(function() {
+  const INTERVAL = 15000;
+  let timer = null;
+
+  function fmtTime(d) {
+    return d.toLocaleTimeString();
+  }
+
+  function updateCard(idx, p) {
+    const badge = document.getElementById('badge-' + idx);
+    const meta  = document.getElementById('meta-'  + idx);
+    const body  = document.getElementById('body-'  + idx);
+    const card  = document.getElementById('card-'  + idx);
+    if (!badge) return;
+    const up = p.ok === true;
+    badge.textContent = up ? 'UP' : 'DOWN';
+    badge.className = 'badge ' + (up ? 'ok' : 'fail');
+    if (p.elapsed_ms !== undefined) meta.textContent = p.elapsed_ms + 'ms';
+    if (p.error) {
+      body.textContent = p.error;
+    } else if (p.body) {
+      body.textContent = JSON.stringify(p.body, null, 2);
+    }
+    card.classList.toggle('card-down', !up);
+  }
+
+  const STATUS_KEYS = {{ targets.keys() | list | tojson }};
+
+  async function refresh() {
+    document.getElementById('refresh-btn').textContent = '…';
+    try {
+      const resp = await fetch('/api/status');
+      const data = await resp.json();
+      let up = 0;
+      STATUS_KEYS.forEach((key, idx) => {
+        const p = data[key];
+        if (p && p.ok) up++;
+        updateCard(idx, p || {});
+      });
+      const total = STATUS_KEYS.length;
+      document.getElementById('up-count').textContent = up;
+      const bar = document.getElementById('status-bar');
+      bar.classList.toggle('bar-ok', up === total);
+      bar.classList.toggle('bar-warn', up > 0 && up < total);
+      bar.classList.toggle('bar-fail', up === 0);
+      document.getElementById('status-ts').textContent = 'Last checked: ' + fmtTime(new Date());
+    } catch(e) {
+      document.getElementById('status-ts').textContent = 'Refresh failed: ' + e.message;
+    }
+    document.getElementById('refresh-btn').textContent = 'Refresh now';
+  }
+
+  document.getElementById('refresh-btn').addEventListener('click', function() {
+    clearInterval(timer);
+    refresh();
+    timer = setInterval(refresh, INTERVAL);
+  });
+
+  // Set initial timestamp and start polling
+  document.getElementById('status-ts').textContent = 'Last checked: ' + fmtTime(new Date());
+  timer = setInterval(refresh, INTERVAL);
+})();
+</script>
+{% endblock %}

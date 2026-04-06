@@ -1,0 +1,6 @@
+{
+  "cline.apiProvider": "openai-compatible",
+  "cline.openAiCompatible.baseUrl": "http://app:8000/v1",
+  "cline.openAiCompatible.apiKey": "not-needed",
+  "cline.openAiCompatible.modelId": "copilot"
+}

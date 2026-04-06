@@ -1,0 +1,84 @@
+# ============================================================
+# docker-compose service block template for a new AI agent
+#
+# HOW TO USE:
+#   1. Copy this snippet into docker-compose.yml under 'services:'
+#   2. Replace all occurrences of:
+#        myagent        → your service name (e.g. aicoder)
+#        C10_myagent    → your container name (e.g. C10_aicoder)
+#        c10-myagent    → your AGENT_ID (e.g. c10-aicoder)
+#        Dockerfile.c10-myagent → your Dockerfile name
+#   3. Choose OpenAI OR Anthropic env block (delete the other)
+# ============================================================
+
+  # ──────────────────────────────────────────────────────────
+  # C10: My New AI Agent
+  #
+  # How to use:
+  #   docker compose run --rm myagent bash       # interactive shell
+  #   docker compose run --rm myagent ask "q"    # one-shot question
+  #   docker compose exec C10_myagent my-tool    # run tool directly
+  # ──────────────────────────────────────────────────────────
+  myagent:
+    build:
+      context: .
+      dockerfile: Dockerfile.c10-myagent
+    image: copilot-myagent:latest
+    container_name: C10_myagent
+    depends_on:
+      app:
+        condition: service_healthy        # C1 must be healthy first
+      browser-auth:
+        condition: service_healthy        # C3 must be healthy first
+    environment:
+      # ── Option A: OpenAI-compatible tools (Aider, KiloCode, etc.) ──
+      - OPENAI_API_BASE=http://app:8000/v1
+      - OPENAI_API_KEY=not-needed
+      # Tool-specific model variable — check your tool's docs:
+      # - MY_TOOL_MODEL=copilot
+
+      # ── Option B: Anthropic-compatible tools (Claude Code) ──
+      # (delete Option A and uncomment Option B)
+      # - ANTHROPIC_BASE_URL=http://app:8000
+      # - ANTHROPIC_API_KEY=sk-ant-not-needed-xxxxxxxxxxxxx
+
+      # ── Required: session identity ──────────────────────────
+      # This becomes the X-Agent-ID header on every request.
+      # Must be unique. Convention: cx-toolname
+      - AGENT_ID=c10-myagent
+
+      # ── Optional ────────────────────────────────────────────
+      - DO_NOT_TRACK=1
+    volumes:
+      # Shared workspace for file operations
+      - ./workspace:/workspace
+    networks:
+      - copilot-net
+    # Default: standby (health server on :8080)
+    # Interactive: docker compose exec C10_myagent bash
+    command: ["standby"]
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+# ── If your agent needs persistent storage, add a named volume: ──
+# (add under top-level 'volumes:' section in docker-compose.yml)
+#
+# volumes:
+#   myagent-config:
+#
+# Then add to the service above:
+#   volumes:
+#     - myagent-config:/root/.myagent
+#     - ./workspace:/workspace

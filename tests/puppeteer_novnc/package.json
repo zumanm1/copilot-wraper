@@ -1,0 +1,9 @@
+{
+  "name": "copilot-novnc-puppeteer-validation",
+  "private": true,
+  "type": "module",
+  "description": "Optional: npm install; node validate_novnc.mjs (C3 :6080); node validate_c3_setup_button.mjs (C3 :8001)",
+  "devDependencies": {
+    "puppeteer": "^24.2.0"
+  }
+}

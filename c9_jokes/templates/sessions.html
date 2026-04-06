@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}C1 sessions{% endblock %}
+{% block content %}
+<h2>C1 agent sessions</h2>
+<p>Source: <code>{{ c1_url }}/v1/sessions</code></p>
+{% if error %}
+  <div class="card"><pre>{{ error }}</pre></div>
+{% elif data is mapping %}
+  <pre>{{ data | tojson(indent=2) }}</pre>
+{% else %}
+  <pre>{{ data }}</pre>
+{% endif %}
+{% endblock %}

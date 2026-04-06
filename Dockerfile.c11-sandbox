@@ -1,0 +1,49 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# C11: Multi-Agent Session-Scoped Sandbox
+#
+# Dedicated execution environment for /multi-Agento multi-agent workspace.
+# Key difference from C10: all operations are scoped to /workspace/{session_id}/
+# so concurrent multi-agent sessions are fully isolated.
+#
+# Features:
+#   - Non-root user "sandbox" running in /workspace
+#   - Python 3.11, Node.js, npm, git, bash, curl, pip
+#   - FastAPI REST API on port 8200 (internal only — no host binding)
+#   - Resource limits enforced via docker-compose (mem: 1g, cpus: 1.0)
+#
+# API endpoints: /health /sessions /session/{id}/reset /exec
+#                /file/write /file/read /file/ls /file/delete /workspace/reset
+#
+# All endpoints accept session_id to scope operations to /workspace/{session_id}/
+# ──────────────────────────────────────────────────────────────────────────────
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    curl \
+    git \
+    gcc \
+    make \
+    ca-certificates \
+    gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m -s /bin/bash sandbox \
+    && mkdir -p /workspace \
+    && chown sandbox:sandbox /workspace
+
+COPY c11_sandbox/requirements.txt /tmp/c11_requirements.txt
+RUN pip install --no-cache-dir -r /tmp/c11_requirements.txt
+
+COPY c11_sandbox/app.py /app/app.py
+RUN chown sandbox:sandbox /app/app.py
+
+USER sandbox
+WORKDIR /workspace
+
+ENV WORKSPACE=/workspace
+
+EXPOSE 8200
+CMD ["uvicorn", "app:app", "--app-dir", "/app", "--host", "0.0.0.0", "--port", "8200"]

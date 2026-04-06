@@ -1,0 +1,55 @@
+# ============================================================
+# Container Cx: New AI Agent Template
+#
+# Copy this file to: Dockerfile.c10-myagent
+# Then edit the three sections marked "# CHANGE:"
+#
+# Usage:
+#   docker compose build myagent
+#   docker compose run --rm myagent bash
+#   docker compose run --rm myagent ask "your question"
+# ============================================================
+FROM python:3.11-slim
+
+WORKDIR /workspace
+
+# ── System dependencies ───────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl ca-certificates bash procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── CHANGE 1: Install your AI tool ───────────────────────────
+# Examples:
+#   RUN pip install --no-cache-dir aider-chat
+#   RUN pip install --no-cache-dir my-ai-tool==1.0.0
+#   RUN npm install -g my-cli-tool
+#
+RUN pip install --no-cache-dir your-ai-tool-here
+
+# ── Standby health server (keep container alive + healthy) ───
+# This tiny HTTP server answers GET /health on :8080.
+# All agent containers need this for docker-compose healthcheck.
+RUN pip install --no-cache-dir flask
+
+# ── Copy launcher script ──────────────────────────────────────
+COPY API-DOCUMENTATION/stubs/start.sh /agent/start.sh
+RUN chmod +x /agent/start.sh
+
+# ── CHANGE 2: Default environment (overridden by docker-compose) ──
+# For OpenAI-compatible tools:
+ENV OPENAI_API_BASE=http://app:8000/v1
+ENV OPENAI_API_KEY=not-needed
+# For Anthropic-compatible tools:
+# ENV ANTHROPIC_BASE_URL=http://app:8000
+# ENV ANTHROPIC_API_KEY=sk-ant-not-needed-xxxxxxxxxxxxx
+
+# Tool-specific model var — check your tool's docs:
+# ENV MY_TOOL_MODEL=copilot
+
+ENV DO_NOT_TRACK=1
+
+# ── CHANGE 3: Set your default AGENT_ID ──────────────────────
+# This is overridden by docker-compose.yml environment section.
+ENV AGENT_ID=c10-myagent
+
+ENTRYPOINT ["/agent/start.sh"]

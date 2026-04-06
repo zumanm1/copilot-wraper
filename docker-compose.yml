@@ -1,0 +1,684 @@
+name: c3btest-feed
+
+# ============================================================
+# Copilot OpenAI-Compatible API Wrapper — Docker Compose
+#
+# Container naming: Cyb_name (C = Container, y = number, b = branch suffix)
+#
+#   C1b_copilot-api       — FastAPI OpenAI-compatible API
+#                           Wraps Microsoft Copilot via WebSocket
+#                           Exposes: http://localhost:8000
+#
+#   C2b_agent-terminal    — Interactive AI Agent Terminal
+#                           Runs Aider / OpenCode
+#                           Uses C1 for inference
+#
+#   C3b_browser-auth      — Headless Chrome Cookie Extractor
+#   C5b_claude-code       — Claude Code CLI Terminal
+#   C6b_kilocode          — KiloCode CLI Terminal
+#   C7ab_openclaw-gateway — OpenClaw Gateway
+#   C7bb_openclaw-cli     — OpenClaw CLI / TUI
+#   C8b_hermes-agent      — Hermes Agent (persistent memory, skills, cron)
+#   C9b_jokes             — Flask validation UI + API (port 6090)
+#   CT_tests              — Playwright automated test suite
+#
+# ── Quick start ───────────────────────────────────────────────
+#
+#   # 1. Start the API server (Container 1):
+#   docker compose up app -d
+#
+#   # 2. Launch an interactive AI agent session (Container 2):
+#   docker compose run --rm agent-terminal
+#
+#   # 3. Run automated Playwright tests:
+#   docker compose run --rm test
+#
+#   # 4. Stop everything:
+#   docker compose down
+# ============================================================
+
+services:
+
+  # ──────────────────────────────────────────────────────────
+  # C1: FastAPI Copilot API Wrapper
+  #
+  # OpenAI-compatible REST API backed by Microsoft Copilot.
+  # All other services use this as their inference backend.
+  # ──────────────────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: copilot-api:latest
+    container_name: C1b_copilot-api
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - RELOAD=false
+      - PYTHONUNBUFFERED=1
+      - REQUEST_TIMEOUT=180
+      - CONNECT_TIMEOUT=15
+      - CIRCUIT_BREAKER_THRESHOLD=50
+      - BING_COOKIES=${BING_COOKIES}
+      - COPILOT_COOKIES=${COPILOT_COOKIES}
+      - CHROME_KEY_PASSWORD=${CHROME_KEY_PASSWORD}
+      - RATE_LIMIT="100/minute"
+      # Cookie extraction: host Chrome data mounted at /chrome-data (read-only)
+      # CHROME_KEY_PASSWORD is derived from macOS Keychain on the host and passed in
+      - CHROME_KEY_PASSWORD=${CHROME_KEY_PASSWORD:-}
+      - CHROME_DATA_PATH=/chrome-data
+      # COPILOT_COOKIES and BING_COOKIES come from env_file: .env
+    volumes:
+      # Mount host Chrome profile directory read-only into Container 1
+      - "${HOME}/Library/Application Support/Google/Chrome:/chrome-data:ro"
+      # Enable hot-reloading for development/debugging
+      - .:/app
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 5
+    networks:
+      - copilot-net
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ──────────────────────────────────────────────────────────
+  # C2: Interactive AI Agent Terminal
+  #
+  # Terminal AI agents pre-configured to use C1
+  # (copilot-api) as their OpenAI-compatible inference backend.
+  #
+  # Included agents:
+  #   - Aider    (recommended — terminal coding agent)
+  #   - OpenCode (modern terminal AI agent)
+  #
+  # How to use:
+  #   docker compose up app -d          # start C1 first
+  #   docker compose run --rm agent-terminal   # launch agent
+  #
+  # The agent will show a menu to choose between Aider / OpenCode / bash.
+  # Files in ./workspace/ are mounted at /workspace inside the container.
+  # ──────────────────────────────────────────────────────────
+  agent-terminal:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    image: copilot-agent-terminal:latest
+    container_name: C2b_agent-terminal
+    profiles: ["optional"]
+    depends_on:
+      app:
+        condition: service_healthy
+      browser-auth:
+        condition: service_healthy
+    environment:
+      # All agents point to the copilot-api service via internal DNS
+      - OPENAI_API_BASE=http://app:8000/v1
+      - OPENAI_API_KEY=not-needed
+      - AIDER_MODEL=openai/copilot
+      # Disable telemetry and auto-update checks
+      - AIDER_ANALYTICS=false
+      - AIDER_NO_CHECK_UPDATE=true
+      - DO_NOT_TRACK=1
+      # Session identity — routes requests to a dedicated C1 backend
+      - AGENT_ID=c2-aider
+    volumes:
+      # Mount workspace so agents can read/edit your project files
+      - ./workspace:/workspace
+    networks:
+      - copilot-net
+    # Default: standby health server. Interactive: docker compose exec C2b_agent-terminal bash
+    command: ["standby"]
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  # ──────────────────────────────────────────────────────────
+  # C7a: OpenClaw Gateway
+  #
+  # Self-hosted OpenClaw gateway (v2026.3.13) adapted to use
+  # C1 (copilot-api) as the OpenAI-compatible AI provider.
+  # Reference: OpenClaw Docker Setup Guide v2026.3.13
+  #
+  # Provider chain: C7a → C1 (http://app:8000/v1) → Copilot
+  # Auth: C3 (browser-auth) feeds cookies to C1 transparently.
+  #
+  # Health checks (reference doc §6):
+  #   curl http://localhost:18789/healthz
+  #   curl http://localhost:18789/readyz
+  #   docker compose exec openclaw-gateway \
+  #       node dist/index.js health --token "copilot-local-gateway-token"
+  #
+  # Mode 1 (host CLI, if openclaw installed on host):
+  #   openclaw tui --url ws://127.0.0.1:18789 --token copilot-local-gateway-token
+  #
+  # Mode 3 (exec into gateway, reference doc §9):
+  #   docker compose exec openclaw-gateway sh
+  # ──────────────────────────────────────────────────────────
+  openclaw-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.openclaw-gw
+    image: copilot-openclaw-gateway:latest
+    container_name: C7ab_openclaw-gateway
+    profiles: ["optional"]
+    depends_on:
+      app:
+        condition: service_healthy
+      browser-auth:
+        condition: service_healthy
+    ports:
+      - "18789:18789"
+    environment:
+      # Provider → C1 (copilot-api) as OpenAI-compatible backend
+      - OPENCLAW_PROVIDER_BASE_URL=http://app:8000/v1
+      - OPENCLAW_PROVIDER_API_KEY=sk-not-needed
+      # Gateway auth token — shared with C7b (EC2: single source of truth)
+      - OPENCLAW_GATEWAY_TOKEN=copilot-local-gateway-token
+      - OPENCLAW_TZ=Africa/Johannesburg
+      # Session identity — routes requests to a dedicated C1 backend
+      - AGENT_ID=c7-openclaw
+    volumes:
+      # Persist gateway config + token across container restarts
+      - openclaw-config:/root/.openclaw
+      - ./workspace:/workspace
+    networks:
+      - copilot-net
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ──────────────────────────────────────────────────────────
+  # C7b: OpenClaw CLI / TUI
+  #
+  # Companion CLI for the C7a gateway. Supports all 3 access
+  # modes from the OpenClaw Docker Setup Guide v2026.3.13.
+  #
+  # Mode 2 — container CLI → gateway (reference doc §8):
+  #   docker compose run --rm openclaw-cli tui
+  #   docker compose run --rm openclaw-cli gateway status
+  #   docker compose run --rm openclaw-cli devices list
+  #   docker compose run --rm openclaw-cli dashboard --no-open
+  #
+  # Extra — one-shot ask (→ C1 directly, professor/polymath persona):
+  #   docker compose run --rm openclaw-cli ask "question"
+  #
+  # Extra — interactive bash shell with helpers:
+  #   docker compose run --rm openclaw-cli bash
+  #
+  # Extra — pass-through any openclaw subcommand:
+  #   docker compose run --rm openclaw-cli config set gateway.bind lan
+  #   docker compose run --rm openclaw-cli channels add --channel telegram --token TOKEN
+  # ──────────────────────────────────────────────────────────
+  openclaw-cli:
+    build:
+      context: .
+      dockerfile: Dockerfile.openclaw-cli
+    image: copilot-openclaw-cli:latest
+    container_name: C7bb_openclaw-cli
+    profiles: ["optional"]
+    depends_on:
+      - openclaw-gateway
+    environment:
+      # Gateway WebSocket URL (internal Docker DNS)
+      - OPENCLAW_GATEWAY_URL=ws://openclaw-gateway:18789
+      # EC2: same token as C7a — single source of truth
+      - OPENCLAW_GATEWAY_TOKEN=copilot-local-gateway-token
+      # C1 backend for one-shot ask command
+      - API_URL=http://app:8000
+      # Session identity — routes requests to a dedicated C1 backend
+      - AGENT_ID=c7-openclaw
+    volumes:
+      - ./workspace:/workspace
+    networks:
+      - copilot-net
+    command: ["standby"]
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  # ──────────────────────────────────────────────────────────
+  # C5: Claude Code CLI Terminal
+  #
+  # Official source: https://www.npmjs.com/package/@anthropic-ai/claude-code
+  # Anthropic's Claude Code CLI routed through C1 via
+  # ANTHROPIC_BASE_URL → /v1/messages (Anthropic-compat endpoint).
+  #
+  # How to use:
+  #   docker compose run --rm claude-code-terminal         # menu
+  #   docker compose run --rm claude-code-terminal bash    # direct bash
+  #   docker compose run --rm claude-code-terminal ask "q" # one-shot
+  # ──────────────────────────────────────────────────────────
+  claude-code-terminal:
+    build:
+      context: .
+      dockerfile: Dockerfile.claude-code
+    image: copilot-claude-code-terminal:latest
+    container_name: C5b_claude-code
+    profiles: ["optional"]
+    depends_on:
+      app:
+        condition: service_healthy
+      browser-auth:
+        condition: service_healthy
+    environment:
+      # Route Claude Code through Container 1's /v1/messages endpoint
+      - ANTHROPIC_BASE_URL=http://app:8000
+      # Format-valid placeholder key (auth bypassed by custom base URL)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-sk-ant-not-needed-xxxxxxxxxxxxx}
+      - DO_NOT_TRACK=1
+      # Session identity — routes requests to a dedicated C1 backend
+      - AGENT_ID=c5-claude-code
+    volumes:
+      - ./workspace:/workspace
+    networks:
+      - copilot-net
+    command: ["standby"]
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  # ──────────────────────────────────────────────────────────
+  # C6: KiloCode CLI Terminal
+  #
+  # Official source: https://www.npmjs.com/package/@kilocode/cli
+  # Install: npm install -g @kilocode/cli
+  # KiloCode terminal TUI configured to use C1.
+  #
+  # How to use:
+  #   docker compose run --rm kilocode-terminal             # menu
+  #   docker compose run --rm kilocode-terminal bash        # bash
+  #   docker compose run --rm kilocode-terminal kilo        # direct
+  #   docker compose run --rm kilocode-terminal ask "q"     # one-shot
+  #   docker compose run --rm kilocode-terminal status      # health
+  # ──────────────────────────────────────────────────────────
+  kilocode-terminal:
+    build:
+      context: .
+      dockerfile: Dockerfile.kilocode
+    image: copilot-kilocode-terminal:latest
+    container_name: C6b_kilocode
+    depends_on:
+      app:
+        condition: service_healthy
+      browser-auth:
+        condition: service_healthy
+    environment:
+      - OPENAI_API_BASE=http://app:8000/v1
+      - OPENAI_API_KEY=not-needed
+      - KILO_MODEL=copilot
+      - DO_NOT_TRACK=1
+      # Session identity — routes requests to a dedicated C1 backend
+      - AGENT_ID=c6-kilocode
+    volumes:
+      - ./workspace:/workspace
+    networks:
+      - copilot-net
+    command: ["standby"]
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  # ──────────────────────────────────────────────────────────
+  # C8: Hermes Agent Terminal
+  #
+  # Nous Research Hermes Agent v2026.3.17 configured to use C1
+  # (copilot-api) as its OpenAI-compatible inference backend.
+  #
+  # Hermes is a long-lived persistent agent with:
+  #   - Persistent memory across sessions
+  #   - Installable/improvable skills
+  #   - Built-in cron scheduler
+  #   - MCP (Model Context Protocol) support
+  #   - Multiple terminal execution backends
+  #
+  # Provider chain: C8 → OPENAI_BASE_URL → C1 → Copilot (via C3 cookies)
+  #
+  # Standby (default): health server on :8080, exec in for interactive use
+  # Interactive:
+  #   docker compose exec C8b_hermes-agent hermes
+  #   docker compose exec C8b_hermes-agent bash
+  # One-shot ask:
+  #   docker compose run --rm hermes-agent ask "question"
+  #   docker compose run --rm hermes-agent hermes-chat "question"
+  # ──────────────────────────────────────────────────────────
+  hermes-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.hermes
+    image: copilot-hermes-agent:latest
+    container_name: C8b_hermes-agent
+    profiles: ["optional"]
+    depends_on:
+      app:
+        condition: service_healthy
+      browser-auth:
+        condition: service_healthy
+    environment:
+      # Route all Hermes inference through C1 (copilot-api)
+      - OPENAI_BASE_URL=http://app:8000/v1
+      - OPENAI_API_KEY=not-needed
+      # Force OpenAI-compat path — skips OpenRouter / Nous auth
+      - HERMES_INFERENCE_PROVIDER=openai
+      - LLM_MODEL=copilot
+      # Hermes home — persisted in named volume across restarts
+      - HERMES_HOME=/root/.hermes
+      # Run terminal commands inside this container (no nested Docker)
+      - TERMINAL_ENV=local
+      # Disable telemetry
+      - DO_NOT_TRACK=1
+      # Session identity — routes requests to dedicated C1 backend
+      - AGENT_ID=c8-hermes
+    volumes:
+      # Persist Hermes memories, skills, sessions, and cron jobs
+      - hermes-config:/root/.hermes
+      # Shared workspace for file operations
+      - ./workspace:/workspace
+    networks:
+      - copilot-net
+    # Default: standby health server. Interactive: docker compose exec C8b_hermes-agent hermes
+    command: ["standby"]
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      start_period: 30s
+      retries: 3
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ──────────────────────────────────────────────────────────
+  # CT: Playwright automated test suite (45 tests)
+  #
+  # How to use:
+  #   docker compose run --rm test
+  # ──────────────────────────────────────────────────────────
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    container_name: CT_tests
+    profiles: ["optional"]
+    depends_on:
+      app:
+        condition: service_healthy
+      browser-auth:
+        condition: service_healthy
+    environment:
+      - RUN_CONTAINER_E2E=1
+      - BASE_URL=http://app:8000
+      - C3_URL=http://browser-auth:8001
+      - C6_URL=http://kilocode-server:9001
+      - PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+    volumes:
+      - ./tests/reports:/tests/reports
+      - ./workspace:/workspace
+    networks:
+      - copilot-net
+    restart: "no"
+
+  # ──────────────────────────────────────────────────────────
+  # C3: Headless Chrome Cookie Extractor
+  #
+  # If C3 fails with read-only overlayfs: Docker Desktop VM disk — see scripts/recover-c3-docker.sh
+  #
+  # C3 code ships inside the image only (same pattern as pre–dual-portal compose): no bind-mount
+  # of ./browser_auth. After editing browser_auth/ or portal_urls.py: docker compose build browser-auth
+  #
+  # Runs Playwright/Chromium + noVNC so user can authenticate
+  # via browser UI, then extracts session cookies automatically.
+  #
+  # How to use:
+  #   docker compose up browser-auth -d
+  #   open http://localhost:6080         ← browser UI (noVNC)
+  #   Log in to copilot.microsoft.com in that browser
+  #   curl -X POST http://localhost:8001/extract   ← extract cookies
+  # ──────────────────────────────────────────────────────────
+  browser-auth:
+    build:
+      context: .
+      dockerfile: Dockerfile.browser
+    image: copilot-browser-auth:latest
+    container_name: C3b_browser-auth
+    ports:
+      - "6080:6080"    # noVNC web UI
+      - "8001:8001"    # Cookie extractor API
+    environment:
+      - ENV_PATH=/app/.env
+      - API1_URL=http://app:8000
+      - VNC_RESOLUTION=1280x900x24
+      - C3_CHAT_TAB_POOL_SIZE=4        # default pool (normal mode: 1 auth + 4 pool = 5 tabs)
+      - C3_POOL_SIZE_PARALLEL=6       # expanded pool for bursty parallel runs
+      - C3_CHAT_MAX_CONCURRENT=4      # cap concurrent Playwright operations
+      - C3_POOL_IDLE_TRIM_SECONDS=60  # collapse extra free tabs after burst usage
+      - BROWSER_AUTH_UVICORN_RELOAD=0
+    volumes:
+      # Share .env with Container 1 so extracted cookies persist
+      - ./.env:/app/.env
+      # Persistent browser profile (survives container restarts)
+      - copilot-browser-profile:/browser-profile
+      # Hot-reload source code (edit on host, auto-reloads in container)
+      - ./browser_auth:/browser-auth
+      - ./portal_urls.py:/browser-auth/portal_urls.py
+    networks:
+      - copilot-net
+    shm_size: '2gb'    # Chrome needs shared memory
+    restart: "no"
+    healthcheck:
+      # API alone is insufficient: noVNC must be up on :6080 or the UI shows "connection closed".
+      test: ["CMD-SHELL", "curl -sf http://localhost:8001/health >/dev/null && curl -sf http://127.0.0.1:6080/ >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      start_period: 25s
+      retries: 3
+
+  # ──────────────────────────────────────────────────────────
+  # C9: Jokes / validation console (read-only toward C1–C8)
+  #
+  # Web UI + JSON helpers on http://localhost:6090
+  # Does not mount C1/C3 config; only HTTP probes and optional C1 chat proxy.
+  # ──────────────────────────────────────────────────────────
+  c9-jokes:
+    build:
+      context: .
+      dockerfile: Dockerfile.c9-jokes
+    image: copilot-c9-jokes:latest
+    container_name: C9b_jokes
+    ports:
+      - "6090:6090"
+    environment:
+      - C1_URL=http://app:8000
+      - C2_URL=http://agent-terminal:8080
+      - C3_URL=http://browser-auth:8001
+      - C3_POOL_SIZE_PARALLEL=6
+      - C5_URL=http://claude-code-terminal:8080
+      - C6_URL=http://kilocode-terminal:8080
+      - C7A_URL=http://openclaw-gateway:18789
+      - C7B_URL=http://openclaw-cli:8080
+      - C8_URL=http://hermes-agent:8080
+      - DATABASE_PATH=/app/data/c9.db
+      # Legacy aliases — overridden by docker-compose.c3test.yml in c3btest project
+      # c3test active values: C10B→c10b-sandbox:8210, C11B→c11b-sandbox:8200, C12B→c12b-sandbox:8210
+      - C10_URL=http://c10b-sandbox:8210
+      - C11_URL=http://c11b-sandbox:8200
+      - C12B_URL=http://c12b-sandbox:8210
+      - C10B_URL=http://c10b-sandbox:8210
+    volumes:
+      - ./c9_jokes:/app/c9_jokes
+      - c9-data:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    working_dir: /app/c9_jokes
+    networks:
+      - copilot-net
+    depends_on:
+      app:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:6090/api/status >/dev/null"]
+      interval: 30s
+      timeout: 10s
+      start_period: 15s
+      retries: 3
+
+  # ──────────────────────────────────────────────────────────
+  # C11 (base): Multi-Agent Session-Scoped Sandbox (base image definition)
+  # NOTE: In c3btest project this is REPLACED by C11b_sandbox (c3test override).
+  # C11b uses image copilot-c11-sandbox:latest on internal port :8200, host :8410.
+  #
+  # Dedicated execution environment for /multi-Agento workspace.
+  # Each multi-agent session is isolated in /workspace/{session_id}/
+  #
+  # REST API on :8200 (internal Docker network only)
+  # Resource limits: 1g RAM, 1 CPU (larger than C10 for concurrent agent builds)
+  # Non-root user: sandbox | Volume: c11-workspace
+  # ──────────────────────────────────────────────────────────
+  c11-sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile.c11-sandbox
+    image: copilot-c11-sandbox:latest
+    container_name: C11b_sandbox
+    mem_limit: 1g
+    cpus: 1.0
+    environment:
+      - WORKSPACE=/workspace
+    volumes:
+      - c11-workspace:/workspace
+    networks:
+      - copilot-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8200/health >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  c10-sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile.c10-sandbox
+    image: copilot-c10-sandbox:latest
+    container_name: C10b_sandbox
+    mem_limit: 512m
+    cpus: 0.5
+    # NOTE: In c3btest project this service is REPLACED by C10b_sandbox (c3test override).
+    # C10b uses image copilot-c12b-sandbox:latest on internal port :8210, host :8310.
+    # No host port binding — accessible only via copilot-net as c10-sandbox:8100
+    environment:
+      - WORKSPACE=/workspace
+    volumes:
+      - c10-workspace:/workspace
+    networks:
+      - copilot-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8100/health >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  # ──────────────────────────────────────────────────────────
+  # C12b: Lean coding/test sandbox (optional, host-exposed)
+  #
+  # Lightweight branch-only alternative to the full upstream AIO Sandbox.
+  # Built from python:3.11-slim with Python, pip, uv, Node.js, npm, git,
+  # bash, curl, and a small FastAPI control plane on :8210.
+  #
+  # Purpose:
+  #   - lower memory footprint than the upstream C12 image
+  #   - reusable for coding, testing, and shell/file workflows
+  #   - compatible with the repo's existing sandbox-style /exec + file APIs
+  # ──────────────────────────────────────────────────────────
+  c12b-sandbox:
+    build:
+      context: .
+      dockerfile: Dockerfile.c12b-sandbox
+    image: copilot-c12b-sandbox:latest
+    container_name: C12b_sandbox
+    profiles: ["optional"]
+    mem_limit: 768m
+    cpus: 0.5
+    ports:
+      - "8210:8210"
+    environment:
+      - WORKSPACE=/workspace
+    volumes:
+      - ./workspace:/workspace
+    networks:
+      - copilot-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8210/health >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+# ── Shared network ────────────────────────────────────────────
+# All containers communicate via this bridge network.
+# C1b_copilot-api:8000 | C7ab_openclaw-gateway:18789 | C3b_browser-auth:8001 | C9b_jokes:6090
+networks:
+  copilot-net:
+    driver: bridge
+
+# ── Named volumes ─────────────────────────────────────────────
+volumes:
+  copilot-browser-profile:
+  # Persists OpenClaw gateway config + token across container restarts (C7a)
+  openclaw-config:
+  # Persists Hermes memories, skills, sessions, cron jobs across restarts (C8)
+  hermes-config:
+  # C9 validation SQLite DB
+  c9-data:
+  # C10 agent workspace — persists files between agent runs
+  c10-workspace:
+  # C11 multi-agent workspace — per-session isolation, persists between runs
+  c11-workspace:
+  # C10b shared workspace — used by both /agent and /multi-agento pages
+  c10b-workspace:

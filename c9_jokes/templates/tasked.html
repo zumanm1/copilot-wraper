@@ -1,0 +1,1730 @@
+{% extends "base.html" %}
+{% block title %}Tasked{% endblock %}
+{% block content %}
+<style>
+.tasked-shell{display:grid;gap:1rem}
+.tasked-hero,.tasked-card{background:var(--card, rgba(255,255,255,0.04));border:1px solid var(--border, rgba(255,255,255,0.08));border-radius:16px;padding:1rem 1.1rem}
+.tasked-hero h1{margin:0 0 .45rem 0;font-size:1.22rem}
+.tasked-meta{font-size:.84rem;color:var(--muted);line-height:1.55}
+.tasked-pill{display:inline-flex;align-items:center;gap:.35rem;border:1px solid var(--border,#333);border-radius:999px;padding:.22rem .6rem;font-size:.73rem;color:var(--muted);background:#111}
+.tasked-role-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.75rem}
+.tasked-role{background:#111;border:1px solid var(--border,#333);border-radius:14px;padding:.85rem}
+.tasked-role h3{margin:0 0 .35rem 0;font-size:.9rem}
+.tasked-role p{margin:0;font-size:.8rem;color:var(--muted);line-height:1.5}
+.tasked-grid{display:grid;grid-template-columns:minmax(360px,560px) 1fr;gap:1rem;align-items:start}
+.tasked-form{display:grid;gap:.8rem}
+.tasked-form label{display:grid;gap:.35rem;font-size:.84rem}
+.tasked-form input,.tasked-form select,.tasked-form textarea{width:100%;background:#111;border:1px solid var(--border,#333);border-radius:10px;color:var(--fg,#f5f5f7);padding:.68rem .8rem;font:inherit}
+.tasked-form textarea{min-height:92px;resize:vertical}
+.tasked-row{display:grid;grid-template-columns:1fr 1fr;gap:.7rem}
+.tasked-actions{display:flex;gap:.6rem;flex-wrap:wrap}
+.tasked-btn{background:var(--accent,#0a84ff);color:#fff;border:none;border-radius:10px;padding:.68rem .95rem;font:inherit;cursor:pointer}
+.tasked-btn.secondary{background:transparent;border:1px solid var(--border,#333);color:var(--fg,#f5f5f7)}
+.tasked-btn.warn{background:#8b5cf6}
+.tasked-note{font-size:.8rem;color:var(--muted);line-height:1.5}
+.tasked-result{white-space:pre-wrap;word-break:break-word;background:#111;border:1px solid var(--border,#333);border-radius:12px;padding:.8rem;min-height:86px;font-size:.83rem}
+.tasked-table{width:100%;border-collapse:collapse}
+.tasked-table th,.tasked-table td{padding:.55rem .5rem;border-bottom:1px solid var(--border,#333);font-size:.84rem;text-align:left;vertical-align:top}
+.tasked-table tbody tr{cursor:pointer}
+.tasked-table tbody tr:hover{background:rgba(255,255,255,.03)}
+.tasked-status.running{color:#0a84ff}.tasked-status.completed{color:#30d158}.tasked-status.failed{color:#ff453a}.tasked-status.launch-required,.tasked-status.manual-only,.tasked-status.waiting-retry,.tasked-status.recovering{color:#ffa000}
+.tasked-template-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.75rem}
+.tasked-template{background:#111;border:1px solid var(--border,#333);border-radius:14px;padding:.9rem;display:grid;gap:.55rem}
+.tasked-template h3{margin:0;font-size:.92rem}
+.tasked-template p{margin:0;font-size:.79rem;color:var(--muted);line-height:1.52}
+.tasked-template ul{margin:0;padding-left:1rem;color:var(--muted);font-size:.76rem;line-height:1.45}
+.tasked-template button{justify-self:start}
+.tasked-template-toolbar{display:flex;gap:.65rem;flex-wrap:wrap;align-items:end;margin-bottom:.9rem}
+.tasked-template-toolbar label{display:grid;gap:.35rem;font-size:.84rem;min-width:min(360px,100%)}
+.tasked-template-toolbar select{width:100%;background:#111;border:1px solid var(--border,#333);border-radius:10px;color:var(--fg,#f5f5f7);padding:.68rem .8rem;font:inherit}
+.tasked-summary-list{display:grid;gap:.45rem;margin-top:.6rem}
+.tasked-summary-item{display:flex;gap:.55rem;align-items:flex-start;font-size:.8rem;color:var(--muted)}
+.tasked-summary-item strong{color:var(--fg)}
+.tasked-trace{background:#111;border:1px solid var(--border,#333);border-radius:14px;padding:.85rem;display:grid;gap:.7rem}
+.tasked-trace-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.65rem}
+.tasked-trace-item{border:1px solid var(--border,#333);border-radius:12px;padding:.65rem;background:#151515}
+.tasked-trace-item strong{display:block;font-size:.82rem;margin-bottom:.2rem}
+.tasked-trace-item span{font-size:.77rem;color:var(--muted);line-height:1.5;white-space:pre-wrap;word-break:break-word}
+.tasked-sandbox{display:grid;gap:.8rem;padding:.9rem;border:1px solid var(--border,#333);border-radius:14px;background:#151515}
+.tasked-runtime-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:.75rem}
+.tasked-runtime-card{background:#111;border:1px solid var(--border,#333);border-radius:14px;padding:.85rem;display:grid;gap:.35rem}
+.tasked-runtime-card strong{font-size:.88rem}
+.tasked-runtime-state{font-size:.78rem;color:var(--muted)}
+.tasked-steps{display:grid;gap:.75rem}
+.tasked-step{display:grid;gap:.65rem;padding:.85rem;border:1px solid var(--border,#333);border-radius:14px;background:#111}
+.tasked-step-head{display:flex;justify-content:space-between;gap:.75rem;align-items:center;flex-wrap:wrap}
+.tasked-step-head strong{font-size:.88rem}
+.tasked-subgrid{display:grid;grid-template-columns:1fr 180px 140px 140px;gap:.65rem}
+.tasked-step textarea{min-height:88px}
+.tasked-step-controls{display:flex;gap:.45rem;flex-wrap:wrap}
+.tasked-inline-note{font-size:.76rem;color:var(--muted);line-height:1.45}
+.tasked-kv-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:.7rem}
+.tasked-kv-grid label{display:grid;gap:.35rem;font-size:.84rem}
+.tasked-json-hint{font-family:monospace;font-size:.74rem;background:#111;border:1px solid var(--border,#333);border-radius:12px;padding:.7rem;white-space:pre-wrap;color:var(--muted)}
+.tasked-row-meta{font-size:.76rem;color:var(--muted);line-height:1.45}
+.tasked-author-grid{display:grid;grid-template-columns:minmax(280px,1.2fr) minmax(260px,.8fr);gap:1rem;align-items:start}
+.tasked-author-side{display:grid;gap:.75rem}
+.tasked-example-list{display:flex;gap:.5rem;flex-wrap:wrap}
+.tasked-example-btn{background:#111;border:1px solid var(--border,#333);color:var(--fg,#f5f5f7);border-radius:999px;padding:.42rem .72rem;font:inherit;cursor:pointer;font-size:.78rem}
+.tasked-draft-preview{display:grid;gap:.55rem}
+.tasked-draft-kv{font-size:.8rem;color:var(--muted);line-height:1.5}
+.tasked-draft-steps{margin:0;padding-left:1rem;color:var(--muted);font-size:.78rem;line-height:1.45}
+@media (max-width: 980px){.tasked-grid{grid-template-columns:1fr}.tasked-row{grid-template-columns:1fr}}
+@media (max-width: 980px){.tasked-subgrid,.tasked-author-grid{grid-template-columns:1fr}}
+.tasked-filter-bar{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-bottom:.7rem;padding:.6rem .75rem;background:#0d0d0d;border:1px solid var(--border,#333);border-radius:12px}
+.tasked-filter-bar select,.tasked-filter-bar input[type=search]{background:#111;border:1px solid var(--border,#333);border-radius:8px;color:var(--fg,#f5f5f7);padding:.35rem .6rem;font:inherit;font-size:.79rem}
+.tasked-filter-bar input[type=search]{min-width:150px}
+.tasked-bulk-bar{display:flex;gap:.4rem;flex-wrap:wrap;align-items:center;margin-bottom:.6rem}
+.tasked-bulk-btn{background:transparent;border:1px solid var(--border,#333);color:var(--fg,#f5f5f7);border-radius:8px;padding:.32rem .6rem;font:inherit;font-size:.77rem;cursor:pointer;white-space:nowrap}
+.tasked-bulk-btn:hover{border-color:#666}
+.tasked-bulk-btn.danger{border-color:#ff453a44;color:#ff6b6b}
+.tasked-bulk-btn.danger:hover{background:#ff453a22;border-color:#ff453a}
+.tasked-group-header td{padding:.42rem .55rem;background:#0d0d0d;font-size:.79rem;font-weight:600;color:var(--muted);cursor:pointer;user-select:none;border-bottom:1px solid var(--border,#333)}
+.tasked-group-header td:hover{color:var(--fg)}
+.tasked-row-actions{display:flex;gap:.3rem;flex-wrap:wrap}
+.tasked-row-btn{background:transparent;border:1px solid var(--border,#333);color:var(--fg,#f5f5f7);border-radius:7px;padding:.22rem .45rem;font:inherit;font-size:.71rem;cursor:pointer;white-space:nowrap}
+.tasked-row-btn:hover{border-color:#888}
+.tasked-row-btn.stop-btn{border-color:#ff453a55;color:#ff6b6b}.tasked-row-btn.stop-btn:hover{background:#ff453a22;border-color:#ff453a}
+.tasked-row-btn.done-btn{border-color:#30d15855;color:#30d158}.tasked-row-btn.done-btn:hover{background:#30d15822}
+.tasked-row-btn.del-btn{border-color:#ff453a33;color:#ff6b6b}.tasked-row-btn.del-btn:hover{background:#ff453a22;border-color:#ff453a}
+.tasked-sys-badge{font-size:.68rem;color:#ffa000;opacity:.75;margin-left:.3rem;border:1px solid #ffa00044;border-radius:4px;padding:0 .3rem}
+/* ── Live run timing (elapsed + start time + progress) ───────── */
+.tasked-timing-cell{display:flex;flex-direction:column;gap:.18rem}
+.tasked-elapsed{font-size:.84rem;font-weight:600;color:#0a84ff;font-variant-numeric:tabular-nums}
+.tasked-start-time{font-size:.72rem;color:var(--muted);line-height:1.3}
+.tasked-progress-wrap{margin-top:.25rem;height:4px;background:rgba(10,132,255,.12);border-radius:2px;overflow:hidden;width:100%;min-width:80px}
+.tasked-progress-bar{height:100%;background:#0a84ff;border-radius:2px;transition:width .4s ease}
+@keyframes tasked-indeterminate{0%{left:-40%;width:40%}60%{left:60%;width:40%}100%{left:100%;width:40%}}
+.tasked-progress-bar.indeterminate{position:relative;animation:tasked-indeterminate 1.6s ease-in-out infinite;width:40%!important}
+.tasked-workflow-diagram{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;padding:.85rem;background:#0d0d0d;border:1px solid var(--border,#333);border-radius:14px;margin-bottom:.8rem;overflow-x:auto}
+.tasked-workflow-node{display:flex;flex-direction:column;align-items:center;gap:.35rem;min-width:90px;padding:.6rem .7rem;background:#151515;border:1px solid var(--border,#333);border-radius:12px;position:relative;transition:all .2s ease}
+.tasked-workflow-node:hover{border-color:var(--accent,#0a84ff);background:#1a1a2e;transform:translateY(-2px);box-shadow:0 4px 12px rgba(10,132,255,.15)}
+.tasked-workflow-node .node-icon{font-size:1.2rem;line-height:1}
+.tasked-workflow-node .node-label{font-size:.72rem;color:var(--fg);font-weight:500;text-align:center}
+.tasked-workflow-node .node-kind{font-size:.65rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.tasked-workflow-connector{flex-shrink:0;width:24px;height:2px;background:linear-gradient(90deg,var(--border,#333),var(--accent,#0a84ff));position:relative}
+.tasked-workflow-connector::after{content:'';position:absolute;right:-3px;top:-3px;width:0;height:0;border-left:6px solid var(--accent,#0a84ff);border-top:4px solid transparent;border-bottom:4px solid transparent}
+.tasked-workflow-empty{padding:1.5rem;text-align:center;color:var(--muted);font-size:.85rem;border:1px dashed var(--border,#333);border-radius:12px;background:#0d0d0d}
+.tasked-form-section{border:1px solid var(--border,#333);border-radius:14px;background:#111;overflow:hidden;margin-bottom:.5rem}
+.tasked-form-section-header{display:flex;justify-content:space-between;align-items:center;padding:.75rem 1rem;cursor:pointer;user-select:none;transition:background .15s ease}
+.tasked-form-section-header:hover{background:rgba(255,255,255,.03)}
+.tasked-form-section-header h3{margin:0;font-size:.9rem}
+.tasked-form-section-toggle{font-size:.75rem;color:var(--muted);transition:transform .2s ease}
+.tasked-form-section-toggle.collapsed{transform:rotate(-90deg)}
+.tasked-form-section-body{padding:0 1rem .85rem;display:grid;gap:.7rem}
+.tasked-form-section-body.hidden{display:none}
+.tasked-form input:focus,.tasked-form select:focus,.tasked-form textarea:focus{outline:none;border-color:var(--accent,#0a84ff);box-shadow:0 0 0 2px rgba(10,132,255,.25)}
+.tasked-btn:hover{filter:brightness(1.1);transform:translateY(-1px);transition:all .15s ease}
+.tasked-btn.secondary:hover{border-color:#666;background:rgba(255,255,255,.04)}
+.tasked-btn.warn:hover{filter:brightness(1.15)}
+.tasked-status{display:inline-flex;align-items:center;gap:.35rem}
+.tasked-status::before{content:'';width:6px;height:6px;border-radius:50%;background:currentColor}
+.tasked-status.running{color:#0a84ff}.tasked-status.running::before{animation:pulse-dot 1.5s ease-in-out infinite}
+.tasked-status.completed{color:#30d158}.tasked-status.failed{color:#ff453a}.tasked-status.launch-required,.tasked-status.manual-only,.tasked-status.waiting-retry,.tasked-status.recovering{color:#ffa000}
+@keyframes pulse-dot{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(1.5)}}
+@keyframes fade-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.tasked-step{animation:fade-in .25s ease}
+.tasked-template{transition:all .2s ease}
+.tasked-template:hover{border-color:var(--accent,#0a84ff);transform:translateY(-2px);box-shadow:0 4px 16px rgba(10,132,255,.1)}
+.tasked-role{transition:all .2s ease}
+.tasked-role:hover{border-color:var(--accent,#0a84ff);background:#151520}
+.tasked-empty-state{padding:2rem;text-align:center;color:var(--muted);font-size:.9rem}
+.tasked-empty-state-icon{font-size:2rem;margin-bottom:.5rem;opacity:.5}
+</style>
+
+<div class="tasked-shell">
+  <section class="tasked-hero">
+    <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:.75rem;">
+      <span class="tasked-pill">Tasked</span>
+      <span class="tasked-pill">Recurring or manual</span>
+      <span class="tasked-pill">Chat + Sandbox + Agent + Multi-Agent + multi-Agento</span>
+      <span class="tasked-pill">Alerts integration</span>
+      <span class="tasked-pill">TaskCompleted visibility</span>
+    </div>
+    <h1>Tasked Orchestrator</h1>
+    <div class="tasked-meta">
+      Tasked is a separate orchestration page in C9. It stores recurring or one-off tasks, keeps editable templates,
+      decides which execution surface to use, and raises alerts when a trigger condition is met. Background recurring
+      execution currently runs <code>chat</code> and <code>sandbox</code> tasks directly. <code>sandbox</code> tasks execute,
+      validate, and test code in <code>C12b</code>. <code>agent</code>, <code>multi-agent</code>, and
+      <code>multi-Agento</code> tasks are saved here, launched from here, and traced back into <code>piplinetask</code>,
+      <code>Alerts</code>, and <code>TaskCompleted</code>.
+    </div>
+    <div class="tasked-summary-list">
+      <div class="tasked-summary-item"><strong>Task orchestration</strong><span>The doer: picks the execution path and holds the saved definition.</span></div>
+      <div class="tasked-summary-item"><strong>Task planner</strong><span>The order of work, cascading actions, and tab-to-tab context handoff.</span></div>
+      <div class="tasked-summary-item"><strong>Task timer</strong><span>The recurrence interval, active state, and next-run scheduling window.</span></div>
+      <div class="tasked-summary-item"><strong>Task executor</strong><span>The exact prompt or code-oriented action executed by chat, agent, or team mode.</span></div>
+      <div class="tasked-summary-item"><strong>Task alert generator</strong><span>Raises an alert on the Alerts page when the trigger condition is satisfied.</span></div>
+    </div>
+    <div class="tasked-actions" style="margin-top:.9rem;">
+      <button class="tasked-btn secondary" type="button" id="task-seed-examples-btn">Load 4 DB examples</button>
+    </div>
+  </section>
+
+  <section class="tasked-card">
+    <h2 style="margin:0 0 .45rem 0;font-size:1rem;">Sandbox Runtime</h2>
+    <div class="tasked-note" style="margin-bottom:.8rem;">
+      Tasked uses C12b Lean Sandbox for code execution, validation, and tests. This runtime view lets you confirm that environment before starting automation runs.
+    </div>
+    <div class="tasked-runtime-grid" id="tasked-runtime-grid">
+      <div class="tasked-runtime-card"><strong>C12b Lean Sandbox</strong><span class="tasked-runtime-state">Loading runtime…</span></div>
+    </div>
+  </section>
+
+  <section class="tasked-card">
+    <h2 style="margin:0 0 .45rem 0;font-size:1rem;">Execution Roles</h2>
+    <div class="tasked-note" style="margin-bottom:.8rem;">These roles are editable through the builder fields below. The templates prefill them for the example flows you gave.</div>
+    <div class="tasked-role-grid">
+      <div class="tasked-role"><h3>Task Orchestrator</h3><p>Selects the mode, keeps the saved task, and decides whether the task runs in background chat mode or launches a larger interactive workspace.</p></div>
+      <div class="tasked-role"><h3>Task Planner</h3><p>Defines the step order, including cascading checks like detect email, inspect attachment, then check SharePoint.</p></div>
+      <div class="tasked-role"><h3>Task Timer</h3><p>Controls recurring frequency, active state, and next-run timing. Use it for every-10-minutes flows and manual one-off launches.</p></div>
+      <div class="tasked-role"><h3>Task Executor</h3><p>Runs the actual prompt or code-oriented action. This is where the detailed task instruction lives.</p></div>
+      <div class="tasked-role"><h3>Task Alert Generator</h3><p>Builds the alert payload that becomes visible on the Alerts page with trigger, summary, and extracted details.</p></div>
+    </div>
+  </section>
+
+  <section class="tasked-card">
+    <h2 style="margin:0 0 .45rem 0;font-size:1rem;">Editable Templates</h2>
+    <div class="tasked-note" style="margin-bottom:.8rem;">
+      These templates are editable. Click <strong>Load template</strong> to prefill the builder, then change the prompts, schedule, tabs, or trigger logic.
+      The current templates cover the weather example, Gmail/Outlook sender watch, SharePoint file watch, Outlook alert watch, the combined Outlook + SharePoint flow, and a sandbox code validation/test flow.
+    </div>
+    <div class="tasked-template-toolbar">
+      <label>
+        Select editable template
+        <select id="tasked-template-picker">
+          <option value="">Choose a template to load</option>
+        </select>
+      </label>
+      <button class="tasked-btn secondary" type="button" id="tasked-template-load-btn">Load selected template</button>
+      <button class="tasked-btn secondary" type="button" id="tasked-template-save-btn">Save current as template</button>
+      <button class="tasked-btn secondary" type="button" id="tasked-template-clone-btn">Clone selected template</button>
+      <button class="tasked-btn secondary" type="button" id="tasked-template-archive-btn">Archive selected template</button>
+    </div>
+    <div class="tasked-note" id="tasked-template-note">Templates are DB-backed. Built-in and user-created templates can both be loaded here; archiving removes them from the active picker.</div>
+    <div class="tasked-template-grid" id="tasked-template-grid"></div>
+  </section>
+
+  <section class="tasked-card">
+    <h2 style="margin:0 0 .45rem 0;font-size:1rem;">Tasked Chat Planner</h2>
+    <div class="tasked-note" style="margin-bottom:.8rem;">
+      Write the task in English and Tasked will turn it into a normal Tasked draft. It will either match an existing editable template or build a template-less free-hand workflow that still flows into piplinetask, Alerts, and TaskCompleted.
+      This planner runs locally inside C9b and does not send the authoring prompt into the M365 auth tabs.
+    </div>
+    <div class="tasked-author-grid">
+      <label>
+        English task request
+        <textarea id="tasked-author-prompt" placeholder="Describe the automation in plain English, including schedule, tabs, conditions, alerts, and whether it needs sandbox code or agent feedback."></textarea>
+      </label>
+      <div class="tasked-author-side">
+        <label>
+          Draft strategy
+          <select id="tasked-author-strategy">
+            <option value="auto">Auto: prefer an existing template, else free-hand</option>
+            <option value="existing-template">Force existing template match</option>
+            <option value="freehand">Force free-hand custom template</option>
+          </select>
+        </label>
+        <div>
+          <div class="tasked-note" style="margin-bottom:.45rem;">Two lifecycle examples</div>
+          <div class="tasked-example-list" id="tasked-author-examples"></div>
+        </div>
+        <div class="tasked-actions">
+          <button class="tasked-btn" type="button" id="tasked-author-generate-btn">Generate Task Draft</button>
+          <button class="tasked-btn secondary" type="button" id="tasked-author-apply-btn">Apply Draft To Builder</button>
+          <button class="tasked-btn secondary" type="button" id="tasked-author-clear-btn">Clear Draft</button>
+        </div>
+      </div>
+    </div>
+    <div class="tasked-result tasked-draft-preview" id="tasked-author-result">No Tasked draft yet.</div>
+  </section>
+
+  <div class="tasked-grid">
+    <section class="tasked-card">
+      <h2 style="margin:0 0 .45rem 0;font-size:1rem;">Tasked Builder</h2>
+      <div class="tasked-note" style="margin-bottom:.8rem;">
+        Use this builder for recurring or non-recurring tasks that combine chat, sandbox code execution, agents, multi-agent, or multi-Agento.
+        Keep <strong>Tabs required</strong> and <strong>Context handoff</strong> explicit when you want one tab to gather data and another tab to continue the flow.
+      </div>
+      <form class="tasked-form" id="task-form">
+        <input type="hidden" id="task-id">
+
+        <div class="tasked-form-section">
+          <div class="tasked-form-section-header" data-section="basic">
+            <h3>Basic Configuration</h3>
+            <span class="tasked-form-section-toggle">▼</span>
+          </div>
+          <div class="tasked-form-section-body" id="section-basic">
+            <label>
+              Template
+              <select id="task-template">
+                <option value="">Custom</option>
+              </select>
+            </label>
+            <div class="tasked-row">
+              <label>
+                Name
+                <input id="task-name" placeholder="Tasked name">
+              </label>
+              <label>
+                Mode
+                <select id="task-mode">
+                  <option value="chat">Chat</option>
+                  <option value="sandbox">Sandbox (C12b)</option>
+                  <option value="agent">Agent</option>
+                  <option value="multi-agent">Multi-Agent</option>
+                  <option value="multi-agento">multi-Agento</option>
+                </select>
+              </label>
+              <label>
+                Output Type
+                <select id="task-tasked-type"></select>
+              </label>
+            </div>
+            <div class="tasked-row">
+              <label>
+                Schedule
+                <select id="task-schedule-kind">
+                  <option value="manual">Once-off / manual</option>
+                  <option value="recurring">Repeating / recurring</option>
+                  <option value="continuous">Live / continuous monitor</option>
+                </select>
+              </label>
+              <label>
+                Every N minutes
+                <input id="task-interval" type="number" min="0" step="1" value="10">
+              </label>
+            </div>
+            <div class="tasked-row">
+              <label>
+                Tabs required
+                <input id="task-tabs" type="number" min="1" max="12" value="2">
+              </label>
+              <label style="align-content:end">
+                <span>Active</span>
+                <input id="task-active" type="checkbox" checked style="width:auto">
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="tasked-form-section">
+          <div class="tasked-form-section-header" data-section="prompts">
+            <h3>Planner & Executor Prompts</h3>
+            <span class="tasked-form-section-toggle">▼</span>
+          </div>
+          <div class="tasked-form-section-body" id="section-prompts">
+            <label>
+              Planner prompt
+              <textarea id="task-planner" placeholder="The order of task execution and cascading actions"></textarea>
+            </label>
+            <label>
+              Executor prompt
+              <textarea id="task-executor" placeholder="The exact task prompt or code-oriented action to run"></textarea>
+            </label>
+          </div>
+        </div>
+
+        <div class="tasked-form-section">
+          <div class="tasked-form-section-header" data-section="sandbox">
+            <h3>Sandbox Configuration</h3>
+            <span class="tasked-form-section-toggle">▼</span>
+          </div>
+          <div class="tasked-form-section-body hidden" id="section-sandbox">
+            <div class="tasked-sandbox" id="task-sandbox-fields" hidden>
+              <div class="tasked-note">Sandbox tasks run directly in C12b for code execution, validation, and testing. Failures always raise an alert so piplinetask and Alerts stay aligned.</div>
+              <div class="tasked-row">
+                <label>
+                  Sandbox target
+                  <select id="task-executor-target">
+                    <option value="c12b">C12b Lean Sandbox</option>
+                  </select>
+                </label>
+                <label>
+                  Workspace dir
+                  <input id="task-workspace-dir" placeholder="/workspace">
+                </label>
+              </div>
+              <label>
+                Validation command
+                <textarea id="task-validate-command" placeholder="Optional command to validate syntax or outputs after execution"></textarea>
+              </label>
+              <label>
+                Test command
+                <textarea id="task-test-command" placeholder="Optional command to run tests after validation"></textarea>
+              </label>
+            </div>
+            <div class="tasked-sandbox" id="task-sandbox-assist-fields" hidden>
+              <div class="tasked-note">AIO Sandbox assist is optional for chat, agent, multi-agent, and multi-Agento tasks. Tasked runs these C12b stages before the main prompt or page handoff so code setup, validation, and test failures are visible in piplinetask and Alerts.</div>
+              <label style="align-content:end">
+                <span>Enable AIO sandbox assist</span>
+                <input id="task-sandbox-assist" type="checkbox" style="width:auto">
+              </label>
+              <div class="tasked-row">
+                <label>
+                  Assist target
+                  <select id="task-sandbox-assist-target">
+                    <option value="c12b">C12b Lean Sandbox</option>
+                  </select>
+                </label>
+                <label>
+                  Assist workspace dir
+                  <input id="task-sandbox-assist-workspace-dir" placeholder="/workspace">
+                </label>
+              </div>
+              <label>
+                Assist execution command
+                <textarea id="task-sandbox-assist-command" placeholder="Optional setup or code execution command that should run before chat or launch"></textarea>
+              </label>
+              <label>
+                Assist validation command
+                <textarea id="task-sandbox-assist-validation-command" placeholder="Optional validation command to run after the assist command"></textarea>
+              </label>
+              <label>
+                Assist test command
+                <textarea id="task-sandbox-assist-test-command" placeholder="Optional test command to run after assist validation"></textarea>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="tasked-form-section">
+          <div class="tasked-form-section-header" data-section="handoff">
+            <h3>Context Handoff & Triggers</h3>
+            <span class="tasked-form-section-toggle">▼</span>
+          </div>
+          <div class="tasked-form-section-body hidden" id="section-handoff">
+            <label>
+              Context handoff
+              <textarea id="task-context" placeholder="Describe how tab 1 copies context into tab 2 or another execution lane"></textarea>
+            </label>
+            <div class="tasked-row">
+              <label>
+                Trigger mode
+                <select id="task-trigger-mode">
+                  <option value="json">JSON triggered flag</option>
+                  <option value="contains">Response contains text</option>
+                  <option value="always">Always create alert</option>
+                </select>
+              </label>
+              <label>
+                Trigger text
+                <input id="task-trigger-text" placeholder="Used for contains mode">
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="tasked-form-section">
+          <div class="tasked-form-section-header" data-section="alerts">
+            <h3>Alert Policy & Completion</h3>
+            <span class="tasked-form-section-toggle">▼</span>
+          </div>
+          <div class="tasked-form-section-body hidden" id="section-alerts">
+            <label>
+              Notes
+              <textarea id="task-notes" placeholder="Extra orchestration notes, code assistance rules, or operational constraints"></textarea>
+            </label>
+            <div class="tasked-kv-grid">
+              <label>
+                Alert repeat every minutes
+                <input id="task-alert-repeat" type="number" min="0" step="1" value="0">
+              </label>
+              <label>
+                Alert dedupe key template
+                <input id="task-alert-dedupe" placeholder="jhb-rule-{task_id}">
+              </label>
+              <label>
+                Alert severity
+                <select id="task-alert-severity">
+                  <option value="info">Info</option>
+                  <option value="warning">Warning</option>
+                  <option value="critical">Critical</option>
+                  <option value="error">Error</option>
+                </select>
+              </label>
+              <label style="align-content:end">
+                <span>Repeat while condition true</span>
+                <input id="task-alert-while-true" type="checkbox" style="width:auto">
+              </label>
+            </div>
+            <div class="tasked-kv-grid">
+              <label>
+                Completion policy
+                <select id="task-completion-mark">
+                  <option value="step-complete">Mark completed on final step</option>
+                  <option value="alert-created">Mark completed when alert is created</option>
+                </select>
+              </label>
+              <label style="align-content:end">
+                <span>Archive on complete</span>
+                <input id="task-completion-archive" type="checkbox" style="width:auto">
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <div class="tasked-form-section">
+          <div class="tasked-form-section-header" data-section="workflow">
+            <h3>Workflow Steps</h3>
+            <span class="tasked-form-section-toggle">▼</span>
+          </div>
+          <div class="tasked-form-section-body" id="section-workflow">
+            <div class="tasked-sandbox">
+              <div style="display:flex;justify-content:space-between;gap:.75rem;align-items:flex-start;flex-wrap:wrap;">
+                <div>
+                  <strong>Workflow steps</strong>
+                  <div class="tasked-inline-note">Linear chained workflow. Each step is editable. Condition and alert rules live in step config JSON so the backend can evaluate them consistently.</div>
+                </div>
+                <button class="tasked-btn secondary" type="button" id="task-add-step-btn">Add step</button>
+              </div>
+              <div class="tasked-json-hint">Condition config example:
+{"operator":"AND","rules":[{"source":"task_step_weather","field":"parsed.temp_c","comparator":"gt","value":14}]}
+
+Alert config example:
+{"title":"Weather alert","trigger_text":"Johannesburg weather rule","repeat_every_minutes":5,"dedupe_key":"jhb-rule-{task_id}","severity":"warning"}</div>
+              <div class="tasked-steps" id="task-steps-list"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="tasked-actions">
+          <button class="tasked-btn" type="submit">Save Tasked</button>
+          <button class="tasked-btn warn" type="button" id="task-run-btn">Start Task</button>
+          <button class="tasked-btn secondary" type="button" id="task-reset-btn">New Tasked</button>
+        </div>
+        <div class="tasked-actions">
+          <button class="tasked-btn secondary" type="button" id="task-repeat-btn">Repeat</button>
+          <button class="tasked-btn secondary" type="button" id="task-clone-btn">Clone</button>
+          <button class="tasked-btn secondary" type="button" id="task-pause-btn">Pause</button>
+          <button class="tasked-btn secondary" type="button" id="task-resume-btn">Resume</button>
+          <button class="tasked-btn secondary" type="button" id="task-restart-btn">Restart</button>
+          <button class="tasked-btn secondary" type="button" id="task-archive-btn">Archive</button>
+        </div>
+        <div class="tasked-note">Saved rows are editable. The saved task definition is the source of truth, not the original template.</div>
+      </form>
+      <div style="margin-top:1rem">
+        <h2 style="margin-bottom:.45rem;font-size:1rem;">Traceability</h2>
+        <div class="tasked-trace" id="task-trace-box">Select or save a Tasked row to inspect its unique trace ID, latest run, latest alert, and role-by-role visibility from orchestration through alerts.</div>
+      </div>
+      <div style="margin-top:1rem">
+        <h2 style="margin-bottom:.45rem;font-size:1rem;">Last run</h2>
+        <div class="tasked-result" id="task-run-result">No run yet.</div>
+      </div>
+    </section>
+
+    <section class="tasked-card">
+      <div style="display:flex;justify-content:space-between;gap:.8rem;align-items:flex-start;flex-wrap:wrap;margin-bottom:.6rem;">
+        <div>
+          <h2 style="margin:0 0 .3rem 0;font-size:1rem;">Saved Tasked Rows</h2>
+          <div class="tasked-note">Click a row to edit. Use filters to group, search, or hide system tasks.</div>
+        </div>
+        <div class="tasked-actions">
+          <button class="tasked-btn secondary" type="button" id="tasked-refresh-btn">Refresh now</button>
+        </div>
+      </div>
+      <!-- Filter & search bar -->
+      <div class="tasked-filter-bar" id="tasked-filter-bar">
+        <input type="search" id="task-filter-search" placeholder="Search tasks…" title="Filter by name or ID">
+        <select id="task-filter-mode" title="Filter by mode">
+          <option value="">All modes</option>
+          <option value="chat">Chat</option>
+          <option value="sandbox">Sandbox</option>
+          <option value="agent">Agent</option>
+          <option value="multi-agent">Multi-agent</option>
+          <option value="multi-agento">Multi-agento</option>
+        </select>
+        <select id="task-filter-status" title="Filter by state">
+          <option value="">All states</option>
+          <option value="idle">Idle</option>
+          <option value="running">Running</option>
+          <option value="completed">Completed</option>
+          <option value="failed">Failed</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
+        <select id="task-filter-schedule" title="Filter by schedule">
+          <option value="">All schedules</option>
+          <option value="manual">Manual</option>
+          <option value="recurring">Recurring</option>
+          <option value="continuous">Continuous</option>
+        </select>
+        <select id="task-filter-group" title="Group tasks by field">
+          <option value="">No grouping</option>
+          <option value="mode">Group by mode</option>
+          <option value="status">Group by status</option>
+          <option value="schedule">Group by schedule</option>
+        </select>
+        <label style="display:flex;align-items:center;gap:.35rem;font-size:.79rem;cursor:pointer;" title="Show or hide tasks created from built-in templates">
+          <input type="checkbox" id="task-filter-show-system" checked style="width:auto;margin:0"> System tasks
+        </label>
+        <button class="tasked-bulk-btn" type="button" id="task-filter-clear-btn">✕ Clear filters</button>
+      </div>
+      <!-- Bulk actions -->
+      <div class="tasked-bulk-bar" id="tasked-bulk-bar">
+        <span style="font-size:.77rem;color:var(--muted);white-space:nowrap">Bulk actions:</span>
+        <button class="tasked-bulk-btn" type="button" id="task-bulk-stop-all" title="Cancel all queued/running tasks">⏹ Stop All</button>
+        <button class="tasked-bulk-btn" type="button" id="task-bulk-complete-all" title="Mark all active tasks as completed">✓ Complete All</button>
+        <button class="tasked-bulk-btn" type="button" id="task-bulk-archive-completed" title="Archive all completed/failed/cancelled tasks">📦 Archive Completed</button>
+        <button class="tasked-bulk-btn danger" type="button" id="task-bulk-delete-completed" title="Permanently delete all completed/failed/cancelled tasks">🗑 Delete Completed</button>
+        <button class="tasked-bulk-btn danger" type="button" id="task-bulk-delete-all" title="Permanently delete ALL tasks — irreversible">🗑 Delete ALL</button>
+      </div>
+      <div class="tasked-note" id="tasked-monitor-note" style="margin-bottom:.6rem;">Live monitor refreshes every 15 seconds and preserves unsaved builder edits.</div>
+      <table class="tasked-table">
+        <thead>
+          <tr><th>Name</th><th>Mode</th><th>Schedule</th><th>State</th><th>Current step</th><th>Duration</th><th>Next run</th><th>Actions</th></tr>
+        </thead>
+        <tbody id="task-table-body"><tr><td colspan="8" class="tasked-note">Loading…</td></tr></tbody>
+      </table>
+      <div style="margin-top:1rem">
+        <h2 style="margin-bottom:.45rem;font-size:1rem;">Recent Runs</h2>
+        <table class="tasked-table">
+          <thead>
+            <tr><th>When</th><th>Task</th><th>Status</th><th>Duration</th><th>Details</th></tr>
+          </thead>
+          <tbody id="task-runs-body"><tr><td colspan="5" class="tasked-note">Loading…</td></tr></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+(function(){
+  var TEMPLATES = {{ task_templates|safe }};
+  var EXECUTOR_TARGETS = {{ task_executor_targets|safe }};
+  var STEP_KINDS = {{ task_step_kinds|safe }};
+  var AGENT_TARGETS = {{ task_agent_targets|safe }};
+  var TASKED_TYPE_OPTIONS = {{ tasked_type_options|safe }};
+  var TASKED_AUTHOR_EXAMPLES = {{ tasked_author_examples|safe }};
+  var state = { tasks: [], selectedId: '', formDirty: false, lastLoadedAt: '', steps: [], authorDraft: null, collapsedGroups: {} };
+  var initialTaskId = new URLSearchParams(window.location.search).get('task_id') || '';
+  var form = document.getElementById('task-form');
+  var templateEl = document.getElementById('task-template');
+  var templatePickerEl = document.getElementById('tasked-template-picker');
+  var resultEl = document.getElementById('task-run-result');
+  var tasksBody = document.getElementById('task-table-body');
+  var runsBody = document.getElementById('task-runs-body');
+  var traceBox = document.getElementById('task-trace-box');
+  var templateGrid = document.getElementById('tasked-template-grid');
+  var monitorNoteEl = document.getElementById('tasked-monitor-note');
+  var templateNoteEl = document.getElementById('tasked-template-note');
+  var sandboxFieldsEl = document.getElementById('task-sandbox-fields');
+  var sandboxAssistFieldsEl = document.getElementById('task-sandbox-assist-fields');
+  var runtimeGridEl = document.getElementById('tasked-runtime-grid');
+  var workflowDiagramEl = document.getElementById('tasked-workflow-diagram');
+  var stepsListEl = document.getElementById('task-steps-list');
+  var authorPromptEl = document.getElementById('tasked-author-prompt');
+  var authorStrategyEl = document.getElementById('tasked-author-strategy');
+  var authorResultEl = document.getElementById('tasked-author-result');
+  var authorExamplesEl = document.getElementById('tasked-author-examples');
+  var filterSearch = document.getElementById('task-filter-search');
+  var filterMode = document.getElementById('task-filter-mode');
+  var filterStatus = document.getElementById('task-filter-status');
+  var filterSchedule = document.getElementById('task-filter-schedule');
+  var filterGroup = document.getElementById('task-filter-group');
+  var filterShowSystem = document.getElementById('task-filter-show-system');
+  var fields = {
+    id: document.getElementById('task-id'),
+    name: document.getElementById('task-name'),
+    mode: document.getElementById('task-mode'),
+    scheduleKind: document.getElementById('task-schedule-kind'),
+    interval: document.getElementById('task-interval'),
+    tabs: document.getElementById('task-tabs'),
+    active: document.getElementById('task-active'),
+    planner: document.getElementById('task-planner'),
+    executor: document.getElementById('task-executor'),
+    executorTarget: document.getElementById('task-executor-target'),
+    workspaceDir: document.getElementById('task-workspace-dir'),
+    validateCommand: document.getElementById('task-validate-command'),
+    testCommand: document.getElementById('task-test-command'),
+    sandboxAssist: document.getElementById('task-sandbox-assist'),
+    sandboxAssistTarget: document.getElementById('task-sandbox-assist-target'),
+    sandboxAssistWorkspaceDir: document.getElementById('task-sandbox-assist-workspace-dir'),
+    sandboxAssistCommand: document.getElementById('task-sandbox-assist-command'),
+    sandboxAssistValidationCommand: document.getElementById('task-sandbox-assist-validation-command'),
+    sandboxAssistTestCommand: document.getElementById('task-sandbox-assist-test-command'),
+    context: document.getElementById('task-context'),
+    triggerMode: document.getElementById('task-trigger-mode'),
+    triggerText: document.getElementById('task-trigger-text'),
+    notes: document.getElementById('task-notes'),
+    alertRepeat: document.getElementById('task-alert-repeat'),
+    alertDedupe: document.getElementById('task-alert-dedupe'),
+    alertSeverity: document.getElementById('task-alert-severity'),
+    alertWhileTrue: document.getElementById('task-alert-while-true'),
+    completionMark: document.getElementById('task-completion-mark'),
+    completionArchive: document.getElementById('task-completion-archive'),
+    taskedType: document.getElementById('task-tasked-type')
+  };
+
+  // Populate output-type select from server-injected options
+  (function() {
+    var sel = fields.taskedType;
+    if (!sel) return;
+    TASKED_TYPE_OPTIONS.forEach(function(opt) {
+      var o = document.createElement('option');
+      o.value = opt.id;
+      o.textContent = opt.label;
+      o.title = opt.desc || '';
+      sel.appendChild(o);
+    });
+  })();
+
+  function esc(v){ return String(v == null ? '' : v).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
+  function fmtTs(ts){ if(!ts) return '—'; try { return new Date(ts).toLocaleString(); } catch(_) { return ts; } }
+  function fmtTsShort(ts){ if(!ts) return ''; try { var d=new Date(ts); return d.toLocaleDateString([],{month:'short',day:'numeric'})+' '+d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); } catch(_){ return ''; } }
+  function fmtDuration(ms){
+    if (ms == null || ms === '') return '—';
+    var total = Math.max(0, Math.floor(ms / 1000));
+    var h = Math.floor(total / 3600);
+    var m = Math.floor((total % 3600) / 60);
+    var s = total % 60;
+    if (h) return h + 'h ' + m + 'm ' + s + 's';
+    if (m) return m + 'm ' + s + 's';
+    return s + 's';
+  }
+
+  function sandboxDefaultWorkspace(target) {
+    return '/workspace';
+  }
+
+  function executorLabel(target) {
+    var hit = EXECUTOR_TARGETS.find(function(item){ return item.id === target; });
+    return (hit && hit.label) || target || '—';
+  }
+  function agentLabel(agentId) {
+    var hit = AGENT_TARGETS.find(function(item){ return item.id === agentId; });
+    return (hit && hit.label) || agentId || '—';
+  }
+  function stepKindLabel(kind) {
+    var hit = STEP_KINDS.find(function(item){ return item.id === kind; });
+    return (hit && hit.label) || kind || 'Step';
+  }
+  function stepKindIcon(kind) {
+    var icons = { trigger: '⏱', condition: '🔀', chat: '💬', sandbox: '🧪', agent: '🤖', 'multi-agent': '👥', 'multi-agento': '🌐', alert: '🔔', complete: '✅' };
+    return icons[kind] || '📋';
+  }
+  function currentTaskId() {
+    return fields.id.value.trim() || 'task_draft';
+  }
+  function nextStepId(index) {
+    return currentTaskId() + '_step_' + (index + 1);
+  }
+  function defaultStepConfig(kind, index) {
+    var taskId = currentTaskId();
+    if (kind === 'trigger') return { schedule_kind: fields.scheduleKind.value, interval_minutes: parseInt(fields.interval.value || '0', 10) || 0 };
+    if (kind === 'condition') return { operator: 'AND', rules: [] };
+    if (kind === 'alert') return { title: fields.name.value || 'Task alert', trigger_text: fields.triggerText.value || 'task trigger', repeat_every_minutes: parseInt(fields.alertRepeat.value || '0', 10) || 0, dedupe_key: fields.alertDedupe.value || '', severity: fields.alertSeverity.value || 'info' };
+    if (kind === 'complete') return {};
+    if (kind === 'sandbox') return { executor_target: 'c12b', workspace_dir: fields.workspaceDir.value || '/workspace', command: fields.executor.value || '', validation_command: fields.validateCommand.value || '', test_command: fields.testCommand.value || '' };
+    if (kind === 'agent' || kind === 'multi-agent' || kind === 'multi-agento') return { prompt: fields.executor.value || '', agent_id: 'c6-kilocode' };
+    if (kind === 'chat') return { prompt: fields.executor.value || fields.planner.value || '', agent_id: 'c6-kilocode' };
+    return { prompt: fields.executor.value || fields.planner.value || '' };
+  }
+  function createStep(kind) {
+    var idx = state.steps.length;
+    return {
+      id: nextStepId(idx),
+      name: stepKindLabel(kind) + ' step',
+      kind: kind,
+      config: defaultStepConfig(kind, idx),
+      on_success_step_id: '',
+      on_failure_step_id: '',
+      active: true
+    };
+  }
+  function rebuildStepIds() {
+    var oldToNew = {};
+    state.steps.forEach(function(step, index) {
+      oldToNew[step.id] = nextStepId(index);
+    });
+    state.steps = state.steps.map(function(step, index) {
+      return {
+        id: oldToNew[step.id] || nextStepId(index),
+        name: step.name || ('Step ' + (index + 1)),
+        kind: step.kind || 'chat',
+        config: step.config || {},
+        on_success_step_id: oldToNew[step.on_success_step_id] || '',
+        on_failure_step_id: oldToNew[step.on_failure_step_id] || '',
+        active: step.active !== false
+      };
+    });
+  }
+  function renderStepCards() {
+    rebuildStepIds();
+    if (!state.steps.length) {
+      stepsListEl.innerHTML = '<div class="tasked-note">No workflow steps yet. Add a step or load a template.</div>';
+      renderWorkflowDiagram();
+      return;
+    }
+    stepsListEl.innerHTML = state.steps.map(function(step, index) {
+      return '<article class="tasked-step" data-step-index="' + index + '">' +
+        '<div class="tasked-step-head">' +
+          '<strong>' + esc(step.name || ('Step ' + (index + 1))) + '</strong>' +
+          '<div class="tasked-step-controls">' +
+            '<span class="tasked-pill">' + esc(step.id) + '</span>' +
+            '<button class="tasked-btn secondary" type="button" data-step-action="up" data-step-index="' + index + '">Up</button>' +
+            '<button class="tasked-btn secondary" type="button" data-step-action="down" data-step-index="' + index + '">Down</button>' +
+            '<button class="tasked-btn secondary" type="button" data-step-action="remove" data-step-index="' + index + '">Remove</button>' +
+          '</div>' +
+        '</div>' +
+        '<div class="tasked-subgrid">' +
+          '<label>Step name<input data-step-field="name" data-step-index="' + index + '" value="' + esc(step.name || '') + '"></label>' +
+          '<label>Kind<select data-step-field="kind" data-step-index="' + index + '">' + STEP_KINDS.map(function(item){ return '<option value="' + esc(item.id) + '"' + (item.id === step.kind ? ' selected' : '') + '>' + esc(item.label) + '</option>'; }).join('') + '</select></label>' +
+          '<label>On success<input data-step-field="on_success_step_id" data-step-index="' + index + '" value="' + esc(step.on_success_step_id || '') + '" placeholder="next id"></label>' +
+          '<label>On failure<input data-step-field="on_failure_step_id" data-step-index="' + index + '" value="' + esc(step.on_failure_step_id || '') + '" placeholder="optional"></label>' +
+        '</div>' +
+        '<label>Config JSON<textarea data-step-field="config" data-step-index="' + index + '">' + esc(JSON.stringify(step.config || {}, null, 2)) + '</textarea></label>' +
+        '<div class="tasked-inline-note">Kinds: trigger, condition, chat, sandbox, agent, multi-agent, multi-agento, alert, complete. Use <code>agent_id: "c6-kilocode"</code> (C2 aider, C6 kilocode, etc.) for chat and agent steps.</div>' +
+      '</article>';
+    }).join('');
+    stepsListEl.querySelectorAll('[data-step-field]').forEach(function(el) {
+      el.addEventListener('input', updateStepField);
+      el.addEventListener('change', updateStepField);
+    });
+    stepsListEl.querySelectorAll('[data-step-action]').forEach(function(btn) {
+      btn.addEventListener('click', handleStepAction);
+    });
+    renderWorkflowDiagram();
+  }
+  function updateStepField(e) {
+    var idx = parseInt(e.target.dataset.stepIndex || '-1', 10);
+    if (idx < 0 || !state.steps[idx]) return;
+    var field = e.target.dataset.stepField;
+    if (field === 'config') {
+      try {
+        state.steps[idx].config = JSON.parse(e.target.value || '{}');
+        e.target.style.borderColor = 'var(--border,#333)';
+      } catch (_) {
+        e.target.style.borderColor = '#ff453a';
+      }
+    } else if (field === 'kind') {
+      state.steps[idx].kind = e.target.value;
+      if (!state.steps[idx].config || !Object.keys(state.steps[idx].config).length) {
+        state.steps[idx].config = defaultStepConfig(e.target.value, idx);
+      }
+      renderStepCards();
+    } else if (field === 'name' || field === 'on_success_step_id' || field === 'on_failure_step_id') {
+      state.steps[idx][field] = e.target.value;
+    }
+    markDirty();
+  }
+  function handleStepAction(e) {
+    var idx = parseInt(e.target.dataset.stepIndex || '-1', 10);
+    if (idx < 0 || !state.steps[idx]) return;
+    var action = e.target.dataset.stepAction;
+    if (action === 'remove') state.steps.splice(idx, 1);
+    if (action === 'up' && idx > 0) {
+      var tmpUp = state.steps[idx - 1];
+      state.steps[idx - 1] = state.steps[idx];
+      state.steps[idx] = tmpUp;
+    }
+    if (action === 'down' && idx < state.steps.length - 1) {
+      var tmpDown = state.steps[idx + 1];
+      state.steps[idx + 1] = state.steps[idx];
+      state.steps[idx] = tmpDown;
+    }
+    markDirty();
+    renderStepCards();
+    renderWorkflowDiagram();
+  }
+  function buildDefaultStepsForMode(mode) {
+    var taskId = currentTaskId();
+    var steps = [];
+    if (fields.scheduleKind.value !== 'manual') steps.push({ id: taskId + '_trigger', name: 'Trigger', kind: 'trigger', config: defaultStepConfig('trigger', 0), on_success_step_id: '', on_failure_step_id: '', active: true });
+    if (mode === 'sandbox') {
+      steps.push({ id: taskId + '_sandbox', name: 'Sandbox execution', kind: 'sandbox', config: defaultStepConfig('sandbox', steps.length), on_success_step_id: '', on_failure_step_id: '', active: true });
+    } else if (mode === 'agent' || mode === 'multi-agent' || mode === 'multi-agento') {
+      steps.push({ id: taskId + '_execute', name: 'Launch ' + mode, kind: mode, config: defaultStepConfig(mode, steps.length), on_success_step_id: '', on_failure_step_id: '', active: true });
+    } else {
+      steps.push({ id: taskId + '_execute', name: 'Execute prompt', kind: 'chat', config: defaultStepConfig('chat', steps.length), on_success_step_id: '', on_failure_step_id: '', active: true });
+    }
+    steps.push({ id: taskId + '_alert', name: 'Create alert', kind: 'alert', config: defaultStepConfig('alert', steps.length), on_success_step_id: '', on_failure_step_id: '', active: true });
+    steps.push({ id: taskId + '_complete', name: 'Complete', kind: 'complete', config: defaultStepConfig('complete', steps.length), on_success_step_id: '', on_failure_step_id: '', active: true });
+    state.steps = steps;
+    renderStepCards();
+    renderWorkflowDiagram();
+  }
+
+  function renderWorkflowDiagram() {
+    if (!workflowDiagramEl) return;
+    if (!state.steps.length) {
+      workflowDiagramEl.innerHTML = '<div class="tasked-workflow-empty">No workflow steps defined. Add steps in the builder below or load a template.</div>';
+      return;
+    }
+    workflowDiagramEl.innerHTML = state.steps.map(function(step, index) {
+      var icon = stepKindIcon(step.kind);
+      var label = (step.name || '').length > 18 ? (step.name || '').slice(0, 16) + '…' : (step.name || step.kind);
+      var kindLabel = stepKindLabel(step.kind);
+      var node = '<div class="tasked-workflow-node" title="' + esc(step.name || '') + ' (' + esc(kindLabel) + ')">' +
+        '<span class="node-icon">' + icon + '</span>' +
+        '<span class="node-label">' + esc(label) + '</span>' +
+        '<span class="node-kind">' + esc(kindLabel) + '</span>' +
+      '</div>';
+      var connector = (index < state.steps.length - 1) ? '<div class="tasked-workflow-connector"></div>' : '';
+      return node + connector;
+    }).join('');
+  }
+
+  function toggleSandboxFields() {
+    var isSandbox = fields.mode.value === 'sandbox';
+    sandboxFieldsEl.hidden = !isSandbox;
+    sandboxAssistFieldsEl.hidden = isSandbox;
+    fields.executor.placeholder = isSandbox
+      ? 'Shell command to execute in the sandbox workspace'
+      : 'The exact task prompt or code-oriented action to run';
+    if (isSandbox) {
+      if (!fields.executorTarget.value) fields.executorTarget.value = 'c12b';
+      if (!fields.workspaceDir.value.trim()) fields.workspaceDir.value = sandboxDefaultWorkspace(fields.executorTarget.value);
+      return;
+    }
+    if (!fields.sandboxAssistTarget.value) fields.sandboxAssistTarget.value = 'c12b';
+    if (!fields.sandboxAssistWorkspaceDir.value.trim()) fields.sandboxAssistWorkspaceDir.value = sandboxDefaultWorkspace(fields.sandboxAssistTarget.value);
+  }
+
+  function markDirty() {
+    state.formDirty = true;
+    if (monitorNoteEl) monitorNoteEl.textContent = 'Unsaved builder edits are preserved. Click Save Tasked when ready.';
+  }
+
+  function renderAuthorExamples() {
+    authorExamplesEl.innerHTML = (TASKED_AUTHOR_EXAMPLES || []).map(function(item) {
+      return '<button class="tasked-example-btn" type="button" data-author-example="' + esc(item.id || '') + '">' + esc(item.label || 'Example') + '</button>';
+    }).join('');
+    authorExamplesEl.querySelectorAll('[data-author-example]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var hit = (TASKED_AUTHOR_EXAMPLES || []).find(function(item){ return item.id === btn.dataset.authorExample; });
+        if (!hit) return;
+        authorPromptEl.value = hit.prompt || '';
+        authorStrategyEl.value = hit.strategy || 'auto';
+      });
+    });
+  }
+
+  function renderAuthorDraft(payload) {
+    state.authorDraft = payload || null;
+    if (!payload || !payload.draft) {
+      authorResultEl.textContent = 'No Tasked draft yet.';
+      return;
+    }
+    var draft = payload.draft || {};
+    var matched = payload.matched_template || null;
+    var steps = draft.steps || [];
+    authorResultEl.innerHTML =
+      '<div><strong>Draft strategy:</strong> ' + esc(payload.strategy_used || draft.strategy || 'freehand') + '</div>' +
+      '<div class="tasked-draft-kv"><strong>Explanation:</strong> ' + esc(payload.explanation || 'Draft ready.') + '</div>' +
+      '<div class="tasked-draft-kv"><strong>Template:</strong> ' + esc(matched ? matched.name : 'Free-hand custom draft') + '</div>' +
+      '<div class="tasked-draft-kv"><strong>Mode:</strong> ' + esc(draft.mode || 'chat') + ' · <strong>Schedule:</strong> ' + esc(draft.schedule_kind || 'manual') + (((draft.interval_minutes || 0) > 0) ? (' / ' + esc(draft.interval_minutes) + 'm') : '') + ' · <strong>Tabs:</strong> ' + esc(draft.tabs_required || 1) + '</div>' +
+      '<div class="tasked-draft-kv"><strong>Planner:</strong> ' + esc(draft.planner_prompt || '—') + '</div>' +
+      '<div class="tasked-draft-kv"><strong>Executor:</strong> ' + esc((draft.executor_prompt || '').slice(0, 260) || '—') + (((draft.executor_prompt || '').length > 260) ? '…' : '') + '</div>' +
+      '<div class="tasked-draft-kv"><strong>Lifecycle path:</strong> Tasked → piplinetask → Alerts → TaskCompleted</div>' +
+      '<div class="tasked-draft-kv"><strong>Steps:</strong></div>' +
+      '<ul class="tasked-draft-steps">' + steps.map(function(step, index) {
+        return '<li>' + esc((index + 1) + '. ' + (step.name || step.kind || 'step') + ' [' + (step.kind || 'step') + ']') + '</li>';
+      }).join('') + '</ul>';
+  }
+
+  function hydrateForm(task, options) {
+    options = options || {};
+    var asDraft = !!options.asDraft;
+    fields.id.value = asDraft ? '' : (task.id || '');
+    fields.name.value = task.name || '';
+    fields.mode.value = task.mode || 'chat';
+    if (fields.taskedType) fields.taskedType.value = task.tasked_type || 'output';
+    fields.scheduleKind.value = task.schedule_kind || 'manual';
+    fields.interval.value = task.interval_minutes || 0;
+    fields.tabs.value = task.tabs_required || 1;
+    fields.active.checked = ('active' in task) ? !!task.active : true;
+    fields.planner.value = task.planner_prompt || '';
+    fields.executor.value = task.executor_prompt || '';
+    fields.executorTarget.value = task.executor_target || 'c12b';
+    fields.workspaceDir.value = task.workspace_dir || sandboxDefaultWorkspace(fields.executorTarget.value);
+    fields.validateCommand.value = task.validation_command || '';
+    fields.testCommand.value = task.test_command || '';
+    fields.sandboxAssist.checked = !!task.sandbox_assist;
+    fields.sandboxAssistTarget.value = task.sandbox_assist_target || 'c12b';
+    fields.sandboxAssistWorkspaceDir.value = task.sandbox_assist_workspace_dir || sandboxDefaultWorkspace(fields.sandboxAssistTarget.value);
+    fields.sandboxAssistCommand.value = task.sandbox_assist_command || '';
+    fields.sandboxAssistValidationCommand.value = task.sandbox_assist_validation_command || '';
+    fields.sandboxAssistTestCommand.value = task.sandbox_assist_test_command || '';
+    fields.context.value = task.context_handoff || '';
+    fields.triggerMode.value = task.trigger_mode || 'json';
+    fields.triggerText.value = task.trigger_text || '';
+    fields.notes.value = task.notes || '';
+    fields.alertRepeat.value = ((task.alert_policy || {}).repeat_every_minutes || 0);
+    fields.alertDedupe.value = ((task.alert_policy || {}).dedupe_key_template || '');
+    fields.alertSeverity.value = ((task.alert_policy || {}).severity || 'info');
+    fields.alertWhileTrue.checked = !!((task.alert_policy || {}).while_condition_true);
+    fields.completionMark.value = ((task.completion_policy || {}).mark_completed_on || 'step-complete');
+    fields.completionArchive.checked = !!((task.completion_policy || {}).archive_on_complete);
+    templateEl.value = task.template_key || '';
+    templatePickerEl.value = task.template_key || '';
+    state.selectedId = asDraft ? '' : (task.id || '');
+    state.formDirty = !!asDraft;
+    state.steps = (task.steps || []).map(function(step) {
+      return {
+        id: step.id || '',
+        name: step.name || '',
+        kind: step.kind || 'chat',
+        config: step.config || {},
+        on_success_step_id: step.on_success_step_id || '',
+        on_failure_step_id: step.on_failure_step_id || '',
+        active: step.active !== false
+      };
+    });
+    resultEl.textContent = options.resultText || ((task.last_result_excerpt || 'No run yet.') + (task.launch_url ? '\n\nLaunch: ' + task.launch_url : ''));
+    if (asDraft) {
+      traceBox.innerHTML =
+        '<div><strong>Draft trace preview</strong></div>' +
+        '<div class="tasked-trace-grid">' +
+          '<div class="tasked-trace-item"><strong>Task orchestration</strong><span>Draft name: ' + esc(task.name || 'Draft') + '\nMode: ' + esc(task.mode || 'chat') + '\nTemplate: ' + esc(task.template_key || 'freehand') + '</span></div>' +
+          '<div class="tasked-trace-item"><strong>Task planner</strong><span>' + esc(task.planner_prompt || '—') + '</span></div>' +
+          '<div class="tasked-trace-item"><strong>Task timer</strong><span>Schedule: ' + esc(task.schedule_kind || 'manual') + (((task.interval_minutes || 0) > 0) ? (' / ' + esc(task.interval_minutes) + 'm') : '') + '</span></div>' +
+          '<div class="tasked-trace-item"><strong>Task executor</strong><span>' + esc(task.mode === 'sandbox' ? 'C12b Lean Sandbox' : (task.mode || 'chat')) + '\nPrompt/command prepared for save.</span></div>' +
+          '<div class="tasked-trace-item"><strong>Task alert generator</strong><span>Severity: ' + esc((task.alert_policy || {}).severity || 'info') + '\nRepeat: ' + esc((task.alert_policy || {}).repeat_every_minutes || 0) + 'm</span></div>' +
+          '<div class="tasked-trace-item"><strong>Task completion</strong><span>This draft will flow into piplinetask, Alerts, and TaskCompleted after it is saved and run.</span></div>' +
+        '</div>';
+    } else {
+      renderTrace(task);
+    }
+    toggleSandboxFields();
+    renderStepCards();
+  }
+
+  function resetForm() {
+    fields.id.value = '';
+    fields.name.value = '';
+    fields.mode.value = 'chat';
+    if (fields.taskedType) fields.taskedType.value = 'output';
+    fields.scheduleKind.value = 'manual';
+    fields.interval.value = 10;
+    fields.tabs.value = 2;
+    fields.active.checked = true;
+    fields.planner.value = '';
+    fields.executor.value = '';
+    fields.executorTarget.value = 'c12b';
+    fields.workspaceDir.value = '/workspace';
+    fields.validateCommand.value = '';
+    fields.testCommand.value = '';
+    fields.sandboxAssist.checked = false;
+    fields.sandboxAssistTarget.value = 'c12b';
+    fields.sandboxAssistWorkspaceDir.value = '/workspace';
+    fields.sandboxAssistCommand.value = '';
+    fields.sandboxAssistValidationCommand.value = '';
+    fields.sandboxAssistTestCommand.value = '';
+    fields.context.value = '';
+    fields.triggerMode.value = 'json';
+    fields.triggerText.value = '';
+    fields.notes.value = '';
+    fields.alertRepeat.value = 0;
+    fields.alertDedupe.value = '';
+    fields.alertSeverity.value = 'info';
+    fields.alertWhileTrue.checked = false;
+    fields.completionMark.value = 'step-complete';
+    fields.completionArchive.checked = false;
+    templatePickerEl.value = '';
+    state.selectedId = '';
+    state.formDirty = false;
+    state.steps = [];
+    resultEl.textContent = 'No run yet.';
+    traceBox.textContent = 'Select or save a Tasked row to inspect its unique trace ID, latest run, latest alert, and role-by-role visibility from orchestration through alerts.';
+    state.authorDraft = null;
+    toggleSandboxFields();
+    buildDefaultStepsForMode('chat');
+  }
+
+  function applyTemplate(key) {
+    var tpl = TEMPLATES.find(function(t){ return t.key === key; });
+    if (!tpl) return;
+    templateEl.value = tpl.key;
+    fields.name.value = tpl.name || '';
+    fields.mode.value = tpl.mode || 'chat';
+    fields.scheduleKind.value = tpl.schedule_kind || 'manual';
+    fields.interval.value = tpl.interval_minutes || 10;
+    fields.tabs.value = tpl.tabs_required || 2;
+    fields.planner.value = tpl.planner_prompt || '';
+    fields.executor.value = tpl.executor_prompt || '';
+    fields.executorTarget.value = tpl.executor_target || 'c12b';
+    fields.workspaceDir.value = tpl.workspace_dir || sandboxDefaultWorkspace(fields.executorTarget.value);
+    fields.validateCommand.value = tpl.validation_command || '';
+    fields.testCommand.value = tpl.test_command || '';
+    fields.sandboxAssist.checked = !!tpl.sandbox_assist;
+    fields.sandboxAssistTarget.value = tpl.sandbox_assist_target || 'c12b';
+    fields.sandboxAssistWorkspaceDir.value = tpl.sandbox_assist_workspace_dir || sandboxDefaultWorkspace(fields.sandboxAssistTarget.value);
+    fields.sandboxAssistCommand.value = tpl.sandbox_assist_command || '';
+    fields.sandboxAssistValidationCommand.value = tpl.sandbox_assist_validation_command || '';
+    fields.sandboxAssistTestCommand.value = tpl.sandbox_assist_test_command || '';
+    fields.context.value = tpl.context_handoff || '';
+    fields.triggerMode.value = tpl.trigger_mode || 'json';
+    fields.triggerText.value = tpl.trigger_text || '';
+    fields.notes.value = (tpl.description || '') + '\n\nCascading task template loaded into Tasked.';
+    fields.alertRepeat.value = (tpl.alert_policy && tpl.alert_policy.repeat_every_minutes) || 0;
+    fields.alertDedupe.value = (tpl.alert_policy && tpl.alert_policy.dedupe_key_template) || '';
+    fields.alertSeverity.value = (tpl.alert_policy && tpl.alert_policy.severity) || 'info';
+    fields.alertWhileTrue.checked = !!(tpl.alert_policy && tpl.alert_policy.while_condition_true);
+    fields.completionMark.value = (tpl.completion_policy && tpl.completion_policy.mark_completed_on) || 'step-complete';
+    fields.completionArchive.checked = !!(tpl.completion_policy && tpl.completion_policy.archive_on_complete);
+    templatePickerEl.value = tpl.key;
+    state.formDirty = true;
+    toggleSandboxFields();
+    state.steps = (tpl.steps || []).map(function(step){ return { id: step.id || '', name: step.name || '', kind: step.kind || 'chat', config: step.config || {}, on_success_step_id: step.on_success_step_id || '', on_failure_step_id: step.on_failure_step_id || '', active: step.active !== false }; });
+    if (!state.steps.length) buildDefaultStepsForMode(fields.mode.value);
+    else renderStepCards();
+  }
+
+  function renderTrace(task) {
+    var trace = task.trace || {};
+    var latestRun = task.latest_run || {};
+    var latestAlert = task.latest_alert || {};
+    traceBox.innerHTML =
+      '<div><strong>Trace ID:</strong> ' + esc(trace.trace_id || task.id || '—') + '</div>' +
+      '<div class="tasked-trace-grid">' +
+        '<div class="tasked-trace-item"><strong>Task orchestration</strong><span>Unique Task ID: ' + esc(trace.task_id || task.id || '—') + '\nMode: ' + esc(task.mode || '—') + '\nState: ' + esc(task.lifecycle_label || task.last_status || '—') + '</span></div>' +
+        '<div class="tasked-trace-item"><strong>Task planner</strong><span>' + esc((trace.planner || {}).prompt || task.planner_prompt || '—') + '</span></div>' +
+        '<div class="tasked-trace-item"><strong>Task timer</strong><span>Schedule: ' + esc((trace.timer || {}).schedule_label || task.schedule_label || '—') + '\nNext run: ' + esc(fmtTs((trace.timer || {}).next_run_at || task.next_run_at)) + '</span></div>' +
+        '<div class="tasked-trace-item"><strong>Task executor</strong><span>Run ID: ' + esc((trace.run_id || latestRun.id || '—')) + '\nStatus: ' + esc((trace.executor || {}).last_status || latestRun.status || '—') + '\nCurrent step: ' + esc((trace.completion || {}).current_step_id || task.current_step_id || '—') + '\nTarget: ' + esc(executorLabel((trace.executor || {}).target || task.executor_target || '')) + '\nWorkspace: ' + esc((trace.executor || {}).workspace_dir || task.workspace_dir || '—') + '\nValidation: ' + esc((trace.executor || {}).validation_status || latestRun.validation_status || '—') + '\nTest: ' + esc((trace.executor || {}).test_status || latestRun.test_status || '—') + '\nDuration: ' + esc((trace.executor || {}).duration_label || latestRun.duration_label || '—') + '</span></div>' +
+        '<div class="tasked-trace-item"><strong>AIO sandbox assist</strong><span>Enabled: ' + esc((trace.sandbox_assist || {}).enabled ? 'yes' : 'no') + '\nTarget: ' + esc(executorLabel((trace.sandbox_assist || {}).target || task.sandbox_assist_target || '')) + '\nWorkspace: ' + esc((trace.sandbox_assist || {}).workspace_dir || task.sandbox_assist_workspace_dir || '—') + '\nStatus: ' + esc((trace.sandbox_assist || {}).last_status || latestRun.status || '—') + '\nValidation: ' + esc((trace.sandbox_assist || {}).validation_status || latestRun.validation_status || '—') + '\nTest: ' + esc((trace.sandbox_assist || {}).test_status || latestRun.test_status || '—') + '</span></div>' +
+        '<div class="tasked-trace-item"><strong>Task alert generator</strong><span>Alert ID: ' + esc((trace.alert_id || latestAlert.id || '—')) + '\nStatus: ' + esc((trace.alert_generator || {}).latest_alert_status || latestAlert.status || '—') + '\nSeverity: ' + esc((trace.alert_generator || {}).severity || latestAlert.severity || '—') + '\nTitle: ' + esc((trace.alert_generator || {}).latest_alert_title || latestAlert.title || '—') + '</span></div>' +
+        '<div class="tasked-trace-item"><strong>Context handoff</strong><span>' + esc((trace.planner || {}).context_handoff || task.context_handoff || '—') + '</span></div>' +
+        '<div class="tasked-trace-item"><strong>Task completion</strong><span>Status: ' + esc((trace.completion || {}).last_status || latestRun.status || '—') + '\nReason: ' + esc((trace.completion || {}).terminal_reason || latestRun.terminal_reason || '—') + '\nCompleted: ' + esc(fmtTs((trace.completion || {}).completed_at || latestRun.completed_at)) + '</span></div>' +
+        '<div class="tasked-trace-item"><strong>Session manager</strong><span>Status: ' + esc((trace.recovery || {}).status || ((task.latest_recovery_session || {}).status) || 'steady') + '\nOperation: ' + esc((trace.recovery || {}).operation || ((task.latest_recovery_session || {}).operation) || '—') + '\nUpstream: ' + esc((trace.recovery || {}).upstream || ((task.latest_recovery_session || {}).upstream) || '—') + '\nRetries: ' + esc((trace.recovery || {}).retry_count || ((task.latest_recovery_session || {}).retry_count) || 0) + '\nNext retry: ' + esc(fmtTs((trace.recovery || {}).next_retry_at || ((task.latest_recovery_session || {}).next_retry_at))) + '\nError: ' + esc((trace.recovery || {}).last_error || ((task.latest_recovery_session || {}).last_error) || '—') + '</span></div>' +
+      '</div>' +
+      '<div class="tasked-actions">' +
+        '<a class="tasked-btn secondary" href="' + esc(task.pipeline_url || '/piplinetask') + '">Open pipeline trace</a>' +
+        '<a class="tasked-btn secondary" href="' + esc(task.alerts_url || '/alerts') + '">Open alerts</a>' +
+        '<a class="tasked-btn secondary" href="' + esc(task.completed_url || '/task-completed') + '">Open completed</a>' +
+        (((task.latest_recovery_session || {}).status || '') === 'waiting-retry' ? '<button class="tasked-btn secondary" type="button" id="tasked-resume-recovery-btn" data-session-id="' + esc((task.latest_recovery_session || {}).id || '') + '">Resume recovery</button>' : '') +
+      '</div>';
+    var resumeBtn = document.getElementById('tasked-resume-recovery-btn');
+    if (resumeBtn) {
+      resumeBtn.addEventListener('click', async function(){
+        resultEl.textContent = 'Resuming recovery session…';
+        var res = await fetch('/api/session-manager/' + encodeURIComponent(resumeBtn.dataset.sessionId) + '/resume', { method: 'POST' });
+        var data = await res.json();
+        resultEl.textContent = JSON.stringify(data, null, 2);
+        await loadTasks();
+        await loadRuns();
+      });
+    }
+  }
+
+  function fillForm(task) {
+    hydrateForm(task, { asDraft: false });
+  }
+
+  function collectPayload() {
+    return {
+      id: fields.id.value.trim(),
+      name: fields.name.value.trim(),
+      mode: fields.mode.value,
+      tasked_type: fields.taskedType ? fields.taskedType.value : 'output',
+      schedule_kind: fields.scheduleKind.value,
+      interval_minutes: parseInt(fields.interval.value || '0', 10) || 0,
+      tabs_required: parseInt(fields.tabs.value || '1', 10) || 1,
+      active: fields.active.checked,
+      template_key: templateEl.value || '',
+      planner_prompt: fields.planner.value.trim(),
+      executor_prompt: fields.executor.value.trim(),
+      executor_target: fields.executorTarget.value,
+      workspace_dir: fields.workspaceDir.value.trim(),
+      validation_command: fields.validateCommand.value.trim(),
+      test_command: fields.testCommand.value.trim(),
+      sandbox_assist: fields.sandboxAssist.checked,
+      sandbox_assist_target: fields.sandboxAssistTarget.value,
+      sandbox_assist_workspace_dir: fields.sandboxAssistWorkspaceDir.value.trim(),
+      sandbox_assist_command: fields.sandboxAssistCommand.value.trim(),
+      sandbox_assist_validation_command: fields.sandboxAssistValidationCommand.value.trim(),
+      sandbox_assist_test_command: fields.sandboxAssistTestCommand.value.trim(),
+      context_handoff: fields.context.value.trim(),
+      trigger_mode: fields.triggerMode.value,
+      trigger_text: fields.triggerText.value.trim(),
+      notes: fields.notes.value.trim(),
+      steps: state.steps.map(function(step, index) {
+        return {
+          id: step.id || nextStepId(index),
+          position: index + 1,
+          name: step.name || ('Step ' + (index + 1)),
+          kind: step.kind || 'chat',
+          config: step.config || {},
+          on_success_step_id: step.on_success_step_id || '',
+          on_failure_step_id: step.on_failure_step_id || '',
+          active: step.active !== false
+        };
+      }),
+      alert_policy: {
+        repeat_every_minutes: parseInt(fields.alertRepeat.value || '0', 10) || 0,
+        dedupe_key_template: fields.alertDedupe.value.trim(),
+        severity: fields.alertSeverity.value,
+        while_condition_true: fields.alertWhileTrue.checked
+      },
+      completion_policy: {
+        mark_completed_on: fields.completionMark.value,
+        archive_on_complete: fields.completionArchive.checked
+      }
+    };
+  }
+
+  function renderTemplates(templates) {
+    TEMPLATES = templates || [];
+    templatePickerEl.innerHTML = '<option value="">Choose a template to load</option>';
+    templateEl.innerHTML = '<option value="">Custom</option>';
+    TEMPLATES.forEach(function(tpl) {
+      var opt = document.createElement('option');
+      opt.value = tpl.key;
+      opt.textContent = tpl.name + ((tpl.source && tpl.source !== 'builtin') ? ' · user' : '');
+      templatePickerEl.appendChild(opt);
+      var opt2 = document.createElement('option');
+      opt2.value = tpl.key;
+      opt2.textContent = tpl.name;
+      templateEl.appendChild(opt2);
+    });
+    if (templateNoteEl) templateNoteEl.textContent = 'Templates are DB-backed. Active templates loaded: ' + TEMPLATES.length + '.';
+    templateGrid.innerHTML = (templates || []).map(function(tpl) {
+      return '<article class="tasked-template">' +
+        '<h3>' + esc(tpl.name) + '</h3>' +
+        '<p>' + esc(tpl.description || '') + '</p>' +
+        '<ul>' +
+          '<li>Mode: ' + esc(tpl.mode || 'chat') + '</li>' +
+          '<li>Schedule: ' + esc(tpl.schedule_kind || 'manual') + ((tpl.interval_minutes || 0) ? ' / ' + esc(tpl.interval_minutes) + 'm' : '') + '</li>' +
+          (tpl.mode === 'sandbox' ? '<li>Executor: ' + esc((EXECUTOR_TARGETS.find(function(item){ return item.id === (tpl.executor_target || "c12b"); }) || {}).label || tpl.executor_target || 'C12b Lean Sandbox') + '</li>' : '') +
+          ((tpl.mode !== 'sandbox' && tpl.sandbox_assist) ? '<li>AIO assist: ' + esc((EXECUTOR_TARGETS.find(function(item){ return item.id === (tpl.sandbox_assist_target || "c12b"); }) || {}).label || tpl.sandbox_assist_target || 'C12b Lean Sandbox') + '</li>' : '') +
+          '<li>Tabs required: ' + esc(tpl.tabs_required || 1) + '</li>' +
+        '</ul>' +
+        '<button class="tasked-btn secondary" type="button" data-template-key="' + esc(tpl.key) + '">Load template</button>' +
+      '</article>';
+    }).join('');
+    templateGrid.querySelectorAll('button[data-template-key]').forEach(function(btn) {
+      btn.addEventListener('click', function() { applyTemplate(btn.dataset.templateKey); });
+    });
+  }
+
+  function isSystemTask(t) {
+    return !!(t.template_key && TEMPLATES.find(function(tpl){ return tpl.key === t.template_key && tpl.source === 'builtin'; }));
+  }
+
+  function renderTaskRow(t) {
+    var latestRun = t.latest_run || {};
+    var status = (t.lifecycle_state || t.last_status || 'idle').toLowerCase();
+    var isRunning = status === 'running' || !!latestRun.is_running;
+    var isTerminal = status === 'completed' || status === 'failed' || status === 'cancelled';
+    var sys = isSystemTask(t);
+    var durationHtml;
+    if (latestRun.is_running) {
+      var startIso = esc(latestRun.started_at || latestRun.created_at || '');
+      var startFmt = (latestRun.started_at || latestRun.created_at) ? fmtTsShort(latestRun.started_at || latestRun.created_at) : '';
+      durationHtml =
+        '<div class="tasked-timing-cell">' +
+          '<span data-live-start="' + startIso + '" class="tasked-elapsed pulse-live">' + esc(latestRun.duration_label || '0s') + '</span>' +
+          (startFmt ? '<div class="tasked-start-time">Started ' + esc(startFmt) + '</div>' : '') +
+          '<div class="tasked-progress-wrap"><div class="tasked-progress-bar indeterminate"></div></div>' +
+        '</div>';
+    } else {
+      durationHtml =
+        '<div class="tasked-timing-cell">' +
+          '<span>' + esc(latestRun.duration_label || '—') + '</span>' +
+          (latestRun.started_at ? '<div class="tasked-start-time">' + esc(fmtTsShort(latestRun.started_at)) + '</div>' : '') +
+        '</div>';
+    }
+    var typePill = t.tasked_type_label ? '<span class="tasked-pill" title="Output type">' + esc(t.tasked_type_label) + '</span> ' : '';
+    var previewUrl = t.preview_url || ('/tasked-preview?task_id=' + esc(t.id || ''));
+    var statusBadge = '<span class="status-badge ' + esc(status) + '">' + esc(t.lifecycle_label || t.last_status || 'idle') + '</span>';
+    var actions =
+      '<div class="tasked-row-actions">' +
+      (isRunning ? '<button class="tasked-row-btn stop-btn" type="button" data-row-action="stop" data-task-id="' + esc(t.id) + '" data-task-name="' + esc(t.name) + '" title="Stop this task">Stop</button>' : '') +
+      (!isTerminal ? '<button class="tasked-row-btn done-btn" type="button" data-row-action="complete" data-task-id="' + esc(t.id) + '" data-task-name="' + esc(t.name) + '" title="Mark as completed">Done</button>' : '') +
+      '<a class="tasked-row-btn" href="' + previewUrl + '" title="Preview output" style="text-decoration:none">Preview</a>' +
+      '<button class="tasked-row-btn del-btn" type="button" data-row-action="delete" data-task-id="' + esc(t.id) + '" data-task-name="' + esc(t.name) + '" title="Permanently delete task">Del</button>' +
+      '</div>';
+    return '<tr data-id="' + esc(t.id) + '">' +
+      '<td><strong>' + esc(t.name) + '</strong>' + (sys ? '<span class="tasked-sys-badge" title="Created from a built-in template">sys</span>' : '') + '<div class="tasked-note">' + typePill + esc((t.template_label || t.template_key || 'custom')) + ' · ' + esc(t.id || '') + '</div><div class="tasked-note">' + (t.sandbox_assist ? ('AIO assist: ' + esc(executorLabel(t.sandbox_assist_target || '')) + ' · ' + esc(t.sandbox_assist_workspace_dir || '—')) : 'AIO assist disabled') + '</div><div class="tasked-note">Recovery: ' + esc(((t.latest_recovery_session || {}).status) || 'steady') + (((t.latest_recovery_session || {}).retry_count || 0) ? (' · retries ' + esc((t.latest_recovery_session || {}).retry_count)) : '') + '</div></td>' +
+      '<td>' + esc(t.mode_label || t.mode) + '</td>' +
+      '<td>' + esc(t.schedule_label || t.schedule_kind || '—') + '</td>' +
+      '<td>' + statusBadge + '</td>' +
+      '<td><span class="tasked-row-meta">' + esc(t.current_step_id || latestRun.current_step_id || '—') + '</span><div class="tasked-row-meta">Trace: ' + esc((t.trace && t.trace.trace_id) || t.id || '—') + '</div></td>' +
+      '<td>' + durationHtml + '</td>' +
+      '<td>' + esc(t.next_run_at ? fmtTs(t.next_run_at) : '—') + '</td>' +
+      '<td>' + actions + '</td>' +
+    '</tr>';
+  }
+
+  function renderTasks(tasks) {
+    if (tasks !== undefined) state.tasks = tasks || [];
+    var all = state.tasks;
+
+    // Apply filters
+    var search = (filterSearch ? filterSearch.value : '').trim().toLowerCase();
+    var modeF = filterMode ? filterMode.value : '';
+    var statusF = filterStatus ? filterStatus.value : '';
+    var scheduleF = filterSchedule ? filterSchedule.value : '';
+    var groupBy = filterGroup ? filterGroup.value : '';
+    var showSystem = filterShowSystem ? filterShowSystem.checked : true;
+
+    var filtered = all.filter(function(t) {
+      if (!showSystem && isSystemTask(t)) return false;
+      if (search && !(t.name || '').toLowerCase().includes(search) && !(t.id || '').toLowerCase().includes(search)) return false;
+      if (modeF && (t.mode || '') !== modeF) return false;
+      if (statusF) {
+        var st = (t.lifecycle_state || t.last_status || 'idle').toLowerCase();
+        if (st !== statusF) return false;
+      }
+      if (scheduleF && (t.schedule_kind || '') !== scheduleF) return false;
+      return true;
+    });
+
+    if (!filtered.length) {
+      tasksBody.innerHTML = '<tr><td colspan="8" class="tasked-note">' + (all.length ? 'No tasks match the current filter.' : 'No saved Tasked rows yet.') + '</td></tr>';
+      return;
+    }
+
+    var html = '';
+    if (!groupBy) {
+      html = filtered.map(renderTaskRow).join('');
+    } else {
+      var groups = {};
+      var groupOrder = [];
+      filtered.forEach(function(t) {
+        var key = groupBy === 'mode' ? (t.mode_label || t.mode || 'unknown')
+                : groupBy === 'status' ? (t.lifecycle_label || t.last_status || 'idle')
+                : (t.schedule_label || t.schedule_kind || 'manual');
+        if (!groups[key]) { groups[key] = []; groupOrder.push(key); }
+        groups[key].push(t);
+      });
+      groupOrder.forEach(function(key) {
+        var collapsed = !!state.collapsedGroups[key];
+        html += '<tr class="tasked-group-header" data-group-key="' + esc(key) + '">' +
+          '<td colspan="8">' + (collapsed ? '▶' : '▼') + ' ' + esc(key) +
+          ' <span style="font-weight:400;color:var(--muted)">(' + groups[key].length + ')</span></td></tr>';
+        if (!collapsed) html += groups[key].map(renderTaskRow).join('');
+      });
+    }
+
+    tasksBody.innerHTML = html;
+
+    // Group collapse toggle
+    tasksBody.querySelectorAll('tr.tasked-group-header').forEach(function(hdr) {
+      hdr.addEventListener('click', function() {
+        var key = hdr.dataset.groupKey;
+        state.collapsedGroups[key] = !state.collapsedGroups[key];
+        renderTasks();
+      });
+    });
+
+    // Row click → load into form (skip action button clicks)
+    tasksBody.querySelectorAll('tr[data-id]').forEach(function(row) {
+      row.addEventListener('click', function(e) {
+        if (e.target.closest('[data-row-action]')) return;
+        var task = state.tasks.find(function(t){ return t.id === row.dataset.id; });
+        if (task) fillForm(task);
+      });
+    });
+
+    // Per-row action buttons: stop / complete / delete
+    tasksBody.querySelectorAll('[data-row-action]').forEach(function(btn) {
+      btn.addEventListener('click', async function(e) {
+        e.stopPropagation();
+        var action = btn.dataset.rowAction;
+        var tid = btn.dataset.taskId;
+        var tname = btn.dataset.taskName || tid;
+        if (!tid) return;
+        if (action === 'delete') {
+          if (!confirm('Permanently delete task "' + tname + '"?\n\nThis removes all runs, alerts, steps, and history. Cannot be undone.')) return;
+          resultEl.textContent = 'Deleting "' + tname + '"…';
+          var res = await fetch('/api/tasks/' + encodeURIComponent(tid), { method: 'DELETE' });
+          var data = await res.json();
+          resultEl.textContent = data.ok ? ('Deleted task "' + (data.name || tid) + '".') : (data.error || 'Delete failed');
+          if (data.ok && state.selectedId === tid) resetForm();
+        } else if (action === 'stop') {
+          resultEl.textContent = 'Stopping "' + tname + '"…';
+          var res = await fetch('/api/tasks/' + encodeURIComponent(tid) + '/stop', { method: 'POST' });
+          var data = await res.json();
+          resultEl.textContent = data.ok ? ('Stopped "' + tname + '".') : (data.error || 'Stop failed');
+        } else if (action === 'complete') {
+          resultEl.textContent = 'Marking "' + tname + '" complete…';
+          var res = await fetch('/api/tasks/' + encodeURIComponent(tid) + '/complete', { method: 'POST' });
+          var data = await res.json();
+          resultEl.textContent = data.ok ? ('"' + tname + '" marked complete.') : (data.error || 'Complete failed');
+        }
+        await loadTasks();
+        await loadRuns();
+      });
+    });
+  }
+
+  function renderRuns(runs) {
+    if (!runs || !runs.length) {
+      runsBody.innerHTML = '<tr><td colspan="5" class="tasked-note">No runs yet.</td></tr>';
+      return;
+    }
+    runsBody.innerHTML = runs.map(function(r) {
+      var detail = r.launch_url || r.output_excerpt || r.error_text || '—';
+      if (r.mode === 'sandbox') {
+        detail = 'Target: ' + executorLabel(r.executor_target) +
+          ' · Validate: ' + (r.validation_status || '—') +
+          ' · Test: ' + (r.test_status || '—') +
+          '\n' + detail;
+      } else if (r.executor_target) {
+        detail = 'AIO assist: ' + executorLabel(r.executor_target) +
+          ' · Validate: ' + (r.validation_status || '—') +
+          ' · Test: ' + (r.test_status || '—') +
+          '\n' + detail;
+      }
+      var durationHtml = r.is_running
+        ? '<span data-live-start="' + esc(r.started_at || r.created_at || '') + '">' + esc(r.duration_label || '0s') + '</span>'
+        : esc(r.duration_label || '—');
+      var statusCls = (r.status || 'queued').toLowerCase().replace(/[^a-z-]/g, '');
+      var statusCls = (r.status || 'queued').toLowerCase().replace(/[^a-z-]/g, '');
+      return '<tr>' +
+        '<td>' + esc(fmtTs(r.created_at)) + '</td>' +
+        '<td>' + esc(r.task_id || '—') + '</td>' +
+        '<td><span class="status-badge ' + esc(statusCls) + '">' + esc(r.status || 'queued') + '</span></td>' +
+        '<td>' + durationHtml + '</td>' +
+        '<td>' + esc(String(detail).slice(0, 180)) + '</td>' +
+      '</tr>';
+    }).join('');
+  }
+
+  function tickDurations() {
+    document.querySelectorAll('[data-live-start]').forEach(function(node) {
+      var started = node.getAttribute('data-live-start');
+      if (!started) return;
+      var ms = Date.now() - new Date(started).getTime();
+      if (!isNaN(ms) && ms >= 0) node.textContent = fmtDuration(ms);
+    });
+  }
+
+  async function loadTasks() {
+    var res = await fetch('/api/tasks', { cache: 'no-store' });
+    var data = await res.json();
+    var templates = data.templates || TEMPLATES;
+    renderTasks(data.tasks || []);
+    renderTemplates(templates);
+    state.lastLoadedAt = new Date().toLocaleTimeString();
+    if (monitorNoteEl) monitorNoteEl.textContent = 'Live monitor refreshed at ' + state.lastLoadedAt + '. Unsaved edits are preserved.';
+    var selectedId = state.selectedId || initialTaskId;
+    if (selectedId) {
+      var task = (data.tasks || []).find(function(t){ return t.id === selectedId; });
+      if (task && !state.formDirty) fillForm(task);
+    }
+  }
+
+  async function loadRuns() {
+    var taskFilter = state.selectedId || initialTaskId;
+    var res = await fetch('/api/task-runs?limit=20' + (taskFilter ? ('&task_id=' + encodeURIComponent(taskFilter)) : ''), { cache: 'no-store' });
+    var data = await res.json();
+    renderRuns(data.runs || []);
+  }
+
+  async function loadSandboxRuntime() {
+    var res = await fetch('/api/runtime-status?force=true', { cache: 'no-store' });
+    var data = await res.json();
+    var smRes = await fetch('/api/session-manager?scope=task&status=waiting-retry&limit=5', { cache: 'no-store' });
+    var smData = await smRes.json();
+    var recoveries = smData.items || [];
+    var components = data.components || {};
+    var cards = ['c12b'].map(function(key) {
+      var item = components[key] || {};
+      return '<div class="tasked-runtime-card">' +
+        '<strong>C12b Lean Sandbox</strong>' +
+        '<span class="tasked-runtime-state">State: ' + esc(item.state || 'unknown') + '</span>' +
+        '<span class="tasked-runtime-state">Message: ' + esc(item.message || 'Unavailable') + '</span>' +
+        '<span class="tasked-runtime-state">Latency: ' + esc((item.elapsed_ms == null) ? '—' : (item.elapsed_ms + 'ms')) + '</span>' +
+      '</div>';
+    }).join('') +
+    '<div class="tasked-runtime-card">' +
+      '<strong>Recovery Manager</strong>' +
+      '<span class="tasked-runtime-state">Waiting recoveries: ' + esc(recoveries.length) + '</span>' +
+      '<span class="tasked-runtime-state">Latest: ' + esc(((recoveries[0] || {}).status) || 'steady') + '</span>' +
+      '<span class="tasked-runtime-state">Upstream: ' + esc(((recoveries[0] || {}).upstream) || '—') + '</span>' +
+    '</div>';
+    runtimeGridEl.innerHTML = cards;
+  }
+
+  form.addEventListener('submit', async function(e) {
+    e.preventDefault();
+    resultEl.textContent = 'Saving…';
+    var res = await fetch('/api/tasks', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(collectPayload())
+    });
+    var data = await res.json();
+    if (!data.ok) {
+      resultEl.textContent = data.error || 'Save failed';
+      return;
+    }
+    fillForm(data.task);
+    await loadTasks();
+    resultEl.textContent = 'Saved Tasked row "' + (data.task.name || '') + '".';
+  });
+
+  document.getElementById('task-run-btn').addEventListener('click', async function() {
+    if (!fields.id.value.trim()) {
+      resultEl.textContent = 'Save the Tasked row first.';
+      return;
+    }
+    resultEl.textContent = 'Running…';
+    var res = await fetch('/api/tasks/' + encodeURIComponent(fields.id.value.trim()) + '/start', { method: 'POST' });
+    var data = await res.json();
+    if (data.launch_url) {
+      resultEl.textContent = (data.text ? (data.text + '\n\n') : '') + 'Launch required:\n' + data.launch_url;
+      window.open(data.launch_url, '_blank');
+    } else if (data.ok) {
+      resultEl.textContent = (data.text || 'Tasked run complete.') + (data.alert_id ? '\n\nAlert #' + data.alert_id + ' created.' : '');
+    } else {
+      resultEl.textContent = data.error || 'Run failed';
+    }
+    await loadTasks();
+    await loadRuns();
+  });
+
+  async function taskAction(action, successLabel) {
+    if (!fields.id.value.trim()) {
+      resultEl.textContent = 'Save or select a Tasked row first.';
+      return;
+    }
+    resultEl.textContent = successLabel + '…';
+    var res = await fetch('/api/tasks/' + encodeURIComponent(fields.id.value.trim()) + '/' + action, { method: 'POST' });
+    var data = await res.json();
+    if (!data.ok && !data.task && !data.run_id) {
+      resultEl.textContent = data.error || (successLabel + ' failed');
+      return;
+    }
+    if (data.task) fillForm(data.task);
+    else resultEl.textContent = (data.text || data.status || successLabel + ' complete');
+    if (data.launch_url) {
+      resultEl.textContent = (data.text ? (data.text + '\n\n') : '') + 'Launch required:\n' + data.launch_url;
+      window.open(data.launch_url, '_blank');
+    } else if (data.ok && data.alert_id) {
+      resultEl.textContent = (data.text || successLabel + ' complete.') + '\n\nAlert #' + data.alert_id + ' created.';
+    }
+    await loadTasks();
+    await loadRuns();
+  }
+
+  document.getElementById('task-seed-examples-btn').addEventListener('click', async function() {
+    resultEl.textContent = 'Seeding 4 Tasked examples…';
+    var res = await fetch('/api/tasks/seed-examples', { method: 'POST' });
+    var data = await res.json();
+    if (!data.ok) {
+      resultEl.textContent = data.error || 'Example seed failed';
+      return;
+    }
+    resultEl.textContent = 'Seeded ' + (data.seeded_count || 0) + ' Tasked examples.';
+    await loadTasks();
+    await loadRuns();
+  });
+
+  document.getElementById('tasked-author-generate-btn').addEventListener('click', async function() {
+    var prompt = (authorPromptEl.value || '').trim();
+    if (!prompt) {
+      authorResultEl.textContent = 'Write the task in English first.';
+      return;
+    }
+    authorResultEl.textContent = 'Generating Tasked draft…';
+    var res = await fetch('/api/tasks/draft-from-text', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        prompt: prompt,
+        strategy: authorStrategyEl.value || 'auto',
+        mode_hint: fields.mode.value || 'chat'
+      })
+    });
+    var data = await res.json();
+    if (!data.ok) {
+      authorResultEl.textContent = data.error || 'Tasked draft generation failed.';
+      return;
+    }
+    renderAuthorDraft(data);
+    resultEl.textContent = 'Tasked draft generated. Review it, then apply it into the builder.';
+  });
+
+  document.getElementById('tasked-author-apply-btn').addEventListener('click', function() {
+    if (!state.authorDraft || !state.authorDraft.draft) {
+      authorResultEl.textContent = 'Generate a Tasked draft first.';
+      return;
+    }
+    hydrateForm(state.authorDraft.draft, {
+      asDraft: true,
+      resultText: 'Tasked draft loaded into the builder. Review, edit, then save it as a normal Tasked row.'
+    });
+  });
+
+  document.getElementById('tasked-author-clear-btn').addEventListener('click', function() {
+    state.authorDraft = null;
+    authorPromptEl.value = '';
+    authorResultEl.textContent = 'No Tasked draft yet.';
+  });
+
+  document.getElementById('tasked-refresh-btn').addEventListener('click', async function() {
+    await loadTasks();
+    await loadRuns();
+  });
+
+  document.getElementById('tasked-template-load-btn').addEventListener('click', function() {
+    if (!templatePickerEl.value) {
+      resultEl.textContent = 'Select an editable template first.';
+      return;
+    }
+    applyTemplate(templatePickerEl.value);
+    resultEl.textContent = 'Loaded editable template "' + templatePickerEl.options[templatePickerEl.selectedIndex].text + '".';
+  });
+
+  document.getElementById('tasked-template-save-btn').addEventListener('click', async function() {
+    var payload = collectPayload();
+    payload.key = templatePickerEl.value || templateEl.value || '';
+    payload.description = (fields.notes.value || payload.name || '').trim();
+    payload.source = 'user';
+    var res = await fetch('/api/task-templates', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload)
+    });
+    var data = await res.json();
+    if (!data.ok) {
+      resultEl.textContent = data.error || 'Template save failed';
+      return;
+    }
+    templatePickerEl.value = data.template.key;
+    templateEl.value = data.template.key;
+    resultEl.textContent = 'Saved editable template "' + data.template.name + '".';
+    await loadTasks();
+  });
+
+  document.getElementById('tasked-template-clone-btn').addEventListener('click', async function() {
+    if (!templatePickerEl.value) {
+      resultEl.textContent = 'Select a template to clone.';
+      return;
+    }
+    var res = await fetch('/api/task-templates/' + encodeURIComponent(templatePickerEl.value) + '/clone', { method: 'POST' });
+    var data = await res.json();
+    if (!data.ok) {
+      resultEl.textContent = data.error || 'Template clone failed';
+      return;
+    }
+    resultEl.textContent = 'Cloned template into "' + data.template.name + '".';
+    await loadTasks();
+    templatePickerEl.value = data.template.key;
+    applyTemplate(data.template.key);
+  });
+
+  document.getElementById('tasked-template-archive-btn').addEventListener('click', async function() {
+    if (!templatePickerEl.value) {
+      resultEl.textContent = 'Select a template to archive.';
+      return;
+    }
+    var res = await fetch('/api/task-templates/' + encodeURIComponent(templatePickerEl.value) + '/archive', { method: 'POST' });
+    var data = await res.json();
+    if (!data.ok) {
+      resultEl.textContent = data.error || 'Template archive failed';
+      return;
+    }
+    resultEl.textContent = 'Archived template "' + data.template.name + '".';
+    templatePickerEl.value = '';
+    templateEl.value = '';
+    await loadTasks();
+  });
+
+  // Filter bar listeners
+  [filterSearch, filterMode, filterStatus, filterSchedule, filterShowSystem].forEach(function(el) {
+    if (!el) return;
+    el.addEventListener('input', function() { renderTasks(); });
+    el.addEventListener('change', function() { renderTasks(); });
+  });
+  if (filterGroup) filterGroup.addEventListener('change', function() { state.collapsedGroups = {}; renderTasks(); });
+  document.getElementById('task-filter-clear-btn').addEventListener('click', function() {
+    if (filterSearch) filterSearch.value = '';
+    if (filterMode) filterMode.value = '';
+    if (filterStatus) filterStatus.value = '';
+    if (filterSchedule) filterSchedule.value = '';
+    if (filterGroup) filterGroup.value = '';
+    if (filterShowSystem) filterShowSystem.checked = true;
+    state.collapsedGroups = {};
+    renderTasks();
+  });
+
+  // Bulk action helper
+  async function bulkAction(action, confirmMsg) {
+    if (confirmMsg && !confirm(confirmMsg)) return;
+    resultEl.textContent = action.replace(/_/g, ' ') + '…';
+    var res = await fetch('/api/tasks/bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: action })
+    });
+    var data = await res.json();
+    if (!data.ok) { resultEl.textContent = data.error || action + ' failed'; return; }
+    var n = data.affected != null ? data.affected : '?';
+    resultEl.textContent = n + ' task(s) affected by ' + action.replace(/_/g, ' ') + '.';
+    if (action === 'delete_all' || action === 'delete_completed') resetForm();
+    await loadTasks();
+    await loadRuns();
+  }
+
+  document.getElementById('task-bulk-stop-all').addEventListener('click', function() { bulkAction('stop_all', null); });
+  document.getElementById('task-bulk-complete-all').addEventListener('click', function() { bulkAction('complete_all', null); });
+  document.getElementById('task-bulk-archive-completed').addEventListener('click', function() { bulkAction('archive_completed', null); });
+  document.getElementById('task-bulk-delete-completed').addEventListener('click', function() {
+    bulkAction('delete_completed', 'Permanently delete all completed/failed/cancelled tasks?\n\nAll runs, alerts and history are removed. Cannot be undone.');
+  });
+  document.getElementById('task-bulk-delete-all').addEventListener('click', function() {
+    bulkAction('delete_all', 'Permanently delete ALL tasks?\n\nEvery task, run, alert and step record will be removed. Cannot be undone.');
+  });
+
+  document.getElementById('task-repeat-btn').addEventListener('click', function() { taskAction('repeat', 'Repeating task'); });
+  document.getElementById('task-clone-btn').addEventListener('click', function() { taskAction('clone', 'Cloning task'); });
+  document.getElementById('task-pause-btn').addEventListener('click', function() { taskAction('pause', 'Pausing task'); });
+  document.getElementById('task-resume-btn').addEventListener('click', function() { taskAction('resume', 'Resuming task'); });
+  document.getElementById('task-restart-btn').addEventListener('click', function() { taskAction('restart', 'Restarting task'); });
+  document.getElementById('task-archive-btn').addEventListener('click', function() { taskAction('archive', 'Archiving task'); });
+  document.getElementById('task-add-step-btn').addEventListener('click', function() {
+    state.steps.push(createStep(fields.mode.value === 'sandbox' ? 'sandbox' : 'chat'));
+    renderStepCards();
+    markDirty();
+  });
+  document.getElementById('task-reset-btn').addEventListener('click', resetForm);
+  templateEl.addEventListener('change', function() { applyTemplate(templateEl.value); });
+  fields.mode.addEventListener('change', function() {
+    toggleSandboxFields();
+    if (!state.formDirty || !state.steps.length) buildDefaultStepsForMode(fields.mode.value);
+  });
+  fields.executorTarget.addEventListener('change', function() {
+    if (fields.mode.value === 'sandbox' && !fields.workspaceDir.value.trim()) {
+      fields.workspaceDir.value = sandboxDefaultWorkspace(fields.executorTarget.value);
+    }
+  });
+  fields.sandboxAssistTarget.addEventListener('change', function() {
+    if (fields.mode.value !== 'sandbox' && !fields.sandboxAssistWorkspaceDir.value.trim()) {
+      fields.sandboxAssistWorkspaceDir.value = sandboxDefaultWorkspace(fields.sandboxAssistTarget.value);
+    }
+  });
+  form.querySelectorAll('input,select,textarea').forEach(function(el) {
+    el.addEventListener('input', markDirty);
+    el.addEventListener('change', markDirty);
+  });
+
+  document.querySelectorAll('.tasked-form-section-header').forEach(function(header) {
+    header.addEventListener('click', function() {
+      var section = header.dataset.section;
+      var body = document.getElementById('section-' + section);
+      var toggle = header.querySelector('.tasked-form-section-toggle');
+      if (!body || !toggle) return;
+      var isHidden = body.classList.toggle('hidden');
+      toggle.classList.toggle('collapsed', isHidden);
+    });
+  });
+
+  resetForm();
+  renderAuthorExamples();
+  loadTasks().catch(function(){ tasksBody.innerHTML = '<tr><td colspan="8" class="tasked-note">Failed to load Tasked rows.</td></tr>'; });
+  loadRuns().catch(function(){ runsBody.innerHTML = '<tr><td colspan="5" class="tasked-note">Failed to load Tasked runs.</td></tr>'; });
+  loadSandboxRuntime().catch(function(){
+    runtimeGridEl.innerHTML = '<div class="tasked-runtime-card"><strong>Sandbox runtime</strong><span class="tasked-runtime-state">Failed to load runtime status.</span></div>';
+  });
+  setInterval(tickDurations, 1000);
+  setInterval(function(){ if (!document.hidden) loadTasks().catch(function(){}); }, 15000);
+  setInterval(loadRuns, 15000);
+  setInterval(function(){ if (!document.hidden) loadSandboxRuntime().catch(function(){}); }, 30000);
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,27 @@
+# ============================================================
+# Hermes Agent — pre-seeded config for C8 container
+#
+# Provider configuration (OPENAI_BASE_URL, OPENAI_API_KEY,
+# HERMES_INFERENCE_PROVIDER, LLM_MODEL) is injected via
+# docker-compose.yml environment — not hardcoded here.
+#
+# This file sets the structural/behavioral config only.
+# Reference: https://hermes-agent.nousresearch.com/docs/user-guide/configuration/
+# ============================================================
+
+# Terminal tool execution — run commands inside this container (no nested Docker)
+terminal:
+  backend: local
+
+# Compact tool-progress display suits container stdout
+display:
+  tool_progress: compact
+
+# Session idle timeout (minutes) — keep sessions alive for the container lifetime
+# Default is 1440 (24 h); set lower to avoid memory buildup in long-running containers
+session_idle_minutes: 120
+
+# Context compression — summarise long conversations to save tokens
+compression:
+  enabled: true
+  threshold: 0.70

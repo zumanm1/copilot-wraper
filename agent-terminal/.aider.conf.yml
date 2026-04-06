@@ -1,0 +1,7 @@
+# Aider configuration — uses copilot-api as the OpenAI-compatible backend
+# Docs: https://aider.chat/docs/llms/openai-compat.html
+model: openai/copilot
+openai-api-base: http://app:8000/v1
+openai-api-key: not-needed
+no-auto-commits: true
+no-check-update: true

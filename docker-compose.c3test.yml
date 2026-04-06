@@ -1,0 +1,83 @@
+services:
+  app:
+    container_name: C1b_copilot-api
+    ports:
+      - "8100:8000"
+
+  browser-auth:
+    container_name: C3b_browser-auth
+    ports:
+      - "6180:6080"
+      - "8101:8001"
+
+  c9-jokes:
+    container_name: C9b_jokes
+    ports:
+      - "6090:6090"
+      - "6190:6090"
+    environment:
+      - C1_URL=http://app:8000
+      - C2_URL=http://agent-terminal:8080
+      - C3_URL=http://browser-auth:8001
+      - C3_POOL_SIZE_PARALLEL=6
+      - C5_URL=http://claude-code-terminal:8080
+      - C6_URL=http://kilocode-terminal:8080
+      - C7A_URL=http://openclaw-gateway:18789
+      - C7B_URL=http://openclaw-cli:8080
+      - C8_URL=http://hermes-agent:8080
+      - DATABASE_PATH=/app/data/c9.db
+      - C10_URL=http://c10b-sandbox:8210
+      - C10B_URL=http://c10b-sandbox:8210
+      - C11_URL=http://c11b-sandbox:8200
+      - C11B_URL=http://c11b-sandbox:8200
+      - C12B_URL=http://c12b-sandbox:8210
+
+  # C10b: Shared sandbox for /agent (reuses C12b image)
+  c10b-sandbox:
+    image: copilot-c12b-sandbox:latest
+    container_name: C10b_sandbox
+    mem_limit: 768m
+    cpus: 0.5
+    ports:
+      - "8310:8210"
+    environment:
+      - WORKSPACE=/workspace
+    volumes:
+      - c10b-workspace:/workspace
+    networks:
+      - copilot-net
+    restart: unless-stopped
+    command: ["uvicorn", "app:app", "--app-dir", "/app", "--host", "0.0.0.0", "--port", "8210"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8210/health >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+  # C11b: Multi-agent sandbox (reuses C11 image, session-scoped workspace)
+  c11b-sandbox:
+    image: copilot-c11-sandbox:latest
+    container_name: C11b_sandbox
+    mem_limit: 1g
+    cpus: 1.0
+    ports:
+      - "8410:8200"
+    environment:
+      - WORKSPACE=/workspace
+    volumes:
+      - c11b-workspace:/workspace
+    networks:
+      - copilot-net
+    restart: unless-stopped
+    command: ["uvicorn", "app:app", "--app-dir", "/app", "--host", "0.0.0.0", "--port", "8200"]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8200/health >/dev/null"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+
+volumes:
+  c10b-workspace:
+  c11b-workspace:

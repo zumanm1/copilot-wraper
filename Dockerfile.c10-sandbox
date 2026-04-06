@@ -1,0 +1,50 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# C10: AI Agent Sandbox
+#
+# Minimal isolated Linux container for AI agent code execution.
+# Features:
+#   - Non-root user "sandbox" running in /workspace
+#   - Python 3.11, Node.js, npm, git, bash, curl, pip
+#   - FastAPI REST API on port 8100 (internal only — no host binding)
+#   - Resource limits enforced via docker-compose (mem: 512m, cpus: 0.5)
+#
+# API endpoints: /health /exec /file/write /file/read /file/ls /file/delete
+#                /workspace/reset
+# ──────────────────────────────────────────────────────────────────────────────
+FROM python:3.11-slim
+
+# Install system tools — use NodeSource for lean Node.js 20 LTS (avoids pulling
+# 400+ debian npm transitive packages that apt brings in)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    curl \
+    git \
+    gcc \
+    make \
+    ca-certificates \
+    gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root sandbox user and workspace directory
+RUN useradd -m -s /bin/bash sandbox \
+    && mkdir -p /workspace \
+    && chown sandbox:sandbox /workspace
+
+# Install FastAPI/uvicorn as root into system Python (accessible to sandbox user)
+COPY c10_sandbox/requirements.txt /tmp/c10_requirements.txt
+RUN pip install --no-cache-dir -r /tmp/c10_requirements.txt
+
+# Copy sandbox API application
+COPY c10_sandbox/app.py /app/app.py
+RUN chown sandbox:sandbox /app/app.py
+
+# Switch to non-root user
+USER sandbox
+WORKDIR /workspace
+
+ENV WORKSPACE=/workspace
+
+EXPOSE 8100
+CMD ["uvicorn", "app:app", "--app-dir", "/app", "--host", "0.0.0.0", "--port", "8100"]

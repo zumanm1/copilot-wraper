@@ -1,0 +1,58 @@
+# ============================================================
+# Container 2 (C2): AI Agent Terminal
+#
+# Interactive terminal AI agents pre-configured to use the
+# copilot-api service (Container 1) as their OpenAI-compatible
+# inference backend.
+#
+# Included agents:
+#   - Aider    (pip install aider-chat)  — primary, recommended
+#   - OpenCode (npm install -g @opencode-ai/opencode) — secondary
+#
+# Usage:
+#   docker compose up app -d
+#   docker compose run --rm agent-terminal
+# ============================================================
+FROM python:3.11-slim
+
+WORKDIR /workspace
+
+# ── System dependencies + Node.js 20 LTS ─────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git curl ca-certificates gnupg bash procps \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Git global config (required by Aider for file editing) ───
+RUN git config --global user.email "agent@copilot-wrapper" && \
+    git config --global user.name "Copilot Agent" && \
+    git config --global init.defaultBranch main && \
+    git config --global core.editor "true"
+
+# ── Aider — terminal-first coding agent ──────────────────────
+# Docs: https://aider.chat/docs/llms/openai-compat.html
+RUN pip install --no-cache-dir aider-chat
+
+# ── OpenCode — modern terminal AI agent ──────────────────────
+# Package: opencode-ai (published by sst/opencode)
+RUN npm install -g opencode-ai 2>/dev/null \
+    && echo "OpenCode installed" \
+    || echo "OpenCode install skipped (optional)"
+
+# ── Copy launcher + config files ─────────────────────────────
+COPY agent-terminal/ /agent-terminal/
+RUN chmod +x /agent-terminal/start.sh \
+    && mkdir -p /root/.config/opencode \
+    && cp /agent-terminal/opencode.json /root/.config/opencode/opencode.json \
+    && cp /agent-terminal/.aider.conf.yml /root/.aider.conf.yml
+
+# ── Default environment (overridden by docker-compose) ───────
+ENV OPENAI_API_BASE=http://app:8000/v1
+ENV OPENAI_API_KEY=not-needed
+ENV AIDER_MODEL=openai/copilot
+ENV DO_NOT_TRACK=1
+ENV AIDER_ANALYTICS=false
+ENV AIDER_NO_CHECK_UPDATE=true
+
+ENTRYPOINT ["/agent-terminal/start.sh"]

@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+    "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+
+    <!-- Unique identifier for this LaunchAgent -->
+    <key>Label</key>
+    <string>com.copilot-wrapper.cookies</string>
+
+    <!-- Command to run: python3 <project>/cookie_manager/service.py -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>__PROJECT_DIR__/cookie_manager/service.py</string>
+    </array>
+
+    <!-- Working directory so relative .env paths resolve correctly -->
+    <key>WorkingDirectory</key>
+    <string>__PROJECT_DIR__</string>
+
+    <!-- Environment variables passed to the service -->
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>COOKIE_ENV_PATH</key>
+        <string>__PROJECT_DIR__/.env</string>
+        <key>COOKIE_APP_URL</key>
+        <string>http://localhost:8000</string>
+        <key>COOKIE_REFRESH_INTERVAL</key>
+        <string>900</string>
+    </dict>
+
+    <!-- Run every 900 seconds (15 minutes) -->
+    <key>StartInterval</key>
+    <integer>900</integer>
+
+    <!-- Also run immediately when the agent is loaded (on login) -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Keep alive: restart automatically if the service crashes -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+
+    <!-- Log stdout and stderr to a single file in the project directory -->
+    <key>StandardOutPath</key>
+    <string>__PROJECT_DIR__/cookie_manager/cookie_manager.log</string>
+    <key>StandardErrorPath</key>
+    <string>__PROJECT_DIR__/cookie_manager/cookie_manager.log</string>
+
+    <!-- Throttle restart if it crashes repeatedly -->
+    <key>ThrottleInterval</key>
+    <integer>60</integer>
+
+</dict>
+</plist>

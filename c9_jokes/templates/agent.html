@@ -1,0 +1,2864 @@
+{% extends "base.html" %}
+{% block title %}Agent Workspace{% endblock %}
+{% block content %}
+
+<style>
+/* ═══════════════════════════════════════════════════════════════════════
+   AGENT WORKSPACE — Brilliance Enhanced
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Layout ────────────────────────────────────────────────────────────── */
+.agent-workspace {
+  display: grid;
+  grid-template-columns: 220px 260px 1fr;
+  grid-template-rows: auto 1fr;
+  gap: 0;
+  height: calc(100vh - 100px);
+  min-height: 600px;
+  margin: -1.25rem;
+  overflow: hidden;
+  background: linear-gradient(180deg, var(--bg) 0%, #0a0a0a 100%);
+}
+
+/* ── Scrollbar Styling ─────────────────────────────────────────────────── */
+.agent-history::-webkit-scrollbar,
+.filetree-list::-webkit-scrollbar,
+.agent-stream::-webkit-scrollbar,
+.notes-panel-body::-webkit-scrollbar,
+.compare-pane-body::-webkit-scrollbar {
+  width: 6px;
+}
+.agent-history::-webkit-scrollbar-track,
+.filetree-list::-webkit-scrollbar-track,
+.agent-stream::-webkit-scrollbar-track {
+  background: transparent;
+}
+.agent-history::-webkit-scrollbar-thumb,
+.filetree-list::-webkit-scrollbar-thumb,
+.agent-stream::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+}
+.agent-history::-webkit-scrollbar-thumb:hover,
+.filetree-list::-webkit-scrollbar-thumb:hover,
+.agent-stream::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.15);
+}
+
+/* ── History Sidebar ───────────────────────────────────────────────────── */
+.agent-history {
+  grid-column: 1;
+  grid-row: 1 / -1;
+  border-right: 1px solid rgba(255,255,255,0.06);
+  background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.01) 100%);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  backdrop-filter: blur(8px);
+}
+.history-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 0.85rem;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  flex-shrink: 0;
+  background: rgba(255,255,255,0.02);
+}
+.history-header .btn-sm {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 4px;
+  padding: 0.15rem 0.4rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.history-header .btn-sm:hover {
+  background: rgba(10,132,255,0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.history-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.35rem 0;
+}
+.history-item {
+  padding: 0.55rem 0.85rem;
+  font-size: 0.76rem;
+  cursor: pointer;
+  border-radius: 0;
+  margin: 0 0.35rem 0.15rem;
+  border-left: 3px solid transparent;
+  color: var(--fg);
+  transition: all 0.15s ease;
+  position: relative;
+}
+.history-item::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(10,132,255,0.05) 0%, transparent 100%);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.history-item:hover { background: rgba(255,255,255,0.04); border-left-color: rgba(10,132,255,0.3); }
+.history-item:hover::before { opacity: 1; }
+.history-item.active { border-left-color: var(--accent); background: rgba(10,132,255,0.08); }
+.history-item.active::before { opacity: 1; }
+.history-item.completed { border-left-color: var(--ok); }
+.history-item.failed    { border-left-color: var(--fail); }
+.history-task { font-size: 0.74rem; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.history-meta { font-size: 0.68rem; color: var(--muted); margin-top: 3px; display: flex; align-items: center; gap: 0.35rem; }
+
+/* ── Toolbar ───────────────────────────────────────────────────────────── */
+.agent-toolbar {
+  grid-column: 2 / -1;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  background: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%);
+  backdrop-filter: blur(8px);
+}
+.agent-toolbar h2 {
+  margin: 0;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--accent) 0%, #64d2ff 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.agent-toolbar .spacer { flex: 1; }
+
+/* ── Badges & Counters ─────────────────────────────────────────────────── */
+.step-counter {
+  font-size: 0.74rem;
+  color: var(--muted);
+  white-space: nowrap;
+  padding: 0.25rem 0.65rem;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.03);
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+.step-counter.running {
+  color: var(--accent);
+  border-color: rgba(10,132,255,0.3);
+  background: rgba(10,132,255,0.08);
+  animation: pulse-glow 2s ease-in-out infinite;
+  box-shadow: 0 0 8px rgba(10,132,255,0.15);
+}
+.elapsed-badge {
+  font-size: 0.74rem;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: nowrap;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.03);
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+.elapsed-badge.running {
+  color: var(--accent);
+  border-color: rgba(10,132,255,0.3);
+  background: rgba(10,132,255,0.08);
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+.token-badge-agent {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 999px; padding: 0.2rem 0.55rem; font-size: 0.7rem;
+  color: var(--muted); font-family: ui-monospace, monospace; white-space: nowrap;
+  transition: all 0.2s ease; font-weight: 600;
+}
+.token-badge-agent.warn   { background: rgba(255,160,0,0.1); border-color: rgba(255,160,0,0.3); color: #ffa000; }
+.token-badge-agent.danger { background: rgba(220,50,50,0.1);  border-color: rgba(255,69,58,0.3); color: var(--fail); }
+
+/* ── Pool Indicator ────────────────────────────────────────────────────── */
+#pool-indicator {
+  padding: 0.2rem 0.6rem !important;
+  border-radius: 999px !important;
+  font-weight: 600 !important;
+  transition: all 0.2s ease !important;
+}
+#pool-indicator-dot {
+  transition: all 0.3s ease !important;
+  box-shadow: 0 0 4px currentColor;
+}
+
+/* ── File Tree Panel ───────────────────────────────────────────────────── */
+.agent-filetree {
+  grid-column: 2;
+  grid-row: 2;
+  border-right: 1px solid rgba(255,255,255,0.06);
+  background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.01) 100%);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  backdrop-filter: blur(8px);
+}
+.filetree-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.65rem 0.85rem;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  flex-shrink: 0;
+  background: rgba(255,255,255,0.02);
+}
+.filetree-header .btn-sm {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 4px;
+  padding: 0.15rem 0.4rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.filetree-header .btn-sm:hover {
+  background: rgba(10,132,255,0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.filetree-search-wrap {
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  position: relative;
+}
+.filetree-search-wrap::before {
+  content: '🔍';
+  position: absolute;
+  left: 0.85rem;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.7rem;
+  opacity: 0.4;
+  pointer-events: none;
+}
+.filetree-search-input {
+  width: 100%;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  color: var(--fg);
+  padding: 0.4rem 0.6rem 0.4rem 1.75rem;
+  font-size: 0.76rem;
+  box-sizing: border-box;
+  transition: all 0.15s ease;
+}
+.filetree-search-input:focus {
+  outline: none;
+  border-color: rgba(10,132,255,0.4);
+  background: rgba(10,132,255,0.05);
+  box-shadow: 0 0 0 2px rgba(10,132,255,0.1);
+}
+.filetree-search-input::placeholder { color: var(--muted); opacity: 0.6; }
+.filetree-list {
+  flex: 1;
+  padding: 0.35rem 0;
+  overflow-y: auto;
+}
+.filetree-empty {
+  color: var(--muted);
+  font-size: 0.8rem;
+  padding: 1.5rem 0.75rem;
+  text-align: center;
+  opacity: 0.6;
+}
+.filetree-item {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.85rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+  border-radius: 0;
+  margin: 0 0.35rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--fg);
+  text-decoration: none;
+  transition: all 0.1s ease;
+  position: relative;
+}
+.filetree-item::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.filetree-item:hover { background: rgba(255,255,255,0.04); }
+.filetree-item:hover::before { opacity: 0; }
+.filetree-item.active { background: rgba(10,132,255,0.08); color: var(--accent); }
+.filetree-item.active::before { opacity: 1; }
+.filetree-item.dir { color: var(--warn); cursor: default; }
+.filetree-icon { font-size: 0.85rem; flex-shrink: 0; }
+.filetree-item .filetree-del {
+  display: none;
+  margin-left: auto;
+  padding: 0 0.35rem;
+  color: var(--muted);
+  border-radius: 3px;
+  font-size: 0.7rem;
+  cursor: pointer;
+  flex-shrink: 0;
+  user-select: none;
+  transition: all 0.1s ease;
+}
+.filetree-item:hover .filetree-del { display: inline-flex; align-items: center; }
+.filetree-item .filetree-del:hover { color: var(--fail); background: rgba(255,69,58,0.1); }
+.filetree-project-header {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.4rem 0.85rem 0.25rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent);
+  border-top: 1px solid rgba(255,255,255,0.06);
+  margin-top: 0.35rem;
+  user-select: none;
+  background: rgba(10,132,255,0.03);
+}
+.filetree-project-header:first-child { border-top: none; margin-top: 0; }
+.filetree-project-header .filetree-proj-del {
+  display: none;
+  margin-left: auto;
+  padding: 0 0.3rem;
+  font-size: 0.65rem;
+  color: var(--muted);
+  border-radius: 3px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.1s ease;
+}
+.filetree-project-header:hover .filetree-proj-del { display: inline-flex; align-items: center; }
+.filetree-project-header .filetree-proj-del:hover { color: var(--fail); background: rgba(255,69,58,0.1); }
+.filetree-section-label {
+  padding: 0.4rem 0.85rem 0.15rem;
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  border-top: 1px solid rgba(255,255,255,0.06);
+  margin-top: 0.35rem;
+  opacity: 0.7;
+}
+.filetree-section-label:first-child { border-top: none; margin-top: 0; }
+.filetree-item.hidden { display: none; }
+.filetree-project-header.hidden { display: none; }
+
+/* ── Notes Panel ───────────────────────────────────────────────────────── */
+.notes-panel {
+  border-top: 1px solid rgba(255,255,255,0.06);
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  max-height: 200px;
+  overflow: hidden;
+  background: rgba(0,0,0,0.2);
+}
+.notes-panel-hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.68rem;
+  color: var(--muted);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+  background: rgba(255,255,255,0.02);
+}
+.notes-panel-hdr .btn-sm {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 4px;
+  padding: 0.1rem 0.35rem;
+  font-size: 0.65rem;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.notes-panel-hdr .btn-sm:hover {
+  background: rgba(10,132,255,0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.notes-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.35rem 0.85rem;
+  font-size: 0.72rem;
+  color: var(--fg);
+  font-family: ui-monospace, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.55;
+  background: transparent;
+}
+
+/* ── Main Panel ────────────────────────────────────────────────────────── */
+.agent-main {
+  grid-column: 3;
+  grid-row: 2;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+/* ── Output Tabs ───────────────────────────────────────────────────────── */
+.output-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.02);
+  flex-shrink: 0;
+  padding: 0 0.75rem;
+}
+.tab-btn {
+  padding: 0.5rem 0.9rem;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  margin-bottom: -1px;
+  margin-top: 0;
+  transition: all 0.15s ease;
+  position: relative;
+}
+.tab-btn:hover { color: var(--fg); }
+.tab-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.tab-btn.active::after {
+  content: '';
+  position: absolute;
+  bottom: -1px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: var(--accent);
+  box-shadow: 0 0 8px rgba(10,132,255,0.3);
+}
+.output-panel { display: none; flex: 1; overflow: hidden; min-height: 0; }
+.output-panel.active { display: flex; flex-direction: column; }
+
+/* ── Stream Output ─────────────────────────────────────────────────────── */
+.agent-stream {
+  flex: 1;
+  background: var(--bg);
+  overflow-y: auto;
+  padding: 0.85rem 1rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.82rem;
+  line-height: 1.6;
+  min-height: 0;
+}
+.stream-empty {
+  color: var(--muted);
+  text-align: center;
+  padding: 3rem 0;
+  font-family: system-ui, sans-serif;
+}
+.stream-entry {
+  margin-bottom: 0.5rem;
+  padding: 0.4rem 0.65rem;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+  animation: fadeIn 0.2s ease;
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.stream-entry.thinking   { color: var(--fg); background: rgba(255,255,255,0.03); }
+.stream-entry.tool_call  { color: var(--accent); background: rgba(10,132,255,0.06); border-left: 3px solid var(--accent); }
+.stream-entry.observation { color: var(--ok); background: rgba(48,209,88,0.04); border-left: 3px solid var(--ok); }
+.stream-entry.observation.fail { color: var(--fail); background: rgba(255,69,58,0.04); border-left-color: var(--fail); }
+.stream-entry.file_update { color: var(--warn); background: rgba(255,160,0,0.04); }
+.stream-entry.final      { color: var(--ok); background: rgba(48,209,88,0.06); border: 1px solid rgba(48,209,88,0.2); font-weight: 600; font-family: system-ui, sans-serif; }
+.stream-entry.error      { color: var(--fail); background: rgba(255,69,58,0.06); border-left: 3px solid var(--fail); }
+.stream-entry.step_info  { color: var(--muted); font-size: 0.74rem; }
+.stream-entry.ctx_compressed { color: var(--accent); background: rgba(10,132,255,0.06); border-left: 3px solid var(--accent); font-style: italic; }
+.stream-entry.token_warning  { color: #ffa000; background: rgba(255,160,0,0.06); font-size: 0.76rem; }
+.stream-entry.notes_updated  { color: var(--ok);  background: rgba(48,209,88,0.04); font-size: 0.76rem; }
+
+.stream-label { font-size: 0.68rem; font-weight: 700; opacity: 0.7; text-transform: uppercase; margin-right: 0.4rem; letter-spacing: 0.06em; }
+.stream-cmd   { opacity: 0.85; }
+.stream-output { white-space: pre-wrap; word-break: break-word; margin-top: 0.2rem; font-size: 0.8rem; opacity: 0.9; }
+
+/* ── Input Bar ─────────────────────────────────────────────────────────── */
+.agent-input-bar {
+  border-top: 1px solid rgba(255,255,255,0.06);
+  background: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%);
+  padding: 0.65rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  flex-shrink: 0;
+  backdrop-filter: blur(8px);
+}
+.agent-input-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.agent-input-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: flex-end;
+}
+.agent-input-row textarea {
+  flex: 1;
+  resize: none;
+  min-height: 3rem;
+  max-height: 140px;
+  font-family: system-ui, sans-serif;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  color: var(--fg);
+  padding: 0.5rem 0.75rem;
+  transition: all 0.15s ease;
+}
+.agent-input-row textarea:focus {
+  outline: none;
+  border-color: rgba(10,132,255,0.4);
+  background: rgba(10,132,255,0.05);
+  box-shadow: 0 0 0 2px rgba(10,132,255,0.1);
+}
+.agent-input-row textarea::placeholder { color: var(--muted); opacity: 0.5; }
+
+/* ── Buttons ───────────────────────────────────────────────────────────── */
+.btn-run {
+  width: auto;
+  padding: 0.55rem 1.5rem;
+  background: linear-gradient(135deg, var(--accent) 0%, #0070e0 100%);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+  white-space: nowrap;
+  margin-top: 0;
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 8px rgba(10,132,255,0.2);
+}
+.btn-run:hover:not(:disabled) {
+  filter: brightness(1.15);
+  box-shadow: 0 4px 12px rgba(10,132,255,0.3);
+  transform: translateY(-1px);
+}
+.btn-run:active:not(:disabled) {
+  transform: translateY(0);
+  box-shadow: 0 1px 4px rgba(10,132,255,0.2);
+}
+.btn-run:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
+.btn-stop {
+  width: auto;
+  padding: 0.55rem 1rem;
+  background: rgba(255,69,58,0.1);
+  color: var(--fail);
+  border: 1px solid rgba(255,69,58,0.3);
+  border-radius: 8px;
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+  white-space: nowrap;
+  margin-top: 0;
+  transition: all 0.15s ease;
+}
+.btn-stop:hover { background: rgba(255,69,58,0.2); border-color: rgba(255,69,58,0.5); }
+.btn-reset-ws {
+  width: auto;
+  padding: 0.3rem 0.75rem;
+  background: transparent;
+  color: var(--muted);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  font-size: 0.76rem;
+  cursor: pointer;
+  margin-top: 0;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+}
+.btn-reset-ws:hover { border-color: rgba(255,69,58,0.3); color: var(--fail); background: rgba(255,69,58,0.05); }
+.btn-compare {
+  width: auto; padding: 0.55rem 1rem;
+  background: rgba(10,132,255,0.1); color: var(--accent);
+  border: 1px solid rgba(10,132,255,0.3); border-radius: 8px;
+  font-weight: 700; font-size: 0.85rem; cursor: pointer; white-space: nowrap; margin-top: 0;
+  transition: all 0.15s ease;
+}
+.btn-compare:hover { background: rgba(10,132,255,0.2); border-color: rgba(10,132,255,0.5); }
+.btn-compare.active { background: rgba(10,132,255,0.25); border-color: var(--accent); box-shadow: 0 0 8px rgba(10,132,255,0.2); }
+
+/* ── File Attach Badges ────────────────────────────────────────────────── */
+.attach-badges { display: flex; flex-wrap: wrap; gap: 0.3rem; }
+.attach-badge {
+  display: inline-flex; align-items: center; gap: 0.3rem;
+  background: rgba(10,132,255,0.08); color: var(--accent);
+  border: 1px solid rgba(10,132,255,0.2); border-radius: 6px;
+  font-size: 0.74rem; padding: 0.15rem 0.45rem;
+  transition: all 0.15s ease;
+}
+.attach-badge button {
+  background: none; border: none; cursor: pointer; color: var(--muted);
+  padding: 0; font-size: 0.85rem; margin: 0;
+  transition: color 0.1s ease;
+}
+.attach-badge button:hover { color: var(--fail); }
+
+/* ── Follow-up Banner ──────────────────────────────────────────────────── */
+.followup-banner {
+  display: none;
+  background: rgba(48,209,88,0.06);
+  border: 1px solid rgba(48,209,88,0.2);
+  border-radius: 8px;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.8rem;
+  color: var(--ok);
+  font-weight: 500;
+}
+.followup-banner.show { display: block; animation: fadeIn 0.3s ease; }
+
+/* ── Launch Context ────────────────────────────────────────────────────── */
+.launch-context {
+  margin: 0.65rem 1rem 0;
+  padding: 0.65rem 0.85rem;
+  border: 1px solid rgba(10,132,255,0.15);
+  border-radius: 10px;
+  background: rgba(10,132,255,0.04);
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  animation: fadeIn 0.3s ease;
+}
+.launch-context strong { color: var(--accent); font-weight: 700; }
+.launch-context-meta { color: var(--muted); font-size: 0.74rem; }
+.launch-context-links { display:flex; gap:.4rem; flex-wrap:wrap; margin-top: 0.25rem; }
+.launch-context-links a {
+  display:inline-flex; align-items:center; justify-content:center;
+  padding:.3rem .6rem; border-radius:6px; text-decoration:none;
+  border:1px solid rgba(255,255,255,0.08); color:var(--fg); background:rgba(255,255,255,0.03); font-size:.74rem;
+  transition: all 0.15s ease;
+}
+.launch-context-links a:hover { border-color: var(--accent); color: var(--accent); background: rgba(10,132,255,0.05); }
+
+/* ── Linux Terminal ────────────────────────────────────────────────────── */
+.linux-terminal {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #0d1117;
+  font-family: ui-monospace, SFMono-Regular, Menlo, 'Courier New', monospace;
+  font-size: 0.82rem;
+}
+.linux-term-output {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.5rem 0.75rem;
+  color: #e0e0e0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.5;
+}
+.linux-term-output .term-cmd { color: #7ee787; font-weight: 600; }
+.linux-term-output .term-stdout { color: #e0e0e0; }
+.linux-term-output .term-stderr { color: #f85149; }
+.linux-term-output .term-info { color: #79c0ff; font-style: italic; }
+.linux-term-output .term-exit { color: #8b949e; font-size: 0.72rem; }
+.linux-term-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border-top: 1px solid #30363d;
+  background: #161b22;
+  flex-shrink: 0;
+}
+.linux-term-prompt {
+  color: #7ee787;
+  padding: 0.4rem 0 0.4rem 0.75rem;
+  font-size: 0.82rem;
+  white-space: nowrap;
+  user-select: none;
+  font-weight: 600;
+}
+.linux-term-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #e0e0e0;
+  font-family: inherit;
+  font-size: 0.82rem;
+  padding: 0.4rem 0.5rem;
+}
+.linux-term-input::placeholder { color: #484f58; }
+.linux-term-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.75rem;
+  background: #161b22;
+  border-bottom: 1px solid #30363d;
+  flex-shrink: 0;
+}
+.linux-term-toolbar .term-tb-btn {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid #30363d;
+  color: #8b949e;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  padding: 0.15rem 0.5rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.linux-term-toolbar .term-tb-btn:hover { background: rgba(255,255,255,0.12); color: #e0e0e0; border-color: #484f58; }
+.linux-term-cwd { color: #8b949e; font-size: 0.7rem; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ── Preview Panel ─────────────────────────────────────────────────────── */
+.preview-panel-inner {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.preview-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  background: rgba(255,255,255,0.02);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+.preview-url-bar {
+  flex: 1;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  padding: 0.25rem 0.55rem;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-family: monospace;
+}
+.preview-iframe {
+  flex: 1;
+  border: none;
+  background: #fff;
+  width: 100%;
+}
+
+/* ── Thinking Dropdown ─────────────────────────────────────────────────── */
+.thinking-dropdown { position: relative; display: inline-block; }
+.thinking-pill {
+  display: inline-flex; align-items: center; gap: 3px;
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+  color: var(--fg); border-radius: 999px; padding: 0.25rem 0.7rem;
+  font-size: 0.8rem; cursor: pointer; white-space: nowrap; margin-top: 0;
+  transition: all 0.15s ease; font-weight: 600;
+}
+.thinking-pill:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.15); }
+.thinking-menu {
+  position: absolute; bottom: calc(100% + 6px); left: 0; z-index: 300;
+  background: #1a1a2e; border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 10px; padding: 4px; min-width: 220px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  backdrop-filter: blur(12px);
+}
+.thinking-opt {
+  display: flex; flex-direction: column; align-items: flex-start;
+  width: 100%; background: none; border: none; border-radius: 8px;
+  color: var(--fg); padding: 8px 12px; cursor: pointer; text-align: left; margin-top: 0;
+  transition: background 0.1s ease;
+}
+.thinking-opt:hover { background: rgba(255,255,255,0.06); }
+.thinking-opt.selected { background: rgba(10,132,255,0.1); }
+.thinking-opt-name { font-size: 0.86rem; font-weight: 600; }
+.thinking-opt-desc { font-size: 0.74rem; color: var(--muted); margin-top: 2px; }
+
+/* ── Work/Web Toggle ───────────────────────────────────────────────────── */
+.mode-btn {
+  padding: 0.25rem 0.75rem;
+  border: 1px solid rgba(255,255,255,0.08);
+  cursor: pointer;
+  font-size: 0.8rem;
+  margin-top: 0;
+  transition: all 0.15s ease;
+  font-weight: 600;
+  background: rgba(255,255,255,0.03);
+  color: var(--muted);
+}
+.mode-btn:first-of-type { border-radius: 6px 0 0 6px; }
+.mode-btn:last-of-type  { border-left: none; border-radius: 0 6px 6px 0; }
+.mode-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.mode-btn:hover:not(.active) { background: rgba(255,255,255,0.06); color: var(--fg); }
+
+/* ── Agent Select ──────────────────────────────────────────────────────── */
+.agent-select {
+  font-size: 0.8rem;
+  padding: 0.25rem 0.55rem;
+  border-radius: 6px;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: rgba(255,255,255,0.04);
+  color: var(--fg);
+  cursor: pointer;
+  margin-top: 0;
+  width: auto;
+  font-weight: 600;
+  transition: all 0.15s ease;
+}
+.agent-select:focus {
+  outline: none;
+  border-color: rgba(10,132,255,0.4);
+  box-shadow: 0 0 0 2px rgba(10,132,255,0.1);
+}
+
+/* ── Compare Mode ──────────────────────────────────────────────────────── */
+.compare-count-select {
+  font-size: 0.8rem; padding: 0.25rem 0.5rem; border-radius: 6px;
+  border: 1px solid rgba(10,132,255,0.3); background: rgba(10,132,255,0.08); color: var(--accent);
+  cursor: pointer; margin-top: 0; width: auto; display: none; font-weight: 600;
+}
+.compare-count-select.show { display: inline-block; }
+#compare-container { display: none; flex: 1; overflow: hidden; min-height: 0; }
+#compare-container.active { display: flex; flex-direction: column; }
+.compare-toolbar {
+  display: flex; align-items: center; gap: 0.5rem;
+  padding: 0.35rem 0.75rem; background: rgba(255,255,255,0.02); border-bottom: 1px solid rgba(255,255,255,0.06);
+  font-size: 0.76rem; flex-shrink: 0;
+}
+.compare-grid { flex: 1; display: grid; overflow: hidden; min-height: 0; }
+.compare-pane {
+  display: flex; flex-direction: column;
+  border-right: 1px solid rgba(255,255,255,0.06); overflow: hidden; min-height: 0;
+}
+.compare-pane:last-child { border-right: none; }
+.compare-pane-header {
+  display: flex; align-items: center; gap: 0.4rem;
+  padding: 0.35rem 0.65rem; background: rgba(255,255,255,0.02);
+  border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 0.76rem; font-weight: 600; flex-shrink: 0;
+}
+.compare-pane-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.compare-pane-status {
+  font-size: 0.68rem; padding: 1px 6px; border-radius: 4px;
+  background: rgba(10,132,255,0.1); color: var(--accent); font-weight: 600;
+}
+.compare-pane-status.done { background: rgba(48,209,88,0.1); color: var(--ok); }
+.compare-pane-status.error { background: rgba(255,69,58,0.1); color: var(--fail); }
+.compare-pane-elapsed { font-size: 0.68rem; color: var(--muted); flex-shrink: 0; font-family: monospace; }
+.compare-progress { height: 2px; background: rgba(255,255,255,0.06); flex-shrink: 0; }
+.compare-progress-bar { height: 100%; width: 0; background: var(--accent); transition: width 0.4s ease; }
+.compare-progress-bar.done { background: var(--ok); width: 100% !important; }
+.compare-progress-bar.error { background: var(--fail); width: 100% !important; }
+.compare-pane-body {
+  flex: 1; overflow-y: auto; padding: 0.5rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.76rem; line-height: 1.5; min-height: 0; background: var(--bg);
+}
+.compare-entry { margin-bottom: 0.4rem; padding: 0.3rem 0.5rem; border-radius: 4px; }
+.compare-entry.thinking   { color: var(--fg); background: rgba(255,255,255,0.03); }
+.compare-entry.tool_call  { color: var(--accent); background: rgba(10,132,255,0.06); border-left: 2px solid var(--accent); }
+.compare-entry.observation { color: var(--ok); background: rgba(48,209,88,0.04); border-left: 2px solid var(--ok); }
+.compare-entry.observation.fail { color: var(--fail); background: rgba(255,69,58,0.04); border-left-color: var(--fail); }
+.compare-entry.file_update { color: var(--warn); background: rgba(255,160,0,0.04); }
+.compare-entry.final      { color: var(--ok); background: rgba(48,209,88,0.06); border: 1px solid rgba(48,209,88,0.2); }
+.compare-entry.error      { color: var(--fail); background: rgba(255,69,58,0.06); border-left: 2px solid var(--fail); }
+.compare-entry.step_info  { color: var(--muted); font-size: 0.7rem; }
+.compare-exit-btn {
+  padding: 0.2rem 0.6rem; background: transparent; border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 4px; color: var(--muted); font-size: 0.74rem; cursor: pointer;
+  flex-shrink: 0; margin-top: 0; transition: all 0.15s ease;
+}
+.compare-exit-btn:hover { color: var(--fail); border-color: rgba(255,69,58,0.3); background: rgba(255,69,58,0.05); }
+
+/* ── Collapsible Observation ───────────────────────────────────────────── */
+.obs-toggle {
+  background: none; border: none; color: var(--accent);
+  font-size: 0.72rem; cursor: pointer; padding: 2px 0; display: block; margin-top: 0;
+  transition: opacity 0.1s ease;
+}
+.obs-toggle:hover { opacity: 0.8; }
+.obs-full { white-space: pre-wrap; word-break: break-word; font-size: 0.8rem; }
+
+/* ── Copy Button ───────────────────────────────────────────────────────── */
+.copy-btn {
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08); border-radius: 4px;
+  color: var(--muted); font-size: 0.68rem; cursor: pointer; padding: 1px 6px;
+  margin-left: 0.4rem; float: right; margin-top: 0; transition: all 0.1s ease;
+}
+.copy-btn:hover { color: var(--fg); background: rgba(255,255,255,0.08); }
+
+/* ── File Preview Modal ────────────────────────────────────────────────── */
+.file-preview-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  z-index: 500;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+  animation: fadeIn 0.2s ease;
+}
+.file-preview-overlay.open { display: flex; }
+.file-preview-modal {
+  background: #1a1a2e;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  width: min(90vw, 900px);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 16px 64px rgba(0,0,0,0.5);
+  animation: modalSlideIn 0.2s ease;
+}
+@keyframes modalSlideIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.file-preview-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  font-size: 0.86rem;
+  font-weight: 600;
+  background: rgba(255,255,255,0.02);
+}
+.file-preview-body {
+  flex: 1;
+  overflow: auto;
+  padding: 1rem;
+}
+.file-preview-body pre {
+  margin: 0;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 8px;
+  padding: 1rem;
+  font-size: 0.82rem;
+  max-height: 60vh;
+  overflow: auto;
+  line-height: 1.6;
+}
+
+/* ── Animations ────────────────────────────────────────────────────────── */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.55; }
+}
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(10,132,255,0.2); }
+  50% { box-shadow: 0 0 0 6px rgba(10,132,255,0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, rgba(255,255,255,0.03) 25%, rgba(255,255,255,0.06) 50%, rgba(255,255,255,0.03) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 4px;
+}
+
+/* ── Responsive ────────────────────────────────────────────────────────── */
+@media (max-width: 1200px) {
+  .agent-workspace {
+    grid-template-columns: 180px 220px 1fr;
+  }
+}
+@media (max-width: 900px) {
+  .agent-workspace {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto 1fr;
+  }
+  .agent-history { display: none; }
+  .agent-filetree { grid-column: 1; grid-row: 2; max-height: 200px; }
+  .agent-main { grid-column: 1; grid-row: 3; }
+}
+</style>
+
+<div class="agent-workspace">
+
+  <!-- ── History Sidebar ────────────────────────────────────────────────── -->
+  <div class="agent-history">
+    <div class="history-header">
+      <span>🕐 History</span>
+      <button type="button" class="btn-sm" id="refresh-history" title="Refresh history">↺</button>
+    </div>
+    <div class="history-list" id="history-list">
+      <div style="color:var(--muted);font-size:0.76rem;padding:0.75rem;text-align:center;">No sessions yet</div>
+    </div>
+  </div>
+
+  <!-- ── Toolbar ────────────────────────────────────────────────────────── -->
+  <div class="agent-toolbar">
+    <h2>⚡ Agent Workspace</h2>
+    <span class="muted" style="font-size:0.78rem;opacity:0.6;">C10 Sandbox · Autonomous Execution</span>
+    <div class="spacer"></div>
+    <span id="elapsed-badge" class="elapsed-badge" style="display:none" title="Task elapsed time">0s</span>
+    <span id="step-counter" class="step-counter" style="display:none">Step 0/15</span>
+    <span id="agent-token-badge" class="token-badge-agent" title="Estimated context tokens in current session">0 tokens</span>
+    <button type="button" id="btn-new-task" class="btn-sm" title="Clear stream and start a new task (resets session)"
+      style="white-space:nowrap;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:0.25rem 0.6rem;font-size:0.76rem;color:var(--muted);cursor:pointer;transition:all 0.15s ease;">&#8635; New Task</button>
+    <div class="thinking-dropdown" id="thinking-dropdown">
+      <button type="button" class="thinking-pill" id="thinking-pill" aria-haspopup="true" aria-expanded="false">
+        <span id="thinking-label">Auto</span>
+        <svg width="10" height="6" viewBox="0 0 10 6" fill="none" style="margin-left:4px"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </button>
+      <div class="thinking-menu" id="thinking-menu" hidden>
+        <button type="button" class="thinking-opt" data-mode="auto">
+          <span class="thinking-opt-name">Auto</span>
+          <span class="thinking-opt-desc">Decides how long to think</span>
+        </button>
+        <button type="button" class="thinking-opt" data-mode="quick">
+          <span class="thinking-opt-name">Quick Response</span>
+          <span class="thinking-opt-desc">Faster, shorter reasoning</span>
+        </button>
+        <button type="button" class="thinking-opt" data-mode="deep">
+          <span class="thinking-opt-name">Think Deeper</span>
+          <span class="thinking-opt-desc">More thorough for complex tasks</span>
+        </button>
+      </div>
+    </div>
+    <div style="display:flex;align-items:center;gap:0;">
+      <button type="button" id="mode-work" class="mode-btn active" data-mode="work">Work</button>
+      <button type="button" id="mode-web"  class="mode-btn"        data-mode="web">Web</button>
+    </div>
+    <span id="pool-indicator" title="C3 browser tab pool"
+          style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:999px;font-size:0.75rem;border:1px solid var(--border,var(--border));background:var(--surface2,var(--border));color:var(--muted,var(--muted));cursor:default;white-space:nowrap;">
+      <span id="pool-indicator-dot" style="width:6px;height:6px;border-radius:50%;background:var(--border);display:inline-block;flex-shrink:0;"></span>
+      <span id="pool-indicator-label">Pool</span>
+    </span>
+    <select id="agent-select" class="agent-select" title="Agent session ID used with C1">
+      {% for agent in agents %}
+      <option value="{{ agent.id }}"{% if agent.id == 'c9-jokes' %} selected{% endif %}>{{ agent.label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <!-- ── File Tree ──────────────────────────────────────────────────────── -->
+  <div class="agent-filetree">
+    <div class="filetree-header">
+      <span>📁 Workspace</span>
+      <div style="display:flex;gap:0.2rem;align-items:center;">
+        <button type="button" class="btn-sm" id="btn-new-project" title="New project folder">📁+</button>
+        <button type="button" class="btn-sm" id="refresh-files" title="Refresh file tree">↺</button>
+      </div>
+    </div>
+    <div class="filetree-search-wrap">
+      <input type="text" id="filetree-search" class="filetree-search-input" placeholder="Search files…">
+    </div>
+    <div class="filetree-list" id="filetree-list">
+      <div class="filetree-empty" id="filetree-empty">Empty workspace</div>
+    </div>
+    <!-- NOTES.md persistent memory panel -->
+    <div class="notes-panel" id="notes-panel" style="display:none">
+      <div class="notes-panel-hdr">
+        <span>📝 NOTES.md</span>
+        <button type="button" class="btn-sm" id="btn-notes-refresh" title="Reload NOTES.md">↺</button>
+      </div>
+      <div class="notes-panel-body" id="notes-panel-body">Loading…</div>
+    </div>
+  </div>
+
+  <!-- ── Stream Output + Input ──────────────────────────────────────────── -->
+  <div class="agent-main">
+    <div class="launch-context" id="agent-task-context" style="display:none"></div>
+    <div class="launch-context" id="agent-recovery-context" style="display:none"></div>
+    <!-- Output tabs -->
+    <div class="output-tabs">
+      <button class="tab-btn active" data-tab="terminal" id="tab-terminal">⚡ Terminal</button>
+      <button class="tab-btn" data-tab="shell" id="tab-shell">🐧 Linux Shell</button>
+      <button class="tab-btn" data-tab="preview" id="tab-preview">🌐 Preview</button>
+    </div>
+
+    <!-- Terminal panel -->
+    <div class="output-panel active" id="panel-terminal">
+      <div class="agent-stream" id="agent-stream">
+        <div class="stream-empty" id="stream-empty">
+          <div style="font-size:2rem;margin-bottom:0.75rem;">🤖</div>
+          <div style="font-size:1rem;color:var(--fg);margin-bottom:0.4rem;">Agent Workspace</div>
+          <div style="font-size:0.85rem;">Describe a task below and the AI agent will plan, code, run, and validate it.</div>
+          <div style="font-size:0.78rem;margin-top:0.5rem;color:var(--muted);">
+            Try: <em>"create a flask app on port 5001 with a hello route"</em> or <em>"write a python calc script"</em>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Linux Shell panel (interactive sandbox terminal) -->
+    <div class="output-panel" id="panel-shell">
+      <div class="linux-terminal">
+        <div class="linux-term-toolbar">
+          <span style="color:#56d364;font-size:0.78rem;font-weight:600;">🐧 C10 Sandbox Shell</span>
+          <span class="linux-term-cwd" id="shell-cwd">/workspace</span>
+          <button class="term-tb-btn" id="shell-clear" title="Clear output">Clear</button>
+          <button class="term-tb-btn" id="shell-ls" title="List files">ls</button>
+          <button class="term-tb-btn" id="shell-pwd" title="Print working directory">pwd</button>
+        </div>
+        <div class="linux-term-output" id="shell-output">
+          <span class="term-info">Interactive Linux shell — C10 sandbox (/workspace)</span>
+          <span class="term-info">Type commands below: ls, cat, python3, pip install, etc.</span>
+          <br>
+        </div>
+        <div class="linux-term-input-row">
+          <span class="linux-term-prompt">workspace $&nbsp;</span>
+          <input class="linux-term-input" id="shell-input" type="text"
+            placeholder="Type a command… (Enter to run)" autocomplete="off" spellcheck="false">
+        </div>
+      </div>
+    </div>
+
+    <!-- Web Preview panel -->
+    <div class="output-panel" id="panel-preview">
+      <div class="preview-panel-inner">
+        <div class="preview-toolbar">
+          <span style="color:var(--muted);font-size:0.78rem;">🌐</span>
+          <span class="preview-url-bar" id="preview-url-bar">—</span>
+          <button type="button" class="btn-sm" id="btn-preview-refresh" title="Reload preview">↺</button>
+          <button type="button" class="btn-sm" id="btn-preview-open" title="Open in new tab" style="display:none">↗</button>
+        </div>
+        <div id="preview-placeholder" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--bg);color:var(--muted);font-family:system-ui,sans-serif;gap:0.75rem;padding:2rem;text-align:center;">
+          <div style="font-size:2.5rem;">🌐</div>
+          <div style="font-size:1rem;color:var(--fg);">Web Preview</div>
+          <div style="font-size:0.85rem;max-width:340px;">Run a web app task (Flask, Node.js/Express) and the live preview will appear here automatically.</div>
+          <div style="font-size:0.78rem;background:var(--card);border:1px solid var(--border);border-radius:6px;padding:0.5rem 1rem;margin-top:0.5rem;">
+            Try: <em>"create flask app.py with one route returning Hello from Flask, start on port 5001"</em>
+          </div>
+        </div>
+        <iframe class="preview-iframe" id="preview-iframe" src="about:blank" sandbox="allow-scripts allow-same-origin allow-forms" style="display:none"></iframe>
+      </div>
+    </div>
+
+    <!-- Compare container (shown in compare mode) -->
+    <div id="compare-container">
+      <div class="compare-toolbar">
+        <span style="color:var(--accent);font-weight:600;">⚡ Compare Mode</span>
+        <span id="compare-summary" style="color:var(--muted);font-size:0.75rem;"></span>
+      </div>
+      <div class="compare-grid" id="compare-grid"></div>
+    </div>
+
+    <!-- Input bar -->
+    <div class="agent-input-bar">
+      <!-- Follow-up banner (shown after task completes) -->
+      <div class="followup-banner" id="followup-banner">
+        ✅ Task complete — type a follow-up below to improve or extend it (same session)
+      </div>
+      <!-- Attached files -->
+      <div class="attach-badges" id="attach-badges"></div>
+      <div class="agent-input-row">
+        <textarea
+          id="task-input"
+          rows="2"
+          placeholder="Describe what you want to build… (Ctrl+Enter to run)"
+        ></textarea>
+        <div style="display:flex;flex-direction:column;gap:0.4rem;align-items:center;">
+          <button type="button" class="btn-run" id="btn-run">▶ Run</button>
+          <button type="button" class="btn-compare" id="btn-compare">⚡ Compare</button>
+          <button type="button" class="btn-stop" id="btn-stop" style="display:none">◼ Stop</button>
+          <button type="button" class="btn-sm" id="btn-run-ma" title="Run as multi-agent team" style="background:rgba(10, 132, 255,0.15);border-color:var(--accent);color:var(--accent);">🤖</button>
+          <button type="button" class="btn-sm" id="btn-attach" title="Attach file to workspace">📎</button>
+        </div>
+      </div>
+      <input type="file" id="attach-input" style="display:none" multiple>
+      <div id="compare-controls" style="display:none;align-items:center;gap:0.4rem;">
+        <span style="font-size:0.78rem;color:var(--accent);">Compare:</span>
+        <select id="compare-count" class="compare-count-select show">
+          <option value="2">2 agents</option>
+          <option value="3">3 agents</option>
+          <option value="4">4 agents</option>
+        </select>
+        <button type="button" class="compare-exit-btn" id="btn-exit-compare">✕ Exit Compare</button>
+      </div>
+      <div class="agent-input-controls">
+        <button type="button" class="btn-reset-ws" id="btn-reset-ws">🗑 Reset Workspace</button>
+        <span class="muted" style="font-size:0.76rem;">C10 sandbox · non-root · 512 MB · 0.5 CPU</span>
+      </div>
+    </div>
+  </div>
+
+</div><!-- end .agent-workspace -->
+
+<!-- ── File Preview Modal ───────────────────────────────────────────────── -->
+<div class="file-preview-overlay" id="file-preview-overlay">
+  <div class="file-preview-modal">
+    <div class="file-preview-header">
+      <span id="file-preview-title">file.py</span>
+      <button type="button" class="btn-sm" id="close-preview">✕ Close</button>
+    </div>
+    <div class="file-preview-body">
+      <pre id="file-preview-content"></pre>
+    </div>
+  </div>
+</div>
+
+<!-- ── New Project Modal ────────────────────────────────────────────────── -->
+<div class="file-preview-overlay" id="new-project-overlay">
+  <div class="file-preview-modal" style="max-width:400px;">
+    <div class="file-preview-header">
+      <span>📁 New Project</span>
+      <button type="button" class="btn-sm" id="close-new-project">✕ Close</button>
+    </div>
+    <div class="file-preview-body" style="padding:1.25rem;display:flex;flex-direction:column;gap:0.65rem;">
+      <label style="font-size:0.8rem;color:var(--muted);font-weight:600;">Project name <span style="font-weight:400;">(becomes the folder name)</span></label>
+      <input id="new-project-name" type="text" placeholder="my-project" autocomplete="off"
+        style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;
+               padding:0.5rem 0.75rem;color:var(--fg);font-size:0.9rem;outline:none;width:100%;box-sizing:border-box;">
+      <label style="font-size:0.8rem;color:var(--muted);font-weight:600;">Description <span style="font-weight:400;">(optional)</span></label>
+      <input id="new-project-desc" type="text" placeholder="What is this project for?"
+        style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;
+               padding:0.5rem 0.75rem;color:var(--fg);font-size:0.82rem;outline:none;width:100%;box-sizing:border-box;">
+      <div id="new-project-error"
+        style="color:var(--muted);font-size:0.78rem;display:none;padding:0.35rem 0.5rem;
+               background:rgba(142, 142, 147,0.07);border-radius:4px;"></div>
+      <button type="button" id="btn-create-project"
+        style="background:var(--accent,var(--accent));color:var(--fg);border:none;border-radius:6px;
+               padding:0.55rem 1rem;cursor:pointer;font-size:0.88rem;font-weight:600;margin-top:0.2rem;">
+        ✅ Create Project
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+(function() {
+  'use strict';
+
+  const agents = {{ agents | tojson }};
+  const taskLaunch = {{ task_launch | tojson }};
+
+  // ── DOM refs ──────────────────────────────────────────────────────────────
+  const streamEl         = document.getElementById('agent-stream');
+  const streamEmpty      = document.getElementById('stream-empty');
+  const filetreeList     = document.getElementById('filetree-list');
+  const taskInput        = document.getElementById('task-input');
+  const btnRun           = document.getElementById('btn-run');
+  const btnRunMa         = document.getElementById('btn-run-ma');
+  const btnStop          = document.getElementById('btn-stop');
+  const btnResetWs       = document.getElementById('btn-reset-ws');
+  const btnRefresh       = document.getElementById('refresh-files');
+  const stepCounter      = document.getElementById('step-counter');
+  const agentSelect      = document.getElementById('agent-select');
+  const previewOverlay   = document.getElementById('file-preview-overlay');
+  const previewTitle     = document.getElementById('file-preview-title');
+  const previewContent   = document.getElementById('file-preview-content');
+  const closePreview     = document.getElementById('close-preview');
+  const btnNewProject    = document.getElementById('btn-new-project');
+  const newProjectOverlay= document.getElementById('new-project-overlay');
+  const newProjectName   = document.getElementById('new-project-name');
+  const newProjectDesc   = document.getElementById('new-project-desc');
+  const newProjectError  = document.getElementById('new-project-error');
+  const btnCreateProject = document.getElementById('btn-create-project');
+  const closeNewProject  = document.getElementById('close-new-project');
+  const historyList      = document.getElementById('history-list');
+  const btnRefreshHist   = document.getElementById('refresh-history');
+  const followupBanner   = document.getElementById('followup-banner');
+  const taskContextEl    = document.getElementById('agent-task-context');
+  const recoveryContextEl= document.getElementById('agent-recovery-context');
+  const attachBadges     = document.getElementById('attach-badges');
+  const btnAttach        = document.getElementById('btn-attach');
+  const attachInput      = document.getElementById('attach-input');
+  const tabTerminal      = document.getElementById('tab-terminal');
+  const tabShell         = document.getElementById('tab-shell');
+  const tabPreview       = document.getElementById('tab-preview');
+  const panelTerminal    = document.getElementById('panel-terminal');
+  const panelShell       = document.getElementById('panel-shell');
+  const panelPreview     = document.getElementById('panel-preview');
+  const previewIframe    = document.getElementById('preview-iframe');
+  const previewUrlBar    = document.getElementById('preview-url-bar');
+  const btnPreviewRefresh= document.getElementById('btn-preview-refresh');
+  const btnPreviewOpen   = document.getElementById('btn-preview-open');
+  const elapsedBadge     = document.getElementById('elapsed-badge');
+
+  let activeSource  = null;
+  let running       = false;
+  let currentStep   = 0;
+  let maxSteps      = 15;
+  let currentSessId = '';   // session_id for follow-ups
+  const STREAM_SETTLE_MS = 20000;
+  const PROMPT_GAP_MS = 25000;
+  const LONG_STREAM_GRACE_MS = 180000;
+  let _lastActivityAt = 0;
+  let _lastPromptAt = 0;
+  let _cooldownUntil = 0;
+  let _cooldownTimer = null;
+  let _taskFeedbackConnected = false;
+  let _taskFeedbackFinalSent = false;
+
+  // ── Elapsed timer state ───────────────────────────────────────────────────
+  let _taskStartTime = null;
+  let _elapsedTimer  = null;
+
+  function fmtElapsed(ms) {
+    var s = Math.floor(ms / 1000);
+    if (s < 60) return s + 's';
+    var m = Math.floor(s / 60);
+    return m + 'm ' + (s % 60) + 's';
+  }
+
+  function startElapsed() {
+    _taskStartTime = Date.now();
+    elapsedBadge.style.display = '';
+    elapsedBadge.className = 'elapsed-badge running';
+    elapsedBadge.textContent = '0s';
+    if (_elapsedTimer) clearInterval(_elapsedTimer);
+    _elapsedTimer = setInterval(function() {
+      elapsedBadge.textContent = fmtElapsed(Date.now() - _taskStartTime);
+    }, 1000);
+  }
+
+  function stopElapsed() {
+    if (_elapsedTimer) { clearInterval(_elapsedTimer); _elapsedTimer = null; }
+    if (_taskStartTime) {
+      elapsedBadge.textContent = fmtElapsed(Date.now() - _taskStartTime);
+    }
+    elapsedBadge.className = 'elapsed-badge';
+  }
+
+  function markRunActivity() {
+    _lastActivityAt = Date.now();
+  }
+
+  function applyRunAvailability() {
+    if (_cooldownTimer) {
+      clearTimeout(_cooldownTimer);
+      _cooldownTimer = null;
+    }
+    if (running) {
+      btnRun.disabled = true;
+      return;
+    }
+    const remain = Math.max(0, _cooldownUntil - Date.now());
+    if (remain > 0) {
+      btnRun.disabled = true;
+      btnRun.textContent = 'Wait ' + Math.ceil(remain / 1000) + 's';
+      _cooldownTimer = setTimeout(applyRunAvailability, Math.min(remain, 1000));
+      return;
+    }
+    btnRun.disabled = false;
+    btnRun.textContent = 'Run';
+  }
+
+  function canStartRun() {
+    if (running) {
+      appendEntry('error', '<span class="stream-label">⏳ Busy</span> Previous output is still active. Wait for the stream to settle before sending another prompt.');
+      return false;
+    }
+    const remain = Math.max(0, _cooldownUntil - Date.now());
+    if (remain > 0) {
+      appendEntry('error', '<span class="stream-label">⏳ Cooldown</span> Wait ' + Math.ceil(remain / 1000) + 's before sending the next prompt.');
+      return false;
+    }
+    return true;
+  }
+
+  // ── Compare mode state ─────────────────────────────────────────────────────
+  let _compareMode    = false;
+  let _comparePanes   = {};  // agentId → {el, bodyEl, progressBar, statusEl, elapsedEl, src, timer, steps}
+  let _compareDone    = 0;
+  let _compareTotal   = 0;
+
+  // ── Live file refresh interval ─────────────────────────────────────────────
+  let _fileRefreshInterval = null;
+
+  // ── Compare DOM refs ───────────────────────────────────────────────────────
+  const compareContainer  = document.getElementById('compare-container');
+  const compareGrid       = document.getElementById('compare-grid');
+  const compareSummary    = document.getElementById('compare-summary');
+  const compareControls   = document.getElementById('compare-controls');
+  const compareCount      = document.getElementById('compare-count');
+  const btnCompare        = document.getElementById('btn-compare');
+  const btnExitCompare    = document.getElementById('btn-exit-compare');
+  const outputTabs        = document.querySelector('.output-tabs');
+
+  // ── Pool status indicator ─────────────────────────────────────────────────
+  const poolDot   = document.getElementById('pool-indicator-dot');
+  const poolLbl   = document.getElementById('pool-indicator-label');
+  async function refreshPoolIndicator() {
+    try {
+      const r = await fetch('/api/runtime-status');
+      if (!r.ok) throw new Error('no-ok');
+      const rt = await r.json();
+      const d = (rt.components || {}).c3_pool || {};
+      if (d.state === 'down') {
+        poolDot.style.background = 'var(--border)';
+        poolLbl.textContent = 'Pool';
+        poolDot.title = 'C3 pool status unavailable';
+        return;
+      }
+      const avail = d.pool_available;
+      const total = d.pool_size;
+      const init  = d.pool_initialized;
+      const color = !init ? 'var(--border)' : avail === 0 ? 'var(--muted)' : avail < 3 ? 'var(--accent)' : 'var(--accent)';
+      poolDot.style.background = color;
+      poolLbl.textContent = init ? avail + '/' + total : 'init…';
+      if (avail === 0 && init) {
+        poolDot.title = '⚠️ No free tabs — agent will create one on demand';
+      }
+    } catch(_) {
+      poolDot.style.background = 'var(--border)';
+      poolLbl.textContent = 'Pool';
+    }
+  }
+  refreshPoolIndicator();
+  setInterval(refreshPoolIndicator, 8000);
+  // ──────────────────────────────────────────────────────────────────────────
+  let activeTab     = 'terminal';
+  let currentWebPort= null;
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
+  function escapeHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = String(s == null ? '' : s);
+    return d.innerHTML;
+  }
+  function scrollToBottom() { streamEl.scrollTop = streamEl.scrollHeight; }
+  function hideEmpty() { if (streamEmpty) streamEmpty.style.display = 'none'; }
+
+  function appendEntry(type, html, extraClass) {
+    hideEmpty();
+    const div = document.createElement('div');
+    div.className = 'stream-entry ' + type + (extraClass ? ' ' + extraClass : '');
+    div.innerHTML = html;
+    streamEl.appendChild(div);
+    scrollToBottom();
+    return div;
+  }
+
+  // ── Output tabs ───────────────────────────────────────────────────────────
+  function switchTab(tab) {
+    activeTab = tab;
+    tabTerminal.classList.toggle('active', tab === 'terminal');
+    tabShell.classList.toggle('active', tab === 'shell');
+    tabPreview.classList.toggle('active', tab === 'preview');
+    panelTerminal.classList.toggle('active', tab === 'terminal');
+    panelShell.classList.toggle('active', tab === 'shell');
+    panelPreview.classList.toggle('active', tab === 'preview');
+    if (tab === 'shell') document.getElementById('shell-input').focus();
+  }
+  tabTerminal.addEventListener('click', function() { switchTab('terminal'); });
+  tabShell.addEventListener('click',    function() { switchTab('shell'); });
+  tabPreview.addEventListener('click',  function() { switchTab('preview'); });
+
+  function showWebPreview(port) {
+    currentWebPort = port;
+    const url = '/api/agent/preview?port=' + port;
+    const placeholder = document.getElementById('preview-placeholder');
+    if (placeholder) placeholder.style.display = 'none';
+    previewIframe.style.display = '';
+    previewIframe.src = url;
+    previewUrlBar.textContent = 'http://localhost:' + port + '/  (proxied via C9)';
+    tabPreview.textContent = '🌐 Preview :' + port;
+    btnPreviewOpen.style.display = '';
+    btnPreviewOpen.onclick = function() { window.open(url, '_blank'); };
+    switchTab('preview');
+  }
+  btnPreviewRefresh.addEventListener('click', function() {
+    if (currentWebPort) previewIframe.src = '/api/agent/preview?port=' + currentWebPort + '&_=' + Date.now();
+  });
+
+  // ── Thinking-mode dropdown ─────────────────────────────────────────────────
+  const THINKING_LABELS = { auto: 'Auto', quick: 'Quick Response', deep: 'Think Deeper' };
+  let thinkingMode = localStorage.getItem('agentThinkingMode') || 'auto';
+  const thinkingPill  = document.getElementById('thinking-pill');
+  const thinkingMenu  = document.getElementById('thinking-menu');
+  const thinkingLabel = document.getElementById('thinking-label');
+
+  function applyThinkingMode(mode) {
+    thinkingMode = mode;
+    thinkingLabel.textContent = THINKING_LABELS[mode] || 'Auto';
+    localStorage.setItem('agentThinkingMode', mode);
+    document.querySelectorAll('.thinking-opt').forEach(function(btn) {
+      btn.classList.toggle('selected', btn.dataset.mode === mode);
+    });
+    thinkingMenu.hidden = true;
+    thinkingPill.setAttribute('aria-expanded', 'false');
+  }
+  applyThinkingMode(thinkingMode);
+  thinkingPill.addEventListener('click', function(e) {
+    e.stopPropagation();
+    const open = !thinkingMenu.hidden;
+    thinkingMenu.hidden = open;
+    thinkingPill.setAttribute('aria-expanded', String(!open));
+  });
+  document.querySelectorAll('.thinking-opt').forEach(function(btn) {
+    btn.addEventListener('click', function() { applyThinkingMode(btn.dataset.mode); });
+  });
+
+  // ── Work/Web mode toggle ──────────────────────────────────────────────────
+  let activeWorkMode = 'work';
+  document.querySelectorAll('.mode-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      activeWorkMode = btn.dataset.mode;
+      document.querySelectorAll('.mode-btn').forEach(function(b) {
+        const active = b.dataset.mode === activeWorkMode;
+        b.style.background = active ? 'var(--accent,var(--accent))' : 'transparent';
+        b.style.color = active ? 'var(--fg)' : '';
+        b.classList.toggle('active', active);
+      });
+    });
+  });
+
+  // ── File tree ──────────────────────────────────────────────────────────────
+  function getFileIcon(path) {
+    const ext = (path.split('.').pop() || '').toLowerCase();
+    return ({py:'🐍',js:'📜',ts:'📘',jsx:'⚛',tsx:'⚛',html:'🌐',css:'🎨',
+             json:'📋',md:'📝',txt:'📄',sh:'⚙',yml:'⚙',yaml:'⚙',
+             toml:'⚙',env:'🔑',sql:'🗄',log:'📋'})[ext] || '📄';
+  }
+
+  // ── Project-aware file tree ────────────────────────────────────────────────
+  let _knownProjects = [];  // [{id, name, display_name, ...}]
+
+  function _makeDelBtn(attrs) {
+    // attrs = { 'data-path': '...', 'data-type': 'file' } or { 'data-project': '...' }
+    const span = document.createElement('span');
+    span.className = attrs['data-project'] ? 'filetree-proj-del' : 'filetree-del';
+    span.textContent = '✕';
+    span.title = 'Delete';
+    Object.keys(attrs).forEach(function(k) { span.setAttribute(k, attrs[k]); });
+    return span;
+  }
+
+  function _makeFileItem(entry, extraPad) {
+    const item = document.createElement('div');
+    const depth = (entry.path.match(/\//g) || []).length;
+    const isDir = entry.type === 'dir';
+    item.className = 'filetree-item' + (isDir ? ' dir' : '');
+    item.style.paddingLeft = ((extraPad || 0.75) + depth * 0.8) + 'rem';
+    const icon = isDir ? '📁' : getFileIcon(entry.path);
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'filetree-icon';
+    nameSpan.textContent = icon;
+    item.appendChild(nameSpan);
+    const label = document.createTextNode(entry.path.split('/').pop());
+    item.appendChild(label);
+    item.title = entry.path;
+    if (!isDir) {
+      item.addEventListener('click', function(e) {
+        if (e.target.classList.contains('filetree-del')) return;
+        openFilePreview(entry.path, item);
+      });
+    }
+    item.appendChild(_makeDelBtn({'data-path': entry.path, 'data-type': entry.type}));
+    return item;
+  }
+
+  function renderFileTree(entries, projects) {
+    filetreeList.innerHTML = '';
+    _knownProjects = projects || [];
+    _filetreeAllEntries = [];
+    _filetreeAllProjects = [];
+    if (!entries || !entries.length) {
+      filetreeList.innerHTML = '<div class="filetree-empty">Empty workspace</div>';
+      return;
+    }
+
+    const projBySlug = {};
+    (_knownProjects || []).forEach(function(p) { projBySlug[p.name] = p; });
+
+    const sorted = entries.slice().sort(function(a, b) {
+      if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
+      return a.path.localeCompare(b.path);
+    });
+
+    const projectEntries = {};
+    const looseEntries   = [];
+    sorted.forEach(function(entry) {
+      const topDir = entry.path.split('/')[0];
+      if (projBySlug[topDir] && entry.path !== topDir) {
+        if (!projectEntries[topDir]) projectEntries[topDir] = [];
+        projectEntries[topDir].push(entry);
+      } else if (projBySlug[entry.path]) {
+      } else {
+        looseEntries.push(entry);
+      }
+    });
+
+    let hasContent = false;
+
+    (_knownProjects || []).forEach(function(proj) {
+      hasContent = true;
+      const header = document.createElement('div');
+      header.className = 'filetree-project-header';
+      header.dataset.name = proj.name;
+      header.innerHTML = '<span style="flex-shrink:0;">📂</span>'
+        + '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;" title="' + escapeHtml(proj.name) + '">'
+        + escapeHtml(proj.display_name || proj.name) + '</span>';
+      header.appendChild(_makeDelBtn({'data-project': proj.name}));
+      filetreeList.appendChild(header);
+      _filetreeAllProjects.push(header);
+
+      const children = projectEntries[proj.name] || [];
+      if (!children.length) {
+        const empty = document.createElement('div');
+        empty.style.cssText = 'padding:0.2rem 0.75rem 0.2rem 1.55rem;font-size:0.75rem;color:var(--muted);';
+        empty.textContent = 'empty project';
+        filetreeList.appendChild(empty);
+      } else {
+        children.forEach(function(entry) {
+          var item = _makeFileItem(entry);
+          item.dataset.name = entry.path;
+          filetreeList.appendChild(item);
+          _filetreeAllEntries.push(item);
+        });
+      }
+    });
+
+    if (looseEntries.length) {
+      if (hasContent) {
+        const sep = document.createElement('div');
+        sep.className = 'filetree-section-label';
+        sep.textContent = 'Workspace files';
+        filetreeList.appendChild(sep);
+      }
+      looseEntries.forEach(function(entry) {
+        hasContent = true;
+        var item = _makeFileItem(entry);
+        item.dataset.name = entry.path;
+        filetreeList.appendChild(item);
+        _filetreeAllEntries.push(item);
+      });
+    }
+
+    if (!hasContent) {
+      filetreeList.innerHTML = '<div class="filetree-empty">Empty workspace</div>';
+    }
+    applyFileTreeFilter(filetreeSearch ? filetreeSearch.value : '');
+  }
+
+  // ── Delete a file or directory ─────────────────────────────────────────────
+  async function deleteWorkspaceItem(path, type) {
+    const label = type === 'dir' ? 'folder' : 'file';
+    if (!confirm('Delete ' + label + ' "' + path + '"?\nThis cannot be undone.')) return;
+    try {
+      const r = await fetch('/api/agent/file?path=' + encodeURIComponent(path), { method: 'DELETE' });
+      const d = await r.json();
+      if (d.ok || d.message === 'already absent') {
+        appendEntry('step_info', '<span class="stream-label">🗑 Deleted</span> ' + escapeHtml(path));
+        await refreshFiles();
+      } else {
+        appendEntry('error', '<span class="stream-label">❌</span> Delete failed: ' + escapeHtml(d.error || JSON.stringify(d)));
+      }
+    } catch(e) {
+      appendEntry('error', '<span class="stream-label">❌</span> Delete error: ' + escapeHtml(e.message));
+    }
+  }
+
+  // ── Delete a project (entire directory + DB record) ───────────────────────
+  async function deleteProject(name) {
+    if (!confirm('Delete project "' + name + '" and ALL its files?\nThis cannot be undone.')) return;
+    try {
+      const r = await fetch('/api/agent/project?name=' + encodeURIComponent(name), { method: 'DELETE' });
+      const d = await r.json();
+      if (d.ok) {
+        appendEntry('step_info', '<span class="stream-label">🗑 Project Deleted</span> ' + escapeHtml(name));
+        await refreshFiles();
+      } else {
+        appendEntry('error', '<span class="stream-label">❌</span> Project delete failed: ' + escapeHtml(d.error || JSON.stringify(d)));
+      }
+    } catch(e) {
+      appendEntry('error', '<span class="stream-label">❌</span> Delete error: ' + escapeHtml(e.message));
+    }
+  }
+
+  // ── Event delegation — delete buttons in file tree ─────────────────────────
+  filetreeList.addEventListener('click', function(e) {
+    const el = e.target;
+    if (el.classList.contains('filetree-del')) {
+      e.stopPropagation();
+      const path = el.getAttribute('data-path');
+      const type = el.getAttribute('data-type') || 'file';
+      if (path) deleteWorkspaceItem(path, type);
+    } else if (el.classList.contains('filetree-proj-del')) {
+      e.stopPropagation();
+      const projName = el.getAttribute('data-project');
+      if (projName) deleteProject(projName);
+    }
+  });
+
+  // ── Refresh: fetch files + projects, then render ───────────────────────────
+  async function refreshFiles() {
+    btnRefresh.textContent = '…';
+    try {
+      const [filesResp, projResp] = await Promise.all([
+        fetch('/api/agent/files'),
+        fetch('/api/agent/projects'),
+      ]);
+      const filesData = await filesResp.json();
+      const projData  = await projResp.json();
+      renderFileTree(filesData.entries || [], Array.isArray(projData) ? projData : []);
+    } catch(e) {}
+    btnRefresh.textContent = '↺';
+  }
+  btnRefresh.addEventListener('click', refreshFiles);
+
+  // ── File tree search ───────────────────────────────────────────────────────
+  var filetreeSearch = document.getElementById('filetree-search');
+  var _filetreeAllEntries = [];
+  var _filetreeAllProjects = [];
+  function applyFileTreeFilter(query) {
+    var q = (query || '').toLowerCase().trim();
+    _filetreeAllEntries.forEach(function(el) {
+      if (!el.dataset) return;
+      var name = (el.dataset.name || '').toLowerCase();
+      if (!q || name.indexOf(q) >= 0) {
+        el.classList.remove('hidden');
+      } else {
+        el.classList.add('hidden');
+      }
+    });
+    _filetreeAllProjects.forEach(function(el) {
+      if (!el.dataset) return;
+      var name = (el.dataset.name || '').toLowerCase();
+      var hasVisibleChild = false;
+      var sibling = el.nextElementSibling;
+      while (sibling && !sibling.classList.contains('filetree-project-header') && !sibling.classList.contains('filetree-section-label')) {
+        if (!sibling.classList.contains('hidden') && (sibling.classList.contains('filetree-item'))) {
+          hasVisibleChild = true;
+          break;
+        }
+        sibling = sibling.nextElementSibling;
+      }
+      if (!q || hasVisibleChild || name.indexOf(q) >= 0) {
+        el.classList.remove('hidden');
+      } else {
+        el.classList.add('hidden');
+      }
+    });
+  }
+  if (filetreeSearch) {
+    filetreeSearch.addEventListener('input', function() {
+      applyFileTreeFilter(filetreeSearch.value);
+    });
+  }
+
+  // ── New Project modal ──────────────────────────────────────────────────────
+  function openNewProjectModal() {
+    newProjectName.value = '';
+    newProjectDesc.value = '';
+    newProjectError.style.display = 'none';
+    newProjectOverlay.classList.add('open');
+    setTimeout(function() { newProjectName.focus(); }, 80);
+  }
+  function closeNewProjectModal() {
+    newProjectOverlay.classList.remove('open');
+  }
+
+  btnNewProject.addEventListener('click', openNewProjectModal);
+  closeNewProject.addEventListener('click', closeNewProjectModal);
+  newProjectOverlay.addEventListener('click', function(e) {
+    if (e.target === newProjectOverlay) closeNewProjectModal();
+  });
+  newProjectName.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter') { e.preventDefault(); btnCreateProject.click(); }
+    if (e.key === 'Escape') closeNewProjectModal();
+  });
+
+  btnCreateProject.addEventListener('click', async function() {
+    const name = newProjectName.value.trim();
+    const desc = newProjectDesc.value.trim();
+    newProjectError.style.display = 'none';
+    if (!name) {
+      newProjectError.textContent = 'Project name is required.';
+      newProjectError.style.display = 'block';
+      newProjectName.focus();
+      return;
+    }
+    btnCreateProject.disabled = true;
+    btnCreateProject.textContent = 'Creating…';
+    try {
+      const r = await fetch('/api/agent/project', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name, description: desc }),
+      });
+      const d = await r.json();
+      if (d.ok) {
+        closeNewProjectModal();
+        appendEntry('step_info',
+          '<span class="stream-label">📁 Project Created</span> '
+          + escapeHtml(d.display_name || d.name)
+          + ' <span style="opacity:0.6">(' + escapeHtml(d.name) + '/)</span>');
+        await refreshFiles();
+      } else {
+        newProjectError.textContent = d.error || 'Failed to create project.';
+        newProjectError.style.display = 'block';
+      }
+    } catch(e) {
+      newProjectError.textContent = 'Network error: ' + e.message;
+      newProjectError.style.display = 'block';
+    }
+    btnCreateProject.disabled = false;
+    btnCreateProject.textContent = '✅ Create Project';
+  });
+
+  // ── File preview modal ─────────────────────────────────────────────────────
+  function openFilePreview(path, activeItem) {
+    document.querySelectorAll('.filetree-item').forEach(function(i) { i.classList.remove('active'); });
+    if (activeItem) activeItem.classList.add('active');
+    previewTitle.textContent = path;
+    previewContent.textContent = 'Loading…';
+    previewOverlay.classList.add('open');
+    fetch('/api/agent/file?path=' + encodeURIComponent(path))
+      .then(function(r) { return r.json(); })
+      .then(function(d) { previewContent.textContent = d.content || ('Error: ' + (d.error || 'unknown')); })
+      .catch(function(e) { previewContent.textContent = 'Error: ' + e.message; });
+  }
+  closePreview.addEventListener('click', function() {
+    previewOverlay.classList.remove('open');
+    document.querySelectorAll('.filetree-item').forEach(function(i) { i.classList.remove('active'); });
+  });
+  previewOverlay.addEventListener('click', function(e) {
+    if (e.target === previewOverlay) {
+      previewOverlay.classList.remove('open');
+      document.querySelectorAll('.filetree-item').forEach(function(i) { i.classList.remove('active'); });
+    }
+  });
+
+  // ── History sidebar ────────────────────────────────────────────────────────
+  async function refreshHistory() {
+    btnRefreshHist.textContent = '…';
+    try {
+      const r = await fetch('/api/agent/sessions?limit=20');
+      const sessions = await r.json();
+      renderHistory(sessions);
+    } catch(e) {}
+    btnRefreshHist.textContent = '↺';
+  }
+
+  function renderHistory(sessions) {
+    historyList.innerHTML = '';
+    if (!sessions || !sessions.length) {
+      historyList.innerHTML = '<div style="color:var(--muted);font-size:0.76rem;padding:0.75rem;text-align:center;">No sessions yet</div>';
+      return;
+    }
+    sessions.forEach(function(s) {
+      const item = document.createElement('div');
+      item.className = 'history-item ' + (s.status || 'running');
+      item.dataset.sessionId = s.id || '';
+      if (s.id === currentSessId) item.classList.add('active');
+      const date = new Date(s.created_at).toLocaleString([], {month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});
+      const statusIcon = s.status === 'completed' ? '✅' : s.status === 'failed' ? '⚠' : '⏳';
+      const filesArr = JSON.parse(s.files_created || '[]');
+      item.innerHTML =
+        '<div class="history-task" title="' + escapeHtml(s.task) + '">' + statusIcon + ' ' + escapeHtml((s.task||'').slice(0,60)) + '</div>' +
+        '<div class="history-meta">' + date + ' · ' + (s.steps_taken||0) + ' steps' +
+        (filesArr.length ? ' · ' + filesArr.length + ' file(s)' : '') + '</div>';
+      item.addEventListener('click', function() {
+        loadSession(s);
+      });
+      historyList.appendChild(item);
+    });
+  }
+
+  function loadSession(s) {
+    currentSessId = s.id;
+    taskInput.value = '';
+    taskInput.placeholder = 'Follow-up for: ' + (s.task||'').slice(0,50) + '…';
+    followupBanner.classList.add('show');
+    followupBanner.textContent = '📂 Session loaded: "' + (s.task||'').slice(0,60) + '" — type a follow-up below';
+    document.querySelectorAll('.history-item').forEach(function(i) { i.classList.remove('active'); });
+    document.querySelectorAll('.history-item[data-session-id]').forEach(function(i) {
+      i.classList.toggle('active', i.dataset.sessionId === s.id);
+    });
+    renderTaskContext();
+    taskInput.focus();
+  }
+
+  btnRefreshHist.addEventListener('click', refreshHistory);
+
+  // ── File attach ────────────────────────────────────────────────────────────
+  const attachedFiles = [];
+
+  btnAttach.addEventListener('click', function() { attachInput.click(); });
+  attachInput.addEventListener('change', async function() {
+    const files = Array.from(attachInput.files || []);
+    for (const file of files) {
+      const fd = new FormData();
+      fd.append('file', file);
+      try {
+        const r = await fetch('/api/agent/upload-to-workspace', { method: 'POST', body: fd });
+        const d = await r.json();
+        if (d.ok !== false) {
+          attachedFiles.push(d.filename || file.name);
+          renderAttachBadges();
+          appendEntry('file_update', '<span class="stream-label">📎 Uploaded</span> ' + escapeHtml(d.filename || file.name) + ' (' + (d.size||0) + ' bytes) → workspace');
+          await refreshFiles();
+        } else {
+          appendEntry('error', '<span class="stream-label">❌</span> Upload failed: ' + escapeHtml(d.error || 'unknown'));
+        }
+      } catch(e) {
+        appendEntry('error', '<span class="stream-label">❌</span> Upload error: ' + escapeHtml(e.message));
+      }
+    }
+    attachInput.value = '';
+  });
+
+  function renderAttachBadges() {
+    attachBadges.innerHTML = '';
+    attachedFiles.forEach(function(name, i) {
+      const badge = document.createElement('span');
+      badge.className = 'attach-badge';
+      badge.innerHTML = '📎 ' + escapeHtml(name) +
+        '<button title="Remove" onclick="this.closest(\'.attach-badge\').remove()">×</button>';
+      attachBadges.appendChild(badge);
+    });
+  }
+
+  // ── SSE event handlers ─────────────────────────────────────────────────────
+  function handleThinking(data) {
+    markRunActivity();
+    const text = (data.text || '').trim();
+    if (!text) return;
+    const stepLabel = data.step > 0 ? '<span class="stream-label">STEP ' + data.step + '</span> ' : '';
+    appendEntry('thinking', stepLabel + escapeHtml(text));
+  }
+
+  function makeCopyBtn(text) {
+    const escaped = JSON.stringify(text);
+    return '<button class="copy-btn" onclick="(function(btn){navigator.clipboard.writeText(' + escaped + ').then(function(){btn.textContent=\'✓ Copied\';setTimeout(function(){btn.textContent=\'Copy\'},1500)});})(this)">Copy</button>';
+  }
+
+  function handleToolCall(data) {
+    markRunActivity();
+    let inner = '<span class="stream-label">🔧 ' + escapeHtml(data.tool) + '</span>';
+    let copyText = '';
+    if (data.command) {
+      copyText = data.command;
+      inner += makeCopyBtn(copyText) + ' <span class="stream-cmd">$ ' + escapeHtml(data.command) + '</span>';
+    } else if (data.path && data.tool === 'write_file') {
+      copyText = data.preview || data.path;
+      inner += makeCopyBtn(copyText) + ' <span class="stream-cmd">→ ' + escapeHtml(data.path) + '</span>';
+      if (data.preview) inner += '<div class="stream-output">' + escapeHtml(data.preview) + (data.preview.length >= 200 ? '…' : '') + '</div>';
+    } else if (data.path) {
+      inner += ' <span class="stream-cmd">' + escapeHtml(data.path) + '</span>';
+    } else if (data.package) {
+      inner += ' <span class="stream-cmd">' + escapeHtml(data.package) + ' (' + escapeHtml(data.manager || 'pip') + ')</span>';
+    }
+    appendEntry('tool_call', inner);
+  }
+
+  function makeObsHtml(result) {
+    const COLLAPSE_THRESHOLD = 8;
+    const lines = result.split('\n');
+    if (lines.length <= COLLAPSE_THRESHOLD) {
+      return '<div class="stream-output">' + escapeHtml(result) + '</div>';
+    }
+    const id = 'obs-' + Date.now() + '-' + Math.random().toString(36).slice(2,6);
+    const preview = escapeHtml(lines.slice(0, 3).join('\n'));
+    const full = escapeHtml(result);
+    return '<div class="obs-preview stream-output">' + preview +
+      '\n<em style="color:var(--muted)">[' + lines.length + ' lines total]</em></div>' +
+      '<div class="obs-full" id="' + id + '" style="display:none">' + full + '</div>' +
+      '<button class="obs-toggle" onclick="window._toggleObs(\'' + id + '\',this)">▶ Expand (' + lines.length + ' lines)</button>';
+  }
+
+  function handleObservation(data) {
+    markRunActivity();
+    const failed = data.exit_code !== undefined && data.exit_code !== 0;
+    const result = (data.result || '').trim();
+    let inner = '<span class="stream-label">' + (failed ? '❌ RESULT' : '✅ RESULT') + '</span>';
+    if (data.exit_code !== undefined) inner += ' <span style="font-size:0.75rem;opacity:0.7">exit ' + data.exit_code + '</span>';
+    if (data.timed_out) inner += ' <span style="color:var(--warn)"> [killed: timeout — expected for web servers]</span>';
+    if (result) inner += makeObsHtml(result);
+    appendEntry('observation', inner, failed ? 'fail' : '');
+  }
+
+  function handleFileUpdate(data) {
+    markRunActivity();
+    appendEntry('file_update',
+      '<span class="stream-label">📁 File</span> ' + escapeHtml(data.path) +
+      ' <span style="opacity:0.6">(' + escapeHtml(data.action || 'updated') + ')</span>');
+    refreshFiles();
+  }
+
+  function handleStepDone(data) {
+    currentStep = data.step;
+    maxSteps = data.max_steps || 15;
+    stepCounter.style.display = '';
+    stepCounter.textContent = 'Step ' + currentStep + '/' + maxSteps;
+    stepCounter.className = 'step-counter running';
+  }
+
+  function handleSession(data) {
+    currentSessId = data.session_id || '';
+    if (data.is_followup) {
+      appendEntry('step_info', '<span class="stream-label">🔗 Session</span> Resuming session ' + escapeHtml(currentSessId));
+    }
+    renderTaskContext();
+    if (!_taskFeedbackConnected && currentSessId) {
+      _taskFeedbackConnected = true;
+      postTaskFeedback('waiting-feedback', 'Agent session connected and is still running.', 'Session ' + currentSessId + ' connected.', { session_id: currentSessId, connected: true });
+    }
+    reportRecovery('running', { connected: true, session_id: currentSessId || '' });
+    loadRecoveryContext();
+  }
+
+  function handleWebServer(data) {
+    markRunActivity();
+    const port = data.port;
+    appendEntry('step_info',
+      '<span class="stream-label">🌐 Web Server</span> Detected on port ' + port +
+      ' — <a href="#" onclick="showWebPreview(' + port + ');return false;">Open Preview ↗</a>');
+    showWebPreview(port);
+  }
+
+  function handleFinal(data) {
+    markRunActivity();
+    const summary = data.summary || 'Task complete.';
+    const steps = data.steps_taken || currentStep;
+    const files = data.files_created || [];
+    const elapsedStr = _taskStartTime ? fmtElapsed(Date.now() - _taskStartTime) : '—';
+    let inner = '<span style="font-size:1rem;">✅ Task Complete</span><br>' +
+      escapeHtml(summary) +
+      '<div style="font-size:0.78rem;color:var(--muted);margin-top:0.4rem;">' +
+      steps + ' steps · ' + files.length + ' file(s) · ⏱ ' + elapsedStr +
+      (data.max_steps_reached ? ' · ⚠ max steps reached' : '') +
+      (data.session_id ? ' · <span style="opacity:0.6">sess ' + escapeHtml(data.session_id) + '</span>' : '') +
+      '</div>';
+    if (data.web_port) {
+      inner += '<div style="margin-top:0.4rem;font-size:0.8rem;">🌐 Web app on port ' + data.web_port +
+        ' — <a href="#" onclick="showWebPreview(' + data.web_port + ');return false;" style="color:var(--accent)">Open Preview</a></div>';
+    }
+    appendEntry('final', inner);
+    if (data.session_id) currentSessId = data.session_id;
+    // Record final token usage to global DB
+    const _agId = (document.getElementById('agent-select') || {}).value || 'c9-jokes';
+    const _badge = document.getElementById('agent-token-badge');
+    const _tokTxt = _badge ? _badge.textContent : '0';
+    const _tokNum = parseFloat(_tokTxt) * (_tokTxt.includes('k') ? 1000 : 1) || 0;
+    if (_tokNum > 0) {
+      fetch('/api/token-usage/record', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({
+          agent_id: _agId, page: 'agent', tokens: Math.round(_tokNum),
+          session_id: currentSessId || '', status: 'ok'
+        })
+      }).catch(function(){});
+    }
+    setIdle(true);
+    refreshFiles();
+    refreshHistory();
+    renderTaskContext();
+    if (!_taskFeedbackFinalSent) {
+      _taskFeedbackFinalSent = true;
+      postTaskFeedback('completed', summary, summary, {
+        session_id: currentSessId || data.session_id || '',
+        files_created: files,
+        steps_taken: steps,
+        summary: summary,
+      });
+    }
+    reportRecovery('completed', { session_id: currentSessId || data.session_id || '', summary: summary, steps_taken: steps });
+    loadRecoveryContext();
+  }
+
+  function handleError(data) {
+    markRunActivity();
+    appendEntry('error', '<span class="stream-label">❌ Error</span> ' + escapeHtml(data.message || 'Unknown error'));
+    setIdle(false);
+    if (!_taskFeedbackFinalSent) {
+      _taskFeedbackFinalSent = true;
+      postTaskFeedback('failed', data.message || 'Agent task failed.', data.message || 'Unknown error', {
+        session_id: currentSessId || '',
+        failed: true,
+      });
+    }
+    reportRecovery(isTransientError(data.message || '') ? 'waiting-retry' : 'failed', { error: data.message || 'Unknown error', session_id: currentSessId || '' });
+    loadRecoveryContext();
+  }
+
+  function handleTokenEstimate(data) {
+    const tokens = data.tokens || 0;
+    const badge  = document.getElementById('agent-token-badge');
+    if (!badge) return;
+    const k = Math.round(tokens / 100) / 10;
+    badge.textContent = k + 'k tokens';
+    badge.className = 'token-badge-agent';
+    if (tokens >= 38000)      badge.className = 'token-badge-agent danger';
+    else if (tokens >= 20000) badge.className = 'token-badge-agent warn';
+    // Update global badge in header
+    if (window.updateGlobalTokens) window.updateGlobalTokens(tokens);
+  }
+
+  function handleTokenWarning(data) {
+    const msg = data.message || ('Context at ' + (data.tokens || '?') + ' tokens — nearing limit.');
+    appendEntry('token_warning', '<span class="stream-label">⚠️ Token</span> ' + escapeHtml(msg));
+    // Also update the badge
+    if (data.tokens) handleTokenEstimate(data);
+  }
+
+  function handleCtxCompressed(data) {
+    const msg = data.summary ? 'History compressed — ' + data.summary : 'History auto-compressed to save context.';
+    appendEntry('ctx_compressed',
+      '<span class="stream-label">♻️ Context</span> ' + escapeHtml(msg));
+    if (data.tokens_after) handleTokenEstimate({ tokens: data.tokens_after });
+  }
+
+  function handleNotesUpdated(data) {
+    const action  = data.action  || 'updated';
+    const preview = data.preview || '';
+    let label = '📝 NOTES.md';
+    if (action === 'created')  label = '📝 NOTES created';
+    if (action === 'appended') label = '📝 NOTES appended';
+    if (action === 'loaded')   label = '📝 NOTES loaded';
+    let html = '<span class="stream-label">' + label + '</span>';
+    if (preview) html += ' <span style="opacity:0.75">' + escapeHtml(preview.slice(0, 100)) + (preview.length > 100 ? '…' : '') + '</span>';
+    appendEntry('notes_updated', html);
+    // Refresh the notes panel
+    refreshNotesPanel();
+  }
+
+  function handleAuthRequired(data) {
+    markRunActivity();
+    // M365 Copilot is not authenticated — show a prominent banner with sign-in link
+    const authUrl = data.auth_url || 'http://localhost:6080/?resize=scale&autoconnect=true';
+    const status  = data.session_status || 'unknown';
+    const reason  = data.reason ? ' (' + escapeHtml(data.reason) + ')' : '';
+    const html = [
+      '<div style="background:var(--fg)3cd;border:2px solid var(--accent);border-radius:8px;padding:14px 18px;margin:6px 0;">',
+      '  <div style="font-size:1.05em;font-weight:700;color:var(--accent);margin-bottom:6px;">',
+      '    🔐 M365 Copilot authentication required',
+      '  </div>',
+      '  <div style="color:var(--accent);font-size:.92em;margin-bottom:10px;">',
+      '    Session status: <strong>' + escapeHtml(status) + '</strong>' + reason + '<br>',
+      '    Sign in to Microsoft 365 in the browser, then come back and run the task.',
+      '  </div>',
+      '  <a href="' + escapeHtml(authUrl) + '" target="_blank" ',
+      '     style="display:inline-block;background:var(--accent);color:var(--fg);padding:7px 16px;',
+      '            border-radius:6px;text-decoration:none;font-weight:600;font-size:.9em;">',
+      '    🌐 Open noVNC browser to sign in',
+      '  </a>',
+      '  <span style="color:var(--border);font-size:.82em;margin-left:12px;">',
+      '    After signing in, click Post /extract on the setup page or just run the task again.',
+      '  </span>',
+      '</div>',
+    ].join('');
+    appendEntry('auth', html);
+    setIdle(false);
+  }
+
+  // ── Run / stop state ───────────────────────────────────────────────────────
+  function setRunning() {
+    running = true;
+    _lastPromptAt = Date.now();
+    markRunActivity();
+    btnRun.style.display = 'none';
+    btnStop.style.display = '';
+    btnResetWs.disabled = true;
+    taskInput.disabled = true;
+    agentSelect.disabled = true;
+    followupBanner.classList.remove('show');
+    stepCounter.style.display = '';
+    stepCounter.textContent = 'Starting…';
+    stepCounter.className = 'step-counter running';
+    startElapsed();
+    // Live file tree polling during run
+    if (_fileRefreshInterval) clearInterval(_fileRefreshInterval);
+    _fileRefreshInterval = setInterval(refreshFiles, 5000);
+  }
+
+  function setIdle(showFollowup) {
+    running = false;
+    _cooldownUntil = Math.max(_lastPromptAt + PROMPT_GAP_MS, _lastActivityAt + STREAM_SETTLE_MS);
+    btnRun.style.display = '';
+    btnStop.style.display = 'none';
+    btnResetWs.disabled = false;
+    taskInput.disabled = false;
+    agentSelect.disabled = false;
+    stepCounter.className = 'step-counter';
+    stopElapsed();
+    if (activeSource) { activeSource.close(); activeSource = null; }
+    // Stop live file polling
+    if (_fileRefreshInterval) { clearInterval(_fileRefreshInterval); _fileRefreshInterval = null; }
+    refreshFiles(); // final refresh
+    if (showFollowup && currentSessId) {
+      followupBanner.textContent = '✅ Task complete — type a follow-up below to improve or extend it (same session)';
+      followupBanner.classList.add('show');
+      taskInput.value = '';
+      taskInput.placeholder = 'Follow-up task… (Ctrl+Enter to run)';
+    }
+    renderTaskContext();
+    applyRunAvailability();
+  }
+
+  function renderTaskContext() {
+    if (!taskContextEl) return;
+    const taskId = taskLaunch.task_id || '';
+    const runId = taskLaunch.task_run_id || '';
+    const stepId = taskLaunch.step_id || '';
+    const source = taskLaunch.source || '';
+    const hasContext = !!(taskId || runId || source || currentSessId);
+    if (!hasContext) {
+      taskContextEl.style.display = 'none';
+      taskContextEl.innerHTML = '';
+      return;
+    }
+    const links = [];
+    if (taskId) {
+      links.push('<a href="/tasked?task_id=' + encodeURIComponent(taskId) + '">Open Tasked</a>');
+      links.push('<a href="/piplinetask?task_id=' + encodeURIComponent(taskId) + '">Open Pipeline</a>');
+    }
+    if (source === 'tasked') {
+      links.push('<a href="/alerts">Open Alerts</a>');
+    }
+    taskContextEl.style.display = 'grid';
+    taskContextEl.innerHTML =
+      '<strong>Tasked launch context</strong>' +
+      '<div class="launch-context-meta">Task ID: ' + escapeHtml(taskId || '—') +
+      ' · Run ID: ' + escapeHtml(runId || '—') +
+      ' · Step ID: ' + escapeHtml(stepId || '—') +
+      ' · Source: ' + escapeHtml(source || 'manual') +
+      ' · Session: ' + escapeHtml(currentSessId || 'pending') + '</div>' +
+      (links.length ? '<div class="launch-context-links">' + links.join('') + '</div>' : '');
+  }
+
+  function isTransientError(text) {
+    var v = String(text || '').toLowerCase();
+    return ['timeout','timed out','readtimeout','connecttimeout','connection','network','disconnected','server disconnected','broken pipe'].some(function(token){ return v.indexOf(token) >= 0; });
+  }
+
+  function recoveryOwnerId() {
+    return currentSessId || taskLaunch.task_run_id || taskLaunch.task_id || 'agent-page';
+  }
+
+  async function reportRecovery(status, extra) {
+    try {
+      await fetch('/api/session-manager/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          scope: 'page',
+          page: 'agent',
+          owner_id: recoveryOwnerId(),
+          external_session_id: currentSessId || '',
+          task_id: taskLaunch.task_id || '',
+          run_id: taskLaunch.task_run_id || '',
+          upstream: 'c1',
+          operation: 'agent-stream',
+          status: status,
+          last_error: (extra && extra.error) || '',
+          state: extra || {},
+        }),
+      });
+    } catch (_) {}
+  }
+
+  async function loadRecoveryContext() {
+    if (!recoveryContextEl) return;
+    var ownerId = recoveryOwnerId();
+    if (!ownerId) {
+      recoveryContextEl.style.display = 'none';
+      recoveryContextEl.innerHTML = '';
+      return;
+    }
+    try {
+      var res = await fetch('/api/session-manager?page=agent&owner_id=' + encodeURIComponent(ownerId) + '&limit=1', { cache: 'no-store' });
+      var data = await res.json();
+      var session = (data.items || [])[0];
+      if (!session) {
+        recoveryContextEl.style.display = 'none';
+        recoveryContextEl.innerHTML = '';
+        return;
+      }
+      recoveryContextEl.style.display = 'grid';
+      recoveryContextEl.innerHTML =
+        '<strong>Session manager</strong>' +
+        '<div class="launch-context-meta">Status: ' + escapeHtml(session.status || 'steady') +
+        ' · Upstream: ' + escapeHtml(session.upstream || '—') +
+        ' · Operation: ' + escapeHtml(session.operation || '—') +
+        ' · Retries: ' + escapeHtml(String(session.retry_count || 0)) +
+        ' · Next retry: ' + escapeHtml(session.next_retry_at || '—') + '</div>' +
+        '<div class="launch-context-meta">' + escapeHtml(session.last_error || 'No recovery error recorded.') + '</div>' +
+        ((session.status || '') === 'waiting-retry'
+          ? '<div><button type="button" class="btn-sm" id="agent-recovery-resume-btn">Resume recovery</button></div>'
+          : '');
+      var resumeBtn = document.getElementById('agent-recovery-resume-btn');
+      if (resumeBtn) {
+        resumeBtn.addEventListener('click', async function() {
+          try {
+            resumeBtn.disabled = true;
+            resumeBtn.textContent = 'Resuming…';
+            await fetch('/api/session-manager/' + encodeURIComponent(session.id) + '/resume', { method: 'POST' });
+            await loadRecoveryContext();
+            if (!running && taskInput.value.trim()) runTask();
+          } catch (_) {
+            resumeBtn.disabled = false;
+            resumeBtn.textContent = 'Resume recovery';
+          }
+        });
+      }
+    } catch (_) {}
+  }
+
+  function canPostTaskFeedback() {
+    return !!(taskLaunch.task_id && taskLaunch.task_run_id && taskLaunch.step_id);
+  }
+
+  async function postTaskFeedback(status, summary, rawExcerpt, signals) {
+    if (!canPostTaskFeedback()) return;
+    try {
+      await fetch('/api/task-feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          task_id: taskLaunch.task_id || '',
+          run_id: taskLaunch.task_run_id || '',
+          step_id: taskLaunch.step_id || '',
+          agent_id: (agentSelect && agentSelect.value) || taskLaunch.agent_id || 'c6-kilocode',
+          status: status,
+          summary: summary || '',
+          raw_excerpt: rawExcerpt || '',
+          signals: signals || {},
+        }),
+      });
+    } catch (_) {}
+  }
+
+  // ── Compare mode ───────────────────────────────────────────────────────────
+  function enterCompareMode() {
+    _compareMode = true;
+    compareContainer.classList.add('active');
+    compareControls.style.display = 'flex';
+    outputTabs.style.display = 'none';
+    panelTerminal.classList.remove('active');
+    panelPreview.classList.remove('active');
+    btnCompare.classList.add('active');
+    btnCompare.textContent = '⚡ Compare ✓';
+  }
+
+  function exitCompareMode() {
+    _compareMode = false;
+    // Close any open SSE streams
+    Object.values(_comparePanes).forEach(function(p) {
+      if (p.src) { p.src.close(); p.src = null; }
+      if (p.timer) { clearInterval(p.timer); p.timer = null; }
+    });
+    _comparePanes = {};
+    compareGrid.innerHTML = '';
+    compareContainer.classList.remove('active');
+    compareControls.style.display = 'none';
+    outputTabs.style.display = '';
+    panelTerminal.classList.add('active');
+    btnCompare.classList.remove('active');
+    btnCompare.textContent = '⚡ Compare';
+    compareSummary.textContent = '';
+  }
+
+  function createComparePane(agentId, agentLabel, count) {
+    compareGrid.style.gridTemplateColumns = 'repeat(' + count + ', 1fr)';
+
+    const pane = document.createElement('div');
+    pane.className = 'compare-pane';
+    pane.id = 'cpane-' + agentId;
+
+    const header = document.createElement('div');
+    header.className = 'compare-pane-header';
+    header.innerHTML =
+      '<span class="compare-pane-label">🤖 ' + escapeHtml(agentLabel) + '</span>' +
+      '<span class="compare-pane-elapsed" id="celapsed-' + agentId + '">0s</span>' +
+      '<span class="compare-pane-status" id="cstatus-' + agentId + '">Starting…</span>';
+
+    const progress = document.createElement('div');
+    progress.className = 'compare-progress';
+    const bar = document.createElement('div');
+    bar.className = 'compare-progress-bar';
+    bar.id = 'cbar-' + agentId;
+    progress.appendChild(bar);
+
+    const body = document.createElement('div');
+    body.className = 'compare-pane-body';
+    body.id = 'cbody-' + agentId;
+
+    pane.appendChild(header);
+    pane.appendChild(progress);
+    pane.appendChild(body);
+    compareGrid.appendChild(pane);
+
+    return { el: pane, bodyEl: body, progressBar: bar,
+             statusEl: document.getElementById('cstatus-' + agentId),
+             elapsedEl: document.getElementById('celapsed-' + agentId),
+             src: null, timer: null, steps: 0, startTime: Date.now() };
+  }
+
+  function cAppendEntry(bodyEl, type, html) {
+    const div = document.createElement('div');
+    div.className = 'compare-entry ' + type;
+    div.innerHTML = html;
+    bodyEl.appendChild(div);
+    bodyEl.scrollTop = bodyEl.scrollHeight;
+  }
+
+  function launchCompare() {
+    const task = taskInput.value.trim();
+    if (!task) { taskInput.focus(); return; }
+    if (running) return;
+
+    const count = parseInt(compareCount.value, 10) || 2;
+    const selectedAgents = agents.slice(0, count);
+    if (!selectedAgents.length) return;
+
+    enterCompareMode();
+    compareGrid.innerHTML = '';
+    _comparePanes = {};
+    _compareDone = 0;
+    _compareTotal = selectedAgents.length;
+    compareSummary.textContent = '0/' + _compareTotal + ' done · running…';
+
+    // Start live file polling during compare run
+    if (_fileRefreshInterval) clearInterval(_fileRefreshInterval);
+    _fileRefreshInterval = setInterval(refreshFiles, 5000);
+
+    selectedAgents.forEach(function(agent) {
+      const pane = createComparePane(agent.id, agent.label, count);
+      _comparePanes[agent.id] = pane;
+
+      const startTs = Date.now();
+      pane.startTime = startTs;
+      pane.timer = setInterval(function() {
+        const secs = Math.floor((Date.now() - startTs) / 1000);
+        pane.elapsedEl.textContent = secs + 's';
+      }, 1000);
+
+      const params = new URLSearchParams({
+        task: task, agent_id: agent.id,
+        chat_mode: thinkingMode, work_mode: activeWorkMode, max_steps: '15',
+      });
+      const src = new EventSource('/api/agent/run?' + params.toString());
+      pane.src = src;
+
+      function cHandle(type, data) {
+        switch(type) {
+          case 'thinking':
+            if ((data.text||'').trim())
+              cAppendEntry(pane.bodyEl, 'thinking',
+                (data.step > 0 ? '<span class="stream-label">STEP '+data.step+'</span> ' : '') +
+                escapeHtml(data.text));
+            break;
+          case 'tool_call': {
+            let inner = '<span class="stream-label">🔧 ' + escapeHtml(data.tool) + '</span>';
+            if (data.command) inner += ' <span>$ ' + escapeHtml(data.command) + '</span>';
+            else if (data.path && data.tool === 'write_file') inner += ' <span>→ ' + escapeHtml(data.path) + '</span>';
+            else if (data.path) inner += ' <span>' + escapeHtml(data.path) + '</span>';
+            else if (data.package) inner += ' <span>' + escapeHtml(data.package) + '</span>';
+            cAppendEntry(pane.bodyEl, 'tool_call', inner);
+            break;
+          }
+          case 'observation': {
+            const failed = data.exit_code !== undefined && data.exit_code !== 0;
+            const result = (data.result || '').trim();
+            let inner = '<span class="stream-label">' + (failed ? '❌' : '✅') + ' RESULT</span>';
+            if (data.exit_code !== undefined) inner += ' <span style="font-size:0.72rem;opacity:0.7">exit ' + data.exit_code + '</span>';
+            if (result) inner += makeObsHtml(result);
+            cAppendEntry(pane.bodyEl, 'observation' + (failed ? ' fail' : ''), inner);
+            break;
+          }
+          case 'file_update':
+            cAppendEntry(pane.bodyEl, 'file_update',
+              '<span class="stream-label">📁</span> ' + escapeHtml(data.path));
+            break;
+          case 'step_done':
+            pane.steps = data.step;
+            pane.statusEl.textContent = 'Step ' + data.step + '/' + (data.max_steps||15);
+            var pct = Math.min(95, Math.round((data.step / (data.max_steps||15)) * 100));
+            pane.progressBar.style.width = pct + '%';
+            break;
+          case 'final': {
+            if (pane.timer) { clearInterval(pane.timer); pane.timer = null; }
+            pane.progressBar.classList.add('done');
+            pane.statusEl.textContent = '✅ Done';
+            pane.statusEl.className = 'compare-pane-status done';
+            const steps = data.steps_taken || pane.steps;
+            const files = (data.files_created || []).length;
+            cAppendEntry(pane.bodyEl, 'final',
+              '✅ ' + escapeHtml(data.summary || 'Complete') +
+              '<div style="font-size:0.72rem;color:var(--muted);margin-top:2px;">' + steps + ' steps · ' + files + ' file(s)</div>');
+            _compareDone++;
+            compareSummary.textContent = _compareDone + '/' + _compareTotal + ' done';
+            if (_compareDone >= _compareTotal) {
+              compareSummary.textContent = '✅ All ' + _compareTotal + ' agents done';
+              if (_fileRefreshInterval) { clearInterval(_fileRefreshInterval); _fileRefreshInterval = null; }
+              refreshFiles();
+            }
+            break;
+          }
+          case 'error':
+            if (pane.timer) { clearInterval(pane.timer); pane.timer = null; }
+            pane.progressBar.classList.add('error');
+            pane.statusEl.textContent = '❌ Error';
+            pane.statusEl.className = 'compare-pane-status error';
+            cAppendEntry(pane.bodyEl, 'error',
+              '<span class="stream-label">❌</span> ' + escapeHtml(data.message || 'Error'));
+            _compareDone++;
+            if (_compareDone >= _compareTotal) {
+              if (_fileRefreshInterval) { clearInterval(_fileRefreshInterval); _fileRefreshInterval = null; }
+            }
+            break;
+        }
+      }
+
+      ['thinking','tool_call','observation','file_update','step_done','web_server','final'].forEach(function(ev) {
+        src.addEventListener(ev, function(e) {
+          try { cHandle(ev, JSON.parse(e.data)); } catch(_) {}
+        });
+      });
+      src.addEventListener('error', function(e) {
+        if (e.data) { try { cHandle('error', JSON.parse(e.data)); } catch(_) {} }
+        else { cHandle('error', {message: 'Connection lost'}); }
+      });
+    });
+  }
+
+  // ── Run task ───────────────────────────────────────────────────────────────
+  function runTask() {
+    const task = taskInput.value.trim();
+    if (!task || !canStartRun()) return;
+
+    // Only clear stream + reset preview for new sessions (not follow-ups)
+    if (!currentSessId) {
+      streamEl.innerHTML = '';
+      currentWebPort = null;
+      // Reset preview panel back to placeholder
+      const placeholder = document.getElementById('preview-placeholder');
+      if (placeholder) placeholder.style.display = '';
+      previewIframe.style.display = 'none';
+      previewIframe.src = 'about:blank';
+      previewUrlBar.textContent = '—';
+      tabPreview.textContent = '🌐 Preview';
+      btnPreviewOpen.style.display = 'none';
+      switchTab('terminal');
+    }
+    hideEmpty();
+    currentStep = 0;
+    _taskFeedbackConnected = false;
+    _taskFeedbackFinalSent = false;
+    setRunning();
+
+    const agentId = agentSelect.value || 'c9-jokes';
+    const params = new URLSearchParams({
+      task:       task,
+      agent_id:   agentId,
+      chat_mode:  thinkingMode,
+      work_mode:  activeWorkMode,
+      max_steps:  '15',
+    });
+    if (currentSessId) params.set('session_id', currentSessId);
+
+    appendEntry('step_info', '<span class="stream-label">🚀 Task</span> ' + escapeHtml(task));
+
+    const src = new EventSource('/api/agent/run?' + params.toString());
+    activeSource = src;
+
+    src.addEventListener('session',     function(e) { handleSession(JSON.parse(e.data)); });
+    src.addEventListener('thinking',    function(e) { handleThinking(JSON.parse(e.data)); });
+    src.addEventListener('tool_call',   function(e) { handleToolCall(JSON.parse(e.data)); });
+    src.addEventListener('observation', function(e) { handleObservation(JSON.parse(e.data)); });
+    src.addEventListener('file_update', function(e) { handleFileUpdate(JSON.parse(e.data)); });
+    src.addEventListener('step_done',   function(e) { handleStepDone(JSON.parse(e.data)); });
+    src.addEventListener('web_server',  function(e) { handleWebServer(JSON.parse(e.data)); });
+    src.addEventListener('final',           function(e) { handleFinal(JSON.parse(e.data)); });
+    src.addEventListener('token_estimate',  function(e) { try { handleTokenEstimate(JSON.parse(e.data)); } catch(_) {} });
+    src.addEventListener('token_warning',   function(e) { try { handleTokenWarning(JSON.parse(e.data)); } catch(_) {} });
+    src.addEventListener('context_compressed', function(e) { try { handleCtxCompressed(JSON.parse(e.data)); } catch(_) {} });
+    src.addEventListener('notes_updated',   function(e) { try { handleNotesUpdated(JSON.parse(e.data)); } catch(_) {} });
+    src.addEventListener('auth_required', function(e) {
+      try { handleAuthRequired(JSON.parse(e.data)); } catch(_) { handleAuthRequired({}); }
+    });
+    src.addEventListener('error',       function(e) {
+      if (e.data) {
+        try { handleError(JSON.parse(e.data)); } catch(_) { handleError({message: e.data}); }
+      } else if (running) {
+        var now = Date.now();
+        var graceUntil = Math.min(_lastPromptAt + LONG_STREAM_GRACE_MS, _lastActivityAt + STREAM_SETTLE_MS);
+        if (now < graceUntil) {
+          appendEntry('thinking', '<span class="stream-label">⏳ Hold</span> Working on the response... Please wait. Stream reconnect grace is still active.');
+          return;
+        }
+        appendEntry('error', '<span class="stream-label">❌ Error</span> Stream disconnected. Session is kept; resume it from History if C1/C3 recovers.');
+        reportRecovery('waiting-retry', { error: 'EventSource disconnected while the agent session remained active.', session_id: currentSessId || '' });
+        loadRecoveryContext();
+        setIdle(false);
+      }
+    });
+  }
+
+  // ── New Task button ─────────────────────────────────────────────────────
+  document.getElementById('btn-new-task').addEventListener('click', function() {
+    if (running) return;
+    if (!confirm('Start a new task? This will clear the current stream and reset the session.')) return;
+    currentSessId = '';
+    currentStep   = 0;
+    streamEl.innerHTML = '';
+    hideEmpty();
+    currentWebPort = null;
+    const placeholder = document.getElementById('preview-placeholder');
+    if (placeholder) placeholder.style.display = '';
+    previewIframe.style.display = 'none';
+    previewIframe.src = 'about:blank';
+    previewUrlBar.textContent = '—';
+    tabPreview.textContent = '🌐 Preview';
+    btnPreviewOpen.style.display = 'none';
+    switchTab('terminal');
+    followupBanner.classList.remove('show');
+    taskInput.placeholder = 'Describe what you want to build… (Ctrl+Enter to run)';
+    taskInput.value = '';
+    const badge = document.getElementById('agent-token-badge');
+    if (badge) { badge.textContent = '0 tokens'; badge.className = 'token-badge-agent'; }
+    appendEntry('step_info', '<span class="stream-label">✨ New Task</span> Session cleared — ready for a new task.');
+    renderTaskContext();
+    taskInput.focus();
+  });
+
+  // ── Notes panel ──────────────────────────────────────────────────────────
+  async function refreshNotesPanel() {
+    try {
+      const r = await fetch('/api/agent/file?path=NOTES.md');
+      const d = await r.json();
+      const panel = document.getElementById('notes-panel');
+      const body  = document.getElementById('notes-panel-body');
+      if (d.content) {
+        if (panel) panel.style.display = '';
+        if (body)  body.textContent = d.content;
+      }
+    } catch(_) { /* non-fatal */ }
+  }
+  document.getElementById('btn-notes-refresh').addEventListener('click', refreshNotesPanel);
+
+  btnRun.addEventListener('click', runTask);
+  btnCompare.addEventListener('click', function() {
+    if (_compareMode) { exitCompareMode(); return; }
+    launchCompare();
+  });
+  btnExitCompare.addEventListener('click', exitCompareMode);
+  btnRunMa.addEventListener('click', function() {
+    var task = taskInput.value.trim();
+    if (!task) { taskInput.focus(); return; }
+    window.location.href = '/multi-agent?task=' + encodeURIComponent(task);
+  });
+  taskInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); runTask(); }
+  });
+
+  // ── Stop ───────────────────────────────────────────────────────────────────
+  btnStop.addEventListener('click', function() {
+    if (activeSource) { activeSource.close(); activeSource = null; }
+    appendEntry('step_info', '<span class="stream-label">⏹ Stopped</span> Task execution cancelled by user.');
+    setIdle(false);
+  });
+
+  // ── Reset workspace ────────────────────────────────────────────────────────
+  btnResetWs.addEventListener('click', async function() {
+    if (running) return;
+    if (!confirm('Reset C10 workspace? This will delete all files in /workspace.')) return;
+    btnResetWs.textContent = 'Resetting…';
+    btnResetWs.disabled = true;
+    currentSessId = '';
+    followupBanner.classList.remove('show');
+    taskInput.placeholder = 'Describe what you want to build… (Ctrl+Enter to run)';
+    try {
+      const r = await fetch('/api/agent/reset', { method: 'POST' });
+      const d = await r.json();
+      appendEntry('step_info', '<span class="stream-label">🗑 Workspace Reset</span> Deleted ' + (d.deleted_count||0) + ' item(s).');
+      await refreshFiles();
+    } catch(e) {
+      appendEntry('error', '<span class="stream-label">❌</span> Reset failed: ' + escapeHtml(e.message));
+    }
+    btnResetWs.textContent = '🗑 Reset Workspace';
+    btnResetWs.disabled = false;
+  });
+
+  // ── Close dropdowns on outside click ──────────────────────────────────────
+  document.addEventListener('click', function() {
+    if (!thinkingMenu.hidden) {
+      thinkingMenu.hidden = true;
+      thinkingPill.setAttribute('aria-expanded', 'false');
+    }
+  });
+
+  // expose globals for inline onclick handlers
+  window.showWebPreview = showWebPreview;
+  window._toggleObs = function(id, btn) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    var hidden = el.style.display === 'none';
+    el.style.display = hidden ? '' : 'none';
+    var prev = el.previousElementSibling;
+    if (prev) prev.style.display = hidden ? 'none' : '';
+    btn.textContent = hidden ? '▼ Collapse' : '▶ Expand (' + (el.textContent.split('\n').length) + ' lines)';
+  };
+
+  // ── Interactive Linux Shell (C10 sandbox) ─────────────────────────────────
+  (function initShell() {
+    var shellOutput = document.getElementById('shell-output');
+    var shellInput  = document.getElementById('shell-input');
+    var shellCwd    = document.getElementById('shell-cwd');
+    var shellClear  = document.getElementById('shell-clear');
+    var shellLs     = document.getElementById('shell-ls');
+    var shellPwd    = document.getElementById('shell-pwd');
+    var _cmdHistory = [];
+    var _histIdx    = -1;
+    var _shellBusy  = false;
+
+    function shellEsc(s) {
+      return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function shellAppend(cls, text) {
+      var span = document.createElement('div');
+      span.className = cls;
+      span.textContent = text;
+      shellOutput.appendChild(span);
+      shellOutput.scrollTop = shellOutput.scrollHeight;
+    }
+
+    async function shellExec(cmd) {
+      if (_shellBusy) return;
+      cmd = cmd.trim();
+      if (!cmd) return;
+      _cmdHistory.push(cmd);
+      _histIdx = _cmdHistory.length;
+      shellAppend('term-cmd', '$ ' + cmd);
+      _shellBusy = true;
+      shellInput.disabled = true;
+      shellInput.placeholder = 'Running…';
+      try {
+        var r = await fetch('/api/sandbox/exec', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command: cmd, sandbox: 'c10', timeout: 60 }),
+        });
+        var d = await r.json();
+        var stdout = (d.stdout || '').replace(/\n$/, '');
+        var stderr = (d.stderr || '').replace(/\n$/, '');
+        if (stdout) shellAppend('term-stdout', stdout);
+        if (stderr) shellAppend('term-stderr', stderr);
+        var exitCode = d.exit_code != null ? d.exit_code : -1;
+        if (d.timed_out) shellAppend('term-exit', '[timed out] exit ' + exitCode);
+        else if (exitCode !== 0) shellAppend('term-exit', 'exit ' + exitCode);
+        // Update cwd display after cd commands
+        if (cmd.match(/^\s*cd\s/)) {
+          var pwdR = await fetch('/api/sandbox/exec', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command: 'pwd', sandbox: 'c10', timeout: 5 }),
+          });
+          var pwdD = await pwdR.json();
+          var cwd = (pwdD.stdout || '').trim();
+          if (cwd) shellCwd.textContent = cwd;
+        }
+        // Auto-refresh file tree after write/install/move/delete commands
+        if (cmd.match(/^(pip|npm|python|cp|mv|rm|mkdir|touch|git|wget|curl|write|cat\s*>)/i)) {
+          refreshFiles();
+        }
+      } catch(e) {
+        shellAppend('term-stderr', 'Error: ' + e.message);
+      }
+      _shellBusy = false;
+      shellInput.disabled = false;
+      shellInput.placeholder = 'Type a command… (Enter to run)';
+      shellInput.focus();
+    }
+
+    shellInput.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        shellExec(shellInput.value);
+        shellInput.value = '';
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (_cmdHistory.length && _histIdx > 0) {
+          _histIdx--;
+          shellInput.value = _cmdHistory[_histIdx];
+        }
+      } else if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (_histIdx < _cmdHistory.length - 1) {
+          _histIdx++;
+          shellInput.value = _cmdHistory[_histIdx];
+        } else {
+          _histIdx = _cmdHistory.length;
+          shellInput.value = '';
+        }
+      } else if (e.key === 'l' && e.ctrlKey) {
+        e.preventDefault();
+        shellOutput.innerHTML = '';
+      }
+    });
+
+    shellClear.addEventListener('click', function() {
+      shellOutput.innerHTML = '';
+      shellAppend('term-info', 'Terminal cleared.');
+    });
+    shellLs.addEventListener('click', function() { shellExec('ls -la'); });
+    shellPwd.addEventListener('click', function() { shellExec('pwd'); });
+  })();
+
+  // ── Init ───────────────────────────────────────────────────────────────────
+  refreshFiles();
+  refreshHistory();
+  (function applyUrlTaskPrefill() {
+    var urlTask = taskLaunch.task || new URLSearchParams(window.location.search).get('task');
+    if (urlTask && !taskInput.value.trim()) taskInput.value = urlTask;
+  })();
+  renderTaskContext();
+  loadRecoveryContext();
+  applyRunAvailability();
+
+})();
+</script>
+
+{% endblock %}

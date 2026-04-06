@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Container health{% endblock %}
+{% block content %}
+<div class="toolbar">
+  <h2 style="margin:0">Container health</h2>
+  <div style="display:flex;align-items:center;gap:0.75rem;">
+    <span class="muted" id="health-ts">Last checked: —</span>
+    <button type="button" id="health-refresh" class="btn-sm">Refresh now</button>
+  </div>
+</div>
+
+<table id="health-table">
+  <thead>
+    <tr>
+      <th>Container</th>
+      <th>URL</th>
+      <th>Status</th>
+      <th>Response time</th>
+      <th>Detail</th>
+      <th>Last 5 checks</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for p in probes %}
+    <tr id="hrow-{{ loop.index0 }}" data-target-key="{{ p.target_key }}">
+      <td><strong>{{ p.name }}</strong></td>
+      <td><small>{{ p.url }}</small></td>
+      <td id="hbadge-{{ loop.index0 }}">
+        <span class="badge {{ 'ok' if p.ok else 'fail' }}">{{ p.http_status or '—' }}</span>
+      </td>
+      <td id="htime-{{ loop.index0 }}" class="muted">
+        {% if p.elapsed_ms is defined %}{{ p.elapsed_ms }}ms{% else %}—{% endif %}
+      </td>
+      <td id="hbody-{{ loop.index0 }}">
+        {% if p.error %}<pre>{{ p.error }}</pre>{% else %}<pre>{{ p.body | tojson(indent=2) }}</pre>{% endif %}
+      </td>
+      <td id="hhistory-{{ loop.index0 }}" class="history-cell">
+        <span class="muted">—</span>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+<script>
+(function() {
+  const INTERVAL = 15000;
+  const rowCount = {{ probes | length }};
+  let timer = null;
+
+  function fmtTime(d) { return d.toLocaleTimeString(); }
+
+  function renderHistory(cell, items) {
+    if (!items || !items.length) { cell.innerHTML = '<span class="muted">—</span>'; return; }
+    const dots = items.slice(0, 5).reverse().map(function(item) {
+      const ok = item.http_status === 200;
+      return '<span class="hist-dot ' + (ok ? 'ok' : 'fail') + '" title="' +
+        item.captured_at + ' HTTP ' + (item.http_status || '?') + '">●</span>';
+    }).join('');
+    cell.innerHTML = dots;
+  }
+
+  async function loadHistory(key, idx) {
+    try {
+      const resp = await fetch('/api/health-history?target=' + encodeURIComponent(key) + '&limit=5');
+      const data = await resp.json();
+      const cell = document.getElementById('hhistory-' + idx);
+      if (cell) renderHistory(cell, data);
+    } catch(e) {}
+  }
+
+  const ROW_TARGET_KEYS = {{ probes | map(attribute='target_key') | list | tojson }};
+
+  async function refresh() {
+    document.getElementById('health-refresh').textContent = '…';
+    try {
+      const resp = await fetch('/api/status');
+      const data = await resp.json();
+      ROW_TARGET_KEYS.forEach(function(key, idx) {
+        const p = data[key];
+        if (!p) return;
+        const badgeEl = document.getElementById('hbadge-' + idx);
+        const timeEl  = document.getElementById('htime-'  + idx);
+        const bodyEl  = document.getElementById('hbody-'  + idx);
+        if (badgeEl) {
+          const cls = p.ok ? 'ok' : 'fail';
+          badgeEl.innerHTML = '<span class="badge ' + cls + '">' + (p.http_status || '—') + '</span>';
+        }
+        if (timeEl) timeEl.textContent = (p.elapsed_ms !== undefined ? p.elapsed_ms + 'ms' : '—');
+        if (bodyEl) {
+          const pre = document.createElement('pre');
+          pre.textContent = p.error || JSON.stringify(p.body, null, 2) || '—';
+          bodyEl.replaceChildren(pre);
+        }
+        loadHistory(key, idx);
+      });
+      document.getElementById('health-ts').textContent = 'Last checked: ' + fmtTime(new Date());
+    } catch(e) {
+      document.getElementById('health-ts').textContent = 'Refresh failed: ' + e.message;
+    }
+    document.getElementById('health-refresh').textContent = 'Refresh now';
+  }
+
+  ROW_TARGET_KEYS.forEach(function(key, idx) {
+    loadHistory(key, idx);
+  });
+
+  document.getElementById('health-refresh').addEventListener('click', function() {
+    clearInterval(timer);
+    refresh();
+    timer = setInterval(refresh, INTERVAL);
+  });
+
+  document.getElementById('health-ts').textContent = 'Last checked: ' + fmtTime(new Date());
+  timer = setInterval(refresh, INTERVAL);
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,1285 @@
+{% extends "base.html" %}
+{% block title %}Agent chat{% endblock %}
+{% block content %}
+<div class="chat-page">
+  <div class="chat-header">
+    <h2>Agent chat <span>(via C1 → Copilot)</span></h2>
+    <div class="chat-header-actions">
+      <div class="thinking-dropdown" id="thinking-dropdown">
+        <button type="button" class="thinking-pill" id="thinking-pill" aria-haspopup="true" aria-expanded="false">
+          <span id="thinking-label">Auto</span>
+          <svg width="10" height="6" viewBox="0 0 10 6" fill="none" style="margin-left:4px"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="thinking-menu" id="thinking-menu" hidden>
+          <button type="button" class="thinking-opt" data-mode="auto">
+            <span class="thinking-opt-name">Auto</span>
+            <span class="thinking-opt-desc">Decides how long to think</span>
+          </button>
+          <button type="button" class="thinking-opt" data-mode="quick">
+            <span class="thinking-opt-name">Quick Response</span>
+            <span class="thinking-opt-desc">Answers right away</span>
+          </button>
+          <button type="button" class="thinking-opt" data-mode="deep">
+            <span class="thinking-opt-name">Think Deeper</span>
+            <span class="thinking-opt-desc">Thinks longer for better answers</span>
+          </button>
+        </div>
+      </div>
+      <span id="token-badge" class="token-badge" title="Estimated context tokens used">0 / 30k tokens</span>
+      <button type="button" id="new-chat-btn" class="btn-sm" title="Start a new chat session">+ New Chat</button>
+      <button type="button" id="sessions-btn" class="btn-sm" title="View past sessions">Sessions</button>
+      <button type="button" id="clear-chat" class="btn-sm">Clear</button>
+    </div>
+  </div>
+<style>
+/* Chat page enhancements */
+.chat-page { display: flex; flex-direction: column; height: calc(100vh - 140px); max-width: 980px; margin: 0 auto; }
+.chat-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  padding-bottom: 0.75rem;
+  margin-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+.chat-header h2 { font-size: 1.25rem; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+.chat-header h2 span { font-weight: 400; font-size: 0.85rem; color: var(--muted); }
+.chat-header-actions { display: flex; gap: 0.4rem; align-items: center; flex-wrap: wrap; }
+
+.thinking-dropdown { position: relative; display: inline-block; }
+.thinking-pill {
+  display: inline-flex; align-items: center; gap: 2px;
+  background: var(--surface2); border: 1px solid var(--border);
+  color: var(--fg); border-radius: 999px; padding: 4px 12px;
+  font-size: 0.82rem; cursor: pointer; white-space: nowrap;
+}
+.thinking-pill:hover { background: var(--surface3); }
+.thinking-menu {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 200;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; padding: 4px; min-width: 220px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+.thinking-opt {
+  display: flex; flex-direction: column; align-items: flex-start;
+  width: 100%; background: none; border: none; border-radius: 8px;
+  color: var(--fg); padding: 8px 12px; cursor: pointer; text-align: left;
+}
+.thinking-opt:hover { background: var(--surface3); }
+.thinking-opt.selected { background: var(--surface3); }
+.thinking-opt-name { font-size: 0.88rem; font-weight: 500; }
+.thinking-opt-desc { font-size: 0.76rem; color: var(--muted); margin-top: 1px; }
+
+.token-badge {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 999px; padding: 3px 10px; font-size: 0.75rem;
+  color: var(--muted); font-family: monospace; white-space: nowrap;
+  transition: background 0.2s, color 0.2s, border-color 0.2s;
+}
+.token-badge.warn { background: rgba(255,160,0,0.15); border-color: #ffa000; color: #ffa000; }
+.token-badge.danger { background: rgba(220,50,50,0.15); border-color: var(--fail); color: var(--fail); }
+
+.ctx-banner {
+  display: none; align-items: center; gap: 8px;
+  padding: 8px 14px; border-radius: 8px; font-size: 0.82rem;
+  margin-bottom: 6px;
+}
+.ctx-banner.warn { display: flex; background: rgba(255,160,0,0.12); border: 1px solid #ffa000; color: #ffa000; }
+.ctx-banner.danger { display: flex; background: rgba(220,50,50,0.12); border: 1px solid var(--fail); color: var(--fail); }
+.ctx-banner button { margin-left: auto; background: currentColor; color: var(--bg);
+  border: none; border-radius: 5px; padding: 2px 10px; font-size: 0.78rem;
+  cursor: pointer; font-weight: 600; opacity: 0.9; }
+.ctx-banner button:hover { opacity: 1; }
+
+.sess-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.65);
+  z-index:500; align-items:center; justify-content:center; }
+.sess-overlay.open { display:flex; }
+.sess-modal { background:var(--card); border:1px solid var(--border); border-radius:10px;
+  width:min(88vw,560px); max-height:80vh; display:flex; flex-direction:column; overflow:hidden; }
+.sess-modal-hdr { display:flex; align-items:center; justify-content:space-between;
+  padding:.6rem .95rem; border-bottom:1px solid var(--border); font-size:.85rem; font-weight:600; }
+.sess-modal-body { flex:1; overflow:auto; padding:.6rem .8rem; }
+.sess-row { padding:.45rem .5rem; border-bottom:1px solid var(--border); cursor:pointer;
+  border-radius:5px; display:flex; align-items:center; gap:.5rem; }
+.sess-row:hover { background:var(--surface2); }
+.sess-row-title { font-size:.82rem; font-weight:500; flex:1; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; }
+.sess-row-meta { font-size:.72rem; color:var(--muted); white-space:nowrap; }
+.sess-del { background:none; border:none; color:var(--muted); cursor:pointer;
+  font-size:.8rem; padding:0 3px; flex-shrink:0; }
+.sess-del:hover { color:var(--fail); }
+
+.chat-window {
+  background: #010409;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1rem;
+  flex: 1;
+  overflow-y: auto;
+  margin-bottom: 0.75rem;
+  scroll-behavior: smooth;
+}
+.chat-empty { color: var(--muted); text-align: center; padding: 3rem 0; }
+
+.bubble {
+  border-radius: 12px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 0.85rem;
+  max-width: 88%;
+  word-wrap: break-word;
+  position: relative;
+  transition: background 0.15s ease;
+}
+.bubble:hover { background: rgba(245,245,247,0.03); }
+.bubble.user {
+  background: rgba(10, 132, 255, 0.12);
+  border: 1px solid rgba(10, 132, 255, 0.25);
+  margin-left: auto;
+  white-space: pre-wrap;
+}
+.bubble.assistant {
+  background: var(--card);
+  border: 1px solid var(--border);
+}
+.bubble.error {
+  background: rgba(142, 142, 147, 0.08);
+  border: 1px solid rgba(142, 142, 147, 0.3);
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+.bubble-header { font-size: 0.72rem; font-weight: 600; color: var(--muted); margin-bottom: 0.3rem; }
+.bubble-body { font-size: 0.92rem; line-height: 1.6; }
+.bubble-body.md-body p { margin: 0 0 0.5rem; }
+.bubble-body.md-body p:last-child { margin: 0; }
+.bubble-body.md-body ul { margin: 0.3rem 0; padding-left: 1.4rem; }
+.bubble-body.md-body li { margin-bottom: 0.2rem; }
+.bubble-body.md-body h3, .bubble-body.md-body h4 { margin: 0.5rem 0 0.2rem; font-size: 0.95rem; }
+.bubble-body.md-body pre { margin: 0.4rem 0; position: relative; }
+.bubble-body.md-body code { padding: 0.1rem 0.35rem; font-size: 0.82rem; }
+.bubble-body.md-body strong { color: var(--fg); }
+.bubble-body.md-body em { color: var(--muted); }
+.bubble-meta { font-size: 0.7rem; color: var(--muted); margin-top: 0.3rem; }
+
+.bubble-copy-btn {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0.2rem 0.4rem;
+  font-size: 0.7rem;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+.bubble:hover .bubble-copy-btn { opacity: 1; }
+.bubble-copy-btn:hover { color: var(--accent); border-color: var(--accent); }
+
+.typing-dots { display: inline-flex; gap: 4px; align-items: center; }
+.typing-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+  animation: typing-bounce 1.4s ease-in-out infinite;
+}
+.typing-dots span:nth-child(2) { animation-delay: 0.2s; }
+.typing-dots span:nth-child(3) { animation-delay: 0.4s; }
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.4; }
+  30% { transform: translateY(-6px); opacity: 1; }
+}
+
+.code-block-wrapper { position: relative; margin: 0.4rem 0; }
+.code-block-wrapper pre { margin: 0; }
+.code-copy-btn {
+  position: absolute;
+  top: 0.4rem;
+  right: 0.4rem;
+  background: var(--surface3);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0.2rem 0.5rem;
+  font-size: 0.7rem;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.code-block-wrapper:hover .code-copy-btn { opacity: 1; }
+.code-copy-btn:hover { color: var(--fg); }
+
+.chat-input-area {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.65rem;
+  transition: border-color 0.2s ease;
+}
+.chat-input-area.drag-over { border-color: var(--accent); background: rgba(10,132,255,0.04); }
+.chat-input-area.drag-over::after {
+  content: 'Drop files to upload';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 0.9rem;
+  color: var(--accent);
+  font-weight: 600;
+  pointer-events: none;
+}
+
+.work-web-row { padding: 2px 0 4px 4px; }
+.work-web-toggle {
+  display: inline-flex; border: 1px solid var(--border); border-radius: 999px; overflow: hidden;
+}
+.ww-btn {
+  background: none; border: none; padding: 3px 14px; font-size: 0.8rem;
+  color: var(--muted); cursor: pointer; transition: background 0.15s, color 0.15s;
+}
+.ww-btn:hover { background: var(--surface3); color: var(--fg); }
+.ww-btn.active { background: var(--surface3); color: var(--fg); font-weight: 600; }
+
+#attach-chips { display: none; flex-wrap: wrap; gap: 6px; padding: 4px 0; }
+.chat-input-row { display: flex; gap: 0.5rem; align-items: flex-end; position: relative; }
+.chat-input-row textarea { flex: 1; resize: vertical; min-height: 2.5rem; border: none; background: transparent; }
+.chat-input-row textarea:focus { outline: none; }
+
+.attach-dropdown { position: relative; display: flex; align-items: center; }
+.attach-plus {
+  width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--border);
+  background: var(--surface2); color: var(--fg);
+  font-size: 1.3rem; line-height: 1; cursor: pointer; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.attach-plus:hover { background: var(--surface3); }
+.attach-menu {
+  position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 200;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; padding: 4px; min-width: 180px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+.attach-opt {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; background: none; border: none; border-radius: 8px;
+  color: var(--fg); padding: 8px 12px; cursor: pointer; font-size: 0.88rem;
+}
+.attach-opt:hover { background: var(--surface3); }
+
+.attach-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--surface2); border: 1px solid var(--border);
+  border-radius: 6px; padding: 2px 8px; font-size: 0.8rem; color: var(--fg);
+}
+.attach-chip-uploading { border-color: var(--border); color: var(--muted); }
+.attach-chip-error { border-color: var(--muted); color: var(--muted); }
+.attach-chip-sent { background: transparent; border: none; font-size: 0.8rem; }
+.attach-chip-close {
+  background: none; border: none; cursor: pointer; color: var(--muted); font-size: 0.9rem; padding: 0;
+}
+.attach-chip-close:hover { color: var(--fg); }
+
+.btn-stop {
+  background: var(--fail);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.5rem 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: none;
+}
+.btn-stop.visible { display: inline-flex; align-items: center; gap: 0.3rem; }
+.btn-stop:hover { filter: brightness(1.1); }
+
+@media (max-width: 600px) {
+  .chat-header { flex-direction: column; align-items: flex-start; }
+  .chat-header-actions { width: 100%; }
+  .bubble { max-width: 95%; }
+}
+</style>
+
+<div class="chat-controls">
+  <div class="control-row">
+    <label for="agent_id">Agent</label>
+    <select id="agent_id">
+      {% for agent in agents %}
+      <option value="{{ agent.id }}"{% if agent.id == 'c2-aider' %} selected{% endif %}>{{ agent.label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="control-row">
+    <label>Quick prompts</label>
+    <div class="quick-btns">
+      <button type="button" class="quick" data-prompt="Tell me a joke">Tell me a joke</button>
+      <button type="button" class="quick" data-prompt="Tell me a programming joke">Programming joke</button>
+      <button type="button" class="quick" data-prompt="Tell me a dad joke">Dad joke</button>
+      <button type="button" class="quick" data-prompt="What can you do?">Capabilities</button>
+    </div>
+  </div>
+</div>
+
+<!-- Context overflow warning banner -->
+<div id="ctx-banner" class="ctx-banner">
+  <span id="ctx-banner-text"></span>
+  <button id="ctx-banner-btn" type="button">+ New Chat</button>
+</div>
+
+<div class="chat-window" id="chat-window">
+  <div class="chat-empty" id="chat-empty">Select an agent and send a prompt to begin.</div>
+</div>
+
+<!-- Sessions overlay modal -->
+<div class="sess-overlay" id="sess-overlay">
+  <div class="sess-modal">
+    <div class="sess-modal-hdr">
+      <span>📋 Past Chat Sessions</span>
+      <button id="sess-close" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:1rem;">✕</button>
+    </div>
+    <div class="sess-modal-body" id="sess-modal-body">Loading…</div>
+  </div>
+</div>
+
+<form id="chat-form" autocomplete="off">
+  <!-- Work / Web toggle (M365 context scope — mirrors C3 browser-auth UI) -->
+  <div class="work-web-row">
+    <div class="work-web-toggle" id="work-web-toggle" role="tablist" aria-label="M365 chat scope">
+      <button type="button" class="ww-btn" id="ww-work" role="tab" data-mode="work">Work</button>
+      <button type="button" class="ww-btn" id="ww-web"  role="tab" data-mode="web">Web</button>
+    </div>
+  </div>
+  <style>
+  .work-web-row { padding: 4px 0 2px 4px; }
+  .work-web-toggle {
+    display: inline-flex; border: 1px solid var(--border, var(--border)); border-radius: 999px; overflow: hidden;
+  }
+  .ww-btn {
+    background: none; border: none; padding: 3px 14px; font-size: 0.8rem;
+    color: var(--muted, var(--muted)); cursor: pointer; transition: background 0.15s, color 0.15s;
+  }
+  .ww-btn:hover { background: var(--surface3, var(--border)); color: var(--text, var(--fg)); }
+  .ww-btn.active {
+    background: var(--surface3, var(--border)); color: var(--text, var(--fg)); font-weight: 600;
+  }
+  </style>
+  <!-- Attachment chips row (shown when files are staged) -->
+  <div id="attach-chips" style="display:none; flex-wrap:wrap; gap:6px; padding:4px 0 4px 4px;"></div>
+  <div class="chat-input-row">
+    <!-- "+" button: Add content / Upload files (mirrors M365 Copilot) -->
+    <div class="attach-dropdown" id="attach-dropdown">
+      <button type="button" class="attach-plus" id="attach-plus" title="Add content or upload file" aria-haspopup="true" aria-expanded="false">+</button>
+      <div class="attach-menu" id="attach-menu" hidden>
+        <button type="button" class="attach-opt" id="opt-paste">
+          <span style="font-size:1.1em;">📋</span> Add content
+        </button>
+        <button type="button" class="attach-opt" id="opt-upload">
+          <span style="font-size:1.1em;">⬆</span> Upload files
+        </button>
+      </div>
+    </div>
+    <input type="file" id="file-input" style="display:none"
+      accept=".png,.jpg,.jpeg,.gif,.webp,.pdf,.txt,.docx,.xlsx,.xls,.pptx" multiple>
+    <textarea id="prompt" rows="2" placeholder="Type a message… (Enter to send, Shift+Enter for newline)"></textarea>
+    <button type="submit" id="send">Send</button>
+    <button type="button" id="send-ma" title="Send to Multi-Agent workspace"
+      style="background:rgba(10, 132, 255,0.15);border:1px solid var(--accent);color:var(--accent);border-radius:6px;padding:0.35rem 0.65rem;font-size:0.9rem;cursor:pointer;flex-shrink:0;">🤖</button>
+  </div>
+</form>
+<style>
+/* Attachment "+" button */
+.attach-dropdown { position: relative; display: flex; align-items: center; }
+.attach-plus {
+  width: 32px; height: 32px; border-radius: 50%; border: 1px solid var(--border, var(--border));
+  background: var(--surface2, var(--border)); color: var(--text, var(--fg));
+  font-size: 1.3rem; line-height: 1; cursor: pointer; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+}
+.attach-plus:hover { background: var(--surface3, var(--border)); }
+.attach-menu {
+  position: absolute; bottom: calc(100% + 8px); left: 0; z-index: 200;
+  background: var(--surface2, var(--border)); border: 1px solid var(--border, var(--border));
+  border-radius: 10px; padding: 4px; min-width: 180px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+.attach-opt {
+  display: flex; align-items: center; gap: 8px;
+  width: 100%; background: none; border: none; border-radius: 8px;
+  color: var(--text, var(--fg)); padding: 8px 12px; cursor: pointer; font-size: 0.88rem;
+}
+.attach-opt:hover { background: var(--surface3, var(--border)); }
+/* Attachment chips */
+.attach-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  background: var(--surface2, var(--border)); border: 1px solid var(--border, var(--border));
+  border-radius: 6px; padding: 2px 8px; font-size: 0.8rem; color: var(--text, var(--fg));
+}
+.attach-chip-uploading { border-color: var(--border); color: var(--muted); }
+.attach-chip-error { border-color: var(--muted); color: var(--muted); }
+.attach-chip-sent { background: transparent; border: none; font-size: 0.8rem; }
+.attach-chip-close {
+  background: none; border: none; cursor: pointer; color: var(--muted); font-size: 0.9rem; padding: 0;
+}
+.attach-chip-close:hover { color: var(--fg); }
+</style>
+
+<details class="muted" style="margin-top:0.75rem;">
+  <summary>How it works</summary>
+  <p>
+    Your prompt is sent to <code>POST /api/chat</code> on this C9 service,
+    which proxies it to <strong>C1</strong> (<code>{{ c1_url }}/v1/chat/completions</code>)
+    with the selected agent's <code>X-Agent-ID</code> header.
+    C1 routes the request through <strong>C3</strong> (browser-auth cookies) to Microsoft Copilot.
+    Each agent ID maintains a separate backend session.
+    All exchanges are logged in the C9 SQLite DB (see <a href="{{ url_for('page_logs') }}">Logs</a>).
+  </p>
+</details>
+
+<script>
+(function() {
+  'use strict';
+
+  /* ── Constants ────────────────────────────────────────────────────────── */
+  var TOKEN_WARN   = 20000;  // show yellow warning
+  var TOKEN_DANGER = 30000;  // show red danger + auto-summarize prompt
+  var TOKEN_AUTO_COMPRESS = 38000; // trigger background summarize
+  var STORAGE_SESSION_KEY = 'chatSessionId';
+
+  /* ── State ────────────────────────────────────────────────────────────── */
+  var chatHistory = [];
+  var currentSessionId = localStorage.getItem(STORAGE_SESSION_KEY) || '';
+  var busy = false;
+  var pendingAttachments = [];
+  var streamController = null;
+  var streamAborted = false;
+
+  /* ── DOM refs ─────────────────────────────────────────────────────────── */
+  var chatWindow   = document.getElementById('chat-window');
+  var chatEmpty    = document.getElementById('chat-empty');
+  var form         = document.getElementById('chat-form');
+  var promptEl     = document.getElementById('prompt');
+  var agentEl      = document.getElementById('agent_id');
+  var sendBtn      = document.getElementById('send');
+  var sendMaBtn    = document.getElementById('send-ma');
+  var clearBtn     = document.getElementById('clear-chat');
+  var newChatBtn   = document.getElementById('new-chat-btn');
+  var sessionsBtn  = document.getElementById('sessions-btn');
+  var tokenBadge   = document.getElementById('token-badge');
+  var ctxBanner    = document.getElementById('ctx-banner');
+  var ctxBannerTxt = document.getElementById('ctx-banner-text');
+  var ctxBannerBtn = document.getElementById('ctx-banner-btn');
+  var sessOverlay  = document.getElementById('sess-overlay');
+  var sessClose    = document.getElementById('sess-close');
+  var sessBody     = document.getElementById('sess-modal-body');
+  var attachPlus   = document.getElementById('attach-plus');
+  var attachMenu   = document.getElementById('attach-menu');
+  var attachChips  = document.getElementById('attach-chips');
+  var fileInput    = document.getElementById('file-input');
+
+  /* ── Markdown renderer ───────────────────────────────────────────────── */
+  function renderMarkdown(text) {
+    if (!text) return '';
+    var html = text
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/```[\w]*\n([\s\S]*?)```/g, function(_, code) {
+        return '<pre><code>' + code.trimEnd() + '</code></pre>';
+      })
+      .replace(/`([^`\n]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>')
+      .replace(/^### (.+)$/gm, '<h4>$1</h4>')
+      .replace(/^## (.+)$/gm, '<h3>$1</h3>')
+      .replace(/^# (.+)$/gm, '<h3>$1</h3>')
+      .replace(/^[\-\*] (.+)$/gm, '<li>$1</li>')
+      .replace(/^\d+\. (.+)$/gm, '<li>$1</li>')
+      .replace(/(<li>[\s\S]+?<\/li>)(?![\s\S]*?<\/ul>)/g, function(m) { return '<ul>' + m + '</ul>'; })
+      .replace(/\n\n+/g, '</p><p>')
+      .replace(/\n/g, '<br>');
+    return '<p>' + html + '</p>';
+  }
+
+  /* ── HTML escape ─────────────────────────────────────────────────────── */
+  function esc(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  /* ── Token estimation: rough chars/4 ────────────────────────────────── */
+  function estimateTokens(messages) {
+    var total = 0;
+    for (var i = 0; i < messages.length; i++) {
+      total += String(messages[i].content || '').length;
+    }
+    return Math.floor(total / 4);
+  }
+
+  /* ── Update token badge + context banner ─────────────────────────────── */
+  function updateTokenUI(tokens) {
+    var budget = TOKEN_WARN;
+    var k = Math.round(tokens / 100) / 10;  // e.g. 12.3k
+    tokenBadge.textContent = k + 'k / 30k tokens';
+    tokenBadge.className = 'token-badge';
+    ctxBanner.className = 'ctx-banner';
+    if (tokens >= TOKEN_AUTO_COMPRESS) {
+      tokenBadge.className = 'token-badge danger';
+      ctxBannerTxt.textContent = '⚠️ Context at limit (~' + k + 'k tokens) — auto-compressing history. Start a new chat to keep full context.';
+      ctxBanner.className = 'ctx-banner danger';
+    } else if (tokens >= TOKEN_DANGER) {
+      tokenBadge.className = 'token-badge danger';
+      ctxBannerTxt.textContent = '⚠️ Context nearly full (~' + k + 'k / 30k tokens). Start a new chat before it overflows.';
+      ctxBanner.className = 'ctx-banner danger';
+    } else if (tokens >= TOKEN_WARN) {
+      tokenBadge.className = 'token-badge warn';
+      ctxBannerTxt.textContent = '💡 Context growing (~' + k + 'k tokens). Consider starting a new chat soon.';
+      ctxBanner.className = 'ctx-banner warn';
+    }
+  }
+
+  /* ── Thinking-mode dropdown ──────────────────────────────────────────── */
+  var THINKING_LABELS = { auto: 'Auto', quick: 'Quick Response', deep: 'Think Deeper' };
+  var thinkingMode = localStorage.getItem('thinkingMode') || 'auto';
+  var thinkingPill  = document.getElementById('thinking-pill');
+  var thinkingMenu  = document.getElementById('thinking-menu');
+  var thinkingLabel = document.getElementById('thinking-label');
+
+  function applyThinkingMode(mode) {
+    thinkingMode = mode;
+    thinkingLabel.textContent = THINKING_LABELS[mode] || 'Auto';
+    localStorage.setItem('thinkingMode', mode);
+    document.querySelectorAll('.thinking-opt').forEach(function(btn) {
+      btn.classList.toggle('selected', btn.dataset.mode === mode);
+    });
+    thinkingMenu.hidden = true;
+    thinkingPill.setAttribute('aria-expanded', 'false');
+  }
+  applyThinkingMode(thinkingMode);
+
+  thinkingPill.addEventListener('click', function(e) {
+    e.stopPropagation();
+    var open = !thinkingMenu.hidden;
+    thinkingMenu.hidden = open;
+    thinkingPill.setAttribute('aria-expanded', String(!open));
+  });
+  document.querySelectorAll('.thinking-opt').forEach(function(btn) {
+    btn.addEventListener('click', function() { applyThinkingMode(btn.dataset.mode); });
+  });
+
+  /* ── Work / Web toggle ───────────────────────────────────────────────── */
+  var workMode = localStorage.getItem('workMode') || 'work';
+  function applyWorkMode(mode) {
+    workMode = mode;
+    localStorage.setItem('workMode', mode);
+    document.querySelectorAll('.ww-btn').forEach(function(btn) {
+      btn.classList.toggle('active', btn.dataset.mode === mode);
+    });
+  }
+  applyWorkMode(workMode);
+  document.querySelectorAll('.ww-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() { applyWorkMode(btn.dataset.mode); });
+  });
+
+  /* ── Attachment helpers ──────────────────────────────────────────────── */
+  function clearAttachments() {
+    pendingAttachments = [];
+    attachChips.innerHTML = '';
+    attachChips.style.display = 'none';
+  }
+  function removeAttachment(file_id) {
+    pendingAttachments = pendingAttachments.filter(function(a) { return a.file_id !== file_id; });
+    var chip = attachChips.querySelector('[data-fid="' + file_id + '"]');
+    if (chip) chip.remove();
+    if (!pendingAttachments.length) attachChips.style.display = 'none';
+  }
+  function addChip(tempId, filename, state) {
+    attachChips.style.display = 'flex';
+    var chip = document.createElement('span');
+    chip.className = 'attach-chip' + (state === 'uploading' ? ' attach-chip-uploading' : state === 'error' ? ' attach-chip-error' : '');
+    chip.dataset.fid = tempId;
+    chip.innerHTML = '📎 ' + esc(filename) +
+      (state !== 'uploading' ? ' <button type="button" class="attach-chip-close" title="Remove">×</button>' : ' ⏳');
+    var closeBtn = chip.querySelector('.attach-chip-close');
+    if (closeBtn) closeBtn.addEventListener('click', function() { removeAttachment(tempId); });
+    attachChips.appendChild(chip);
+    return chip;
+  }
+  async function uploadFiles(files) {
+    for (var i = 0; i < files.length; i++) {
+      var file = files[i];
+      var tempId = 'tmp_' + Math.random().toString(36).slice(2);
+      var chip = addChip(tempId, file.name, 'uploading');
+      var fd = new FormData(); fd.append('file', file);
+      try {
+        var r = await fetch('/api/upload', { method: 'POST', body: fd });
+        var j = await r.json(); chip.remove();
+        if (j.ok && j.file_id) {
+          pendingAttachments.push({ file_id: j.file_id, filename: file.name });
+          addChip(j.file_id, file.name + (j.preview ? ' ✓' : ''), 'ready');
+        } else {
+          var ec = addChip(tempId+'_err', file.name+': '+(j.error||'upload failed'), 'error');
+          setTimeout(function() { ec.remove(); }, 5000);
+        }
+      } catch(e) {
+        chip.remove();
+        var ec2 = addChip(tempId+'_err', file.name+': network error', 'error');
+        setTimeout(function() { ec2.remove(); }, 5000);
+      }
+    }
+  }
+  attachPlus.addEventListener('click', function(e) {
+    e.stopPropagation();
+    var open = !attachMenu.hidden;
+    attachMenu.hidden = open;
+    attachPlus.setAttribute('aria-expanded', String(!open));
+  });
+  document.getElementById('opt-upload').addEventListener('click', function() {
+    attachMenu.hidden = true; fileInput.click();
+  });
+  document.getElementById('opt-paste').addEventListener('click', function() {
+    attachMenu.hidden = true; promptEl.focus();
+  });
+  fileInput.addEventListener('change', function() {
+    if (fileInput.files.length) { uploadFiles(Array.from(fileInput.files)); fileInput.value = ''; }
+  });
+
+  /* ── Bubble rendering ────────────────────────────────────────────────── */
+  function agentLabel() {
+    return agentEl.options[agentEl.selectedIndex].text.trim();
+  }
+  function appendBubble(role, htmlContent, meta, isHtml) {
+    chatEmpty.style.display = 'none';
+    var bubble = document.createElement('div');
+    bubble.className = 'bubble ' + role;
+    var header = document.createElement('div');
+    header.className = 'bubble-header';
+    header.textContent = role === 'user' ? 'You' : agentLabel();
+    bubble.appendChild(header);
+    var body = document.createElement('div');
+    body.className = 'bubble-body' + (isHtml ? ' md-body' : '');
+    if (isHtml) {
+      body.innerHTML = htmlContent;
+      body.querySelectorAll('pre').forEach(function(pre) {
+        var wrapper = document.createElement('div');
+        wrapper.className = 'code-block-wrapper';
+        var copyBtn = document.createElement('button');
+        copyBtn.className = 'code-copy-btn';
+        copyBtn.textContent = 'copy';
+        copyBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          var code = pre.querySelector('code') || pre;
+          navigator.clipboard.writeText(code.textContent).then(function() {
+            copyBtn.textContent = 'copied!';
+            setTimeout(function() { copyBtn.textContent = 'copy'; }, 1500);
+          });
+        });
+        pre.parentNode.insertBefore(wrapper, pre);
+        wrapper.appendChild(copyBtn);
+        wrapper.appendChild(pre);
+      });
+    } else {
+      body.textContent = htmlContent;
+    }
+    bubble.appendChild(body);
+    if (meta) {
+      var foot = document.createElement('div');
+      foot.className = 'bubble-meta'; foot.textContent = meta;
+      bubble.appendChild(foot);
+    }
+    var copyBtn = document.createElement('button');
+    copyBtn.className = 'bubble-copy-btn';
+    copyBtn.textContent = 'copy';
+    copyBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var text = body.textContent || body.innerText;
+      navigator.clipboard.writeText(text).then(function() {
+        copyBtn.textContent = 'copied!';
+        setTimeout(function() { copyBtn.textContent = 'copy'; }, 1500);
+      });
+    });
+    bubble.appendChild(copyBtn);
+    chatWindow.appendChild(bubble);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+    return bubble;
+  }
+
+  function showTypingIndicator(agentName) {
+    chatEmpty.style.display = 'none';
+    var bubble = document.createElement('div');
+    bubble.className = 'bubble assistant loading';
+    bubble.id = 'typing-indicator';
+    bubble.innerHTML = '<div class="bubble-header">' + esc(agentName) + '</div>' +
+      '<div class="bubble-body"><div class="typing-dots"><span></span><span></span><span></span></div></div>';
+    chatWindow.appendChild(bubble);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+    return bubble;
+  }
+
+  function hideTypingIndicator() {
+    var el = document.getElementById('typing-indicator');
+    if (el) el.remove();
+  }
+  function appendBubble(role, htmlContent, meta, isHtml) {
+    chatEmpty.style.display = 'none';
+    var bubble = document.createElement('div');
+    bubble.className = 'bubble ' + role;
+    var header = document.createElement('div');
+    header.className = 'bubble-header';
+    header.textContent = role === 'user' ? 'You' : agentLabel();
+    bubble.appendChild(header);
+    var body = document.createElement('div');
+    body.className = 'bubble-body' + (isHtml ? ' md-body' : '');
+    if (isHtml) {
+      body.innerHTML = htmlContent;
+      body.querySelectorAll('pre').forEach(function(pre) {
+        var wrapper = document.createElement('div');
+        wrapper.className = 'code-block-wrapper';
+        var copyBtn = document.createElement('button');
+        copyBtn.className = 'code-copy-btn';
+        copyBtn.textContent = 'copy';
+        copyBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          var code = pre.querySelector('code') || pre;
+          navigator.clipboard.writeText(code.textContent).then(function() {
+            copyBtn.textContent = 'copied!';
+            setTimeout(function() { copyBtn.textContent = 'copy'; }, 1500);
+          });
+        });
+        pre.parentNode.insertBefore(wrapper, pre);
+        wrapper.appendChild(copyBtn);
+        wrapper.appendChild(pre);
+      });
+    } else {
+      body.textContent = htmlContent;
+    }
+    bubble.appendChild(body);
+    if (meta) {
+      var foot = document.createElement('div');
+      foot.className = 'bubble-meta'; foot.textContent = meta;
+      bubble.appendChild(foot);
+    }
+    var copyBtn = document.createElement('button');
+    copyBtn.className = 'bubble-copy-btn';
+    copyBtn.textContent = 'copy';
+    copyBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      var text = body.textContent || body.innerText;
+      navigator.clipboard.writeText(text).then(function() {
+        copyBtn.textContent = 'copied!';
+        setTimeout(function() { copyBtn.textContent = 'copy'; }, 1500);
+      });
+    });
+    bubble.appendChild(copyBtn);
+    chatWindow.appendChild(bubble);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+    return bubble;
+  }
+
+  function showTypingIndicator(agentName) {
+    chatEmpty.style.display = 'none';
+    var bubble = document.createElement('div');
+    bubble.className = 'bubble assistant loading';
+    bubble.id = 'typing-indicator';
+    bubble.innerHTML = '<div class="bubble-header">' + esc(agentName) + '</div>' +
+      '<div class="bubble-body"><div class="typing-dots"><span></span><span></span><span></span></div></div>';
+    chatWindow.appendChild(bubble);
+    chatWindow.scrollTop = chatWindow.scrollHeight;
+    return bubble;
+  }
+
+  function hideTypingIndicator() {
+    var el = document.getElementById('typing-indicator');
+    if (el) el.remove();
+  }
+
+  function parseSseBlock(block) {
+    var dataLines = block.split('\n').filter(function(line) {
+      return line.indexOf('data:') === 0;
+    });
+    if (!dataLines.length) return null;
+    var payload = dataLines.map(function(line) {
+      return line.slice(5).trim();
+    }).join('\n');
+    if (!payload || payload === '[DONE]') return null;
+    try {
+      return JSON.parse(payload);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function readChatStream(response, onEvent) {
+    if (!response.body) throw new Error('Streaming response body missing');
+    var reader = response.body.getReader();
+    var decoder = new TextDecoder();
+    var buffer = '';
+    while (true) {
+      var part = await reader.read();
+      if (part.done) break;
+      buffer += decoder.decode(part.value, { stream: true });
+      var boundary = buffer.indexOf('\n\n');
+      while (boundary !== -1) {
+        var block = buffer.slice(0, boundary);
+        buffer = buffer.slice(boundary + 2);
+        var event = parseSseBlock(block);
+        if (event) onEvent(event);
+        boundary = buffer.indexOf('\n\n');
+      }
+    }
+    buffer += decoder.decode();
+    if (buffer.trim()) {
+      var trailing = parseSseBlock(buffer.trim());
+      if (trailing) onEvent(trailing);
+    }
+  }
+
+  async function readJsonError(response) {
+    var raw = await response.text();
+    if (!raw) return 'Request failed';
+    try {
+      var parsed = JSON.parse(raw);
+      return parsed.error || parsed.detail || parsed.message || raw;
+    } catch (e) {
+      return raw;
+    }
+  }
+
+  /* ── Session management ──────────────────────────────────────────────── */
+  function startNewSession() {
+    currentSessionId = '';
+    localStorage.removeItem(STORAGE_SESSION_KEY);
+    chatHistory = [];
+    updateTokenUI(0);
+  }
+
+  function saveSessionId(id) {
+    currentSessionId = id;
+    localStorage.setItem(STORAGE_SESSION_KEY, id);
+  }
+
+  /* ── New Chat button ─────────────────────────────────────────────────── */
+  function doNewChat(silent) {
+    startNewSession();
+    chatWindow.innerHTML = '';
+    var empty = document.createElement('div');
+    empty.id = 'chat-empty'; empty.className = 'chat-empty';
+    empty.textContent = 'New chat started. Select an agent and send a message.';
+    chatWindow.appendChild(empty);
+    if (!silent) promptEl.focus();
+  }
+
+  newChatBtn.addEventListener('click', function() { doNewChat(false); });
+  ctxBannerBtn.addEventListener('click', function() { doNewChat(false); });
+
+  /* ── Sessions modal ──────────────────────────────────────────────────── */
+  function openSessions() {
+    sessOverlay.classList.add('open');
+    sessBody.textContent = 'Loading…';
+    fetch('/api/chat/sessions?limit=30')
+      .then(function(r) { return r.json(); })
+      .then(function(rows) {
+        if (!rows.length) { sessBody.textContent = 'No saved sessions yet.'; return; }
+        sessBody.innerHTML = rows.map(function(s) {
+          var tok = s.token_estimate ? Math.round(s.token_estimate/100)/10 + 'k tokens · ' : '';
+          var dt  = (s.updated_at || '').slice(0, 16).replace('T', ' ');
+          return '<div class="sess-row" data-sid="' + esc(s.id) + '" data-title="' + esc(s.title||'Chat') + '">'
+            + '<span class="sess-row-title">' + esc(s.title || 'Chat') + '</span>'
+            + '<span class="sess-row-meta">' + esc(tok + s.message_count + ' msgs · ' + dt) + '</span>'
+            + '<button class="sess-del" title="Delete" data-sid="' + esc(s.id) + '">🗑</button>'
+            + '</div>';
+        }).join('');
+        // Attach click handlers
+        sessBody.querySelectorAll('.sess-row').forEach(function(row) {
+          row.addEventListener('click', function(e) {
+            if (e.target.classList.contains('sess-del')) return;
+            resumeSession(row.dataset.sid, row.dataset.title);
+          });
+        });
+        sessBody.querySelectorAll('.sess-del').forEach(function(btn) {
+          btn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            if (!confirm('Delete this session?')) return;
+            fetch('/api/chat/session/' + encodeURIComponent(btn.dataset.sid), { method: 'DELETE' })
+              .then(function() { openSessions(); });
+          });
+        });
+      })
+      .catch(function() { sessBody.textContent = 'Failed to load sessions.'; });
+  }
+
+  function resumeSession(sid, title) {
+    sessOverlay.classList.remove('open');
+    sessBody.textContent = 'Loading…';
+    fetch('/api/chat/session/' + encodeURIComponent(sid))
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (!d.ok) { alert('Could not load session: ' + (d.error || 'unknown')); return; }
+        // Reset UI and history
+        doNewChat(true);
+        saveSessionId(sid);
+        // Rebuild chat display and history from stored messages
+        // Messages are stored as pairs (turn N user, turn N assistant)
+        var msgs = d.messages || [];
+        var seen = {};
+        for (var i = 0; i < msgs.length; i++) {
+          var m = msgs[i];
+          var turn = m.turn;
+          if (!seen[turn]) seen[turn] = {};
+          seen[turn][m.role] = m.content;
+        }
+        var turns = Object.keys(seen).map(Number).sort(function(a,b){return a-b;});
+        for (var t = 0; t < turns.length; t++) {
+          var pair = seen[turns[t]];
+          if (pair.user) {
+            chatHistory.push({ role: 'user', content: pair.user });
+            appendBubble('user', esc(pair.user), null, true);
+          }
+          if (pair.assistant) {
+            chatHistory.push({ role: 'assistant', content: pair.assistant });
+            appendBubble('assistant', renderMarkdown(pair.assistant), null, true);
+          }
+        }
+        updateTokenUI(estimateTokens(chatHistory));
+        appendBubble('assistant',
+          '<em style="color:var(--muted)">— Resumed session: ' + esc(title||sid) + ' (' + msgs.length + ' messages loaded) —</em>',
+          null, true);
+        promptEl.focus();
+      })
+      .catch(function() { alert('Network error loading session.'); });
+  }
+
+  sessionsBtn.addEventListener('click', openSessions);
+  sessClose.addEventListener('click', function() { sessOverlay.classList.remove('open'); });
+  sessOverlay.addEventListener('click', function(e) {
+    if (e.target === sessOverlay) sessOverlay.classList.remove('open');
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape') sessOverlay.classList.remove('open');
+  });
+  document.addEventListener('click', function() {
+    if (!thinkingMenu.hidden) {
+      thinkingMenu.hidden = true;
+      thinkingPill.setAttribute('aria-expanded', 'false');
+    }
+    if (!attachMenu.hidden) {
+      attachMenu.hidden = true;
+      attachPlus.setAttribute('aria-expanded', 'false');
+    }
+  });
+
+  /* ── Auto-compress context ───────────────────────────────────────────── */
+  async function maybeCompress() {
+    var tokens = estimateTokens(chatHistory);
+    if (tokens < TOKEN_AUTO_COMPRESS) return;
+    // Summarize all but last 2 messages
+    var toSummarize = chatHistory.slice(0, -2);
+    var keep = chatHistory.slice(-2);
+    try {
+      var r = await fetch('/api/chat/summarize', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ messages: toSummarize, agent_id: agentEl.value })
+      });
+      var j = await r.json();
+      if (j.ok && j.summary) {
+        chatHistory = [
+          { role: 'user', content: '[Earlier conversation summary]:\n' + j.summary }
+        ].concat(keep);
+        appendBubble('assistant',
+          '<em style="color:var(--muted)">♻️ Context compressed — earlier messages summarized to save space.</em>',
+          null, true);
+        updateTokenUI(estimateTokens(chatHistory));
+      }
+    } catch(e) { /* non-fatal */ }
+  }
+
+  /* ── Send ────────────────────────────────────────────────────────────── */
+  async function send(promptText) {
+    if (busy || !promptText) return;
+    busy = true;
+    streamAborted = false;
+    sendBtn.style.display = 'none';
+    sendBtn.disabled = true;
+    var agent_id = agentEl.value;
+
+    var stopBtn = document.getElementById('btn-stop');
+    if (!stopBtn) {
+      stopBtn = document.createElement('button');
+      stopBtn.id = 'btn-stop';
+      stopBtn.type = 'button';
+      stopBtn.className = 'btn-stop visible';
+      stopBtn.innerHTML = '<svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor"><rect x="1" y="1" width="10" height="10" rx="2"/></svg> Stop';
+      promptEl.parentNode.insertBefore(stopBtn, promptEl.nextSibling);
+      stopBtn.addEventListener('click', function() {
+        streamAborted = true;
+        if (streamController) streamController.abort();
+      });
+    }
+    stopBtn.classList.add('visible');
+
+    chatHistory.push({ role: 'user', content: promptText });
+
+    var attachCopy = pendingAttachments.slice();
+    var userHtml = esc(promptText);
+    if (attachCopy.length) {
+      userHtml += attachCopy.map(function(a) {
+        return '<span class="attach-chip attach-chip-sent">📎 ' + esc(a.filename) + '</span>';
+      }).join('');
+    }
+    appendBubble('user', userHtml, null, true);
+    clearAttachments();
+
+    showTypingIndicator(agentLabel());
+
+    var t0 = performance.now();
+    var httpStatus = '?';
+    try {
+      var reqBody = {
+        agent_id:   agent_id,
+        prompt:     promptText,
+        chat_mode:  thinkingMode,
+        work_mode:  workMode,
+        stream:     true,
+        messages:   chatHistory.slice(),
+        session_id: currentSessionId
+      };
+      if (attachCopy.length) reqBody.attachments = attachCopy.map(function(a) {
+        return { file_id: a.file_id, filename: a.filename };
+      });
+
+      streamController = new AbortController();
+      var res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(reqBody),
+        signal: streamController.signal
+      });
+      httpStatus = res.status;
+      var ct = res.headers.get('content-type') || '';
+      if (ct.indexOf('text/event-stream') === -1) {
+        throw new Error(await readJsonError(res));
+      }
+
+      var fullText = '';
+      var streamDone = null;
+      var streamError = '';
+      await readChatStream(res, function(event) {
+        if (streamAborted) return;
+        if (event.type === 'token') {
+          fullText += event.text || '';
+          hideTypingIndicator();
+          var existingBubble = chatWindow.querySelector('.bubble.assistant.streaming-bubble');
+          if (!existingBubble) {
+            existingBubble = document.createElement('div');
+            existingBubble.className = 'bubble assistant streaming-bubble';
+            var header = document.createElement('div');
+            header.className = 'bubble-header';
+            header.textContent = agentLabel();
+            existingBubble.appendChild(header);
+            var body = document.createElement('div');
+            body.className = 'bubble-body md-body';
+            existingBubble.appendChild(body);
+            chatWindow.appendChild(existingBubble);
+          }
+          existingBubble.querySelector('.bubble-body').innerHTML = renderMarkdown(fullText);
+          chatWindow.scrollTop = chatWindow.scrollHeight;
+        } else if (event.type === 'done') {
+          streamDone = event;
+          if (event.text && !fullText) fullText = event.text;
+        } else if (event.type === 'error') {
+          streamError = event.message || 'Streaming failed';
+        }
+      });
+
+      var elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+      hideTypingIndicator();
+      var streamingBubble = chatWindow.querySelector('.bubble.assistant.streaming-bubble');
+      if (streamingBubble) streamingBubble.remove();
+
+      if (streamAborted) {
+        chatHistory.push({ role: 'assistant', content: fullText || '[stopped]' });
+        appendBubble('assistant', fullText ? renderMarkdown(fullText) : '<em style="color:var(--muted)">— Stopped by user —</em>',
+          'Stopped · ' + elapsed + 's', true);
+        return;
+      }
+
+      if (streamError) throw new Error(streamError);
+      if (!streamDone || !fullText) throw new Error('C1 returned an empty reply');
+
+      if (streamDone.session_id) saveSessionId(streamDone.session_id);
+      chatHistory.push({ role: 'assistant', content: fullText });
+      appendBubble('assistant', renderMarkdown(fullText),
+        'HTTP ' + (streamDone.http_status || httpStatus) + ' · ' + elapsed + 's · ' + agent_id, true);
+
+      var tok = streamDone.token_estimate || estimateTokens(chatHistory);
+      updateTokenUI(tok);
+      if (window.updateGlobalTokens) window.updateGlobalTokens(tok);
+      fetch('/api/token-usage/record', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({
+          agent_id:   agent_id,
+          page:       'chat',
+          tokens:     tok,
+          session_id: streamDone.session_id || currentSessionId || '',
+          status:     'ok'
+        })
+      }).catch(function(){});
+      await maybeCompress();
+    } catch(e) {
+      if (streamAborted) return;
+      chatHistory.pop();
+      hideTypingIndicator();
+      var streamingBubble = chatWindow.querySelector('.bubble.assistant.streaming-bubble');
+      if (streamingBubble) streamingBubble.remove();
+      var elapsed = ((performance.now() - t0) / 1000).toFixed(1);
+      appendBubble('error', e.message || 'Streaming failed',
+        'HTTP ' + httpStatus + ' · ' + elapsed + 's', false);
+    } finally {
+      busy = false;
+      sendBtn.style.display = '';
+      sendBtn.disabled = false;
+      stopBtn.classList.remove('visible');
+      promptEl.focus();
+    }
+  }
+
+  /* ── Clear display (does NOT reset history) ──────────────────────────── */
+  clearBtn.addEventListener('click', function() {
+    chatWindow.innerHTML = '';
+    var empty = document.createElement('div');
+    empty.id = 'chat-empty'; empty.className = 'chat-empty';
+    empty.textContent = 'Display cleared — history still active. Use "+ New Chat" to start fresh.';
+    chatWindow.appendChild(empty);
+  });
+
+  /* ── Multi-agent hand-off ────────────────────────────────────────────── */
+  sendMaBtn.addEventListener('click', function() {
+    var task = promptEl.value.trim();
+    window.location.href = '/multi-agent' + (task ? '?task=' + encodeURIComponent(task) : '');
+  });
+
+  /* ── Form submit ─────────────────────────────────────────────────────── */
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    var p = promptEl.value.trim();
+    if (p || pendingAttachments.length) {
+      promptEl.value = '';
+      send(p || 'Please analyze the attached file.');
+    }
+  });
+
+  document.querySelectorAll('.quick').forEach(function(btn) {
+    btn.addEventListener('click', function() { send(btn.dataset.prompt); });
+  });
+
+  promptEl.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      form.dispatchEvent(new Event('submit'));
+    }
+  });
+
+  /* ── Drag & Drop ─────────────────────────────────────────────────────── */
+  var inputArea = document.getElementById('chat-form');
+  var dragCounter = 0;
+  inputArea.addEventListener('dragenter', function(e) {
+    e.preventDefault();
+    dragCounter++;
+    inputArea.classList.add('drag-over');
+  });
+  inputArea.addEventListener('dragleave', function(e) {
+    e.preventDefault();
+    dragCounter--;
+    if (dragCounter === 0) inputArea.classList.remove('drag-over');
+  });
+  inputArea.addEventListener('dragover', function(e) { e.preventDefault(); });
+  inputArea.addEventListener('drop', function(e) {
+    e.preventDefault();
+    dragCounter = 0;
+    inputArea.classList.remove('drag-over');
+    if (e.dataTransfer.files.length) {
+      uploadFiles(Array.from(e.dataTransfer.files));
+    }
+  });
+
+  /* ── Paste from clipboard ────────────────────────────────────────────── */
+  promptEl.addEventListener('paste', function(e) {
+    var items = (e.clipboardData || e.originalEvent.clipboardData).items;
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].kind === 'file') {
+        e.preventDefault();
+        var file = items[i].getAsFile();
+        if (file) uploadFiles([file]);
+      }
+    }
+  });
+
+  /* ── Drag & Drop ─────────────────────────────────────────────────────── */
+  var inputArea = document.getElementById('chat-form');
+  var dragCounter = 0;
+  inputArea.addEventListener('dragenter', function(e) {
+    e.preventDefault();
+    dragCounter++;
+    inputArea.classList.add('drag-over');
+  });
+  inputArea.addEventListener('dragleave', function(e) {
+    e.preventDefault();
+    dragCounter--;
+    if (dragCounter === 0) inputArea.classList.remove('drag-over');
+  });
+  inputArea.addEventListener('dragover', function(e) { e.preventDefault(); });
+  inputArea.addEventListener('drop', function(e) {
+    e.preventDefault();
+    dragCounter = 0;
+    inputArea.classList.remove('drag-over');
+    if (e.dataTransfer.files.length) {
+      uploadFiles(Array.from(e.dataTransfer.files));
+    }
+  });
+
+  /* ── Paste from clipboard ────────────────────────────────────────────── */
+  promptEl.addEventListener('paste', function(e) {
+    var items = (e.clipboardData || e.originalEvent.clipboardData).items;
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].kind === 'file') {
+        e.preventDefault();
+        var file = items[i].getAsFile();
+        if (file) uploadFiles([file]);
+      }
+    }
+  });
+
+  /* ── On load: offer to resume last session ───────────────────────────── */
+  (function checkLastSession() {
+    if (!currentSessionId) return;
+    fetch('/api/chat/session/' + encodeURIComponent(currentSessionId))
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (!d.ok || !d.messages || !d.messages.length) {
+          startNewSession(); return;
+        }
+        // Show a resume banner
+        var banner = document.createElement('div');
+        banner.style.cssText = 'background:rgba(10,132,255,0.1);border:1px solid var(--accent);border-radius:8px;padding:8px 14px;font-size:0.82rem;margin-bottom:6px;display:flex;align-items:center;gap:8px;';
+        var title = d.session.title || 'previous chat';
+        var count = d.messages.length;
+        banner.innerHTML = '💬 <strong>Resume last session?</strong> &nbsp;"' + esc(title) + '" · ' + count + ' messages '
+          + '<button id="resume-yes" style="margin-left:8px;background:var(--accent);color:var(--bg);border:none;border-radius:5px;padding:2px 10px;cursor:pointer;font-size:0.78rem;font-weight:600;">Resume</button>'
+          + '<button id="resume-no"  style="margin-left:4px;background:none;border:1px solid var(--border);color:var(--muted);border-radius:5px;padding:2px 10px;cursor:pointer;font-size:0.78rem;">New chat</button>';
+        chatWindow.insertBefore(banner, chatWindow.firstChild);
+        document.getElementById('resume-yes').addEventListener('click', function() {
+          banner.remove();
+          resumeSession(currentSessionId, title);
+        });
+        document.getElementById('resume-no').addEventListener('click', function() {
+          banner.remove();
+          doNewChat(true);
+        });
+      })
+      .catch(function() { startNewSession(); });
+  })();
+
+})();
+</script>
+{% endblock %}

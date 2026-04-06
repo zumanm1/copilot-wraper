@@ -1,0 +1,1732 @@
+{% extends "base.html" %}
+{% block title %}Multi-Agento Workspace{% endblock %}
+{% block content %}
+<style>
+/* ═══════════════════════════════════════════════════════════════════════
+   MULTI-AGENTO WORKSPACE — Brilliance Enhanced
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── Layout ────────────────────────────────────────────────────────────── */
+.mao {
+  display: grid;
+  grid-template-columns: 190px 1fr 230px;
+  grid-template-rows: auto auto auto 1fr;
+  gap: 0;
+  height: calc(100vh - 100px);
+  min-height: 600px;
+  margin: -1.25rem;
+  overflow: hidden;
+  background: linear-gradient(180deg, var(--bg) 0%, #0a0a0a 100%);
+}
+
+/* ── Scrollbars ────────────────────────────────────────────────────────── */
+.mao-left::-webkit-scrollbar,
+.mao-grid::-webkit-scrollbar,
+.mao-ftree::-webkit-scrollbar,
+.p-body::-webkit-scrollbar,
+.mao-shell-out::-webkit-scrollbar,
+.mao-mbody::-webkit-scrollbar {
+  width: 6px;
+}
+.mao-left::-webkit-scrollbar-track,
+.p-body::-webkit-scrollbar-track,
+.mao-shell-out::-webkit-scrollbar-track {
+  background: transparent;
+}
+.mao-left::-webkit-scrollbar-thumb,
+.p-body::-webkit-scrollbar-thumb,
+.mao-shell-out::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.08);
+  border-radius: 3px;
+}
+.mao-left::-webkit-scrollbar-thumb:hover,
+.p-body::-webkit-scrollbar-thumb:hover,
+.mao-shell-out::-webkit-scrollbar-thumb:hover {
+  background: rgba(255,255,255,0.15);
+}
+
+/* ── Left Sidebar ──────────────────────────────────────────────────────── */
+.mao-left {
+  grid-column: 1;
+  grid-row: 1 / -1;
+  border-right: 1px solid rgba(255,255,255,0.06);
+  background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.01) 100%);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  backdrop-filter: blur(8px);
+}
+.mao-left-hdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  flex-shrink: 0;
+  background: rgba(255,255,255,0.02);
+}
+.mao-left-hdr .btn-sm {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 4px;
+  padding: 0.15rem 0.4rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.mao-left-hdr .btn-sm:hover {
+  background: rgba(10,132,255,0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.mao-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.25rem 0;
+}
+.mao-item {
+  padding: 0.4rem 0.7rem;
+  font-size: 0.76rem;
+  cursor: pointer;
+  border-left: 3px solid transparent;
+  color: var(--fg);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin: 0 0.3rem 0.1rem;
+  border-radius: 0;
+  transition: all 0.15s ease;
+  position: relative;
+}
+.mao-item::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(10,132,255,0.05) 0%, transparent 100%);
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.mao-item:hover { background: rgba(255,255,255,0.04); border-left-color: rgba(10,132,255,0.3); }
+.mao-item:hover::before { opacity: 1; }
+.mao-item.active { border-left-color: var(--accent); background: rgba(10,132,255,0.08); }
+.mao-item.active::before { opacity: 1; }
+.mao-item.done { border-left-color: var(--ok); }
+.mao-item.failed { border-left-color: var(--fail); }
+.mao-meta { font-size: 0.68rem; color: var(--muted); margin-top: 1px; }
+.mao-section {
+  padding: 0.4rem 0.7rem 0.15rem;
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--accent);
+  border-top: 1px solid rgba(255,255,255,0.06);
+  margin-top: 0.25rem;
+  background: rgba(10,132,255,0.03);
+}
+.mao-proj-item {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.7rem;
+  font-size: 0.76rem;
+  color: var(--fg);
+  cursor: default;
+  margin: 0 0.3rem;
+  transition: background 0.1s ease;
+}
+.mao-proj-item:hover { background: rgba(255,255,255,0.03); }
+.mao-proj-del {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 0.68rem;
+  padding: 0 2px;
+  border-radius: 3px;
+  transition: all 0.1s ease;
+}
+.mao-proj-del:hover { color: var(--fail); background: rgba(255,69,58,0.1); }
+
+/* ── Top Bar ───────────────────────────────────────────────────────────── */
+.mao-topbar {
+  grid-column: 2 / 4;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.5rem 0.9rem;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  background: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%);
+  flex-wrap: wrap;
+  backdrop-filter: blur(8px);
+}
+.mao-topbar h2 {
+  margin: 0;
+  font-size: 0.95rem;
+  white-space: nowrap;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--accent) 0%, #64d2ff 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.mao-task {
+  flex: 1;
+  min-width: 220px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 8px;
+  color: var(--fg);
+  font-size: 0.88rem;
+  padding: 0.35rem 0.65rem;
+  resize: none;
+  font-family: inherit;
+  line-height: 1.4;
+  min-height: 36px;
+  max-height: 72px;
+  transition: all 0.15s ease;
+}
+.mao-task:focus {
+  outline: none;
+  border-color: rgba(10,132,255,0.4);
+  background: rgba(10,132,255,0.05);
+  box-shadow: 0 0 0 2px rgba(10,132,255,0.1);
+}
+.mao-task::placeholder { color: var(--muted); opacity: 0.5; }
+.mao-launch {
+  background: linear-gradient(135deg, var(--accent) 0%, #0070e0 100%);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 0.4rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 8px rgba(10,132,255,0.2);
+}
+.mao-launch:hover:not(:disabled) {
+  filter: brightness(1.15);
+  box-shadow: 0 4px 12px rgba(10,132,255,0.3);
+  transform: translateY(-1px);
+}
+.mao-launch:disabled { opacity: 0.4; cursor: not-allowed; transform: none; box-shadow: none; }
+.mao-pause, .mao-stop {
+  border: none;
+  border-radius: 8px;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: none;
+  transition: all 0.15s ease;
+}
+.mao-pause {
+  background: rgba(10,132,255,0.1);
+  color: var(--accent);
+  border: 1px solid rgba(10,132,255,0.3);
+}
+.mao-pause:hover { background: rgba(10,132,255,0.2); border-color: rgba(10,132,255,0.5); }
+.mao-stop {
+  background: rgba(255,69,58,0.1);
+  color: var(--fail);
+  border: 1px solid rgba(255,69,58,0.3);
+}
+.mao-stop:hover { background: rgba(255,69,58,0.2); border-color: rgba(255,69,58,0.5); }
+.mao-pause.vis, .mao-stop.vis { display: inline-flex; }
+
+/* ── Role Chips ────────────────────────────────────────────────────────── */
+.mao-chips { display: flex; align-items: center; gap: 0.35rem; flex-wrap: wrap; }
+.mao-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.2rem;
+  background: rgba(255,255,255,0.03);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 12px;
+  padding: 0.15rem 0.5rem;
+  font-size: 0.73rem;
+  cursor: pointer;
+  color: var(--muted);
+  transition: all 0.15s ease;
+}
+.mao-chip:hover { background: rgba(255,255,255,0.06); color: var(--fg); }
+.mao-chip.active {
+  background: rgba(10,132,255,0.15);
+  border-color: rgba(10,132,255,0.3);
+  color: var(--accent);
+  box-shadow: 0 0 6px rgba(10,132,255,0.1);
+}
+
+/* ── Options ───────────────────────────────────────────────────────────── */
+.mao-opts { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; font-size: 0.78rem; color: var(--muted); }
+.mao-opts input[type=number] {
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 6px;
+  color: var(--fg);
+  font-size: 0.78rem;
+  padding: 0.15rem 0.35rem;
+  width: 44px;
+  transition: all 0.15s ease;
+}
+.mao-opts input[type=number]:focus {
+  outline: none;
+  border-color: rgba(10,132,255,0.4);
+  box-shadow: 0 0 0 2px rgba(10,132,255,0.1);
+}
+.mao-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  color: var(--fg);
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  font-weight: 600;
+}
+.mao-pill:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.15); }
+.mao-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 300;
+  background: #1a1a2e;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 8px;
+  padding: 4px;
+  min-width: 190px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  backdrop-filter: blur(12px);
+}
+.mao-mopt {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: 5px 9px;
+  border-radius: 5px;
+  cursor: pointer;
+  background: none;
+  border: none;
+  width: 100%;
+  text-align: left;
+  color: var(--fg);
+  transition: background 0.1s ease;
+}
+.mao-mopt:hover, .mao-mopt.sel { background: rgba(10,132,255,0.1); }
+.mao-mopt-n { font-size: 0.8rem; font-weight: 600; }
+.mao-mopt-d { font-size: 0.7rem; color: var(--muted); margin-top: 1px; }
+.mao-mbtn {
+  padding: 0.18rem 0.6rem;
+  border: 1px solid rgba(255,255,255,0.08);
+  cursor: pointer;
+  background: rgba(255,255,255,0.03);
+  color: var(--muted);
+  font-size: 0.76rem;
+  transition: all 0.15s ease;
+  font-weight: 600;
+}
+.mao-mbtn:first-of-type { border-radius: 6px 0 0 6px; }
+.mao-mbtn:last-of-type { border-left: none; border-radius: 0 6px 6px 0; }
+.mao-mbtn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+.mao-mbtn:hover:not(.active) { background: rgba(255,255,255,0.06); color: var(--fg); }
+
+/* ── Supervisor Bar ────────────────────────────────────────────────────── */
+.mao-supbar {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.9rem;
+  background: rgba(10,132,255,0.04);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  font-size: 0.78rem;
+  color: var(--muted);
+  min-height: 26px;
+  overflow: hidden;
+}
+.mao-sup-lbl {
+  font-weight: 700;
+  color: var(--accent);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+#mao-sup-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+#mao-prog {
+  white-space: nowrap;
+  flex-shrink: 0;
+  color: var(--ok);
+  font-size: 0.73rem;
+  font-weight: 600;
+  display: none;
+}
+.mao-elapsed {
+  font-size: 0.72rem;
+  color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  padding: 0.1rem 0.4rem;
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 4px;
+  white-space: nowrap;
+  transition: all 0.2s ease;
+  font-weight: 600;
+  background: rgba(255,255,255,0.03);
+}
+.mao-elapsed.running {
+  color: var(--accent);
+  border-color: rgba(10,132,255,0.3);
+  background: rgba(10,132,255,0.08);
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+/* ── Trace / Recovery Bars ─────────────────────────────────────────────── */
+.mao-tracebar {
+  grid-column: 2 / 4;
+  display: none;
+  align-items: center;
+  gap: 0.45rem;
+  flex-wrap: wrap;
+  padding: 0.4rem 0.9rem;
+  background: rgba(10,132,255,0.07);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  font-size: 0.76rem;
+  color: var(--muted);
+}
+.mao-tracebar strong { color: var(--accent); }
+.mao-tracebar a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.22rem 0.55rem;
+  border-radius: 7px;
+  text-decoration: none;
+  border: 1px solid rgba(255,255,255,0.08);
+  color: var(--fg);
+  background: rgba(255,255,255,0.03);
+  transition: all 0.15s ease;
+}
+.mao-tracebar a:hover { border-color: var(--accent); color: var(--accent); background: rgba(10,132,255,0.05); }
+
+/* ── Right Panel Header ────────────────────────────────────────────────── */
+.mao-rbar {
+  grid-column: 3;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.65rem;
+  background: rgba(255,255,255,0.02);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  border-left: 1px solid rgba(255,255,255,0.06);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.mao-rbar .btn-sm {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 4px;
+  padding: 0.15rem 0.4rem;
+  font-size: 0.7rem;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.mao-rbar .btn-sm:hover {
+  background: rgba(10,132,255,0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ── Pane Grid ─────────────────────────────────────────────────────────── */
+.mao-grid {
+  grid-column: 2;
+  grid-row: 4;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 0;
+  overflow: hidden;
+  height: 100%;
+}
+
+/* ── Right Panel ───────────────────────────────────────────────────────── */
+.mao-right {
+  grid-column: 3;
+  grid-row: 4;
+  border-left: 1px solid rgba(255,255,255,0.06);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.01) 100%);
+  backdrop-filter: blur(8px);
+}
+.mao-rtabs {
+  display: flex;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  flex-shrink: 0;
+  background: rgba(255,255,255,0.02);
+}
+.mao-rtab {
+  flex: 1;
+  padding: 0.35rem 0;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  font-size: 0.78rem;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.15s ease;
+}
+.mao-rtab:hover { color: var(--fg); }
+.mao-rtab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.mao-rpanel {
+  display: none;
+  flex: 1;
+  overflow: hidden;
+  flex-direction: column;
+}
+.mao-rpanel.active { display: flex; }
+
+/* ── File Tree ─────────────────────────────────────────────────────────── */
+.mao-ftree {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.2rem 0;
+}
+.mao-fitem {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.22rem 0.65rem;
+  font-size: 0.78rem;
+  cursor: pointer;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.1s ease;
+  margin: 0 0.2rem;
+  border-radius: 0;
+}
+.mao-fitem:hover { background: rgba(255,255,255,0.04); }
+.mao-fitem.dir { color: var(--warn); cursor: default; }
+.mao-fitem .fdel {
+  display: none;
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 0.68rem;
+  cursor: pointer;
+  padding: 0 2px;
+  flex-shrink: 0;
+  border-radius: 3px;
+  transition: all 0.1s ease;
+}
+.mao-fitem:hover .fdel { display: inline; }
+.mao-fitem .fdel:hover { color: var(--fail); background: rgba(255,69,58,0.1); }
+.mao-fempty {
+  color: var(--muted);
+  font-size: 0.8rem;
+  padding: 1rem 0.65rem;
+  text-align: center;
+  opacity: 0.6;
+}
+
+/* ── Preview ───────────────────────────────────────────────────────────── */
+.mao-preview-tb {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.6rem;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  font-size: 0.76rem;
+  flex-shrink: 0;
+}
+.mao-preview-url {
+  flex: 1;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 4px;
+  padding: 0.15rem 0.45rem;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-family: monospace;
+}
+#mao-preview-iframe {
+  flex: 1;
+  border: none;
+  background: #fff;
+  width: 100%;
+}
+
+/* ── Shell ─────────────────────────────────────────────────────────────── */
+.mao-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #0d1117;
+  font-family: ui-monospace, SFMono-Regular, Menlo, 'Courier New', monospace;
+  font-size: 0.78rem;
+}
+.mao-shell-out {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.4rem 0.6rem;
+  color: #e0e0e0;
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+.mao-shell-out .sh-cmd { color: #7ee787; }
+.mao-shell-out .sh-err { color: #f85149; }
+.mao-shell-out .sh-info { color: #79c0ff; font-style: italic; }
+.mao-shell-out .sh-exit { color: #8b949e; font-size: 0.68rem; }
+.mao-shell-row {
+  display: flex;
+  align-items: center;
+  border-top: 1px solid #30363d;
+  background: #161b22;
+  flex-shrink: 0;
+}
+.mao-shell-row .sh-p {
+  color: #7ee787;
+  padding: 0.3rem 0 0.3rem 0.6rem;
+  font-size: 0.78rem;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.mao-shell-row input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: #e0e0e0;
+  font-family: inherit;
+  font-size: 0.78rem;
+  padding: 0.3rem 0.4rem;
+}
+.mao-shell-row input::placeholder { color: #484f58; }
+.mao-shell-tb {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.18rem 0.6rem;
+  background: #161b22;
+  border-bottom: 1px solid #30363d;
+  flex-shrink: 0;
+}
+.mao-shell-tb .stb {
+  background: rgba(255,255,255,0.06);
+  border: 1px solid #30363d;
+  color: #8b949e;
+  border-radius: 3px;
+  font-size: 0.68rem;
+  padding: 0.12rem 0.45rem;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.mao-shell-tb .stb:hover { background: rgba(255,255,255,0.12); color: #e0e0e0; border-color: #484f58; }
+.mao-shell-cwd {
+  color: #8b949e;
+  font-size: 0.68rem;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Panes ─────────────────────────────────────────────────────────────── */
+.ma-pane {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid rgba(255,255,255,0.06);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  overflow: hidden;
+  min-height: 0;
+  background: var(--bg);
+  animation: fadeIn 0.2s ease;
+}
+.ma-pane:last-child { border-right: none; }
+.ma-pane[data-role=builder]>.ph { border-left: 3px solid var(--accent); }
+.ma-pane[data-role=executor]>.ph { border-left: 3px solid var(--warn); }
+.ma-pane[data-role=tester]>.ph { border-left: 3px solid var(--ok); }
+.ma-pane[data-role=debugger]>.ph { border-left: 3px solid #ff6b6b; }
+.ma-pane[data-role=ui]>.ph { border-left: 3px solid #c084fc; }
+.ma-pane[data-role=reporter]>.ph { border-left: 3px solid #38bdf8; }
+.ph {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.28rem 0.55rem;
+  background: rgba(255,255,255,0.02);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  font-size: 0.76rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.ph-ctrl {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 0.68rem;
+  cursor: pointer;
+  padding: 0 2px;
+  border-radius: 3px;
+  transition: all 0.1s ease;
+}
+.ph-ctrl:hover { color: var(--fg); background: rgba(255,255,255,0.06); }
+.p-status {
+  margin-left: auto;
+  padding: 0.08rem 0.38rem;
+  border-radius: 10px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  background: rgba(255,255,255,0.03);
+  color: var(--muted);
+  transition: all 0.2s ease;
+}
+.p-status.running {
+  background: rgba(10,132,255,0.15);
+  color: var(--accent);
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+.p-status.done { background: rgba(48,209,88,0.15); color: var(--ok); }
+.p-status.error { background: rgba(255,69,58,0.15); color: var(--fail); }
+.p-prog { height: 2px; background: rgba(255,255,255,0.06); flex-shrink: 0; }
+.p-bar {
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}
+.p-bar.done { background: var(--ok); width: 100% !important; }
+.p-bar.error { background: var(--fail); width: 100% !important; }
+.p-assign {
+  padding: 0.25rem 0.6rem;
+  background: rgba(10,132,255,0.04);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  font-size: 0.7rem;
+  color: var(--muted);
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 0;
+}
+.p-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.45rem 0.6rem;
+  font-size: 0.76rem;
+  font-family: 'Courier New', monospace;
+  line-height: 1.5;
+  min-height: 0;
+  scroll-behavior: smooth;
+}
+.p-inject {
+  display: none;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 7px;
+  border-top: 1px solid rgba(255,255,255,0.06);
+  flex-shrink: 0;
+}
+.p-inject.active { display: flex; }
+.p-inject-inp {
+  flex: 1;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: 4px;
+  color: var(--fg);
+  font-size: 0.7rem;
+  padding: 2px 5px;
+  transition: all 0.15s ease;
+}
+.p-inject-inp:focus {
+  outline: none;
+  border-color: rgba(10,132,255,0.4);
+  box-shadow: 0 0 0 2px rgba(10,132,255,0.1);
+}
+.p-inject-btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  padding: 2px 7px;
+  font-size: 0.72rem;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.15s ease;
+}
+.p-inject-btn:hover { filter: brightness(1.15); }
+.ma-pane.collapsed .p-body,
+.ma-pane.collapsed .p-assign,
+.ma-pane.collapsed .p-prog,
+.ma-pane.collapsed .p-inject { display: none !important; }
+
+/* ── Pane Entries ──────────────────────────────────────────────────────── */
+.pe { margin-bottom: 0.25rem; word-break: break-word; animation: fadeIn 0.15s ease; }
+.pe-thinking { color: var(--fg); }
+.pe-tool { color: var(--accent); }
+.pe-obs { color: var(--muted); font-size: 0.72rem; }
+.pe-obs pre {
+  margin: 0;
+  padding: 0.2rem 0.35rem;
+  background: rgba(255,255,255,0.03);
+  border-radius: 4px;
+  white-space: pre-wrap;
+  font-size: 0.69rem;
+  border: 1px solid rgba(255,255,255,0.04);
+}
+.pe-file { color: var(--warn); }
+.pe-done { color: var(--ok); font-weight: 600; }
+.pe-error { color: var(--fail); }
+.obs-tog {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 0.68rem;
+  cursor: pointer;
+  padding: 1px 0;
+  display: block;
+  transition: opacity 0.1s ease;
+}
+.obs-tog:hover { opacity: 0.8; }
+.sb {
+  display: inline-block;
+  background: rgba(255,255,255,0.03);
+  color: var(--muted);
+  border-radius: 3px;
+  padding: 0 0.28rem;
+  font-size: 0.64rem;
+  margin-right: 0.25rem;
+  font-family: monospace;
+  border: 1px solid rgba(255,255,255,0.06);
+}
+
+/* ── Empty Placeholder ─────────────────────────────────────────────────── */
+.mao-empty {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2.5rem;
+  color: var(--muted);
+  font-size: 0.88rem;
+  gap: 0.4rem;
+}
+
+/* ── Summary Bar ───────────────────────────────────────────────────────── */
+.mao-sumbar {
+  display: none;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(48,209,88,0.06);
+  border-top: 2px solid var(--ok);
+  padding: 0.45rem 1.2rem;
+  font-size: 0.8rem;
+  color: var(--ok);
+  z-index: 100;
+  align-items: center;
+  gap: 0.6rem;
+  backdrop-filter: blur(8px);
+}
+.mao-sumbar.show { display: flex; animation: slideUp 0.3s ease; }
+@keyframes slideUp {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+.mao-sumbar a { color: var(--accent); text-decoration: none; font-weight: 600; }
+.mao-sumbar a:hover { text-decoration: underline; }
+
+/* ── Modal ─────────────────────────────────────────────────────────────── */
+.mao-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.7);
+  z-index: 400;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(4px);
+}
+.mao-overlay.open { display: flex; animation: fadeIn 0.2s ease; }
+.mao-modal {
+  background: #1a1a2e;
+  border: 1px solid rgba(255,255,255,0.1);
+  border-radius: 12px;
+  width: min(88vw, 680px);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-shadow: 0 16px 64px rgba(0,0,0,0.5);
+  animation: modalSlideIn 0.2s ease;
+}
+@keyframes modalSlideIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+.mao-mhdr {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0.95rem;
+  border-bottom: 1px solid rgba(255,255,255,0.08);
+  font-size: 0.85rem;
+  font-weight: 600;
+  background: rgba(255,255,255,0.02);
+}
+.mao-mbody {
+  flex: 1;
+  overflow: auto;
+  padding: 0.85rem;
+}
+.mao-mbody pre {
+  margin: 0;
+  background: rgba(0,0,0,0.3);
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: 6px;
+  padding: 0.85rem;
+  font-size: 0.79rem;
+  max-height: 55vh;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.6;
+}
+.mao-sm-modal { width: min(88vw, 380px); }
+.mao-td { position: relative; display: inline-block; }
+
+/* ── Animations ────────────────────────────────────────────────────────── */
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.55; }
+}
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(10,132,255,0.2); }
+  50% { box-shadow: 0 0 0 6px rgba(10,132,255,0); }
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Responsive ────────────────────────────────────────────────────────── */
+@media (max-width: 1200px) {
+  .mao { grid-template-columns: 160px 1fr 200px; }
+}
+@media (max-width: 900px) {
+  .mao { grid-template-columns: 1fr; grid-template-rows: auto auto auto 1fr; }
+  .mao-left { display: none; }
+  .mao-right { grid-column: 1; grid-row: 4; max-height: 300px; }
+}
+</style>
+
+<div class="mao" id="mao">
+
+  <!-- LEFT SIDEBAR -->
+  <div class="mao-left">
+    <div class="mao-left-hdr">
+      <span>🕐 Sessions</span>
+      <button class="btn-sm" onclick="loadSessions()" title="Refresh">↺</button>
+    </div>
+    <div class="mao-list" id="sess-list">
+      <div class="mao-meta" style="padding:.5rem .7rem;">No sessions yet</div>
+    </div>
+    <div class="mao-section">📁 Projects</div>
+    <div class="mao-list" id="proj-list" style="max-height:160px;">
+      <div class="mao-meta" style="padding:.4rem .7rem;">—</div>
+    </div>
+    <div style="padding:.5rem .7rem;border-top:1px solid var(--border);flex-shrink:0;display:flex;flex-direction:column;gap:.3rem;">
+      <button class="btn-sm" id="btn-new-proj" style="width:100%;text-align:left;">📁+ New Project</button>
+      <label class="btn-sm" style="width:100%;text-align:left;cursor:pointer;">
+        📎 Upload File <input type="file" id="upload-input" style="display:none" multiple>
+      </label>
+    </div>
+  </div>
+
+  <!-- TOP BAR (center+right) -->
+  <div class="mao-topbar">
+    <div style="display:flex;align-items:center;gap:.4rem;flex-shrink:0;">
+      <span style="font-size:1.3rem;">🤖</span>
+      <h2>Multi-Agento</h2>
+      <span style="font-size:.72rem;color:var(--muted);">C11b · session-scoped</span>
+    </div>
+    <textarea id="mao-task" class="mao-task" rows="1"
+      placeholder="Describe the task for the agent team… (Enter to launch)">{% if task %}{{ task }}{% endif %}</textarea>
+    <div style="display:flex;gap:.35rem;align-items:center;flex-wrap:wrap;">
+      <button id="mao-launch" class="mao-launch">🚀 Launch</button>
+      <button id="mao-pause"  class="mao-pause">⏸ Pause</button>
+      <button id="mao-stop"   class="mao-stop">⏹ Stop</button>
+    </div>
+    <!-- Role chips -->
+    <div class="mao-chips" id="role-chips">
+      <span style="font-size:.72rem;color:var(--muted);">Roles:</span>
+      {% for role_id, info in ma_roles.items() %}{% if role_id != 'supervisor' %}
+      <span class="mao-chip {% if role_id in ['builder','executor','tester'] %}active{% endif %}" data-role="{{ role_id }}">{{ info.emoji }} {{ info.label }}</span>
+      {% endif %}{% endfor %}
+    </div>
+    <!-- Options -->
+    <div class="mao-opts">
+      <div class="mao-td" id="think-dd">
+        <button type="button" class="mao-pill" id="think-pill" aria-haspopup="true" aria-expanded="false">
+          <span id="think-lbl">Auto</span>
+          <svg width="8" height="5" viewBox="0 0 10 6" fill="none"><path d="M1 1l4 4 4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="mao-menu" id="think-menu" hidden>
+          <button class="mao-mopt" data-mode="auto"><span class="mao-mopt-n">Auto</span><span class="mao-mopt-d">Decides how long to think</span></button>
+          <button class="mao-mopt" data-mode="quick"><span class="mao-mopt-n">Quick</span><span class="mao-mopt-d">Faster, less reasoning</span></button>
+          <button class="mao-mopt" data-mode="deep"><span class="mao-mopt-n">Deep Think</span><span class="mao-mopt-d">Extended thinking budget</span></button>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;gap:0;">
+        <button type="button" class="mao-mbtn active" data-wm="work">Work</button>
+        <button type="button" class="mao-mbtn"        data-wm="web">Web</button>
+      </div>
+      <label>Steps:<input type="number" id="mao-steps" value="8" min="2" max="12" style="width:42px;margin-left:3px;"></label>
+      <select id="mao-agent-select" title="Testing agent (C2b Aider or C6b KiloCode)" style="font-size:.75rem;background:var(--surface);color:var(--fg);border:1px solid var(--border);border-radius:6px;padding:3px 8px;cursor:pointer;">
+        <option value="c6-kilocode" selected>C6b KiloCode</option>
+        <option value="c2-aider">C2b Aider</option>
+      </select>
+      <button class="btn-sm" id="btn-sessions-history" style="white-space:nowrap;">📋 History</button>
+    </div>
+  </div>
+
+  <div class="mao-tracebar" id="mao-tracebar"></div>
+  <div class="mao-tracebar" id="mao-recoverybar"></div>
+
+  <!-- SUPERVISOR BAR -->
+  <div class="mao-supbar">
+    <span class="mao-sup-lbl">🧭 Supervisor</span>
+    <span id="mao-sup-text">Ready — enter a task and launch.</span>
+    <span id="mao-prog"></span>
+  <span id="mao-elapsed" class="mao-elapsed" style="display:none">0s</span>
+  </div>
+
+  <!-- RIGHT SIDEBAR HEADER (same grid row as supbar) -->
+  <div class="mao-rbar">
+    <span style="flex:1;">📁 Workspace</span>
+    <button class="btn-sm" id="btn-new-proj2" title="New project">📁+</button>
+    <button class="btn-sm" id="btn-refresh-files" title="Refresh">↺</button>
+    <button class="btn-sm" id="btn-reset-ws" title="Reset workspace" style="color:var(--fail);" onclick="resetWorkspace()">🗑</button>
+  </div>
+
+  <!-- PANE GRID -->
+  <div class="mao-grid" id="pane-grid">
+    <div class="mao-empty" id="pane-empty">
+      <span style="font-size:2.2rem;">🤖</span>
+      <span>Agent panes appear here when you launch a task.</span>
+      <span style="font-size:.76rem;">Builder · Executor · Tester run in parallel.</span>
+    </div>
+  </div>
+
+  <!-- RIGHT PANEL -->
+  <div class="mao-right">
+    <div class="mao-rtabs">
+      <button class="mao-rtab active" data-tab="files">📁 Files</button>
+      <button class="mao-rtab" data-tab="shell">🐧 Shell</button>
+      <button class="mao-rtab"        data-tab="preview">🌐 Preview</button>
+    </div>
+    <!-- Files tab -->
+    <div class="mao-rpanel active" id="rpanel-files">
+      <div class="mao-ftree" id="mao-ftree">
+        <div class="mao-fempty" id="mao-fempty">Empty workspace</div>
+      </div>
+    </div>
+    <!-- Preview tab -->
+    <div class="mao-rpanel" id="rpanel-preview">
+      <div class="mao-preview-tb">
+        <input class="mao-preview-url" id="mao-purl" placeholder="port…" style="width:54px;">
+        <button class="btn-sm" id="btn-pload">Load</button>
+        <button class="btn-sm" id="btn-preload">↺</button>
+      </div>
+      <div id="mao-preview-ph" style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;background:var(--bg);color:var(--muted);gap:.5rem;padding:1rem;text-align:center;font-size:.83rem;">
+        <span style="font-size:2rem;">🌐</span>
+        <span>Enter port and click Load to preview a running web server.</span>
+      </div>
+      <iframe id="mao-preview-iframe" style="flex:1;border:none;background:var(--fg);width:100%;display:none;"></iframe>
+    </div>
+    <!-- Linux Shell panel (C11b sandbox) -->
+    <div class="mao-rpanel" id="rpanel-shell">
+      <div class="mao-shell">
+        <div class="mao-shell-tb">
+          <span style="color:#56d364;font-size:.74rem;font-weight:600;">🐧 C11b Sandbox Shell</span>
+          <span class="mao-shell-cwd" id="mao-shell-cwd">/workspace</span>
+          <button class="stb" id="mao-shell-clear">Clear</button>
+          <button class="stb" id="mao-shell-ls">ls</button>
+          <button class="stb" id="mao-shell-pwd">pwd</button>
+        </div>
+        <div class="mao-shell-out" id="mao-shell-out">
+<span class="sh-info">C11b multi-agent sandbox shell. Session-scoped workspace.</span>
+<span class="sh-info">Commands run here share the workspace with running agents.</span>
+
+</div>
+        <div class="mao-shell-row">
+          <span class="sh-p">workspace $&nbsp;</span>
+          <input id="mao-shell-input" type="text" placeholder="Type a command… (Enter to run)" autocomplete="off" spellcheck="false">
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div><!-- end .mao -->
+
+<!-- SUMMARY BAR -->
+<div class="mao-sumbar" id="mao-sumbar">
+  <span>✅</span>
+  <span id="mao-sum-text"></span>
+  <a href="/multi-Agento" onclick="location.reload();return false;">New task</a>
+  <button onclick="document.getElementById('mao-sumbar').classList.remove('show')" style="background:none;border:none;color:var(--muted);cursor:pointer;margin-left:auto;">✕</button>
+</div>
+
+<!-- FILE PREVIEW MODAL -->
+<div class="mao-overlay" id="file-overlay">
+  <div class="mao-modal">
+    <div class="mao-mhdr">
+      <span id="file-title" style="font-family:monospace;"></span>
+      <button onclick="closeModal('file-overlay')" style="background:none;border:none;color:var(--muted);cursor:pointer;font-size:1rem;">✕</button>
+    </div>
+    <div class="mao-mbody"><pre id="file-content"></pre></div>
+  </div>
+</div>
+
+<!-- NEW PROJECT MODAL -->
+<div class="mao-overlay" id="proj-overlay">
+  <div class="mao-modal mao-sm-modal">
+    <div class="mao-mhdr">
+      <span>📁 New Project</span>
+      <button onclick="closeModal('proj-overlay')" style="background:none;border:none;color:var(--muted);cursor:pointer;">✕</button>
+    </div>
+    <div class="mao-mbody" style="display:flex;flex-direction:column;gap:.55rem;">
+      <label style="font-size:.8rem;color:var(--muted);font-weight:600;">Project name</label>
+      <input id="proj-name" type="text" placeholder="my-project" autocomplete="off"
+        style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:.45rem .7rem;color:var(--fg);font-size:.88rem;outline:none;">
+      <label style="font-size:.8rem;color:var(--muted);font-weight:600;">Description (optional)</label>
+      <input id="proj-desc" type="text" placeholder="What is this project for?"
+        style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:.4rem .7rem;color:var(--fg);font-size:.8rem;outline:none;">
+      <div id="proj-err" style="color:var(--fail);font-size:.76rem;display:none;padding:.3rem .45rem;background:var(--surface2);border-radius:4px;"></div>
+      <button id="btn-create-proj" style="background:var(--accent);color:var(--bg);border:none;border-radius:6px;padding:.5rem 1rem;cursor:pointer;font-size:.85rem;font-weight:600;">✅ Create Project</button>
+    </div>
+  </div>
+</div>
+
+<!-- SESSIONS MODAL -->
+<div class="mao-overlay" id="sess-overlay">
+  <div class="mao-modal" style="max-width:540px;">
+    <div class="mao-mhdr">
+      <span>📋 Past Sessions</span>
+      <button onclick="closeModal('sess-overlay')" style="background:none;border:none;color:var(--muted);cursor:pointer;">✕</button>
+    </div>
+    <div class="mao-mbody" id="sess-modal-list" style="font-size:.8rem;color:var(--muted);">Loading…</div>
+  </div>
+</div>
+
+<script>
+(function(){
+'use strict';
+var _src=null,_run=false,_panes={},_sid='',_pdone=0,_ptotal=0,_pstart={},_ptimers={},_files=[],_maxSteps=8,_wm='work',_paused=false,_think=localStorage.getItem('maoThink')||'auto';
+var STREAM_SETTLE_MS=20000,_PROMPT_GAP_MS=25000,_LONG_STREAM_GRACE_MS=180000,_lastActivityAt=0,_lastPromptAt=0,_cooldownUntil=0,_cooldownTimer=null;
+var _resumeRequested=false;
+var taskLaunch={{ task_launch | tojson }};
+
+// DOM
+var taskEl=document.getElementById('mao-task');
+var launchBtn=document.getElementById('mao-launch');
+var pauseBtn=document.getElementById('mao-pause');
+var stopBtn=document.getElementById('mao-stop');
+var paneGrid=document.getElementById('pane-grid');
+var paneEmpty=document.getElementById('pane-empty');
+var supText=document.getElementById('mao-sup-text');
+var progEl=document.getElementById('mao-prog');
+var sumBar=document.getElementById('mao-sumbar');
+var sumText=document.getElementById('mao-sum-text');
+var ftree=document.getElementById('mao-ftree');
+var traceBar=document.getElementById('mao-tracebar');
+var recoveryBar=document.getElementById('mao-recoverybar');
+
+// URL param pre-fill
+(function(){var t=taskLaunch.task||new URLSearchParams(location.search).get('task');if(t&&!taskEl.value)taskEl.value=t;})();
+
+function renderTraceBar(){
+  var taskId=taskLaunch.task_id||'';
+  var runId=taskLaunch.task_run_id||'';
+  var source=taskLaunch.source||'';
+  var hasContext=!!(taskId||runId||source||_sid);
+  if(!traceBar)return;
+  if(!hasContext){traceBar.style.display='none';traceBar.innerHTML='';return;}
+  var links=[];
+  if(taskId){
+    links.push('<a href="/tasked?task_id='+encodeURIComponent(taskId)+'">Open Tasked</a>');
+    links.push('<a href="/piplinetask?task_id='+encodeURIComponent(taskId)+'">Open Pipeline</a>');
+  }
+  if(source==='tasked')links.push('<a href="/alerts">Open Alerts</a>');
+  traceBar.style.display='flex';
+  traceBar.innerHTML='<strong>Tasked launch context</strong>'
+    +'<span>Task ID: '+esc(taskId||'—')+'</span>'
+    +'<span>Run ID: '+esc(runId||'—')+'</span>'
+    +'<span>Source: '+esc(source||'manual')+'</span>'
+    +'<span>Session: '+esc(_sid||(_resumeRequested?'resume-pending':'new'))+'</span>'
+    +(links.length?links.join(''):'');
+}
+
+function maoTransientError(text){
+  var v=String(text||'').toLowerCase();
+  return ['timeout','timed out','readtimeout','connecttimeout','connection','network','disconnected','server disconnected','broken pipe'].some(function(token){return v.indexOf(token)>=0;});
+}
+
+function maoRecoveryOwner(){
+  return _sid||taskLaunch.task_run_id||taskLaunch.task_id||'multi-agento-page';
+}
+
+function reportRecovery(status, extra){
+  return fetch('/api/session-manager/report',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({
+      scope:'page',
+      page:'multi-agento',
+      owner_id:maoRecoveryOwner(),
+      external_session_id:_sid||'',
+      task_id:taskLaunch.task_id||'',
+      run_id:taskLaunch.task_run_id||'',
+      upstream:'c1',
+      operation:'multi-agento-stream',
+      status:status,
+      last_error:(extra&&extra.error)||'',
+      state:extra||{}
+    })
+  }).catch(function(){});
+}
+
+function loadRecoveryBar(){
+  if(!recoveryBar)return;
+  var ownerId=maoRecoveryOwner();
+  if(!ownerId){recoveryBar.style.display='none';recoveryBar.innerHTML='';return;}
+  fetch('/api/session-manager?page=multi-agento&owner_id='+encodeURIComponent(ownerId)+'&limit=1',{cache:'no-store'})
+    .then(function(r){return r.json();})
+    .then(function(data){
+      var session=(data.items||[])[0];
+      if(!session){recoveryBar.style.display='none';recoveryBar.innerHTML='';return;}
+      recoveryBar.style.display='flex';
+      recoveryBar.innerHTML='<strong>Session manager</strong>'
+        +'<span>Status: '+esc(session.status||'steady')+'</span>'
+        +'<span>Upstream: '+esc(session.upstream||'—')+'</span>'
+        +'<span>Operation: '+esc(session.operation||'—')+'</span>'
+        +'<span>Retries: '+esc(session.retry_count||0)+'</span>'
+        +'<span>Next retry: '+esc(session.next_retry_at||'—')+'</span>'
+        +'<span>'+esc(session.last_error||'No recovery error recorded.')+'</span>'
+        +(((session.status||'')==='waiting-retry')?'<button type="button" class="mao-mini" id="mao-recovery-resume-btn">Resume recovery</button>':'');
+      var resumeBtn=document.getElementById('mao-recovery-resume-btn');
+      if(resumeBtn){
+        resumeBtn.addEventListener('click',function(){
+          resumeBtn.disabled=true;
+          resumeBtn.textContent='Resuming…';
+          fetch('/api/session-manager/'+encodeURIComponent(session.id)+'/resume',{method:'POST'})
+            .then(function(){return loadRecoveryBar();})
+            .then(function(){if(!_run&&taskEl.value.trim()){_resumeRequested=true;launch();}})
+            .catch(function(){
+              resumeBtn.disabled=false;
+              resumeBtn.textContent='Resume recovery';
+            });
+        });
+      }
+    }).catch(function(){});
+}
+
+function markRunActivity(){_lastActivityAt=Date.now();}
+function applyRunAvailability(){
+  if(_cooldownTimer){clearTimeout(_cooldownTimer);_cooldownTimer=null;}
+  if(_run){launchBtn.disabled=true;return;}
+  var waitMs=Math.max(0,_cooldownUntil-Date.now());
+  if(waitMs>0){
+    var secs=Math.ceil(waitMs/1000);
+    launchBtn.disabled=true;
+    launchBtn.textContent='Wait '+secs+'s';
+    _cooldownTimer=setTimeout(applyRunAvailability,Math.min(1000,waitMs));
+    return;
+  }
+  launchBtn.disabled=false;
+  launchBtn.textContent='▶ Launch';
+}
+function canStartRun(){
+  if(_run)return false;
+  if(Date.now()<_cooldownUntil){
+    supText.textContent='⏳ Working on the response... Please wait. Cooldown is still active before the next run.';
+    applyRunAvailability();
+    return false;
+  }
+  return true;
+}
+
+// Role chips
+document.querySelectorAll('.mao-chip').forEach(function(c){c.addEventListener('click',function(){c.classList.toggle('active');});});
+function activeRoles(){return Array.from(document.querySelectorAll('.mao-chip.active')).map(function(c){return c.dataset.role;});}
+
+// Thinking mode
+var THINKLABELS={auto:'Auto',quick:'Quick',deep:'Deep Think'};
+function applyThink(m){_think=m;document.getElementById('think-lbl').textContent=THINKLABELS[m]||'Auto';localStorage.setItem('maoThink',m);document.querySelectorAll('.mao-mopt').forEach(function(b){b.classList.toggle('sel',b.dataset.mode===m);});document.getElementById('think-menu').hidden=true;}
+applyThink(_think);
+document.getElementById('think-pill').addEventListener('click',function(e){e.stopPropagation();var m=document.getElementById('think-menu');m.hidden=!m.hidden;});
+document.querySelectorAll('.mao-mopt').forEach(function(b){b.addEventListener('click',function(){applyThink(b.dataset.mode);});});
+document.addEventListener('click',function(){document.getElementById('think-menu').hidden=true;});
+
+// Work/Web mode
+document.querySelectorAll('.mao-mbtn').forEach(function(b){b.addEventListener('click',function(){_wm=b.dataset.wm;document.querySelectorAll('.mao-mbtn').forEach(function(x){x.classList.toggle('active',x.dataset.wm===_wm);});});});
+
+// Right tabs
+document.querySelectorAll('.mao-rtab').forEach(function(t){t.addEventListener('click',function(){document.querySelectorAll('.mao-rtab').forEach(function(x){x.classList.remove('active');});document.querySelectorAll('.mao-rpanel').forEach(function(x){x.classList.remove('active');});t.classList.add('active');document.getElementById('rpanel-'+t.dataset.tab).classList.add('active');if(t.dataset.tab==='shell')document.getElementById('mao-shell-input').focus();});});
+
+// Task textarea — Enter to launch
+taskEl.addEventListener('keydown',function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();if(!_run)launch();}});
+
+// Elapsed helpers
+function fmt(ms){var s=Math.floor(ms/1000);return s<60?s+'s':Math.floor(s/60)+'m '+(s%60)+'s';}
+var _taskStart=null,_taskTimer=null,_elBadge=document.getElementById('mao-elapsed');
+function startTaskElapsed(){
+  _taskStart=Date.now();
+  if(_elBadge){_elBadge.style.display='';_elBadge.className='mao-elapsed running';_elBadge.textContent='0s';}
+  if(_taskTimer)clearInterval(_taskTimer);
+  _taskTimer=setInterval(function(){if(_elBadge&&_taskStart)_elBadge.textContent=fmt(Date.now()-_taskStart);},1000);
+}
+function stopTaskElapsed(){
+  if(_taskTimer){clearInterval(_taskTimer);_taskTimer=null;}
+  if(_elBadge&&_taskStart){_elBadge.textContent=fmt(Date.now()-_taskStart);_elBadge.className='mao-elapsed';}
+}
+
+function startTimer(pid){_pstart[pid]=Date.now();var p=_panes[pid];if(!p)return;_ptimers[pid]=setInterval(function(){if(p.el_el)p.el_el.textContent=fmt(Date.now()-_pstart[pid]);},1000);}
+function stopTimer(pid){if(_ptimers[pid]){clearInterval(_ptimers[pid]);delete _ptimers[pid];}}
+function clearTimers(){Object.keys(_ptimers).forEach(function(id){clearInterval(_ptimers[id]);});_ptimers={};}
+
+// Create pane
+function createPane(pid,role,label,emoji,assignment){
+  if(_panes[pid])return;
+  if(paneEmpty)paneEmpty.style.display='none';
+  var pane=document.createElement('div');pane.className='ma-pane';pane.id='pane-'+pid;pane.setAttribute('data-role',role);
+  var header=document.createElement('div');header.className='ph';
+  function mkBtn(txt,title,fn){var b=document.createElement('button');b.className='ph-ctrl';b.textContent=txt;b.title=title;b.onclick=fn;return b;}
+  var colBtn=mkBtn('▼','Collapse',function(){var c=pane.classList.toggle('collapsed');colBtn.textContent=c?'▶':'▼';});
+  var expBtn=mkBtn('⤢','Focus/expand',function(){pane.classList.toggle('mao-focused');});
+  var expBtn2=mkBtn('⬇','Export log',function(){exportPane(pid,role);});
+  var emojiEl=document.createElement('span');emojiEl.textContent=emoji;emojiEl.style.fontSize='.9rem';
+  var lblEl=document.createElement('span');lblEl.style.fontWeight='600';lblEl.textContent=label;
+  var stepEl=document.createElement('span');stepEl.style.cssText='font-size:.66rem;color:var(--muted);';stepEl.textContent='step 0';
+  var elEl=document.createElement('span');elEl.style.cssText='font-size:.64rem;color:var(--muted);font-family:monospace;';elEl.textContent='0s';
+  var statEl=document.createElement('span');statEl.className='p-status running';statEl.textContent='running';
+  [colBtn,expBtn,expBtn2,emojiEl,lblEl,stepEl,elEl,statEl].forEach(function(x){header.appendChild(x);});
+  var prog=document.createElement('div');prog.className='p-prog';
+  var bar=document.createElement('div');bar.className='p-bar';prog.appendChild(bar);
+  var asgn=document.createElement('div');asgn.className='p-assign';asgn.textContent=assignment||'';
+  var body=document.createElement('div');body.className='p-body';
+  var inj=document.createElement('div');inj.className='p-inject';
+  var injInp=document.createElement('input');injInp.className='p-inject-inp';injInp.placeholder='Inject message…';
+  var injBtn=document.createElement('button');injBtn.className='p-inject-btn';injBtn.textContent='→';
+  injBtn.onclick=function(){var msg=injInp.value.trim();if(!msg||!_sid)return;fetch('/api/ma/inject/'+_sid+'/'+pid,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:msg})}).then(function(){injInp.value='';});};
+  injInp.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();injBtn.click();}});
+  inj.appendChild(injInp);inj.appendChild(injBtn);
+  pane.appendChild(header);pane.appendChild(prog);pane.appendChild(asgn);pane.appendChild(body);pane.appendChild(inj);
+  paneGrid.appendChild(pane);
+  _panes[pid]={el:pane,body:body,stat:statEl,step:stepEl,el_el:elEl,bar:bar,inj:inj};
+  startTimer(pid);
+}
+
+// Append to pane
+function appendPane(pid,cls,html){
+  var p=_panes[pid];if(!p)return;
+  var d=document.createElement('div');d.className='pe pe-'+cls;d.innerHTML=html;
+  p.body.appendChild(d);p.body.scrollTop=p.body.scrollHeight;
+}
+function setStep(pid,step){var p=_panes[pid];if(!p)return;p.step.textContent='step '+step;if(p.bar)p.bar.style.width=Math.min(Math.round(step/_maxSteps*95),95)+'%';}
+function setPaneStatus(pid,status){var p=_panes[pid];if(!p)return;p.stat.className='p-status '+status;p.stat.textContent=status;if(p.bar){p.bar.className='p-bar '+(status==='done'||status==='error'?status:'');}if(status==='done'||status==='error'){stopTimer(pid);p.inj.classList.remove('active');}}
+
+// Export pane
+function exportPane(pid,role){var p=_panes[pid];if(!p)return;var txt=p.body.innerText;var a=document.createElement('a');a.href='data:text/plain,'+encodeURIComponent(txt);a.download=role+'-log.txt';a.click();}
+
+// Escape HTML
+function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+// SSE handler
+function handleEvent(type,data){
+  markRunActivity();
+  if(type==='session'){_sid=data.session_id;_resumeRequested=false;refreshFiles();loadSessions();renderTraceBar();reportRecovery('running',{session_id:_sid||'',connected:true});loadRecoveryBar();return;}
+  if(type==='supervisor'){supText.textContent=data.text||'';return;}
+  if(type==='pane_init'){
+    createPane(data.pane_id,data.role,data.label||data.role,{'builder':'🔨','executor':'⚡','tester':'🧪','debugger':'🐛','ui':'🎨','reporter':'📊'}[data.role]||'🤖',data.assignment||'');
+    _ptotal++;return;
+  }
+  var pid=data.pane_id;
+  if(type==='pane_thinking'){setStep(pid,data.step);appendPane(pid,'thinking','<span class="sb">step '+esc(data.step)+'</span>'+esc(data.text||''));}
+  else if(type==='pane_tool'){appendPane(pid,'tool','<span class="sb">'+esc(data.type)+'</span>'+esc(data.content||''));}
+  else if(type==='pane_obs'){
+    var ec=data.exit_code;var txt=data.stdout||'';var ok=ec==null||ec===0;
+    var short=txt.length>200?txt.slice(0,200)+'…':txt;
+    var full=txt.length>200;
+    var html='<div class="pe-obs'+(ok?'':' pe-error')+'">';
+    if(full){html+='<button class="obs-tog" onclick="this.nextElementSibling.hidden=!this.nextElementSibling.hidden;this.textContent=this.textContent===\'▼ Output\'?\'▲ Output\':\'▼ Output\';">▼ Output</button><div hidden><pre>'+esc(txt)+'</pre></div>';}
+    else{html+='<pre>'+esc(txt)+'</pre>';}
+    html+='</div>';
+    appendPane(pid,'obs',html);
+  }
+  else if(type==='pane_file'){appendPane(pid,'file','📄 '+esc(data.path));_files.push(data.path);refreshFiles();}
+  else if(type==='pane_done'){
+    setStep(pid,data.step);appendPane(pid,'done','✅ '+esc(data.summary||'Done'));
+    setPaneStatus(pid,'done');_pdone++;
+    progEl.style.display='';progEl.textContent=_pdone+'/'+_ptotal+' done';
+  }
+  else if(type==='pane_error'){appendPane(pid,'error','❌ '+esc(data.message||'Error'));setPaneStatus(pid,'error');}
+  else if(type==='final'){
+    var _el=_taskStart?(' · ⏱ '+fmt(Date.now()-_taskStart)):'';
+    sumText.textContent=(data.summary||('Files: '+(data.files_created||[]).join(', ')||'Complete'))+_el;
+    sumBar.classList.add('show');
+    setRunning(false);refreshFiles();
+    // Record token usage
+    var _maTok = (data.files_created||[]).length * 500 || 0;
+    fetch('/api/token-usage/record',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({agent_id:'multi-agento',page:'multi-agento',tokens:_maTok,session_id:_sid||'',status:'ok'})
+    }).catch(function(){});
+    reportRecovery('completed',{session_id:_sid||'',summary:data.summary||'',files_created:data.files_created||[]});
+    loadRecoveryBar();
+    loadSessions();
+    renderTraceBar();
+  }
+  else if(type==='error'){supText.textContent='❌ '+esc(data.message||'Error');reportRecovery(maoTransientError(data.message||'')?'waiting-retry':'failed',{error:data.message||'Error',session_id:_sid||''});loadRecoveryBar();setRunning(false);}
+  else if(type==='auth_required'){
+    var _authUrl=data.auth_url||'http://localhost:6080/?resize=scale&autoconnect=true';
+    supText.innerHTML='<span style="color:#f85149">⚠️ Auth required — <a href="'+_authUrl+'" target="_blank" style="color:#58a6ff;text-decoration:underline;">Sign in at localhost:6080</a> then retry.</span>';
+    setRunning(false);
+  }
+  else if(type==='token_estimate'){
+    var _tok=data.tokens||0;
+    if(window.updateGlobalTokens)window.updateGlobalTokens(_tok);
+  }
+}
+
+function setRunning(v){
+  _run=v;
+  pauseBtn.classList.toggle('vis',v);
+  stopBtn.classList.toggle('vis',v);
+  if(v){
+    _lastPromptAt=Date.now();
+    markRunActivity();
+    _cooldownUntil=0;
+    launchBtn.disabled=true;
+    startTaskElapsed();
+  }else{
+    stopTaskElapsed();
+    clearTimers();
+    stopFileInterval();
+    _cooldownUntil=Math.max(_lastPromptAt+_PROMPT_GAP_MS,_lastActivityAt+STREAM_SETTLE_MS);
+    if((Date.now()-_lastPromptAt)>_LONG_STREAM_GRACE_MS){_cooldownUntil=Math.max(_cooldownUntil,Date.now()+1000);}
+    applyRunAvailability();
+  }
+}
+
+// Launch
+function launch(){
+  var task=taskEl.value.trim();if(!task)return;
+  if(!canStartRun())return;
+  _maxSteps=parseInt(document.getElementById('mao-steps').value)||8;
+  var roles=activeRoles().join(',');
+  var requestedSessionId=_resumeRequested?_sid:'';
+  if(_src){try{_src.close();}catch(e){}_src=null;}
+  _panes={};_pdone=0;_ptotal=0;_files=[];_paused=false;
+  if(!_resumeRequested)_sid='';
+  paneGrid.innerHTML='';paneGrid.appendChild(paneEmpty);paneEmpty.style.display='';
+  sumBar.classList.remove('show');progEl.style.display='none';supText.textContent='🧭 Decomposing task…';
+  var agentId=(document.getElementById('mao-agent-select')||{}).value||'c6-kilocode';
+  var params=new URLSearchParams({task:task,roles:roles,max_steps:_maxSteps,chat_mode:_think,work_mode:_wm,agent_id:agentId});
+  if(requestedSessionId)params.set('session_id',requestedSessionId);
+  _src=new EventSource('/api/ma/run?'+params.toString());
+  _src.onmessage=function(e){try{handleEvent('message',JSON.parse(e.data));}catch(ex){}};
+  ['session','supervisor','pane_init','pane_thinking','pane_tool','pane_obs','pane_file','pane_done','pane_error','final','error','auth_required','token_estimate'].forEach(function(ev){
+    _src.addEventListener(ev,function(e){try{handleEvent(ev,JSON.parse(e.data));}catch(ex){}});
+  });
+  _src.onerror=function(){
+    if(!_run)return;
+    var graceUntil=Math.min(_lastPromptAt+_LONG_STREAM_GRACE_MS,_lastActivityAt+STREAM_SETTLE_MS);
+    if(_lastPromptAt&&Date.now()<graceUntil){
+      supText.textContent='⏳ Working on the response... Please wait. Stream reconnect grace is still active.';
+      return;
+    }
+    supText.textContent='⚠️ Stream disconnected. Session is preserved; reopen it from History after C1/C3 recovers.';
+    reportRecovery('waiting-retry',{error:'EventSource disconnected while the team session remained active.',session_id:_sid||''});
+    loadRecoveryBar();
+    setRunning(false);
+  };
+  setRunning(true);startFileInterval();
+  // Add to session list
+  renderTraceBar();
+  loadSessions();
+}
+
+launchBtn.addEventListener('click',launch);
+
+pauseBtn.addEventListener('click',function(){
+  if(!_sid)return;
+  if(_paused){
+    fetch('/api/ma/resume/'+_sid,{method:'POST'}).then(function(){_paused=false;pauseBtn.textContent='⏸ Pause';});
+  }else{
+    fetch('/api/ma/pause/'+_sid,{method:'POST'}).then(function(){_paused=true;pauseBtn.textContent='▶ Resume';});
+  }
+});
+stopBtn.addEventListener('click',function(){if(_src){_src.close();_src=null;}setRunning(false);});
+applyRunAvailability();
+
+// File tree
+var _ftInterval=null;
+function startFileInterval(){_ftInterval=setInterval(function(){if(_run)refreshFiles();},4000);}
+function stopFileInterval(){if(_ftInterval){clearInterval(_ftInterval);_ftInterval=null;}}
+
+function refreshFiles(){
+  var url='/api/ma/files'+(_sid?'?session_id='+encodeURIComponent(_sid):'');
+  fetch(url).then(function(r){return r.json();}).then(function(items){renderFileTree(items);}).catch(function(){});
+}
+
+function renderFileTree(items){
+  if(!items||!items.length){ftree.innerHTML='<div class="mao-fempty" id="mao-fempty">Empty workspace</div>';return;}
+  var html='';
+  // dirs first
+  items.filter(function(x){return x.type==='dir';}).forEach(function(x){
+    html+='<div class="mao-fitem dir">📂 '+esc(x.path)+'<button class="fdel" onclick="delFile(\''+esc(x.path)+'\',event)" title="Delete dir">✕</button></div>';
+  });
+  items.filter(function(x){return x.type==='file';}).forEach(function(x){
+    var icon=x.path.endsWith('.py')?'🐍':x.path.endsWith('.js')?'📜':x.path.endsWith('.html')?'🌐':x.path.endsWith('.md')?'📝':'📄';
+    html+='<div class="mao-fitem" onclick="viewFile(\''+esc(x.path)+'\')">'+icon+' '+esc(x.path)+'<button class="fdel" onclick="delFile(\''+esc(x.path)+'\',event)" title="Delete">✕</button></div>';
+  });
+  ftree.innerHTML=html;
+}
+
+// File view
+function viewFile(path){
+  var url='/api/ma/file?path='+encodeURIComponent(path)+(_sid?'&session_id='+encodeURIComponent(_sid):'');
+  fetch(url).then(function(r){return r.json();}).then(function(d){
+    document.getElementById('file-title').textContent=path;
+    document.getElementById('file-content').textContent=d.content||d.error||'(empty)';
+    openModal('file-overlay');
+  });
+}
+// File delete
+function delFile(path,e){
+  e.stopPropagation();
+  if(!confirm('Delete '+path+'?'))return;
+  var url='/api/ma/file?path='+encodeURIComponent(path)+(_sid?'&session_id='+encodeURIComponent(_sid):'');
+  fetch(url,{method:'DELETE'}).then(function(){refreshFiles();});
+}
+
+// Reset workspace
+function resetWorkspace(){
+  if(!_sid){alert('No active session.');return;}
+  if(!confirm('Reset C11b workspace for this session?'))return;
+  fetch('/api/ma/reset/'+_sid,{method:'POST'}).then(function(){refreshFiles();supText.textContent='Workspace reset.';});
+}
+document.getElementById('btn-refresh-files').addEventListener('click',refreshFiles);
+
+// Web preview
+document.getElementById('btn-pload').addEventListener('click',function(){
+  var port=document.getElementById('mao-purl').value.trim();if(!port)return;
+  var iframe=document.getElementById('mao-preview-iframe');
+  iframe.src='/api/ma/preview?port='+encodeURIComponent(port)+'&path=/';
+  iframe.style.display='';document.getElementById('mao-preview-ph').style.display='none';
+});
+document.getElementById('btn-preload').addEventListener('click',function(){
+  var iframe=document.getElementById('mao-preview-iframe');if(iframe.src&&iframe.src!=='about:blank')iframe.src=iframe.src;
+});
+
+// Sessions
+function loadSessions(){
+  fetch('/api/ma/sessions').then(function(r){return r.json();}).then(function(rows){
+    var sl=document.getElementById('sess-list');
+    if(!rows.length){sl.innerHTML='<div class="mao-meta" style="padding:.4rem .7rem;">No sessions yet</div>';return;}
+    sl.innerHTML=rows.map(function(r){
+      var cls=(r.status==='completed'?'done':r.status==='failed'?'failed':'') + (r.id===_sid?' active':'');
+      return '<div class="mao-item '+cls+'" data-session-id="'+esc(r.id)+'" onclick="resumeSession(\''+esc(r.id)+'\',\''+esc(r.task||'').replace(/'/g,'\\\'')+'\')" title="'+esc(r.task||'')+'">'
+        +'<div style="font-size:.74rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc((r.task||'—').slice(0,50))+'</div>'
+        +'<div class="mao-meta">'+esc(r.status)+' · '+esc((r.created_at||'').slice(0,10))+'</div>'
+        +'</div>';
+    }).join('');
+    // also populate modal
+    var ml=document.getElementById('sess-modal-list');
+    ml.innerHTML=rows.map(function(r){
+      return '<div style="padding:.4rem .5rem;border-bottom:1px solid var(--border);">'
+        +'<strong style="font-size:.8rem;">'+esc((r.task||'—').slice(0,80))+'</strong>'
+        +'<div class="mao-meta">'+esc(r.status)+' · roles: '+esc(r.roles||'')+'</div>'
+        +'<div class="mao-meta">'+esc((r.summary||'').slice(0,100))+'</div>'
+        +'</div>';
+    }).join('');
+  }).catch(function(){});
+}
+loadSessions();
+
+function resumeSession(sid,task){
+  _sid=sid;
+  _resumeRequested=true;
+  taskEl.value=task;
+  supText.textContent='📂 Session loaded — the next launch continues the same C11b session workspace.';
+  document.querySelectorAll('.mao-item[data-session-id]').forEach(function(el){el.classList.toggle('active',el.dataset.sessionId===sid);});
+  renderTraceBar();
+  loadRecoveryBar();
+  refreshFiles();loadProjects();
+}
+
+// Projects
+function loadProjects(){
+  var url='/api/ma/projects'+(_sid?'?session_id='+encodeURIComponent(_sid):'');
+  fetch(url).then(function(r){return r.json();}).then(function(rows){
+    var pl=document.getElementById('proj-list');
+    if(!rows.length){pl.innerHTML='<div class="mao-meta" style="padding:.4rem .7rem;">—</div>';return;}
+    pl.innerHTML=rows.map(function(r){
+      return '<div class="mao-proj-item">📁 '+esc(r.display_name||r.name)
+        +'<button class="mao-proj-del" onclick="delProject(\''+esc(r.name)+'\',event)" title="Delete project">✕</button></div>';
+    }).join('');
+  }).catch(function(){});
+}
+function delProject(name,e){
+  e.stopPropagation();if(!confirm('Delete project '+name+'?'))return;
+  var url='/api/ma/project?name='+encodeURIComponent(name)+(_sid?'&session_id='+encodeURIComponent(_sid):'');
+  fetch(url,{method:'DELETE'}).then(function(){loadProjects();refreshFiles();});
+}
+
+// New project modal
+function openProjModal(){
+  document.getElementById('proj-name').value='';document.getElementById('proj-desc').value='';document.getElementById('proj-err').style.display='none';
+  openModal('proj-overlay');
+}
+document.getElementById('btn-new-proj').addEventListener('click',openProjModal);
+document.getElementById('btn-new-proj2').addEventListener('click',openProjModal);
+document.getElementById('btn-create-proj').addEventListener('click',function(){
+  var name=document.getElementById('proj-name').value.trim();
+  var desc=document.getElementById('proj-desc').value.trim();
+  if(!name){showProjErr('Name required.');return;}
+  fetch('/api/ma/project',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name:name,description:desc,session_id:_sid||''})
+  }).then(function(r){return r.json();}).then(function(d){
+    if(d.ok){closeModal('proj-overlay');loadProjects();refreshFiles();}
+    else{showProjErr(d.error||'Failed');}
+  });
+});
+function showProjErr(msg){var e=document.getElementById('proj-err');e.textContent=msg;e.style.display='';}
+
+// File upload
+document.getElementById('upload-input').addEventListener('change',function(e){
+  var files=e.target.files;if(!files.length)return;
+  Array.from(files).forEach(function(f){
+    var fd=new FormData();fd.append('file',f);
+    var url='/api/ma/upload'+(_sid?'?session_id='+encodeURIComponent(_sid):'');
+    fetch(url,{method:'POST',body:fd}).then(function(){refreshFiles();});
+  });
+  e.target.value='';
+});
+
+// Modal helpers
+function openModal(id){document.getElementById(id).classList.add('open');}
+function closeModal(id){document.getElementById(id).classList.remove('open');}
+document.querySelectorAll('.mao-overlay').forEach(function(ov){
+  ov.addEventListener('click',function(e){if(e.target===ov)ov.classList.remove('open');});
+});
+document.addEventListener('keydown',function(e){if(e.key==='Escape')document.querySelectorAll('.mao-overlay.open').forEach(function(o){o.classList.remove('open');});});
+
+// Sessions modal trigger via "History" btn
+document.getElementById('btn-sessions-history').addEventListener('click',function(){loadSessions();openModal('sess-overlay');});
+
+// ── Interactive Linux Shell (C11b sandbox) ─────────────────────────────────
+(function initMaoShell(){
+  var out=document.getElementById('mao-shell-out');
+  var inp=document.getElementById('mao-shell-input');
+  var cwdEl=document.getElementById('mao-shell-cwd');
+  var clearBtn=document.getElementById('mao-shell-clear');
+  var lsBtn=document.getElementById('mao-shell-ls');
+  var pwdBtn=document.getElementById('mao-shell-pwd');
+  if(!out||!inp)return;
+  var _hist=[],_histIdx=-1,_busy=false;
+
+  function sadd(cls,text){
+    var d=document.createElement('div');
+    d.className=cls;d.textContent=text;
+    out.appendChild(d);out.scrollTop=out.scrollHeight;
+  }
+
+  async function shellRun(cmd){
+    cmd=cmd.trim();if(!cmd||_busy)return;
+    _hist.push(cmd);_histIdx=_hist.length;
+    sadd('sh-cmd','$ '+cmd);
+    _busy=true;inp.disabled=true;inp.placeholder='Running\u2026';
+    try{
+      var r=await fetch('/api/sandbox/exec',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({command:cmd,sandbox:'c11',timeout:60,session_id:_sid||''})
+      });
+      var d=await r.json();
+      var so=(d.stdout||'').replace(/\n$/,'');
+      var se=(d.stderr||'').replace(/\n$/,'');
+      if(so)sadd('',so);
+      if(se)sadd('sh-err',se);
+      if(d.timed_out)sadd('sh-exit','[timed out]');
+      else if(d.exit_code!==0&&d.exit_code!=null)sadd('sh-exit','exit '+d.exit_code);
+      if(/^\s*cd\s/.test(cmd)){
+        var pr=await fetch('/api/sandbox/exec',{
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({command:'pwd',sandbox:'c11',timeout:5,session_id:_sid||''})
+        });
+        var pd=await pr.json();
+        var cwd=(pd.stdout||'').trim();
+        if(cwd&&cwdEl)cwdEl.textContent=cwd;
+      }
+      if(/^(pip|npm|python|cp|mv|rm|mkdir|touch|git|wget|curl)/i.test(cmd))refreshFiles();
+    }catch(e){sadd('sh-err','Error: '+e.message);}
+    _busy=false;inp.disabled=false;
+    inp.placeholder='Type a command\u2026 (Enter to run)';
+    inp.focus();
+  }
+
+  inp.addEventListener('keydown',function(e){
+    if(e.key==='Enter'){
+      e.preventDefault();shellRun(inp.value);inp.value='';
+    }else if(e.key==='ArrowUp'){
+      e.preventDefault();
+      if(_hist.length&&_histIdx>0){_histIdx--;inp.value=_hist[_histIdx];}
+    }else if(e.key==='ArrowDown'){
+      e.preventDefault();
+      if(_histIdx<_hist.length-1){_histIdx++;inp.value=_hist[_histIdx];}
+      else{_histIdx=_hist.length;inp.value='';}
+    }else if(e.key==='l'&&e.ctrlKey){
+      e.preventDefault();out.innerHTML='';
+    }
+  });
+  if(clearBtn)clearBtn.addEventListener('click',function(){out.innerHTML='';sadd('sh-info','Cleared.');});
+  if(lsBtn)lsBtn.addEventListener('click',function(){shellRun('ls -la');});
+  if(pwdBtn)pwdBtn.addEventListener('click',function(){shellRun('pwd');});
+})();
+
+renderTraceBar();
+loadRecoveryBar();
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,45 @@
+# Environment & secrets — NEVER commit real cookies
+.env
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.Python
+env/
+venv/
+.venv/
+pip-wheel-metadata/
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Testing
+tests/puppeteer_novnc/node_modules/
+.pytest_cache/
+.coverage
+htmlcov/
+tests/reports/
+
+# Docker build artifacts
+*.tar
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+
+# Temp files
+*.tmp
+/workspace/

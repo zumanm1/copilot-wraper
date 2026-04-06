@@ -1,0 +1,47 @@
+# ──────────────────────────────────────────────────────────────────────────────
+# C11b: Multi-Agent Sandbox (session-scoped workspace)
+#
+# Cloned from C11 with enhanced session management, similar to C10b pattern.
+# Purpose:
+#   - Multi-agent workspace with session-scoped isolation
+#   - Each session gets its own /workspace/{session_id}/ directory
+#   - Supports concurrent agent runs with isolated workspaces
+#   - Non-root user "sandbox" running in /workspace
+#   - Python 3.11, pip, uv, Node.js 20, npm, git, bash, curl
+#   - FastAPI REST API on port 8200
+#
+# API endpoints: /health /sessions /session/{id}/reset
+#                /exec /file/write /file/read /file/ls /file/delete /workspace/reset
+# ──────────────────────────────────────────────────────────────────────────────
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    bash \
+    curl \
+    git \
+    gcc \
+    g++ \
+    make \
+    ca-certificates \
+    gnupg \
+    && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y --no-install-recommends nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN useradd -m -s /bin/bash sandbox \
+    && mkdir -p /workspace \
+    && chown sandbox:sandbox /workspace
+
+COPY c11b_sandbox/requirements.txt /tmp/c11b_requirements.txt
+RUN pip install --no-cache-dir uv -r /tmp/c11b_requirements.txt
+
+COPY c11b_sandbox/app.py /app/app.py
+RUN chown sandbox:sandbox /app/app.py
+
+USER sandbox
+WORKDIR /workspace
+
+ENV WORKSPACE=/workspace
+
+EXPOSE 8200
+CMD ["uvicorn", "app:app", "--app-dir", "/app", "--host", "0.0.0.0", "--port", "8200"]

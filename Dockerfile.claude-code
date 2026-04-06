@@ -1,0 +1,38 @@
+# ============================================================
+# Container 5 (C5) — Claude Code CLI Terminal
+#
+# Official source: https://www.npmjs.com/package/@anthropic-ai/claude-code
+# Anthropic's official Claude Code CLI, routed through Container 1
+# (copilot-api) via ANTHROPIC_BASE_URL → /v1/messages endpoint.
+#
+# Usage:
+#   docker compose run --rm claude-code-terminal
+#   docker compose run --rm claude-code-terminal bash
+#   docker compose run --rm claude-code-terminal ask "question"
+# ============================================================
+FROM node:20-alpine
+
+RUN apk add --no-cache git curl ca-certificates bash python3 \
+    && npm install -g @anthropic-ai/claude-code 2>&1 | tail -3 \
+    && npm cache clean --force \
+    && git config --global user.email "agent@copilot-wrapper" \
+    && git config --global user.name "Claude Code Agent" \
+    && git config --global init.defaultBranch main \
+    && git config --global core.editor "true"
+
+WORKDIR /workspace
+
+COPY claude-code-terminal/ /claude-code-terminal/
+RUN chmod +x /claude-code-terminal/start.sh
+
+# Pre-seed ~/.claude credentials so Claude Code skips the interactive login
+# prompt when ANTHROPIC_BASE_URL is pointed at a custom server (C1).
+# The apiKeyHelper script echoes the env var key at runtime, bypassing
+# Anthropic's auth validation entirely.
+RUN mkdir -p /root/.claude && \
+    echo '{"claudeAiOauth":{"accessToken":"sk-ant-oat01-placeholder","refreshToken":"sk-ant-ort01-placeholder","expiresAt":9999999999999,"scopes":["user:inference","user:profile"],"subscriptionType":"pro"}}' \
+        > /root/.claude/.credentials.json && \
+    echo '{"apiKeyHelper":"/bin/sh -c \"echo ${ANTHROPIC_API_KEY:-sk-ant-not-needed-xxxxxxxxxxxxx}\"","hasCompletedOnboarding":true,"primaryApiType":"apiKey"}' \
+        > /root/.claude/settings.json
+
+ENTRYPOINT ["/claude-code-terminal/start.sh"]

@@ -1,0 +1,31 @@
+# ============================================================
+# Container 6 (C6) — KiloCode CLI Terminal
+#
+# Official source: https://www.npmjs.com/package/@kilocode/cli
+# Install: npm install -g @kilocode/cli
+#
+# KiloCode CLI terminal agent configured to use Container 1
+# (copilot-api) as the OpenAI-compatible AI backend.
+#
+# Usage:
+#   docker compose run --rm kilocode-terminal
+#   docker compose run --rm kilocode-terminal bash
+#   docker compose run --rm kilocode-terminal kilo
+#   docker compose run --rm kilocode-terminal ask "question"
+# ============================================================
+FROM node:20-alpine
+
+RUN apk add --no-cache git curl ca-certificates bash python3 \
+    && npm install -g @kilocode/cli 2>&1 | tail -3 \
+    && npm cache clean --force \
+    && git config --global user.email "agent@copilot-wrapper" \
+    && git config --global user.name "KiloCode Agent" \
+    && git config --global init.defaultBranch main \
+    && git config --global core.editor "true"
+
+WORKDIR /workspace
+
+COPY kilocode-server/ /kilocode-terminal/
+RUN chmod +x /kilocode-terminal/entrypoint.sh
+
+ENTRYPOINT ["/kilocode-terminal/entrypoint.sh"]

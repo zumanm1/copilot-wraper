@@ -1,0 +1,98 @@
+# ============================================================
+# Container 8 (C8): Hermes Agent Terminal
+#
+# Nous Research Hermes Agent v2026.3.17
+# https://github.com/NousResearch/hermes-agent
+#
+# Hermes is a long-lived personal/operational AI agent with
+# persistent memory, skills, cron scheduling, and MCP support.
+# Configured here to use C1 (copilot-api) as its OpenAI-
+# compatible inference backend via OPENAI_BASE_URL.
+#
+# Usage:
+#   docker compose up hermes-agent -d          # standby mode
+#   docker compose exec C8_hermes-agent hermes # interactive CLI
+#   docker compose run --rm hermes-agent ask "question"
+# ============================================================
+
+FROM python:3.11-slim
+
+# ── System dependencies ───────────────────────────────────────────────────────
+# ripgrep: used by Hermes for fast file search (rg)
+# ffmpeg:  optional (audio/TTS) — included for full feature support
+# curl:    health checks + uv installer
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        git curl ca-certificates \
+        ripgrep \
+        ffmpeg \
+        procps \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── Install uv (Hermes' preferred Python package manager) ────────────────────
+RUN curl -LsSf https://astral.sh/uv/install.sh | sh
+ENV PATH="/root/.local/bin:$PATH"
+
+# ── Clone Hermes at pinned release tag ───────────────────────────────────────
+# --depth 1 saves ~500 MB of git history
+# --recurse-submodules pulls mini-swe-agent (terminal tool backend)
+# Submodule tinker-atropos (RL training) is excluded — not needed for CLI use
+ARG HERMES_TAG=v2026.3.17
+RUN git clone --depth 1 --branch "${HERMES_TAG}" \
+        --recurse-submodules \
+        --shallow-submodules \
+        https://github.com/NousResearch/hermes-agent.git \
+        /opt/hermes
+
+# ── Create Python virtual environment with Python 3.11 ───────────────────────
+WORKDIR /opt/hermes
+RUN uv venv venv --python 3.11
+ENV VIRTUAL_ENV=/opt/hermes/venv
+
+# ── Install Hermes core + selected extras ────────────────────────────────────
+# Extras included:  cli (setup wizard TUI), mcp (MCP protocol), pty (PTY terminal),
+#                   cron (scheduled tasks)
+# Extras excluded:  messaging (needs bot tokens), voice (needs audio hardware),
+#                   tts-premium (ElevenLabs key), modal/daytona (cloud sandboxes),
+#                   homeassistant (HASS token), slack (Slack bot token)
+RUN uv pip install -e ".[cli,mcp,pty,cron]"
+
+# ── Install mini-swe-agent (terminal tool execution backend) ─────────────────
+RUN uv pip install -e "./mini-swe-agent" || \
+    echo "[C8] mini-swe-agent install skipped (optional)"
+
+# ── Make hermes available globally ───────────────────────────────────────────
+RUN ln -sf /opt/hermes/venv/bin/hermes /usr/local/bin/hermes
+
+# ── Git global config (required by Hermes memory + skills) ───────────────────
+RUN git config --global user.email "agent@copilot-wrapper" && \
+    git config --global user.name "Hermes Agent" && \
+    git config --global init.defaultBranch main && \
+    git config --global core.editor "true"
+
+# ── Create Hermes config directory tree ──────────────────────────────────────
+RUN mkdir -p /root/.hermes/{cron,sessions,logs,memories,skills,pairing,hooks,image_cache,audio_cache}
+
+# ── Copy launcher + pre-seeded config ────────────────────────────────────────
+COPY hermes-agent/ /hermes-agent/
+RUN chmod +x /hermes-agent/start.sh \
+    && cp /hermes-agent/hermes-config.yaml /root/.hermes/config.yaml \
+    && touch /root/.hermes/.env
+
+# ── Post-install cleanup to reduce image size ────────────────────────────────
+RUN find /opt/hermes/venv -name "*.pyc" -delete && \
+    find /opt/hermes/venv -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+
+WORKDIR /workspace
+
+# ── Default environment (overridden by docker-compose) ───────────────────────
+# HERMES_INFERENCE_PROVIDER=openai: forces OpenAI-compat path, skips OpenRouter/Nous
+# OPENAI_BASE_URL: routes all inference through C1 (copilot-api)
+ENV OPENAI_BASE_URL=http://app:8000/v1
+ENV OPENAI_API_KEY=not-needed
+ENV HERMES_INFERENCE_PROVIDER=openai
+ENV LLM_MODEL=copilot
+ENV HERMES_HOME=/root/.hermes
+ENV TERMINAL_ENV=local
+ENV DO_NOT_TRACK=1
+
+ENTRYPOINT ["/hermes-agent/start.sh"]
