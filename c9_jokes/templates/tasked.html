@@ -88,6 +88,14 @@
 .tasked-row-btn.done-btn{border-color:#30d15855;color:#30d158}.tasked-row-btn.done-btn:hover{background:#30d15822}
 .tasked-row-btn.del-btn{border-color:#ff453a33;color:#ff6b6b}.tasked-row-btn.del-btn:hover{background:#ff453a22;border-color:#ff453a}
 .tasked-sys-badge{font-size:.68rem;color:#ffa000;opacity:.75;margin-left:.3rem;border:1px solid #ffa00044;border-radius:4px;padding:0 .3rem}
+/* ── Live run timing (elapsed + start time + progress) ───────── */
+.tasked-timing-cell{display:flex;flex-direction:column;gap:.18rem}
+.tasked-elapsed{font-size:.84rem;font-weight:600;color:#0a84ff;font-variant-numeric:tabular-nums}
+.tasked-start-time{font-size:.72rem;color:var(--muted);line-height:1.3}
+.tasked-progress-wrap{margin-top:.25rem;height:4px;background:rgba(10,132,255,.12);border-radius:2px;overflow:hidden;width:100%;min-width:80px}
+.tasked-progress-bar{height:100%;background:#0a84ff;border-radius:2px;transition:width .4s ease}
+@keyframes tasked-indeterminate{0%{left:-40%;width:40%}60%{left:60%;width:40%}100%{left:100%;width:40%}}
+.tasked-progress-bar.indeterminate{position:relative;animation:tasked-indeterminate 1.6s ease-in-out infinite;width:40%!important}
 .tasked-workflow-diagram{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;padding:.85rem;background:#0d0d0d;border:1px solid var(--border,#333);border-radius:14px;margin-bottom:.8rem;overflow-x:auto}
 .tasked-workflow-node{display:flex;flex-direction:column;align-items:center;gap:.35rem;min-width:90px;padding:.6rem .7rem;background:#151515;border:1px solid var(--border,#333);border-radius:12px;position:relative;transition:all .2s ease}
 .tasked-workflow-node:hover{border-color:var(--accent,#0a84ff);background:#1a1a2e;transform:translateY(-2px);box-shadow:0 4px 12px rgba(10,132,255,.15)}
@@ -664,6 +672,7 @@ Alert config example:
 
   function esc(v){ return String(v == null ? '' : v).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
   function fmtTs(ts){ if(!ts) return '—'; try { return new Date(ts).toLocaleString(); } catch(_) { return ts; } }
+  function fmtTsShort(ts){ if(!ts) return ''; try { var d=new Date(ts); return d.toLocaleDateString([],{month:'short',day:'numeric'})+' '+d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); } catch(_){ return ''; } }
   function fmtDuration(ms){
     if (ms == null || ms === '') return '—';
     var total = Math.max(0, Math.floor(ms / 1000));
@@ -1199,9 +1208,23 @@ Alert config example:
     var isRunning = status === 'running' || !!latestRun.is_running;
     var isTerminal = status === 'completed' || status === 'failed' || status === 'cancelled';
     var sys = isSystemTask(t);
-    var durationHtml = latestRun.is_running
-      ? '<span data-live-start="' + esc(latestRun.started_at || latestRun.created_at || '') + '" class="pulse-live">' + esc(latestRun.duration_label || '0s') + '</span>'
-      : esc(latestRun.duration_label || '—');
+    var durationHtml;
+    if (latestRun.is_running) {
+      var startIso = esc(latestRun.started_at || latestRun.created_at || '');
+      var startFmt = (latestRun.started_at || latestRun.created_at) ? fmtTsShort(latestRun.started_at || latestRun.created_at) : '';
+      durationHtml =
+        '<div class="tasked-timing-cell">' +
+          '<span data-live-start="' + startIso + '" class="tasked-elapsed pulse-live">' + esc(latestRun.duration_label || '0s') + '</span>' +
+          (startFmt ? '<div class="tasked-start-time">Started ' + esc(startFmt) + '</div>' : '') +
+          '<div class="tasked-progress-wrap"><div class="tasked-progress-bar indeterminate"></div></div>' +
+        '</div>';
+    } else {
+      durationHtml =
+        '<div class="tasked-timing-cell">' +
+          '<span>' + esc(latestRun.duration_label || '—') + '</span>' +
+          (latestRun.started_at ? '<div class="tasked-start-time">' + esc(fmtTsShort(latestRun.started_at)) + '</div>' : '') +
+        '</div>';
+    }
     var typePill = t.tasked_type_label ? '<span class="tasked-pill" title="Output type">' + esc(t.tasked_type_label) + '</span> ' : '';
     var previewUrl = t.preview_url || ('/tasked-preview?task_id=' + esc(t.id || ''));
     var statusBadge = '<span class="status-badge ' + esc(status) + '">' + esc(t.lifecycle_label || t.last_status || 'idle') + '</span>';

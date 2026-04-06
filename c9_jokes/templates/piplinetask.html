@@ -83,6 +83,15 @@
 .pipeline-live-indicator{display:inline-flex;align-items:center;gap:.4rem;padding:.3rem .65rem;background:#111;border:1px solid #0a84ff44;border-radius:999px;font-size:.73rem;color:#0a84ff}
 .pipeline-live-indicator::before{content:'';width:8px;height:8px;border-radius:50%;background:#0a84ff;animation:pulse-glow 1.5s ease-in-out infinite}
 @keyframes fade-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+/* ── Live timing / progress ───────────────────────────────────── */
+.pipeline-timing-row{display:flex;align-items:center;gap:.65rem;flex-wrap:wrap;margin-top:.5rem;padding:.45rem .65rem;background:#0d0d0d;border:1px solid var(--border,#333);border-radius:10px;font-size:.78rem}
+.pipeline-elapsed{font-weight:700;color:#0a84ff;font-variant-numeric:tabular-nums;min-width:3.5rem}
+.pipeline-start-label{color:var(--muted);font-size:.73rem}
+.pipeline-progress-outer{flex:1;min-width:80px;height:6px;background:rgba(255,255,255,.06);border-radius:3px;overflow:hidden}
+.pipeline-progress-inner{height:100%;border-radius:3px;background:linear-gradient(90deg,#0a84ff,#30d158);transition:width .5s ease}
+.pipeline-progress-pct{font-size:.73rem;color:var(--muted);min-width:2.5rem;text-align:right}
+@keyframes pipeline-indeterminate{0%{left:-40%;width:40%}60%{left:60%;width:40%}100%{left:100%;width:40%}}
+.pipeline-progress-inner.indeterminate{position:relative;animation:pipeline-indeterminate 1.6s ease-in-out infinite;width:40%!important}
 .pipeline-item{animation:fade-in .3s ease}
 .pipeline-step,.pipeline-feedback,.pipeline-event{animation:fade-in .2s ease}
 @media (max-width: 980px){
@@ -155,6 +164,8 @@
   var initialRunId  = new URLSearchParams(window.location.search).get('run_id')  || '';
   function esc(v){ return String(v == null ? '' : v).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
   function fmtTs(ts){ if(!ts) return '—'; try { return new Date(ts).toLocaleString(); } catch(_) { return ts; } }
+  function fmtTsShort(ts){ if(!ts) return ''; try { var d=new Date(ts); return d.toLocaleDateString([],{month:'short',day:'numeric'})+' '+d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); } catch(_){ return ''; } }
+  function fmtDuration(ms){ if(ms==null||ms==='') return '—'; var t=Math.max(0,Math.floor(ms/1000)),h=Math.floor(t/3600),m=Math.floor((t%3600)/60),s=t%60; if(h) return h+'h '+m+'m '+s+'s'; if(m) return m+'m '+s+'s'; return s+'s'; }
   function fmtJson(value){ try { return JSON.stringify(value || {}, null, 2); } catch (_) { return String(value || ''); } }
   function targetLabel(id){ return EXECUTOR_TARGET_LABELS[id] || AGENT_TARGET_LABELS[id] || id || '—'; }
 
@@ -287,8 +298,24 @@
     var statusCls = runStatus.toLowerCase().replace(/[^a-z-]/g, '');
     var isRunning = runStatus === 'running';
     var steps = item.steps || [];
+    var stepsTotal = steps.length || summary.steps_total || 0;
+    var stepsDone  = steps.filter(function(s){ return s.status === 'completed' || s.status === 'failed'; }).length;
+    var progressPct = stepsTotal > 0 ? Math.round(stepsDone / stepsTotal * 100) : (isRunning ? 0 : 100);
+    var startIso    = run.started_at || '';
+    var startFmt    = fmtTsShort(startIso);
     var stepFlowHtml = renderStepFlow(steps);
     var timelineHtml = renderTimeline(item);
+
+    /* timing row — elapsed counter (live when running), start time, progress bar */
+    var timingRow = '<div class="pipeline-timing-row">' +
+      (isRunning
+        ? '<span class="pipeline-elapsed" data-live-start="' + esc(startIso) + '">' + esc(run.duration_label || '0s') + '</span>'
+        : '<span class="pipeline-elapsed">' + esc(run.duration_label || summary.latest_run_duration_label || '—') + '</span>') +
+      (startFmt ? '<span class="pipeline-start-label">Started ' + esc(startFmt) + '</span>' : '') +
+      '<div class="pipeline-progress-outer"><div class="pipeline-progress-inner' + (isRunning && progressPct === 0 ? ' indeterminate' : '') + '" style="width:' + progressPct + '%"></div></div>' +
+      '<span class="pipeline-progress-pct">' + progressPct + '%</span>' +
+    '</div>';
+
     return '<article class="pipeline-item">' +
       '<div class="pipeline-item-header">' +
         '<div class="pipeline-item-title">' +
@@ -301,6 +328,7 @@
             '<span class="pipeline-pill">Current step: ' + esc(summary.current_step_id || run.current_step_id || '—') + '</span>' +
             '<span class="pipeline-pill">Terminal: ' + esc(summary.terminal_reason || run.terminal_reason || '—') + '</span>' +
           '</div>' +
+          timingRow +
         '</div>' +
         '<div class="pipeline-actions">' +
           '<a class="pipeline-link" href="' + esc(task.task_url || '/tasked') + '">Open Tasked</a>' +
