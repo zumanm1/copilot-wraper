@@ -9351,6 +9351,9 @@ async def api_sandbox_exec(request: Request):
 
 # ── Container control API ────────────────────────────────────────────────────
 
+# Docker Compose project name (matches name: in docker-compose.yml)
+_COMPOSE_PROJECT = "c3btest-feed"
+
 # CORE — always on; restart allowed but stop/delete/rebuild blocked
 _CORE_CONTAINERS    = {"C1b_copilot-api", "C3b_browser-auth", "C6b_kilocode", "C9b_jokes"}
 # AI AGENTS — start/stop/restart/rebuild/delete on demand
@@ -9359,6 +9362,8 @@ _AGENT_CONTAINERS   = {"C2b_agent-terminal", "C5b_claude-code", "C7ab_openclaw-g
 _SANDBOX_CONTAINERS = {"C10b_sandbox", "C11b_sandbox", "C12b_sandbox"}
 # Combined optional set (all non-core)
 _OPTIONAL_CONTAINERS = _AGENT_CONTAINERS | _SANDBOX_CONTAINERS
+# All known containers in this project
+_ALL_PROJECT_CONTAINERS = _CORE_CONTAINERS | _AGENT_CONTAINERS | _SANDBOX_CONTAINERS
 
 # Map container name → compose service name
 _CONTAINER_SERVICE = {
@@ -9376,23 +9381,37 @@ _CONTAINER_SERVICE = {
     "C12b_sandbox":           "c12b-sandbox",
 }
 
+# docker-compose.yml location (app.py lives in <root>/c9_jokes/)
+import os as _ct_os
+_COMPOSE_DIR  = _ct_os.path.dirname(_ct_os.path.dirname(_ct_os.path.abspath(__file__)))
+_COMPOSE_FILE = _ct_os.path.join(_COMPOSE_DIR, "docker-compose.yml")
+
 
 @app.get("/api/containers", name="api_containers")
 async def api_containers():
-    """Return status of all Docker containers with group and action flags."""
+    """Return status of all containers in the c3btest-feed compose project."""
     import subprocess
     try:
+        # Filter by project label so only c3btest-feed containers are returned
         r = subprocess.run(
-            ["docker", "ps", "-a", "--format", "{{.Names}}\t{{.Status}}\t{{.State}}"],
+            [
+                "docker", "ps", "-a",
+                "--filter", f"label=com.docker.compose.project={_COMPOSE_PROJECT}",
+                "--format", "{{.Names}}\t{{.Status}}\t{{.State}}",
+            ],
             capture_output=True, text=True, timeout=10,
         )
         containers = []
+        seen = set()
         for line in r.stdout.strip().split("\n"):
             if not line.strip():
                 continue
             parts = line.split("\t")
             if len(parts) >= 3:
                 name, status, state = parts[0], parts[1], parts[2]
+                if name in seen:
+                    continue
+                seen.add(name)
                 if name in _CORE_CONTAINERS:
                     group = "core"
                 elif name in _AGENT_CONTAINERS:
@@ -9409,7 +9428,24 @@ async def api_containers():
                     "toggleable": name in _OPTIONAL_CONTAINERS,
                     "core": name in _CORE_CONTAINERS,
                 })
-        return JSONResponse({"ok": True, "containers": containers})
+        # Include known project containers that are not yet created (never started)
+        for name in sorted(_ALL_PROJECT_CONTAINERS):
+            if name not in seen:
+                if name in _CORE_CONTAINERS:
+                    group = "core"
+                elif name in _AGENT_CONTAINERS:
+                    group = "agent"
+                else:
+                    group = "sandbox"
+                containers.append({
+                    "name": name,
+                    "status": "not created",
+                    "state": "absent",
+                    "group": group,
+                    "toggleable": name in _OPTIONAL_CONTAINERS,
+                    "core": name in _CORE_CONTAINERS,
+                })
+        return JSONResponse({"ok": True, "containers": containers, "project": _COMPOSE_PROJECT})
     except Exception as exc:
         return JSONResponse({"ok": False, "error": str(exc), "containers": []})
 
@@ -9429,13 +9465,25 @@ async def api_container_toggle(request: Request):
     action = (body.get("action") or "").strip().lower()
     if action not in ("start", "stop", "restart"):
         return JSONResponse({"ok": False, "error": "action must be start, stop, or restart"}, status_code=400)
-    if action in ("stop",) and name in _CORE_CONTAINERS:
+    if action == "stop" and name in _CORE_CONTAINERS:
         return JSONResponse({"ok": False, "error": f"Cannot stop core container '{name}'"}, status_code=400)
+    if name not in _ALL_PROJECT_CONTAINERS:
+        return JSONResponse({"ok": False, "error": f"Container '{name}' is not part of project {_COMPOSE_PROJECT}"}, status_code=400)
     try:
-        r = subprocess.run(
-            ["docker", action, name],
-            capture_output=True, text=True, timeout=60,
-        )
+        if action == "start":
+            # Use compose up -d so it works whether container is stopped OR absent
+            service = _CONTAINER_SERVICE.get(name)
+            if not service:
+                return JSONResponse({"ok": False, "error": f"No compose service mapping for '{name}'"}, status_code=400)
+            r = subprocess.run(
+                ["docker", "compose", "-f", _COMPOSE_FILE, "up", "-d", service],
+                capture_output=True, text=True, timeout=60, cwd=_COMPOSE_DIR,
+            )
+        else:
+            r = subprocess.run(
+                ["docker", action, name],
+                capture_output=True, text=True, timeout=60,
+            )
         return JSONResponse({
             "ok": r.returncode == 0,
             "name": name,
@@ -9468,12 +9516,8 @@ async def api_container_action(request: Request):
     service = _CONTAINER_SERVICE.get(name)
     if not service:
         return JSONResponse({"ok": False, "error": f"Unknown container '{name}'"}, status_code=400)
-    # Locate docker-compose.yml — walk up from app.py location
-    import os as _os
-    compose_dir = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
-    compose_file = _os.path.join(compose_dir, "docker-compose.yml")
-    if not _os.path.exists(compose_file):
-        return JSONResponse({"ok": False, "error": f"docker-compose.yml not found at {compose_dir}"}, status_code=500)
+    if not _ct_os.path.exists(_COMPOSE_FILE):
+        return JSONResponse({"ok": False, "error": f"docker-compose.yml not found at {_COMPOSE_DIR}"}, status_code=500)
     try:
         if action == "delete":
             r = subprocess.run(
@@ -9489,8 +9533,8 @@ async def api_container_action(request: Request):
         if action == "rebuild":
             # Step 1: build
             rb = subprocess.run(
-                ["docker", "compose", "-f", compose_file, "build", "--no-cache", service],
-                capture_output=True, text=True, timeout=600, cwd=compose_dir,
+                ["docker", "compose", "-f", _COMPOSE_FILE, "build", "--no-cache", service],
+                capture_output=True, text=True, timeout=600, cwd=_COMPOSE_DIR,
             )
             build_out = (rb.stdout + rb.stderr).strip()[-2000:]
             if rb.returncode != 0:
@@ -9498,8 +9542,8 @@ async def api_container_action(request: Request):
                                      "step": "build", "output": build_out})
             # Step 2: up
             ru = subprocess.run(
-                ["docker", "compose", "-f", compose_file, "up", "-d", service],
-                capture_output=True, text=True, timeout=120, cwd=compose_dir,
+                ["docker", "compose", "-f", _COMPOSE_FILE, "up", "-d", service],
+                capture_output=True, text=True, timeout=120, cwd=_COMPOSE_DIR,
             )
             up_out = (ru.stdout + ru.stderr).strip()[-1000:]
             return JSONResponse({
