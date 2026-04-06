@@ -579,7 +579,7 @@ services:
       context: .
       dockerfile: Dockerfile.c11-sandbox
     image: copilot-c11-sandbox:latest
-    container_name: C11_sandbox
+    container_name: C11b_sandbox
     mem_limit: 1g
     cpus: 1.0
     environment:
@@ -601,7 +601,7 @@ services:
       context: .
       dockerfile: Dockerfile.c10-sandbox
     image: copilot-c10-sandbox:latest
-    container_name: C10_sandbox
+    container_name: C10b_sandbox
     mem_limit: 512m
     cpus: 0.5
     # NOTE: In c3btest project this service is REPLACED by C10b_sandbox (c3test override).
