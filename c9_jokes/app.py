@@ -9349,17 +9349,37 @@ async def api_sandbox_exec(request: Request):
     return JSONResponse(result)
 
 
-# ── Container control API (start/stop optional containers) ───────────────────
+# ── Container control API ────────────────────────────────────────────────────
 
-# Containers that can be toggled on/off to save resources
-_OPTIONAL_CONTAINERS = {"C2b_agent-terminal", "C5b_claude-code", "C7ab_openclaw-gateway", "C7bb_openclaw-cli", "C8b_hermes-agent", "C12b_sandbox"}
-# Containers that must stay running
-_CORE_CONTAINERS = {"C1b_copilot-api", "C3b_browser-auth", "C6b_kilocode", "C9b_jokes", "C10b_sandbox", "C11b_sandbox"}
+# CORE — always on; restart allowed but stop/delete/rebuild blocked
+_CORE_CONTAINERS    = {"C1b_copilot-api", "C3b_browser-auth", "C6b_kilocode", "C9b_jokes"}
+# AI AGENTS — start/stop/restart/rebuild/delete on demand
+_AGENT_CONTAINERS   = {"C2b_agent-terminal", "C5b_claude-code", "C7ab_openclaw-gateway", "C7bb_openclaw-cli", "C8b_hermes-agent"}
+# SANDBOX — bring up only when a page needs them
+_SANDBOX_CONTAINERS = {"C10b_sandbox", "C11b_sandbox", "C12b_sandbox"}
+# Combined optional set (all non-core)
+_OPTIONAL_CONTAINERS = _AGENT_CONTAINERS | _SANDBOX_CONTAINERS
+
+# Map container name → compose service name
+_CONTAINER_SERVICE = {
+    "C1b_copilot-api":        "app",
+    "C2b_agent-terminal":     "agent-terminal",
+    "C3b_browser-auth":       "browser-auth",
+    "C5b_claude-code":        "claude-code-terminal",
+    "C6b_kilocode":           "kilocode-terminal",
+    "C7ab_openclaw-gateway":  "openclaw-gateway",
+    "C7bb_openclaw-cli":      "openclaw-cli",
+    "C8b_hermes-agent":       "hermes-agent",
+    "C9b_jokes":              "c9-jokes",
+    "C10b_sandbox":           "c10b-sandbox",
+    "C11b_sandbox":           "c11b-sandbox",
+    "C12b_sandbox":           "c12b-sandbox",
+}
 
 
 @app.get("/api/containers", name="api_containers")
 async def api_containers():
-    """Return status of all Docker containers with toggleable flag."""
+    """Return status of all Docker containers with group and action flags."""
     import subprocess
     try:
         r = subprocess.run(
@@ -9373,10 +9393,19 @@ async def api_containers():
             parts = line.split("\t")
             if len(parts) >= 3:
                 name, status, state = parts[0], parts[1], parts[2]
+                if name in _CORE_CONTAINERS:
+                    group = "core"
+                elif name in _AGENT_CONTAINERS:
+                    group = "agent"
+                elif name in _SANDBOX_CONTAINERS:
+                    group = "sandbox"
+                else:
+                    group = "other"
                 containers.append({
                     "name": name,
                     "status": status,
                     "state": state,
+                    "group": group,
                     "toggleable": name in _OPTIONAL_CONTAINERS,
                     "core": name in _CORE_CONTAINERS,
                 })
@@ -9387,9 +9416,9 @@ async def api_containers():
 
 @app.post("/api/container/toggle", name="api_container_toggle")
 async def api_container_toggle(request: Request):
-    """Start or stop an optional container.
-    Body: {name: str, action: "start"|"stop"}
-    Only works for containers in _OPTIONAL_CONTAINERS.
+    """Start, stop, or restart a container.
+    Body: {name: str, action: "start"|"stop"|"restart"}
+    Core containers cannot be stopped.
     """
     import subprocess
     try:
@@ -9398,20 +9427,110 @@ async def api_container_toggle(request: Request):
         return JSONResponse({"ok": False, "error": "invalid JSON"}, status_code=400)
     name = (body.get("name") or "").strip()
     action = (body.get("action") or "").strip().lower()
-    if name not in _OPTIONAL_CONTAINERS:
-        return JSONResponse({"ok": False, "error": f"Container '{name}' is not toggleable (core container)"}, status_code=400)
-    if action not in ("start", "stop"):
-        return JSONResponse({"ok": False, "error": "action must be 'start' or 'stop'"}, status_code=400)
+    if action not in ("start", "stop", "restart"):
+        return JSONResponse({"ok": False, "error": "action must be start, stop, or restart"}, status_code=400)
+    if action in ("stop",) and name in _CORE_CONTAINERS:
+        return JSONResponse({"ok": False, "error": f"Cannot stop core container '{name}'"}, status_code=400)
     try:
         r = subprocess.run(
             ["docker", action, name],
-            capture_output=True, text=True, timeout=30,
+            capture_output=True, text=True, timeout=60,
         )
         return JSONResponse({
             "ok": r.returncode == 0,
             "name": name,
             "action": action,
             "output": (r.stdout + r.stderr).strip()[:500],
+        })
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)})
+
+
+@app.post("/api/container/action", name="api_container_action")
+async def api_container_action(request: Request):
+    """Extended container actions: rebuild, delete.
+    Body: {name: str, action: "rebuild"|"delete"}
+    Only works for non-core containers.
+    rebuild = docker compose build <service> + docker compose up -d <service>
+    delete  = docker rm -f <name>
+    """
+    import subprocess
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"ok": False, "error": "invalid JSON"}, status_code=400)
+    name   = (body.get("name")   or "").strip()
+    action = (body.get("action") or "").strip().lower()
+    if action not in ("rebuild", "delete"):
+        return JSONResponse({"ok": False, "error": "action must be rebuild or delete"}, status_code=400)
+    if name in _CORE_CONTAINERS:
+        return JSONResponse({"ok": False, "error": f"Cannot {action} core container '{name}'"}, status_code=400)
+    service = _CONTAINER_SERVICE.get(name)
+    if not service:
+        return JSONResponse({"ok": False, "error": f"Unknown container '{name}'"}, status_code=400)
+    # Locate docker-compose.yml — walk up from app.py location
+    import os as _os
+    compose_dir = _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))
+    compose_file = _os.path.join(compose_dir, "docker-compose.yml")
+    if not _os.path.exists(compose_file):
+        return JSONResponse({"ok": False, "error": f"docker-compose.yml not found at {compose_dir}"}, status_code=500)
+    try:
+        if action == "delete":
+            r = subprocess.run(
+                ["docker", "rm", "-f", name],
+                capture_output=True, text=True, timeout=30,
+            )
+            return JSONResponse({
+                "ok": r.returncode == 0,
+                "name": name,
+                "action": action,
+                "output": (r.stdout + r.stderr).strip()[:1000],
+            })
+        if action == "rebuild":
+            # Step 1: build
+            rb = subprocess.run(
+                ["docker", "compose", "-f", compose_file, "build", "--no-cache", service],
+                capture_output=True, text=True, timeout=600, cwd=compose_dir,
+            )
+            build_out = (rb.stdout + rb.stderr).strip()[-2000:]
+            if rb.returncode != 0:
+                return JSONResponse({"ok": False, "name": name, "action": action,
+                                     "step": "build", "output": build_out})
+            # Step 2: up
+            ru = subprocess.run(
+                ["docker", "compose", "-f", compose_file, "up", "-d", service],
+                capture_output=True, text=True, timeout=120, cwd=compose_dir,
+            )
+            up_out = (ru.stdout + ru.stderr).strip()[-1000:]
+            return JSONResponse({
+                "ok": ru.returncode == 0,
+                "name": name,
+                "action": action,
+                "output": build_out[-500:] + "\n---\n" + up_out,
+            })
+    except subprocess.TimeoutExpired:
+        return JSONResponse({"ok": False, "error": "operation timed out"})
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)})
+
+
+@app.get("/api/container/logs", name="api_container_logs")
+async def api_container_logs(name: str = "", lines: int = 40):
+    """Return last N log lines for a container."""
+    import subprocess
+    name = name.strip()
+    if not name:
+        return JSONResponse({"ok": False, "error": "name is required"}, status_code=400)
+    lines = max(5, min(lines, 200))
+    try:
+        r = subprocess.run(
+            ["docker", "logs", "--tail", str(lines), name],
+            capture_output=True, text=True, timeout=10,
+        )
+        return JSONResponse({
+            "ok": True,
+            "name": name,
+            "lines": (r.stdout + r.stderr).strip(),
         })
     except Exception as exc:
         return JSONResponse({"ok": False, "error": str(exc)})

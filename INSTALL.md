@@ -327,25 +327,50 @@ You should see all services listed as `running` or `healthy`. The first full sta
 
 ### 8.1 Lean startup (recommended on low-memory machines)
 
-If your machine has limited RAM or CPU, start only the four core containers. Agent containers (C2b, C5b, C7ab, C7bb, C8b) can be started on demand later.
+The stack is divided into three groups. **CORE is mandatory**. AGENTS and SANDBOX are on-demand.
+
+#### 🔷 CORE — always start these (mandatory)
 
 ```bash
-# Core stack only: C1b (API) + C3b (auth) + C6b (agent) + C9b (console)
+# C1b (API) + C3b (auth) + C6b (agent) + C9b (console)
 docker compose up app browser-auth kilocode-terminal c9-jokes -d
 
-# Add sandbox containers only when needed:
+# Verify all four are healthy
+curl http://localhost:8000/health      # C1b
+curl http://localhost:8001/health      # C3b
+docker exec C6b_kilocode curl -sf http://localhost:8080/health  # C6b
+curl http://localhost:6090/api/status  # C9b
+```
+
+#### 🤖 AI AGENTS — start only when you need them
+
+```bash
+docker compose up agent-terminal -d          # C2b — Aider + OpenCode
+docker compose up claude-code-terminal -d    # C5b — Claude Code
+docker compose up openclaw-gateway openclaw-cli -d  # C7ab + C7bb — OpenClaw
+docker compose up hermes-agent -d            # C8b — Hermes Agent
+
+# Stop all agents to free CPU/memory when not in use:
+docker stop C2b_agent-terminal C5b_claude-code C7ab_openclaw-gateway C7bb_openclaw-cli C8b_hermes-agent
+```
+
+#### 📦 SANDBOX — start only when a page needs it
+
+```bash
 docker compose up c10b-sandbox -d    # C10b — needed for /api/agent/* pages
 docker compose up c11b-sandbox -d    # C11b — needed for /api/multi-Agento/* pages
 docker compose up c12b-sandbox -d    # C12b — needed for Tasked pipeline sandbox
 
-# Stop agents to free CPU/memory when not in use:
-docker stop C2b_agent-terminal C5b_claude-code C7ab_openclaw-gateway C7bb_openclaw-cli C8b_hermes-agent
+# Stop sandboxes when not in use:
+docker stop C10b_sandbox C11b_sandbox C12b_sandbox
 ```
+
+> **Tip:** After the CORE stack is running, open the **Container Manager** panel at `http://localhost:6090/` to start, stop, restart, rebuild, or view logs for any container — no CLI required.
 
 **Minimum viable stack health check:**
 ```bash
-curl http://localhost:8000/health    # C1b
-curl http://localhost:8001/health    # C3b
+curl http://localhost:8000/health      # C1b
+curl http://localhost:8001/health      # C3b
 curl http://localhost:6090/api/status  # C9b
 ```
 

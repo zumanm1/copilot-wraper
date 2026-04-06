@@ -93,107 +93,287 @@
 <p><a href="{{ url_for('api_status') }}">JSON: /api/status</a></p>
 
 <!-- ── Container Resource Manager ─────────────────────────────────────────── -->
-<div style="margin-top:1.5rem;">
+<style>
+.ctm-section{margin-top:1.5rem;}
+.ctm-group{margin-bottom:1.2rem;}
+.ctm-group-header{display:flex;align-items:center;gap:0.6rem;margin-bottom:0.5rem;padding-bottom:0.3rem;border-bottom:1px solid var(--border);}
+.ctm-group-title{font-size:0.9rem;font-weight:700;margin:0;}
+.ctm-group-note{font-size:0.72rem;color:var(--muted);}
+.ctm-cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(310px,1fr));gap:0.55rem;}
+.ctm-card{background:var(--card);border:1px solid var(--border);border-radius:9px;padding:0.7rem 0.9rem;}
+.ctm-card.ctm-running{border-color:rgba(48,209,88,0.4);}
+.ctm-card.ctm-stopped{border-color:rgba(255,59,48,0.25);opacity:0.8;}
+.ctm-card.ctm-core{border-color:rgba(10,132,255,0.35);background:rgba(10,132,255,0.03);}
+.ctm-card.ctm-busy{border-color:rgba(255,159,10,0.5);background:rgba(255,159,10,0.04);}
+.ctm-top{display:flex;align-items:center;gap:0.55rem;margin-bottom:0.45rem;}
+.ctm-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;transition:background 0.3s;}
+.ctm-dot.up{background:var(--ok);}
+.ctm-dot.down{background:var(--fail);}
+.ctm-dot.core{background:var(--accent);}
+.ctm-dot.busy{background:#ff9f0a;animation:led-pulse 0.8s ease-in-out infinite;}
+.ctm-name{font-size:0.83rem;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ctm-state{font-size:0.7rem;color:var(--muted);white-space:nowrap;}
+.ctm-actions{display:flex;flex-wrap:wrap;gap:0.3rem;margin-top:0.35rem;}
+.ctm-btn{background:var(--surface2);border:1px solid var(--border);color:var(--fg);border-radius:5px;font-size:0.7rem;padding:0.18rem 0.55rem;cursor:pointer;white-space:nowrap;transition:border-color 0.15s,color 0.15s;}
+.ctm-btn:hover{border-color:var(--accent);color:var(--accent);}
+.ctm-btn.ctm-btn-danger:hover{border-color:#ff3b30;color:#ff3b30;}
+.ctm-btn.ctm-btn-warn:hover{border-color:#ff9f0a;color:#ff9f0a;}
+.ctm-btn:disabled{opacity:0.4;pointer-events:none;}
+.ctm-progress{margin-top:0.4rem;font-size:0.7rem;color:var(--muted);display:none;}
+.ctm-progress.visible{display:block;}
+.ctm-log{background:var(--surface2);border:1px solid var(--border);border-radius:4px;padding:0.35rem 0.5rem;font-size:0.68rem;font-family:monospace;max-height:120px;overflow-y:auto;white-space:pre-wrap;word-break:break-all;margin-top:0.3rem;display:none;}
+.ctm-log.visible{display:block;}
+.ctm-msg{font-size:0.78rem;margin-top:0.6rem;min-height:1.2em;}
+</style>
+
+<div class="ctm-section">
   <div style="display:flex;align-items:center;gap:0.75rem;margin-bottom:0.75rem;">
     <h3 style="margin:0;font-size:1rem;">🐳 Container Manager</h3>
-    <span style="font-size:0.76rem;color:var(--muted);">Start/stop optional containers to save resources. Core containers (C1, C3, C6, C9, C10, C11) are always protected.</span>
     <button type="button" id="ct-refresh-btn" class="btn-sm" style="margin-left:auto;">↺ Refresh</button>
   </div>
-  <div id="ct-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:0.6rem;">
-    <div style="color:var(--muted);font-size:0.82rem;padding:0.5rem;">Loading containers…</div>
-  </div>
-  <div id="ct-msg" style="font-size:0.78rem;margin-top:0.5rem;min-height:1.2em;"></div>
-</div>
 
-<style>
-.ct-card{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:0.65rem 0.85rem;display:flex;align-items:center;gap:0.6rem;}
-.ct-card.ct-running{border-color:rgba(48,209,88,0.35);}
-.ct-card.ct-stopped{border-color:rgba(255,59,48,0.25);opacity:0.75;}
-.ct-card.ct-core{border-color:rgba(10,132,255,0.3);background:rgba(10,132,255,0.04);}
-.ct-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;}
-.ct-dot.up{background:var(--ok);}
-.ct-dot.down{background:var(--fail);}
-.ct-dot.core{background:var(--accent);}
-.ct-name{font-size:0.82rem;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.ct-status{font-size:0.7rem;color:var(--muted);white-space:nowrap;}
-.ct-toggle{background:var(--surface2);border:1px solid var(--border);color:var(--fg);border-radius:5px;font-size:0.72rem;padding:0.2rem 0.6rem;cursor:pointer;white-space:nowrap;flex-shrink:0;}
-.ct-toggle:hover{border-color:var(--accent);color:var(--accent);}
-.ct-toggle.stopping{opacity:0.5;pointer-events:none;}
-.ct-lock{font-size:0.68rem;color:var(--muted);white-space:nowrap;}
-</style>
+  <!-- CORE group -->
+  <div class="ctm-group" id="ctm-group-core">
+    <div class="ctm-group-header">
+      <span class="ctm-group-title">🔷 CORE</span>
+      <span class="ctm-group-note">C1b · C3b · C6b · C9b — Always on. Restart only.</span>
+    </div>
+    <div class="ctm-cards" id="ctm-cards-core"><div style="color:var(--muted);font-size:0.8rem;">Loading…</div></div>
+  </div>
+
+  <!-- AGENTS group -->
+  <div class="ctm-group" id="ctm-group-agent">
+    <div class="ctm-group-header">
+      <span class="ctm-group-title">🤖 AI AGENTS</span>
+      <span class="ctm-group-note">C2b · C5b · C7ab · C7bb · C8b — Start on demand to save CPU/memory.</span>
+    </div>
+    <div class="ctm-cards" id="ctm-cards-agent"><div style="color:var(--muted);font-size:0.8rem;">Loading…</div></div>
+  </div>
+
+  <!-- SANDBOX group -->
+  <div class="ctm-group" id="ctm-group-sandbox">
+    <div class="ctm-group-header">
+      <span class="ctm-group-title">📦 SANDBOX</span>
+      <span class="ctm-group-note">C10b · C11b · C12b — Bring up only when a page needs it.</span>
+    </div>
+    <div class="ctm-cards" id="ctm-cards-sandbox"><div style="color:var(--muted);font-size:0.8rem;">Loading…</div></div>
+  </div>
+
+  <div class="ctm-msg" id="ctm-msg"></div>
+</div>
 
 <script>
 (function(){
-  var grid = document.getElementById('ct-grid');
-  var msg  = document.getElementById('ct-msg');
+  var msgEl = document.getElementById('ctm-msg');
+  var _polling = {};   // name → intervalId for health polling
 
   function showMsg(text, ok) {
-    msg.textContent = text;
-    msg.style.color = ok ? 'var(--ok)' : 'var(--fail)';
-    setTimeout(function(){ msg.textContent = ''; }, 4000);
+    msgEl.textContent = text;
+    msgEl.style.color = ok ? 'var(--ok)' : 'var(--fail)';
+    clearTimeout(msgEl._t);
+    msgEl._t = setTimeout(function(){ msgEl.textContent = ''; }, 5000);
   }
 
-  function renderContainers(containers) {
-    if (!containers || !containers.length) {
-      grid.innerHTML = '<div style="color:var(--muted);font-size:0.82rem;padding:0.5rem;">No containers found — is Docker accessible from C9?</div>';
+  function ctLabel(name) {
+    var short = name.replace(/^C\d+[a-z]*_/i, '').replace(/_/g, '-');
+    return name.split('_')[0] + ' ' + short;
+  }
+
+  function renderCard(ct) {
+    var running = ct.state === 'running';
+    var isCore  = ct.group === 'core';
+    var cardCls = isCore ? 'ctm-card ctm-core' : (running ? 'ctm-card ctm-running' : 'ctm-card ctm-stopped');
+    var dotCls  = isCore ? 'ctm-dot core' : (running ? 'ctm-dot up' : 'ctm-dot down');
+    var label   = ctLabel(ct.name);
+    var safe    = ct.name.replace(/[^a-zA-Z0-9]/g, '_');
+
+    var actions = '';
+    if (isCore) {
+      actions = '<button class="ctm-btn ctm-btn-warn" data-name="' + ct.name + '" data-action="restart">↺ Restart</button>'
+              + '<span style="font-size:0.68rem;color:var(--muted);margin-left:0.2rem;">🔒 Core</span>';
+    } else {
+      if (!running) actions += '<button class="ctm-btn" data-name="' + ct.name + '" data-action="start">▶ Start</button>';
+      if (running)  actions += '<button class="ctm-btn ctm-btn-danger" data-name="' + ct.name + '" data-action="stop">⏹ Stop</button>';
+      actions += '<button class="ctm-btn ctm-btn-warn" data-name="' + ct.name + '" data-action="restart">↺ Restart</button>';
+      actions += '<button class="ctm-btn" data-name="' + ct.name + '" data-action="rebuild">🔨 Rebuild &amp; Start</button>';
+      actions += '<button class="ctm-btn ctm-btn-danger" data-name="' + ct.name + '" data-action="delete">🗑 Delete</button>';
+      actions += '<button class="ctm-btn" data-name="' + ct.name + '" data-action="logs">📋 Logs</button>';
+    }
+
+    return '<div class="' + cardCls + '" id="ctm-card-' + safe + '">'
+      + '<div class="ctm-top">'
+      + '<span class="' + dotCls + '" id="ctm-dot-' + safe + '"></span>'
+      + '<div style="flex:1;min-width:0;">'
+      + '<div class="ctm-name" title="' + ct.name + '">' + label + '</div>'
+      + '<div class="ctm-state" id="ctm-state-' + safe + '">' + (ct.status || ct.state || '—') + '</div>'
+      + '</div>'
+      + '</div>'
+      + '<div class="ctm-actions">' + actions + '</div>'
+      + '<div class="ctm-progress" id="ctm-prog-' + safe + '"></div>'
+      + '<pre class="ctm-log" id="ctm-log-' + safe + '"></pre>'
+      + '</div>';
+  }
+
+  function renderGroup(groupId, containers) {
+    var el = document.getElementById('ctm-cards-' + groupId);
+    if (!el) return;
+    if (!containers.length) {
+      el.innerHTML = '<div style="color:var(--muted);font-size:0.8rem;padding:0.3rem;">No containers found in this group.</div>';
       return;
     }
-    var html = '';
-    containers.forEach(function(ct) {
-      var running = ct.state === 'running';
-      var cardCls = ct.core ? 'ct-card ct-core' : (running ? 'ct-card ct-running' : 'ct-card ct-stopped');
-      var dotCls  = ct.core ? 'ct-dot core' : (running ? 'ct-dot up' : 'ct-dot down');
-      var shortName = ct.name.replace(/^C\d+[a-z]?_/, '').replace(/_/g, '-');
-      var label = ct.name.split('_')[0] + ' ' + shortName;
-      var actionBtn = '';
-      if (ct.toggleable) {
-        var action = running ? 'stop' : 'start';
-        var btnLabel = running ? '⏹ Stop' : '▶ Start';
-        actionBtn = '<button class="ct-toggle" data-name="' + ct.name + '" data-action="' + action + '">' + btnLabel + '</button>';
+    el.innerHTML = containers.map(renderCard).join('');
+    attachHandlers(el);
+  }
+
+  function startHealthPoll(name, safe) {
+    if (_polling[name]) return;
+    var elapsed = 0;
+    var progEl  = document.getElementById('ctm-prog-' + safe);
+    var dotEl   = document.getElementById('ctm-dot-' + safe);
+    var stateEl = document.getElementById('ctm-state-' + safe);
+    var cardEl  = document.getElementById('ctm-card-' + safe);
+    if (dotEl) { dotEl.className = 'ctm-dot busy'; }
+    _polling[name] = setInterval(function() {
+      elapsed += 2;
+      if (progEl) { progEl.className = 'ctm-progress visible'; progEl.textContent = 'Starting… (' + elapsed + 's)'; }
+      fetch('/api/containers').then(function(r){ return r.json(); }).then(function(d) {
+        var found = (d.containers || []).find(function(c){ return c.name === name; });
+        if (found && found.state === 'running') {
+          clearInterval(_polling[name]);
+          delete _polling[name];
+          if (dotEl)  { dotEl.className = found.group === 'core' ? 'ctm-dot core' : 'ctm-dot up'; }
+          if (stateEl){ stateEl.textContent = found.status || 'running'; }
+          if (progEl) { progEl.textContent = '✓ Running'; progEl.style.color = 'var(--ok)'; }
+          if (cardEl) { cardEl.className = cardEl.className.replace('ctm-stopped','ctm-running').replace('ctm-busy','ctm-running'); }
+          showMsg('✓ ' + name + ' is running', true);
+        }
+        if (elapsed >= 90) {
+          clearInterval(_polling[name]);
+          delete _polling[name];
+          if (progEl) { progEl.textContent = 'Timeout — check logs'; progEl.style.color = 'var(--fail)'; }
+        }
+      });
+    }, 2000);
+  }
+
+  function doToggle(name, action, safe) {
+    var progEl = document.getElementById('ctm-prog-' + safe);
+    var logEl  = document.getElementById('ctm-log-' + safe);
+    if (progEl) { progEl.className = 'ctm-progress visible'; progEl.style.color = 'var(--muted)'; progEl.textContent = action + 'ing…'; }
+    fetch('/api/container/toggle', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({name: name, action: action}),
+    }).then(function(r){ return r.json(); }).then(function(d) {
+      if (d.ok) {
+        if (action === 'start' || action === 'restart') {
+          startHealthPoll(name, safe);
+        } else {
+          if (progEl) { progEl.textContent = '✓ ' + action + 'ped'; progEl.style.color = 'var(--ok)'; }
+          showMsg('✓ ' + name + ' ' + action + 'ped', true);
+          setTimeout(loadContainers, 1500);
+        }
       } else {
-        actionBtn = '<span class="ct-lock" title="Core container — always running">🔒 Core</span>';
+        if (progEl) { progEl.textContent = 'Error: ' + (d.error || 'unknown'); progEl.style.color = 'var(--fail)'; }
+        showMsg('Error: ' + (d.error || 'unknown'), false);
       }
-      html += '<div class="' + cardCls + '">'
-        + '<span class="' + dotCls + '"></span>'
-        + '<div style="flex:1;min-width:0;">'
-        + '<div class="ct-name" title="' + ct.name + '">' + label + '</div>'
-        + '<div class="ct-status">' + (ct.status || ct.state || '—') + '</div>'
-        + '</div>'
-        + actionBtn
-        + '</div>';
+    }).catch(function(e) {
+      if (progEl) { progEl.textContent = 'Request failed'; progEl.style.color = 'var(--fail)'; }
+      showMsg('Request failed: ' + e.message, false);
     });
-    grid.innerHTML = html;
-    // Attach toggle handlers
-    grid.querySelectorAll('.ct-toggle').forEach(function(btn) {
+  }
+
+  function doAction(name, action, safe) {
+    var progEl = document.getElementById('ctm-prog-' + safe);
+    var logEl  = document.getElementById('ctm-log-' + safe);
+    var confirmed = true;
+    if (action === 'delete') {
+      confirmed = confirm('Delete container ' + name + '?\nThis removes the container. The image is kept.');
+    }
+    if (!confirmed) return;
+    if (progEl) { progEl.className = 'ctm-progress visible'; progEl.style.color = 'var(--muted)'; }
+    if (action === 'rebuild') {
+      if (progEl) progEl.textContent = '🔨 Building image… (may take 1–5 min)';
+    } else {
+      if (progEl) progEl.textContent = action + 'ing…';
+    }
+    if (logEl)  { logEl.className = 'ctm-log visible'; logEl.textContent = ''; }
+    fetch('/api/container/action', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({name: name, action: action}),
+    }).then(function(r){ return r.json(); }).then(function(d) {
+      if (logEl && d.output) { logEl.textContent = d.output; logEl.scrollTop = logEl.scrollHeight; }
+      if (d.ok) {
+        if (action === 'rebuild') {
+          if (progEl) progEl.textContent = '🔨 Build done — starting…';
+          startHealthPoll(name, safe);
+        } else {
+          if (progEl) { progEl.textContent = '✓ ' + action + 'd'; progEl.style.color = 'var(--ok)'; }
+          showMsg('✓ ' + name + ' ' + action + 'd', true);
+          setTimeout(loadContainers, 1500);
+        }
+      } else {
+        if (progEl) { progEl.textContent = 'Error: ' + (d.error || d.output || 'unknown'); progEl.style.color = 'var(--fail)'; }
+        showMsg('Error on ' + action + ': ' + (d.error || 'see log'), false);
+      }
+    }).catch(function(e) {
+      if (progEl) { progEl.textContent = 'Request failed'; progEl.style.color = 'var(--fail)'; }
+      showMsg('Request failed: ' + e.message, false);
+    });
+  }
+
+  function doLogs(name, safe) {
+    var logEl = document.getElementById('ctm-log-' + safe);
+    if (!logEl) return;
+    var isOpen = logEl.classList.contains('visible');
+    if (isOpen) { logEl.className = 'ctm-log'; logEl.textContent = ''; return; }
+    logEl.className = 'ctm-log visible';
+    logEl.textContent = 'Loading logs…';
+    fetch('/api/container/logs?name=' + encodeURIComponent(name) + '&lines=50')
+      .then(function(r){ return r.json(); })
+      .then(function(d){ logEl.textContent = d.lines || '(no output)'; logEl.scrollTop = logEl.scrollHeight; })
+      .catch(function(e){ logEl.textContent = 'Error: ' + e.message; });
+  }
+
+  function attachHandlers(root) {
+    root.querySelectorAll('[data-action]').forEach(function(btn) {
       btn.addEventListener('click', function() {
         var name   = btn.dataset.name;
         var action = btn.dataset.action;
-        btn.classList.add('stopping');
-        btn.textContent = action === 'stop' ? 'Stopping…' : 'Starting…';
-        fetch('/api/container/toggle', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({name: name, action: action}),
-        }).then(function(r){ return r.json(); }).then(function(d) {
-          if (d.ok) {
-            showMsg((action === 'stop' ? 'Stopped ' : 'Started ') + name, true);
-          } else {
-            showMsg('Error: ' + (d.error || 'unknown'), false);
-          }
-          loadContainers();
-        }).catch(function(e) {
-          showMsg('Request failed: ' + e.message, false);
-          loadContainers();
-        });
+        var safe   = name.replace(/[^a-zA-Z0-9]/g, '_');
+        // Disable all buttons in this card during operation
+        var card = document.getElementById('ctm-card-' + safe);
+        if (card) card.querySelectorAll('[data-action]').forEach(function(b){ b.disabled = true; });
+        setTimeout(function() {
+          if (card) card.querySelectorAll('[data-action]').forEach(function(b){ b.disabled = false; });
+        }, 3000);
+        if (action === 'logs') { doLogs(name, safe); return; }
+        if (action === 'rebuild' || action === 'delete') { doAction(name, action, safe); }
+        else { doToggle(name, action, safe); }
       });
     });
+  }
+
+  function renderContainers(containers) {
+    var groups = {core:[], agent:[], sandbox:[]};
+    (containers || []).forEach(function(ct) {
+      var g = ct.group || 'other';
+      if (groups[g]) groups[g].push(ct);
+    });
+    renderGroup('core',    groups.core);
+    renderGroup('agent',   groups.agent);
+    renderGroup('sandbox', groups.sandbox);
   }
 
   function loadContainers() {
     fetch('/api/containers').then(function(r){ return r.json(); }).then(function(d) {
       renderContainers(d.containers || []);
     }).catch(function(e) {
-      grid.innerHTML = '<div style="color:var(--fail);font-size:0.82rem;padding:0.5rem;">Failed to load: ' + e.message + '</div>';
+      ['core','agent','sandbox'].forEach(function(g) {
+        var el = document.getElementById('ctm-cards-' + g);
+        if (el) el.innerHTML = '<div style="color:var(--fail);font-size:0.8rem;">Failed to load: ' + e.message + '</div>';
+      });
     });
   }
 
