@@ -106,11 +106,16 @@
 .ctm-card.ctm-core{border-color:rgba(10,132,255,0.35);background:rgba(10,132,255,0.03);}
 .ctm-card.ctm-busy{border-color:rgba(255,159,10,0.5);background:rgba(255,159,10,0.04);}
 .ctm-top{display:flex;align-items:center;gap:0.55rem;margin-bottom:0.45rem;}
-.ctm-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;transition:background 0.3s;}
+.ctm-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;transition:background 0.3s;box-shadow:0 0 0 0 transparent;}
 .ctm-dot.up{background:var(--ok);}
-.ctm-dot.down{background:var(--fail);}
+.ctm-dot.healthy{background:var(--ok);animation:led-pulse-green 2s ease-in-out infinite;}
+.ctm-dot.down{background:var(--fail);animation:led-pulse-red 1.4s ease-in-out infinite;}
+.ctm-dot.absent{background:var(--muted);}
 .ctm-dot.core{background:var(--accent);}
+.ctm-dot.core-up{background:var(--ok);animation:led-pulse-green 2s ease-in-out infinite;}
 .ctm-dot.busy{background:#ff9f0a;animation:led-pulse 0.8s ease-in-out infinite;}
+@keyframes led-pulse-green{0%,100%{box-shadow:0 0 0 0 rgba(48,209,88,0.7);}50%{box-shadow:0 0 0 5px rgba(48,209,88,0);}}
+@keyframes led-pulse-red{0%,100%{box-shadow:0 0 0 0 rgba(255,59,48,0.7);}50%{box-shadow:0 0 0 5px rgba(255,59,48,0);}}
 .ctm-name{font-size:0.83rem;font-weight:600;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 .ctm-state{font-size:0.7rem;color:var(--muted);white-space:nowrap;}
 .ctm-actions{display:flex;flex-wrap:wrap;gap:0.3rem;margin-top:0.35rem;}
@@ -137,6 +142,7 @@
     <div class="ctm-group-header">
       <span class="ctm-group-title">🔷 CORE</span>
       <span class="ctm-group-note">C1b · C3b · C6b · C9b — Always on. Restart only.</span>
+      <span id="ctm-core-led" style="display:inline-flex;align-items:center;gap:0.35rem;margin-left:auto;font-size:0.7rem;color:var(--muted);"><span id="ctm-core-led-dot" class="ctm-dot absent" style="width:8px;height:8px;"></span><span id="ctm-core-led-label">—</span></span>
     </div>
     <div class="ctm-cards" id="ctm-cards-core"><div style="color:var(--muted);font-size:0.8rem;">Loading…</div></div>
   </div>
@@ -146,6 +152,7 @@
     <div class="ctm-group-header">
       <span class="ctm-group-title">🤖 AI AGENTS</span>
       <span class="ctm-group-note">C2b · C5b · C7ab · C7bb · C8b — Start on demand to save CPU/memory.</span>
+      <span id="ctm-agent-led" style="display:inline-flex;align-items:center;gap:0.35rem;margin-left:auto;font-size:0.7rem;color:var(--muted);"><span id="ctm-agent-led-dot" class="ctm-dot absent" style="width:8px;height:8px;"></span><span id="ctm-agent-led-label">—</span></span>
     </div>
     <div class="ctm-cards" id="ctm-cards-agent"><div style="color:var(--muted);font-size:0.8rem;">Loading…</div></div>
   </div>
@@ -155,6 +162,7 @@
     <div class="ctm-group-header">
       <span class="ctm-group-title">📦 SANDBOX</span>
       <span class="ctm-group-note">C10b · C11b · C12b — Bring up only when a page needs it.</span>
+      <span id="ctm-sandbox-led" style="display:inline-flex;align-items:center;gap:0.35rem;margin-left:auto;font-size:0.7rem;color:var(--muted);"><span id="ctm-sandbox-led-dot" class="ctm-dot absent" style="width:8px;height:8px;"></span><span id="ctm-sandbox-led-label">—</span></span>
     </div>
     <div class="ctm-cards" id="ctm-cards-sandbox"><div style="color:var(--muted);font-size:0.8rem;">Loading…</div></div>
   </div>
@@ -179,11 +187,25 @@
     return name.split('_')[0] + ' ' + short;
   }
 
+  function dotClass(ct) {
+    var running = ct.state === 'running';
+    var healthy = running && (ct.status || '').toLowerCase().indexOf('healthy') !== -1;
+    if (ct.group === 'core') {
+      if (healthy)  return 'ctm-dot core-up';
+      if (running)  return 'ctm-dot core-up';
+      return 'ctm-dot down';
+    }
+    if (ct.state === 'absent' || ct.state === 'exited') return 'ctm-dot absent';
+    if (!running) return 'ctm-dot down';
+    if (healthy)  return 'ctm-dot healthy';
+    return 'ctm-dot up';
+  }
+
   function renderCard(ct) {
     var running = ct.state === 'running';
     var isCore  = ct.group === 'core';
     var cardCls = isCore ? 'ctm-card ctm-core' : (running ? 'ctm-card ctm-running' : 'ctm-card ctm-stopped');
-    var dotCls  = isCore ? 'ctm-dot core' : (running ? 'ctm-dot up' : 'ctm-dot down');
+    var dotCls  = dotClass(ct);
     var label   = ctLabel(ct.name);
     var safe    = ct.name.replace(/[^a-zA-Z0-9]/g, '_');
 
@@ -241,7 +263,7 @@
         if (found && found.state === 'running') {
           clearInterval(_polling[name]);
           delete _polling[name];
-          if (dotEl)  { dotEl.className = found.group === 'core' ? 'ctm-dot core' : 'ctm-dot up'; }
+          if (dotEl)  { dotEl.className = dotClass(found); }
           if (stateEl){ stateEl.textContent = found.status || 'running'; }
           if (progEl) { progEl.textContent = '✓ Running'; progEl.style.color = 'var(--ok)'; }
           if (cardEl) { cardEl.className = cardEl.className.replace('ctm-stopped','ctm-running').replace('ctm-busy','ctm-running'); }
@@ -355,6 +377,26 @@
     });
   }
 
+  function updateGroupLed(groupId, containers) {
+    var dotEl   = document.getElementById('ctm-' + groupId + '-led-dot');
+    var labelEl = document.getElementById('ctm-' + groupId + '-led-label');
+    if (!dotEl || !labelEl) return;
+    var total   = containers.length;
+    var running = containers.filter(function(c){ return c.state === 'running'; }).length;
+    var healthy = containers.filter(function(c){ return c.state === 'running' && (c.status||'').toLowerCase().indexOf('healthy') !== -1; }).length;
+    if (total === 0) {
+      dotEl.className = 'ctm-dot absent'; labelEl.textContent = 'none defined'; return;
+    }
+    if (running === 0) {
+      dotEl.className = 'ctm-dot down'; labelEl.textContent = '0/' + total + ' up'; return;
+    }
+    if (healthy === running) {
+      dotEl.className = 'ctm-dot healthy'; labelEl.textContent = healthy + '/' + total + ' healthy';
+    } else {
+      dotEl.className = 'ctm-dot up'; labelEl.textContent = running + '/' + total + ' running';
+    }
+  }
+
   function renderContainers(containers) {
     var groups = {core:[], agent:[], sandbox:[]};
     (containers || []).forEach(function(ct) {
@@ -364,6 +406,9 @@
     renderGroup('core',    groups.core);
     renderGroup('agent',   groups.agent);
     renderGroup('sandbox', groups.sandbox);
+    updateGroupLed('core',    groups.core);
+    updateGroupLed('agent',   groups.agent);
+    updateGroupLed('sandbox', groups.sandbox);
   }
 
   function loadContainers() {
