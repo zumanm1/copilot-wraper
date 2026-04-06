@@ -139,6 +139,7 @@
 
   function esc(v){ return String(v == null ? '' : v).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
   function fmtTs(ts){ if(!ts) return '—'; try { return new Date(ts).toLocaleString(); } catch(_) { return ts; } }
+  function fmtTsShort(ts){ if(!ts) return '—'; try { var d=new Date(ts); return d.toLocaleDateString()+' '+d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); } catch(_){ return ts; } }
   function labelForTarget(id){ return EXECUTOR_TARGET_LABELS[id] || AGENT_TARGET_LABELS[id] || id || '—'; }
   function parseDurationMs(label) {
     if (!label || label === '—') return 0;
@@ -273,6 +274,7 @@
       '<div class="tc-summary">' +
         '<div class="tc-stat"><strong><span class="status-badge ' + esc(statusCls) + '">' + esc(runStatus) + '</span></strong><span>Terminal status</span></div>' +
         '<div class="tc-stat"><strong>' + esc(run.duration_label || '—') + '</strong><span>Duration</span></div>' +
+        '<div class="tc-stat"><strong>' + esc(run.started_at ? fmtTsShort(run.started_at) : '—') + '</strong><span>Start time</span></div>' +
         '<div class="tc-stat"><strong>' + esc(run.current_step_id || '—') + '</strong><span>Final step</span></div>' +
         '<div class="tc-stat"><strong>' + esc(labelForTarget(item.task_executor_target || run.executor_target || '')) + '</strong><span>Executor target</span></div>' +
         '<div class="tc-stat"><strong><span class="alerts-badge ' + esc(alertCls) + '">' + esc(alertStatus) + '</span></strong><span>Latest alert</span></div>' +

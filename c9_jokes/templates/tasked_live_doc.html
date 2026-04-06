@@ -444,10 +444,12 @@ main {
   height: 100%; width: 0%; transition: width 0.4s ease, background-color 0.3s;
   background: var(--accent);
 }
-.tld-live-card.running  .tld-card-progress-bar { width: 60%; animation: tld-progress-pulse 2s ease-in-out infinite; }
-.tld-live-card.completed .tld-card-progress-bar { width: 100%; background: var(--ok); }
-.tld-live-card.failed   .tld-card-progress-bar { width: 100%; background: var(--fail); }
-@keyframes tld-progress-pulse { 0%{width:20%} 50%{width:75%} 100%{width:20%} }
+.tld-live-card.running  .tld-card-progress-bar { animation: none; }
+.tld-live-card.completed .tld-card-progress-bar { width: 100% !important; background: var(--ok); }
+.tld-live-card.failed   .tld-card-progress-bar { width: 100% !important; background: var(--fail); }
+.tld-elapsed-chip{font-size:.7rem;color:#0a84ff;background:rgba(10,132,255,.1);border:1px solid rgba(10,132,255,.25);border-radius:999px;padding:.1rem .4rem;white-space:nowrap}
+.tld-started-chip{font-size:.68rem;color:var(--muted);white-space:nowrap}
+.tld-pct-chip{font-size:.68rem;color:var(--muted);margin-left:.1rem}
 
 /* How-to-use callout */
 .tld-how-to {
@@ -1231,7 +1233,7 @@ main {
     var savedSt  = localStorage.getItem('tld_ss_' + t.trace) || 'idle';
     S[t.trace] = {
       task_id: t.task_id, run_id: savedRid, alert_id: t.alert_id,
-      status: savedSt, output: '', checks: null, selected: false
+      status: savedSt, output: '', checks: null, selected: false, started_at: '', progress_pct: 0
     };
   });
 
@@ -1242,6 +1244,9 @@ main {
   function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
   function post(url,body) { return fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}).then(function(r){return r.json();}); }
   function get(url)       { return fetch(url).then(function(r){return r.json();}); }
+  function fmtTsShort(ts){ if(!ts) return '\u2014'; try { var d=new Date(ts); return d.toLocaleDateString()+' '+d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); } catch(_){ return ts; } }
+  function fmtDuration(ms){ if(ms==null||ms==='') return '\u2014'; var t=Math.max(0,Math.floor(ms/1000)),h=Math.floor(t/3600),m=Math.floor((t%3600)/60),s=t%60; if(h) return h+'h '+m+'m '+s+'s'; if(m) return m+'m '+s+'s'; return s+'s'; }
+  function tickDurations(){ document.querySelectorAll('[data-live-start]').forEach(function(n){ var st=n.getAttribute('data-live-start'); if(!st) return; var ms=Date.now()-new Date(st).getTime(); if(!isNaN(ms)&&ms>=0) n.textContent=fmtDuration(ms); }); }
   var _gstatusTimer = null;
   function gstatus(msg,c) {
     var el=document.getElementById('tld-gstatus'); if(!el) return;
@@ -1340,8 +1345,11 @@ main {
     var rid = esc(s.run_id  || '—');
     var aid = esc(s.alert_id ? String(s.alert_id) : '—');
 
+    var pct = s.progress_pct || 0;
+    var isRunning = s.status === 'running';
+    var startedAt = s.started_at || '';
     el.innerHTML =
-      '<div class="tld-card-progress"><div class="tld-card-progress-bar"></div></div>' +
+      '<div class="tld-card-progress"><div class="tld-card-progress-bar" style="width:' + pct + '%"></div></div>' +
       '<div class="tld-live-card-header" onclick="selectTrace(\'' + t.trace + '\')">' +
         '<div style="width:9px;height:9px;border-radius:50%;background:' + t.typeColor + ';flex-shrink:0;"></div>' +
         '<span class="tld-live-card-title">' + esc(t.trace) + ' &mdash; ' + esc(t.name) + '</span>' +
@@ -1352,6 +1360,9 @@ main {
         '<div class="tld-status-row">' +
           '<div class="tld-dot ' + s.status + '" id="dot-' + t.trace + '"></div>' +
           '<span class="tld-status-lbl ' + s.status + '" id="slbl-' + t.trace + '">' + esc(statusLabel(s.status)) + '</span>' +
+          (isRunning && startedAt ? '<span class="tld-elapsed-chip" data-live-start="' + esc(startedAt) + '">' + fmtDuration(Date.now()-new Date(startedAt).getTime()) + '</span>' : '') +
+          (startedAt ? '<span class="tld-started-chip">' + esc(fmtTsShort(startedAt)) + '</span>' : '') +
+          '<span class="tld-pct-chip">' + pct + '%</span>' +
           '<div class="tld-mini-flow" style="margin-left:auto;">' + stepFlow + '</div>' +
         '</div>' +
         '<div class="tld-chip-row">' +
@@ -1609,6 +1620,8 @@ main {
         var p = (d.pipelines||[])[0]||{}, r = p.run||{};
         if (r.status) S[t.trace].status = r.status;
         if (r.id)     S[t.trace].run_id  = r.id;
+        if (r.started_at) S[t.trace].started_at = r.started_at;
+        S[t.trace].progress_pct = (p.summary && p.summary.progress_pct) || r.progress_pct || 0;
         saveState(t.trace); refreshCard(t.trace);
         if (selectedTrace === t.trace) renderDetail(t.trace);
         done++;
@@ -1658,6 +1671,9 @@ main {
     sel.value = savedAuto;
     if (parseInt(savedAuto,10) > 0) { setAutoRefresh(savedAuto); }
   }
+
+  // Tick elapsed timers every second
+  setInterval(tickDurations, 1000);
 
   // Initial status load
   refreshStatus();

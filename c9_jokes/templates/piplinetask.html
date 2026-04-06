@@ -52,6 +52,9 @@
 .status-badge.launch-pending{color:#bf5af2;border-color:rgba(191,90,242,.3);background:rgba(191,90,242,.08)}
 .status-badge.waiting-feedback{color:#ffa000;border-color:rgba(255,160,0,.3);background:rgba(255,160,0,.08)}
 .status-badge.alert-open{color:#ff453a;border-color:rgba(255,69,58,.3);background:rgba(255,69,58,.08)}
+.pl-progress-wrap{height:5px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;width:80px;display:inline-block;vertical-align:middle;margin-right:.3rem}
+.pl-progress-bar{height:100%;background:#0a84ff;border-radius:3px;transition:width .4s}
+.pl-progress-lbl{font-size:.71rem;color:var(--muted);vertical-align:middle}
 .pipeline-empty{font-size:.82rem;color:var(--muted);padding:.8rem;text-align:center}
 .pipeline-empty-icon{font-size:2.5rem;margin-bottom:.5rem;opacity:.5}
 .pipeline-empty-text{font-size:.88rem}
@@ -155,6 +158,9 @@
   var initialRunId  = new URLSearchParams(window.location.search).get('run_id')  || '';
   function esc(v){ return String(v == null ? '' : v).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
   function fmtTs(ts){ if(!ts) return '—'; try { return new Date(ts).toLocaleString(); } catch(_) { return ts; } }
+  function fmtTsShort(ts){ if(!ts) return '—'; try { var d=new Date(ts); return d.toLocaleDateString()+' '+d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); } catch(_){ return ts; } }
+  function fmtDuration(ms){ if(ms==null||ms==='') return '—'; var t=Math.max(0,Math.floor(ms/1000)),h=Math.floor(t/3600),m=Math.floor((t%3600)/60),s=t%60; if(h) return h+'h '+m+'m '+s+'s'; if(m) return m+'m '+s+'s'; return s+'s'; }
+  function tickDurations(){ document.querySelectorAll('[data-live-start]').forEach(function(n){ var st=n.getAttribute('data-live-start'); if(!st) return; var ms=Date.now()-new Date(st).getTime(); if(!isNaN(ms)&&ms>=0) n.textContent=fmtDuration(ms); }); }
   function fmtJson(value){ try { return JSON.stringify(value || {}, null, 2); } catch (_) { return String(value || ''); } }
   function targetLabel(id){ return EXECUTOR_TARGET_LABELS[id] || AGENT_TARGET_LABELS[id] || id || '—'; }
 
@@ -311,7 +317,9 @@
       '</div>' +
       '<div class="pipeline-summary-grid">' +
         '<div class="pipeline-stat"><strong><span class="status-badge ' + esc(statusCls) + '">' + esc(runStatus) + '</span></strong><span>Run status</span></div>' +
-        '<div class="pipeline-stat"><strong>' + esc(run.duration_label || summary.latest_run_duration_label || '—') + '</strong><span>Duration</span></div>' +
+        '<div class="pipeline-stat"><strong>' + (isRunning ? '<span data-live-start="' + esc(run.started_at || run.created_at || '') + '">' + esc(run.duration_label || summary.latest_run_duration_label || '0s') + '</span>' : esc(run.duration_label || summary.latest_run_duration_label || '—')) + '</strong><span>Duration</span></div>' +
+        '<div class="pipeline-stat"><strong>' + esc(fmtTsShort(run.started_at || '')) + '</strong><span>Start time</span></div>' +
+        '<div class="pipeline-stat"><strong><div class="pl-progress-wrap"><div class="pl-progress-bar" style="width:' + esc((summary.progress_pct || 0)) + '%"></div></div><span class="pl-progress-lbl">' + esc(summary.progress_pct || 0) + '%</span></strong><span>Progress</span></div>' +
         '<div class="pipeline-stat"><strong>' + esc(summary.steps_total || 0) + '</strong><span>Step results</span></div>' +
         '<div class="pipeline-stat"><strong>' + esc(summary.feedback_total || 0) + '</strong><span>Feedback events</span></div>' +
         '<div class="pipeline-stat"><strong>' + esc(summary.alerts_total || 0) + '</strong><span>Alerts on this run</span></div>' +
@@ -388,6 +396,7 @@
   if (initialRunId) runIdEl.value = initialRunId;
 
   loadPipelines().catch(function(){ listEl.innerHTML = '<div class="pipeline-empty">Failed to load task pipelines.</div>'; });
+  setInterval(tickDurations, 1000);
   loadRuntime().catch(function(){ runtimeEl.innerHTML = '<span class="pipeline-runtime-pill">Sandbox runtime unavailable.</span>'; });
   function fmtPipelineRefreshInterval(ms) {
     if (ms < 60000) return Math.round(ms / 1000) + 's';

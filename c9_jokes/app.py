@@ -3437,6 +3437,31 @@ def _task_templates_payload(active_only: bool = True) -> list[dict]:
         return [dict(item) | {"active": True, "source": "builtin"} for item in TASK_TEMPLATES]
 
 
+def _compute_progress_pct(task_id: str, current_step_id: str, status: str) -> int:
+    """Estimate run progress 0-100 based on current_step_id position in workflow steps."""
+    if status in ("completed", "cancelled"):
+        return 100
+    if status == "failed":
+        return 0
+    if not task_id or not current_step_id:
+        return 0
+    try:
+        with _db() as conn:
+            rows = conn.execute(
+                "SELECT id FROM task_workflow_steps WHERE task_id=? ORDER BY position ASC",
+                (task_id,),
+            ).fetchall()
+        if not rows:
+            return 10
+        ids = [r[0] for r in rows]
+        if current_step_id in ids:
+            idx = ids.index(current_step_id)
+            return min(99, int((idx + 1) / len(ids) * 100))
+        return 10
+    except Exception:
+        return 0
+
+
 def _task_run_to_dict(row: sqlite3.Row | dict) -> dict:
     raw = dict(row)
     raw["executor_target"] = _task_sandbox_target(raw.get("executor_target")) if raw.get("executor_target") else ""
@@ -3460,6 +3485,11 @@ def _task_run_to_dict(row: sqlite3.Row | dict) -> dict:
     raw["trigger_snapshot"] = _json_load_object(raw.get("trigger_snapshot_json"))
     raw["completed_at"] = raw.get("completed_at") or raw.get("finished_at") or ""
     raw["parent_run_id"] = raw.get("parent_run_id") or ""
+    raw["progress_pct"] = _compute_progress_pct(
+        str(raw.get("task_id") or ""),
+        str(raw.get("current_step_id") or ""),
+        str(raw.get("status") or ""),
+    )
     return raw
 
 
@@ -3487,6 +3517,9 @@ def _task_alert_to_dict(row: sqlite3.Row | dict) -> dict:
     raw["severity"] = raw.get("severity") or "info"
     raw["repeat_key"] = raw.get("repeat_key") or ""
     raw["closed_by_run_id"] = raw.get("closed_by_run_id") or ""
+    raw["run_started_at"] = raw.get("run_started_at") or ""
+    raw["run_duration_ms"] = _duration_ms(raw.get("run_started_at"), raw.get("run_finished_at"))
+    raw["run_duration_label"] = _duration_label(raw.get("run_duration_ms"))
     return raw
 
 
@@ -3923,6 +3956,8 @@ def _task_pipeline_build(
         "feedback_total": len(feedback_items),
         "steps_total": len(step_items),
         "recovery_total": len(recovery_sessions),
+        "progress_pct": (selected_run or {}).get("progress_pct") or 0,
+        "run_started_at": (selected_run or {}).get("started_at") or "",
     }
     return {
         "task": task,
@@ -7395,7 +7430,9 @@ async def api_alerts(limit: int = 100):
                 "r.status AS run_status, "
                 "r.current_step_id AS current_step_id, "
                 "r.terminal_reason AS terminal_reason, "
-                "r.completed_at AS completed_at "
+                "r.completed_at AS completed_at, "
+                "r.started_at AS run_started_at, "
+                "r.finished_at AS run_finished_at "
                 "FROM task_alerts a "
                 "LEFT JOIN task_definitions t ON t.id=a.task_id "
                 "LEFT JOIN task_runs r ON r.id=a.run_id "

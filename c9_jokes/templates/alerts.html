@@ -520,6 +520,7 @@
 
   function esc(v){ return String(v == null ? '' : v).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
   function fmtTs(ts){ if(!ts) return '—'; try { return new Date(ts).toLocaleString(); } catch(_) { return ts; } }
+  function fmtTsShort(ts){ if(!ts) return '—'; try { var d=new Date(ts); return d.toLocaleDateString()+' '+d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); } catch(_){ return ts; } }
   function fmtSchedule(a){
     var kind = (a.schedule_kind || 'manual');
     if (kind === 'recurring') return 'Recurring / ' + (a.interval_minutes || 0) + 'm';
@@ -666,7 +667,7 @@
       '<td><input type="checkbox" class="alert-select-cb" data-id="' + esc(a.id) + '" ' + (isSelected ? 'checked' : '') + '></td>' +
       '<td>' + esc(fmtTs(a.created_at)) + '</td>' +
       '<td><strong>' + esc(a.task_name || a.task_id || 'Tasked') + '</strong><div class="alerts-meta">' + esc(modeLabel) + ' · ' + esc(templateLabel) + '</div></td>' +
-      '<td><span class="status-badge ' + esc(runStatusCls) + '">' + esc(a.run_status || '—') + '</span><div class="alerts-meta">Step: ' + esc(a.current_step_id || '—') + '</div></td>' +
+      '<td><span class="status-badge ' + esc(runStatusCls) + '">' + esc(a.run_status || '—') + '</span><div class="alerts-meta">Step: ' + esc(a.current_step_id || '—') + '</div><div class="alerts-meta">Started: ' + esc(a.run_started_at ? fmtTsShort(a.run_started_at) : '—') + '</div><div class="alerts-meta">Duration: ' + esc(a.run_duration_label || '—') + '</div></td>' +
       '<td><span class="severity-pill ' + esc(sevCls) + '">' + esc(a.severity || 'info') + '</span></td>' +
       '<td>' + esc(a.trigger_text || '—') + '</td>' +
       '<td>' + esc((a.summary || '').slice(0, 120)) + '</td>' +
