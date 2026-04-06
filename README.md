@@ -30,7 +30,7 @@ Microsoft Copilot is a powerful AI assistant with no official public API. This p
 - **OpenAI-compatible** — `/v1/chat/completions` works with any OpenAI SDK, LangChain, AutoGen, Open WebUI, Aider, OpenCode, KiloCode, and more
 - **Anthropic-compatible** — `/v1/messages` works with Claude Code, the Anthropic SDK, and any client that targets Claude's API
 
-Nine Docker containers make up the full stack:
+Thirteen Docker containers make up the full stack:
 
 ```
 Your App / OpenAI SDK / Claude Code / Hermes / ...
@@ -269,18 +269,33 @@ curl -X POST http://localhost:8000/v1/messages \
   -d '{"model":"claude-sonnet-4-6","max_tokens":512,"messages":[{"role":"user","content":"Hello!"}]}'
 ```
 
-### Step 6 — Build and start the full stack (all 9 containers)
+### Step 6 — Build and start the full stack (all containers)
 
 ```bash
-# Build all images — C2b, C5b, C6b, C7ab, C7bb, C8b, C9b (~10–20 min first run)
+# Build all images (~10–20 min first run)
 docker compose build
 
-# Start all 9 containers
+# Start all containers
 docker compose up -d
 
 # Check status
 docker compose ps
 ```
+
+> **Low-memory machine?** Start only the four core containers and bring sandboxes/agents up on demand:
+>
+> ```bash
+> # Core only: C1b + C3b + C6b + C9b
+> docker compose up app browser-auth kilocode-terminal c9-jokes -d
+>
+> # Add sandboxes when needed
+> docker compose up c10b-sandbox -d   # /api/agent/* pages
+> docker compose up c11b-sandbox -d   # /api/multi-Agento/* pages
+> docker compose up c12b-sandbox -d   # Tasked pipeline
+>
+> # Stop unused agents to free CPU/memory
+> docker stop C2b_agent-terminal C5b_claude-code C7ab_openclaw-gateway C7bb_openclaw-cli C8b_hermes-agent
+> ```
 
 ### Step 7 — Verify all containers
 

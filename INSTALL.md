@@ -1,6 +1,6 @@
 # Installation Guide — Copilot OpenAI-Compatible API Wrapper
 
-> **Fresh-machine setup for Linux and macOS — from GitHub clone to all 11 runtime containers running.**
+> **Fresh-machine setup for Linux and macOS — from GitHub clone to all 13 runtime containers running.**
 
 ---
 
@@ -27,7 +27,7 @@
 
 ## 1. Overview
 
-This project wraps Microsoft Copilot behind a standard OpenAI- and Anthropic-compatible REST API. Thirteen runtime containers handle the full stack (c3btest project):
+This project wraps Microsoft Copilot behind a standard OpenAI- and Anthropic-compatible REST API. Thirteen runtime containers handle the full stack:
 
 | # | Container | Port(s) | What it does |
 |---|---|---|---|
@@ -316,7 +316,7 @@ If the noVNC flow doesn't work (corporate proxy, VPN, etc.):
 
 ## 8. Start the Full Stack
 
-After authentication, start all 11 runtime containers (C1-C11):
+After authentication, start all containers:
 
 ```bash
 docker compose up -d
@@ -325,7 +325,31 @@ docker compose ps
 
 You should see all services listed as `running` or `healthy`. The first full start takes ~30–60 seconds for all health checks to pass.
 
-### 8.1 Quick start: clone → build → auth → run C1-C11
+### 8.1 Lean startup (recommended on low-memory machines)
+
+If your machine has limited RAM or CPU, start only the four core containers. Agent containers (C2b, C5b, C7ab, C7bb, C8b) can be started on demand later.
+
+```bash
+# Core stack only: C1b (API) + C3b (auth) + C6b (agent) + C9b (console)
+docker compose up app browser-auth kilocode-terminal c9-jokes -d
+
+# Add sandbox containers only when needed:
+docker compose up c10b-sandbox -d    # C10b — needed for /api/agent/* pages
+docker compose up c11b-sandbox -d    # C11b — needed for /api/multi-Agento/* pages
+docker compose up c12b-sandbox -d    # C12b — needed for Tasked pipeline sandbox
+
+# Stop agents to free CPU/memory when not in use:
+docker stop C2b_agent-terminal C5b_claude-code C7ab_openclaw-gateway C7bb_openclaw-cli C8b_hermes-agent
+```
+
+**Minimum viable stack health check:**
+```bash
+curl http://localhost:8000/health    # C1b
+curl http://localhost:8001/health    # C3b
+curl http://localhost:6090/api/status  # C9b
+```
+
+### 8.2 Quick start: clone → build → auth → run full stack
 
 ```bash
 # 1. Clone the repo
@@ -562,6 +586,7 @@ docker image rm \
   copilot-c9-jokes:latest \
   copilot-c10-sandbox:latest \
   copilot-c11-sandbox:latest \
+  copilot-c12b-sandbox:latest \
   2>/dev/null || true
 
 # Remove the cloned repository
@@ -815,6 +840,7 @@ All dependencies are managed inside Docker — you do not need Python, Node.js, 
 | C9 | `python:3.11-slim` | fastapi, uvicorn, httpx, jinja2, python-multipart |
 | C10 | `python:3.11-slim` | FastAPI sandbox runtime for single-agent workspace execution |
 | C11 | `python:3.11-slim` | FastAPI sandbox runtime for multi-agent session execution |
+| C12b | `python:3.11-slim` | FastAPI lean sandbox runtime for Tasked pipeline execution |
 
 ---
 
