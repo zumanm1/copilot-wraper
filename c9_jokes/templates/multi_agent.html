@@ -509,13 +509,6 @@
   var _paused = false;
   var _thinkingMode = localStorage.getItem('maThinkingMode') || 'auto';
   var _lastTask = '';
-  var STREAM_SETTLE_MS = 20000;
-  var PROMPT_GAP_MS = 25000;
-  var LONG_STREAM_GRACE_MS = 180000;
-  var _lastActivityAt = 0;
-  var _lastPromptAt = 0;
-  var _cooldownUntil = 0;
-  var _cooldownTimer = null;
 
   // ── DOM refs ──────────────────────────────────────────────────────────────
   var taskEl      = document.getElementById('ma-task');
@@ -539,51 +532,6 @@
     var urlTask = new URLSearchParams(window.location.search).get('task');
     if (urlTask) { taskEl.value = urlTask; }
   })();
-
-  function markRunActivity() {
-    _lastActivityAt = Date.now();
-  }
-
-  function applyRunAvailability() {
-    if (_cooldownTimer) {
-      clearTimeout(_cooldownTimer);
-      _cooldownTimer = null;
-    }
-    var followBtn = document.getElementById('ma-followup-btn');
-    if (_running) {
-      launchBtn.disabled = true;
-      if (followBtn) followBtn.disabled = true;
-      return;
-    }
-    var waitMs = Math.max(0, _cooldownUntil - Date.now());
-    if (waitMs > 0) {
-      var secs = Math.ceil(waitMs / 1000);
-      launchBtn.disabled = true;
-      launchBtn.textContent = 'Wait ' + secs + 's';
-      if (followBtn) {
-        followBtn.disabled = true;
-        followBtn.textContent = 'Wait ' + secs + 's';
-      }
-      _cooldownTimer = setTimeout(applyRunAvailability, Math.min(1000, waitMs));
-      return;
-    }
-    launchBtn.disabled = false;
-    launchBtn.textContent = '▶ Run';
-    if (followBtn) {
-      followBtn.disabled = false;
-      followBtn.textContent = '▶ Run';
-    }
-  }
-
-  function canStartRun() {
-    if (_running) return false;
-    if (Date.now() < _cooldownUntil) {
-      supText.textContent = '⏳ Working on the response... Please wait. Cooldown is still active before the next run.';
-      applyRunAvailability();
-      return false;
-    }
-    return true;
-  }
 
   // ── Role chips ────────────────────────────────────────────────────────────
   document.querySelectorAll('.ma-role-chip').forEach(function(chip) {
@@ -996,7 +944,6 @@
   // ── SSE event handler ──────────────────────────────────────────────────────
   function handleEvent(type, data) {
     var paneId = data.pane_id;
-    markRunActivity();
 
     switch (type) {
 
@@ -1123,7 +1070,6 @@
   function launch() {
     var task = taskEl.value.trim();
     if (!task) { taskEl.focus(); return; }
-    if (!canStartRun()) return;
 
     var roles = activeRoles();
     if (roles.length === 0) { alert('Select at least one role to activate.'); return; }
@@ -1159,9 +1105,6 @@
 
     _src = new EventSource('/api/multi-agent/run?' + params.toString());
     _running = true;
-    _lastPromptAt = Date.now();
-    markRunActivity();
-    _cooldownUntil = 0;
     launchBtn.disabled = true;
     stopBtn.classList.add('visible');
     pauseBtn.classList.add('visible');
@@ -1178,11 +1121,6 @@
 
     _src.onerror = function() {
       if (!_running) return;
-      var graceUntil = Math.min(_lastPromptAt + LONG_STREAM_GRACE_MS, _lastActivityAt + STREAM_SETTLE_MS);
-      if (_lastPromptAt && Date.now() < graceUntil) {
-        supText.textContent = '⏳ Working on the response... Please wait. Stream reconnect grace is still active.';
-        return;
-      }
       _reconnectAttempts++;
       if (_reconnectAttempts <= 3) {
         supText.textContent = '⚠️ SSE reconnecting… (' + _reconnectAttempts + '/3)';
@@ -1196,16 +1134,12 @@
   function setIdle() {
     _running = false;
     _paused = false;
+    launchBtn.disabled = false;
     stopBtn.classList.remove('visible');
     pauseBtn.classList.remove('visible');
     if (_src) { _src.close(); _src = null; }
     clearAllTimers();
     stopLiveFiles();
-    _cooldownUntil = Math.max(_lastPromptAt + PROMPT_GAP_MS, _lastActivityAt + STREAM_SETTLE_MS);
-    if ((Date.now() - _lastPromptAt) > LONG_STREAM_GRACE_MS) {
-      _cooldownUntil = Math.max(_cooldownUntil, Date.now() + 1000);
-    }
-    applyRunAvailability();
     updatePool();
   }
 
@@ -1257,7 +1191,6 @@
   document.getElementById('ma-followup-input').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') { e.preventDefault(); document.getElementById('ma-followup-btn').click(); }
   });
-  applyRunAvailability();
 
   // ── Output panel ───────────────────────────────────────────────────────────
   window.toggleOutputPanel = function() { outputPanel.classList.toggle('open'); };

@@ -131,7 +131,8 @@ CREATE TABLE IF NOT EXISTS task_definitions (
     archived_at TEXT,
     completion_policy_json TEXT DEFAULT '{}',
     alert_policy_json TEXT DEFAULT '{}',
-    workflow_version INTEGER DEFAULT 1
+    workflow_version INTEGER DEFAULT 1,
+    tasked_type TEXT DEFAULT 'output'
 );
 
 CREATE TABLE IF NOT EXISTS task_runs (
@@ -331,3 +332,16 @@ CREATE TABLE IF NOT EXISTS session_manager_metrics (
 );
 
 CREATE INDEX IF NOT EXISTS idx_task_def_due ON task_definitions(active, schedule_kind, next_run_at);
+
+CREATE TABLE IF NOT EXISTS task_outputs (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL,
+    run_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    output_type TEXT DEFAULT 'text',
+    file_path TEXT DEFAULT '',
+    content_text TEXT DEFAULT '',
+    metadata_json TEXT DEFAULT '{}',
+    FOREIGN KEY (task_id) REFERENCES task_definitions(id)
+);
+CREATE INDEX IF NOT EXISTS idx_task_outputs_task_run ON task_outputs(task_id, run_id, created_at DESC);

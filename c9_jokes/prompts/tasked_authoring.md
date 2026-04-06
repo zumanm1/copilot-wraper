@@ -131,7 +131,38 @@ Expected shape:
 - alert_policy.while_condition_true = true
 - condition rules check parsed.temp_c and parsed.market_cap_usd
 
+Example 3: free-hand combined Outlook inbox + Johannesburg weather
+User request:
+Every 10 minutes, check my Outlook inbox for new unread emails AND check the current weather in Johannesburg. Only trigger an alert when both conditions are true at the same time: there is at least one new unread email AND the temperature in Johannesburg is above 15°C. When both conditions are true, send the alert "You are free to go home." Include sender, subject, temperature, and timestamp. Do not send duplicate alerts for the same email. Log which condition failed when no alert is sent.
+
+Expected shape:
+- strategy = freehand
+- template_key = ""
+- mode = chat
+- schedule_kind = recurring
+- interval_minutes = 10
+- tabs_required = 2
+- trigger_mode = json
+- trigger_text = "Outlook + Johannesburg weather alert"
+- executor_prompt must be imperative step-by-step instructions, NOT a summary of the user request:
+  STEP 1: Read Outlook inbox, return JSON with email_check.unread_count and emails array
+  STEP 2: Fetch Johannesburg weather, return JSON with weather_check.temp_c and condition
+  STEP 3: Evaluate Condition A (unread_count > 0) AND Condition B (temp_c > 15)
+  STEP 4: Return strict JSON only with triggered, trigger, title ("You are free to go home."), summary, and details (sender, subject, email_id, temp_c, condition, timestamp, unread_count, condition_email, condition_weather)
+  Include failure reasons in summary when triggered=false
+- steps include:
+  - trigger (recurring, 10m)
+  - chat step "Read Outlook inbox" (source id: task_draft_email)
+  - chat step "Get Johannesburg weather" (source id: task_draft_weather)
+  - condition (AND operator, two rules: email_check.unread_count gt 0 from task_draft_email, weather_check.temp_c gt 15 from task_draft_weather)
+  - alert (title: "You are free to go home.", severity: warning)
+  - complete
+- alert_policy.dedupe_key_template = "jhb-outlook-email-{task_id}"
+- alert_policy.severity = "warning"
+- The executor_prompt must never be a paraphrase or summary of the user's request. It must be structured imperative instructions the agent executes literally.
+
 When you are unsure
 - Choose a valid draft over an imaginative one.
 - Keep the step chain minimal and linear.
 - Preserve the user's actual timing, threshold, agent, and tab requirements when present.
+- When the task involves two independent data sources (e.g. email AND weather), always produce two separate chat steps and wire the condition rules to each step's source id independently. Never merge both into a single execute step.

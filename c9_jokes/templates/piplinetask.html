@@ -40,6 +40,51 @@
 .pipeline-step-pre,.pipeline-feedback-pre,.pipeline-event-pre{font-size:.76rem;color:var(--fg);line-height:1.5;white-space:pre-wrap;word-break:break-word}
 .pipeline-empty{font-size:.82rem;color:var(--muted);padding:.8rem}
 .pipeline-badge.running{color:#0a84ff}.pipeline-badge.completed{color:#30d158}.pipeline-badge.failed{color:#ff453a}.pipeline-badge.launch-pending,.pipeline-badge.waiting-feedback,.pipeline-badge.alert-open,.pipeline-badge.waiting-retry,.pipeline-badge.recovering{color:#ffa000}
+@keyframes pulse-glow{0%,100%{box-shadow:0 0 0 0 rgba(10,132,255,.3)}50%{box-shadow:0 0 0 6px rgba(10,132,255,0)}}
+.pulse-live{animation:pulse-glow 2s ease-in-out infinite}
+.status-badge{display:inline-flex;align-items:center;gap:.3rem;padding:.15rem .55rem;border-radius:999px;font-size:.7rem;font-weight:500;border:1px solid}
+.status-badge.idle{color:#8e8e93;border-color:rgba(142,142,147,.3);background:rgba(142,142,147,.08)}
+.status-badge.running{color:#0a84ff;border-color:rgba(10,132,255,.3);background:rgba(10,132,255,.08)}
+.status-badge.completed{color:#30d158;border-color:rgba(48,209,88,.3);background:rgba(48,209,88,.08)}
+.status-badge.failed{color:#ff453a;border-color:rgba(255,69,58,.3);background:rgba(255,69,58,.08)}
+.status-badge.cancelled{color:#ffa000;border-color:rgba(255,160,0,.3);background:rgba(255,160,0,.08)}
+.status-badge.waiting-retry{color:#ffa000;border-color:rgba(255,160,0,.3);background:rgba(255,160,0,.08)}
+.status-badge.launch-pending{color:#bf5af2;border-color:rgba(191,90,242,.3);background:rgba(191,90,242,.08)}
+.status-badge.waiting-feedback{color:#ffa000;border-color:rgba(255,160,0,.3);background:rgba(255,160,0,.08)}
+.status-badge.alert-open{color:#ff453a;border-color:rgba(255,69,58,.3);background:rgba(255,69,58,.08)}
+.pipeline-empty{font-size:.82rem;color:var(--muted);padding:.8rem;text-align:center}
+.pipeline-empty-icon{font-size:2.5rem;margin-bottom:.5rem;opacity:.5}
+.pipeline-empty-text{font-size:.88rem}
+.pipeline-empty-hint{font-size:.76rem;opacity:.7}
+.pipeline-timeline{position:relative;padding-left:2rem;margin-top:.5rem}
+.pipeline-timeline::before{content:'';position:absolute;left:8px;top:0;bottom:0;width:2px;background:linear-gradient(180deg,var(--accent,#0a84ff),var(--border,#333))}
+.pipeline-timeline-item{position:relative;padding:.65rem 0 .65rem 1.25rem}
+.pipeline-timeline-item::before{content:'';position:absolute;left:-1.45rem;top:.85rem;width:10px;height:10px;border-radius:50%;background:var(--accent,#0a84ff);border:2px solid #111}
+.pipeline-timeline-item.status-completed::before{background:#30d158}
+.pipeline-timeline-item.status-failed::before{background:#ff453a}
+.pipeline-timeline-item.status-running::before{background:#0a84ff;animation:pulse-glow 1.5s ease-in-out infinite}
+.pipeline-timeline-item.status-waiting::before{background:#ffa000}
+.pipeline-step-flow{display:flex;gap:.35rem;align-items:center;flex-wrap:wrap;padding:.75rem;background:#0d0d0d;border:1px solid var(--border,#333);border-radius:12px;margin-bottom:.75rem;overflow-x:auto}
+.pipeline-step-flow-node{display:flex;flex-direction:column;align-items:center;gap:.25rem;padding:.5rem .65rem;background:#151515;border:1px solid var(--border,#333);border-radius:10px;min-width:80px;transition:all .2s ease}
+.pipeline-step-flow-node:hover{border-color:var(--accent,#0a84ff);transform:translateY(-2px);box-shadow:0 4px 12px rgba(10,132,255,.15)}
+.pipeline-step-flow-node .flow-icon{font-size:1.1rem}
+.pipeline-step-flow-node .flow-label{font-size:.7rem;color:var(--fg);text-align:center;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pipeline-step-flow-node .flow-status{font-size:.62rem;text-transform:uppercase;letter-spacing:.05em}
+.pipeline-step-flow-node .flow-status.completed{color:#30d158}
+.pipeline-step-flow-node .flow-status.failed{color:#ff453a}
+.pipeline-step-flow-node .flow-status.running{color:#0a84ff}
+.pipeline-step-flow-node .flow-status.queued{color:var(--muted)}
+.pipeline-step-flow-connector{flex-shrink:0;width:20px;height:2px;background:linear-gradient(90deg,var(--border,#333),var(--accent,#0a84ff));position:relative}
+.pipeline-step-flow-connector::after{content:'';position:absolute;right:-3px;top:-3px;width:0;height:0;border-left:5px solid var(--accent,#0a84ff);border-top:3px solid transparent;border-bottom:3px solid transparent}
+.pipeline-run-compare{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:.65rem;margin-top:.75rem;padding:.75rem;background:#0d0d0d;border:1px solid var(--border,#333);border-radius:12px}
+.pipeline-run-compare .compare-stat{text-align:center;padding:.5rem}
+.pipeline-run-compare .compare-stat strong{display:block;font-size:1.1rem;color:var(--fg)}
+.pipeline-run-compare .compare-stat span{font-size:.72rem;color:var(--muted)}
+.pipeline-live-indicator{display:inline-flex;align-items:center;gap:.4rem;padding:.3rem .65rem;background:#111;border:1px solid #0a84ff44;border-radius:999px;font-size:.73rem;color:#0a84ff}
+.pipeline-live-indicator::before{content:'';width:8px;height:8px;border-radius:50%;background:#0a84ff;animation:pulse-glow 1.5s ease-in-out infinite}
+@keyframes fade-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.pipeline-item{animation:fade-in .3s ease}
+.pipeline-step,.pipeline-feedback,.pipeline-event{animation:fade-in .2s ease}
 @media (max-width: 980px){
   .pipeline-item-header{grid-template-columns:1fr}
 }
@@ -75,7 +120,7 @@
           <option value="cancelled">Cancelled</option>
         </select>
       </label>
-      <button class="pipeline-btn" id="pipeline-refresh">Refresh pipeline</button>
+      <label>Refresh<select id="pipeline-refresh-interval" style="background:#111;border:1px solid var(--border,#333);border-radius:10px;color:var(--fg,#f5f5f7);padding:.58rem .7rem;font:inherit;min-width:100px"><option value="1000">1s</option><option value="15000">15s</option><option value="30000">30s</option><option value="60000">1min</option><option value="120000" selected>2min</option><option value="900000">15min</option><option value="1800000">30min</option></select></label><button class="pipeline-btn" id="pipeline-refresh">Refresh pipeline</button>
       <button class="pipeline-btn secondary" id="pipeline-clear-filter">Clear filter</button>
       <label><input id="pipeline-live-toggle" type="checkbox" checked> Live monitor</label>
     </div>
@@ -96,15 +141,18 @@
 (function(){
   var EXECUTOR_TARGET_LABELS = Object.fromEntries(({{ task_executor_targets|safe }} || []).map(function(item){ return [item.id, item.label]; }));
   var AGENT_TARGET_LABELS = Object.fromEntries(({{ task_agent_targets|safe }} || []).map(function(item){ return [item.id, item.label]; }));
-  var listEl = document.getElementById('pipeline-list');
-  var taskIdEl = document.getElementById('pipeline-task-id');
-  var runIdEl = document.getElementById('pipeline-run-id');
-  var statusEl = document.getElementById('pipeline-status-filter');
+  var listEl    = document.getElementById('pipeline-list');
+  var taskIdEl  = document.getElementById('pipeline-task-id');
+  var runIdEl   = document.getElementById('pipeline-run-id');
+  var statusEl  = document.getElementById('pipeline-status-filter');
   var liveToggleEl = document.getElementById('pipeline-live-toggle');
-  var noteEl = document.getElementById('pipeline-monitor-note');
+  var noteEl    = document.getElementById('pipeline-monitor-note');
   var runtimeEl = document.getElementById('pipeline-runtime');
+  var pipelineIsLoading   = false;   /* declare early — used in loadPipelines guard */
+  var pipelineRefreshTimer  = null;
+  var pipelineRuntimeTimer  = null;
   var initialTaskId = new URLSearchParams(window.location.search).get('task_id') || '';
-  var initialRunId = new URLSearchParams(window.location.search).get('run_id') || '';
+  var initialRunId  = new URLSearchParams(window.location.search).get('run_id')  || '';
   function esc(v){ return String(v == null ? '' : v).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
   function fmtTs(ts){ if(!ts) return '—'; try { return new Date(ts).toLocaleString(); } catch(_) { return ts; } }
   function fmtJson(value){ try { return JSON.stringify(value || {}, null, 2); } catch (_) { return String(value || ''); } }
@@ -144,12 +192,103 @@
     '</div>';
   }
 
+  /* ── Step flow diagram ─────────────────────────────────────────
+     Called by renderItem(). Renders the horizontal node→node flow
+     strip using .pipeline-step-flow-node + connector CSS classes.
+     Was referenced but never implemented — caused the page crash.
+  ──────────────────────────────────────────────────────────────── */
+  function renderStepFlow(steps) {
+    if (!steps || !steps.length) return '';
+    var ICONS = { trigger:'⚡', chat:'💬', sandbox:'🖥️', alert:'🚨', complete:'✅', hook:'🔗', action:'⚙️', condition:'🔍' };
+    return steps.map(function(step, i) {
+      var kind   = step.step_kind || step.kind || '';
+      var icon   = ICONS[kind] || '⚙️';
+      var status = step.status || 'queued';
+      var label  = step.step_name || step.step_id || kind || 'Step';
+      return (
+        '<div class="pipeline-step-flow-node">' +
+          '<span class="flow-icon">' + icon + '</span>' +
+          '<span class="flow-label" title="' + esc(label) + '">' + esc(label) + '</span>' +
+          '<span class="flow-status ' + esc(status) + '">' + esc(status) + '</span>' +
+        '</div>' +
+        (i < steps.length - 1 ? '<div class="pipeline-step-flow-connector"></div>' : '')
+      );
+    }).join('');
+  }
+
+  /* ── Timeline renderer ─────────────────────────────────────────
+     Called by renderItem(). Builds a chronological event list from
+     run start / step results / alerts / run completion.
+     Was referenced but never implemented — caused the page crash.
+  ──────────────────────────────────────────────────────────────── */
+  function renderTimeline(item) {
+    var run    = item.run    || {};
+    var steps  = item.steps  || [];
+    var alerts = item.alerts || [];
+    var events = [];
+
+    if (run.started_at) {
+      events.push({ ts: run.started_at, label: 'Run started', status: 'running',
+                    detail: 'Run ID: ' + (run.id || '—') });
+    }
+    steps.forEach(function(step) {
+      var ts = step.started_at || step.finished_at;
+      if (!ts) return;
+      events.push({
+        ts: ts,
+        label: step.step_name || step.step_id || step.step_kind || 'Step',
+        status: step.status || 'queued',
+        detail: (step.step_kind || '') + (step.duration_label ? ' · ' + step.duration_label : '')
+      });
+    });
+    alerts.forEach(function(alert) {
+      if (!alert.created_at) return;
+      events.push({
+        ts: alert.created_at,
+        label: 'Alert: ' + (alert.title || 'Alert'),
+        status: 'alert-open',
+        detail: 'ID: ' + (alert.id || '—') + (alert.severity ? ' · ' + alert.severity : '')
+      });
+    });
+    if (run.completed_at) {
+      events.push({ ts: run.completed_at,
+                    label: 'Run ' + (run.status || 'completed'),
+                    status: run.status || 'completed',
+                    detail: run.terminal_reason || '' });
+    }
+
+    events.sort(function(a, b) { return new Date(a.ts) - new Date(b.ts); });
+
+    if (!events.length) {
+      return '<div class="pipeline-empty"><div class="pipeline-empty-icon">📅</div>' +
+             '<div class="pipeline-empty-text">No timeline events recorded.</div></div>';
+    }
+    return '<div class="pipeline-timeline">' +
+      events.map(function(ev) {
+        var stCls = 'status-' + (ev.status || 'idle').replace(/[^a-z-]/g, '-');
+        return '<div class="pipeline-timeline-item ' + esc(stCls) + '">' +
+          '<div style="display:flex;justify-content:space-between;gap:.5rem;">' +
+            '<strong style="font-size:.82rem;">' + esc(ev.label) + '</strong>' +
+            '<span style="font-size:.72rem;color:var(--muted);">' + esc(fmtTs(ev.ts)) + '</span>' +
+          '</div>' +
+          (ev.detail ? '<div style="font-size:.75rem;color:var(--muted);margin-top:.15rem;">' + esc(ev.detail) + '</div>' : '') +
+        '</div>';
+      }).join('') +
+    '</div>';
+  }
+
   function renderItem(item) {
     var task = item.task || {};
     var run = item.run || {};
     var trace = item.trace || {};
     var summary = item.summary || {};
     var latestAlert = (item.alerts || [])[0] || null;
+    var runStatus = run.status || summary.last_status || 'idle';
+    var statusCls = runStatus.toLowerCase().replace(/[^a-z-]/g, '');
+    var isRunning = runStatus === 'running';
+    var steps = item.steps || [];
+    var stepFlowHtml = renderStepFlow(steps);
+    var timelineHtml = renderTimeline(item);
     return '<article class="pipeline-item">' +
       '<div class="pipeline-item-header">' +
         '<div class="pipeline-item-title">' +
@@ -157,7 +296,8 @@
           '<div class="pipeline-item-meta">Run ID: ' + esc(run.id || '—') + ' · Trace ID: ' + esc(summary.trace_id || task.id || '—') + ' · Source: ' + esc(run.source || '—') + '</div>' +
           '<div class="pipeline-pills">' +
             '<span class="pipeline-pill">' + esc(task.mode_label || task.mode || 'Unknown') + '</span>' +
-            '<span class="pipeline-pill pipeline-badge ' + esc(run.status || summary.last_status || 'idle') + '">' + esc(run.status || summary.last_status || 'idle') + '</span>' +
+            (task.tasked_type_label ? '<span class="pipeline-pill">' + esc(task.tasked_type_label) + '</span>' : '') +
+            '<span class="status-badge ' + esc(statusCls) + (isRunning ? ' pulse-live' : '') + '">' + esc(runStatus) + '</span>' +
             '<span class="pipeline-pill">Current step: ' + esc(summary.current_step_id || run.current_step_id || '—') + '</span>' +
             '<span class="pipeline-pill">Terminal: ' + esc(summary.terminal_reason || run.terminal_reason || '—') + '</span>' +
           '</div>' +
@@ -166,16 +306,18 @@
           '<a class="pipeline-link" href="' + esc(task.task_url || '/tasked') + '">Open Tasked</a>' +
           '<a class="pipeline-link" href="' + esc(task.alerts_url || '/alerts') + '">Open Alerts</a>' +
           '<a class="pipeline-link" href="' + esc(task.completed_url || '/task-completed') + '">Open Completed</a>' +
+          '<a class="pipeline-link" href="' + esc(task.preview_url || ('/tasked-preview?task_id=' + esc(task.id || ''))) + '">Preview Output</a>' +
         '</div>' +
       '</div>' +
       '<div class="pipeline-summary-grid">' +
-        '<div class="pipeline-stat"><strong>' + esc(run.status || summary.last_status || 'idle') + '</strong><span>Run status</span></div>' +
+        '<div class="pipeline-stat"><strong><span class="status-badge ' + esc(statusCls) + '">' + esc(runStatus) + '</span></strong><span>Run status</span></div>' +
         '<div class="pipeline-stat"><strong>' + esc(run.duration_label || summary.latest_run_duration_label || '—') + '</strong><span>Duration</span></div>' +
         '<div class="pipeline-stat"><strong>' + esc(summary.steps_total || 0) + '</strong><span>Step results</span></div>' +
         '<div class="pipeline-stat"><strong>' + esc(summary.feedback_total || 0) + '</strong><span>Feedback events</span></div>' +
         '<div class="pipeline-stat"><strong>' + esc(summary.alerts_total || 0) + '</strong><span>Alerts on this run</span></div>' +
         '<div class="pipeline-stat"><strong>' + esc(summary.open_alerts || 0) + '</strong><span>Open alerts</span></div>' +
       '</div>' +
+      (stepFlowHtml ? '<div class="pipeline-step-flow">' + stepFlowHtml + '</div>' : '') +
       '<div class="pipeline-sections">' +
         '<section class="pipeline-section"><h3>Trace</h3><div class="pipeline-trace">' +
           '<div class="pipeline-trace-item"><strong>Task orchestration</strong><span>Task ID: ' + esc(trace.task_id || task.id || '—') + '\nRun ID: ' + esc(trace.run_id || run.id || '—') + '\nMode: ' + esc((trace.orchestration || {}).mode || task.mode || '—') + '\nState: ' + esc(task.lifecycle_label || task.last_status || '—') + '</span></div>' +
@@ -187,16 +329,19 @@
           '<div class="pipeline-trace-item"><strong>Completion state</strong><span>Status: ' + esc((trace.completion || {}).last_status || run.status || '—') + '\nCurrent step: ' + esc((trace.completion || {}).current_step_id || run.current_step_id || '—') + '\nReason: ' + esc((trace.completion || {}).terminal_reason || run.terminal_reason || '—') + '\nCompleted: ' + esc(fmtTs((trace.completion || {}).completed_at || run.completed_at)) + '</span></div>' +
           '<div class="pipeline-trace-item"><strong>Session manager</strong><span>Status: ' + esc((trace.recovery || {}).status || 'steady') + '\nOperation: ' + esc((trace.recovery || {}).operation || '—') + '\nUpstream: ' + esc((trace.recovery || {}).upstream || '—') + '\nRetries: ' + esc((trace.recovery || {}).retry_count || 0) + '\nNext retry: ' + esc(fmtTs((trace.recovery || {}).next_retry_at)) + '</span></div>' +
         '</div></section>' +
-        '<section class="pipeline-section"><h3>Step results</h3><div class="pipeline-step-list">' + ((item.steps || []).length ? item.steps.map(renderStep).join('') : '<div class="pipeline-empty">No step results recorded.</div>') + '</div></section>' +
-        '<section class="pipeline-section"><h3>Agent feedback</h3><div class="pipeline-feedback-list">' + ((item.feedback || []).length ? item.feedback.map(renderFeedback).join('') : '<div class="pipeline-empty">No agent feedback recorded for this run.</div>') + '</div></section>' +
-        '<section class="pipeline-section"><h3>Recovery sessions</h3><div class="pipeline-event-list">' + ((item.recovery_sessions || []).length ? item.recovery_sessions.map(renderRecovery).join('') : '<div class="pipeline-empty">No recovery sessions recorded for this run.</div>') + '</div></section>' +
-        '<section class="pipeline-section"><h3>Timeline</h3><div class="pipeline-event-list">' + ((item.events || []).length ? item.events.map(renderEvent).join('') : '<div class="pipeline-empty">No events recorded.</div>') + '</div></section>' +
+        '<section class="pipeline-section"><h3>Step results</h3><div class="pipeline-step-list">' + (steps.length ? steps.map(renderStep).join('') : '<div class="pipeline-empty"><div class="pipeline-empty-icon">📋</div><div class="pipeline-empty-text">No step results recorded.</div></div>') + '</div></section>' +
+        '<section class="pipeline-section"><h3>Agent feedback</h3><div class="pipeline-feedback-list">' + ((item.feedback || []).length ? item.feedback.map(renderFeedback).join('') : '<div class="pipeline-empty"><div class="pipeline-empty-icon">🤖</div><div class="pipeline-empty-text">No agent feedback recorded for this run.</div></div>') + '</div></section>' +
+        '<section class="pipeline-section"><h3>Recovery sessions</h3><div class="pipeline-event-list">' + ((item.recovery_sessions || []).length ? item.recovery_sessions.map(renderRecovery).join('') : '<div class="pipeline-empty"><div class="pipeline-empty-icon">🔄</div><div class="pipeline-empty-text">No recovery sessions recorded for this run.</div></div>') + '</div></section>' +
+        '<section class="pipeline-section"><h3>Timeline</h3>' + timelineHtml + '</section>' +
       '</div>' +
     '</article>';
   }
 
   async function loadPipelines() {
+    if (pipelineIsLoading) return;
+    pipelineIsLoading = true;
     listEl.innerHTML = '<div class="pipeline-empty">Loading task pipelines…</div>';
+    try {
     var url = new URL('/api/task-pipelines', window.location.origin);
     var searchUrl = new URL(window.location.href);
     var taskId = taskIdEl.value.trim();
@@ -211,6 +356,9 @@
     var rows = data.pipelines || [];
     if (noteEl) noteEl.textContent = 'Pipeline monitor refreshed at ' + new Date().toLocaleTimeString() + '. Active runs refresh every 5 seconds and terminal runs every 15 seconds.';
     listEl.innerHTML = rows.length ? rows.map(renderItem).join('') : '<div class="pipeline-empty">No matching task pipelines found.</div>';
+    } catch(e) {
+      listEl.innerHTML = '<div class="pipeline-empty">Failed to load task pipelines. ' + esc(e.message) + '</div>';
+    } finally { pipelineIsLoading = false; }
   }
 
   async function loadRuntime() {
@@ -241,8 +389,33 @@
 
   loadPipelines().catch(function(){ listEl.innerHTML = '<div class="pipeline-empty">Failed to load task pipelines.</div>'; });
   loadRuntime().catch(function(){ runtimeEl.innerHTML = '<span class="pipeline-runtime-pill">Sandbox runtime unavailable.</span>'; });
-  setInterval(function(){ if (!document.hidden && liveToggleEl.checked) loadPipelines().catch(function(){}); }, 5000);
-  setInterval(function(){ if (!document.hidden && liveToggleEl.checked) loadRuntime().catch(function(){}); }, 30000);
+  function fmtPipelineRefreshInterval(ms) {
+    if (ms < 60000) return Math.round(ms / 1000) + 's';
+    return Math.round(ms / 60000) + 'min';
+  }
+  function startPipelineRefreshTimer() {
+    if (pipelineRefreshTimer) clearInterval(pipelineRefreshTimer);
+    var interval = parseInt(pipelineRefreshIntervalEl.value, 10) || 120000;
+    noteEl.textContent = 'Pipeline monitor auto-refreshes every ' + fmtPipelineRefreshInterval(interval) + '. Last refresh: ' + new Date().toLocaleTimeString() + '.';
+    pipelineRefreshTimer = setInterval(function() {
+      if (!document.hidden && liveToggleEl.checked && !pipelineIsLoading) loadPipelines().catch(function(){});
+    }, interval);
+  }
+  function startPipelineRuntimeTimer() {
+    if (pipelineRuntimeTimer) clearInterval(pipelineRuntimeTimer);
+    pipelineRuntimeTimer = setInterval(function() {
+      if (!document.hidden && liveToggleEl.checked) loadRuntime().catch(function(){});
+    }, 30000);
+  }
+  var pipelineRefreshIntervalEl = document.getElementById('pipeline-refresh-interval');
+  pipelineRefreshIntervalEl.addEventListener('change', function() {
+    localStorage.setItem('pipelineRefreshInterval', pipelineRefreshIntervalEl.value);
+    startPipelineRefreshTimer();
+  });
+  var savedPipelineInterval = localStorage.getItem('pipelineRefreshInterval');
+  if (savedPipelineInterval) pipelineRefreshIntervalEl.value = savedPipelineInterval;
+  startPipelineRefreshTimer();
+  startPipelineRuntimeTimer();
 })();
 </script>
 {% endblock %}

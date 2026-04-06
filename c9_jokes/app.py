@@ -27,38 +27,47 @@ from starlette.templating import Jinja2Templates
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DB = Path(os.environ.get("DATABASE_PATH", "/app/data/c9.db"))
 
-# ── C10 Sandbox URL (single-agent /agent workspace) ──────────────────────────
-C10_URL = os.environ.get("C10_URL", "http://c10-sandbox:8100").rstrip("/")
+# ── C10 Sandbox URL (agent workspace — uses C10b shared sandbox) ─────────────
+C10_URL = os.environ.get("C10B_URL", os.environ.get("C10_URL", "http://c10b-sandbox:8210")).rstrip("/")
 
-# ── C11 Sandbox URL (multi-agent /multi-Agento, session-scoped workspace) ────
-C11_URL = os.environ.get("C11_URL", "http://c11-sandbox:8200").rstrip("/")
+# ── C11 Sandbox URL (multi-agent /multi-Agento → now uses C11b) ──────────────
+C11_URL = os.environ.get("C11B_URL", os.environ.get("C11_URL", "http://c11b-sandbox:8200")).rstrip("/")
+
+# -- C11b Sandbox URL (multi-agent session-scoped workspace) -------------------
+C11B_URL = os.environ.get("C11B_URL", "http://c11b-sandbox:8200").rstrip("/")
+# ── C11b Sandbox URL (multi-agent session-scoped workspace) ──────────────────
 
 # ── C12b Sandbox URL (lean coding/test sandbox) ──────────────────────────────
 C12B_URL = os.environ.get("C12B_URL", "http://c12b-sandbox:8210").rstrip("/")
 
+# ── C10b Sandbox URL (shared coding sandbox for /agent + /multi-agento) ──────
+C10B_URL = os.environ.get("C10B_URL", "http://c10b-sandbox:8210").rstrip("/")
+
 # ── Container targets ─────────────────────────────────────────────────────────
 TARGETS = {
-    "c1":  {"env": "C1_URL",  "default": "http://localhost:8000",  "label": "C1 copilot-api",       "health": "/health"},
-    "c2":  {"env": "C2_URL",  "default": "http://localhost:8080",  "label": "C2 agent-terminal",    "health": "/health"},
-    "c3":  {"env": "C3_URL",  "default": "http://localhost:8001",  "label": "C3 browser-auth",      "health": "/health"},
-    "c5":  {"env": "C5_URL",  "default": "http://localhost:8080",  "label": "C5 claude-code",       "health": "/health"},
-    "c6":  {"env": "C6_URL",  "default": "http://localhost:8080",  "label": "C6 kilocode",          "health": "/health"},
-    "c7a": {"env": "C7A_URL", "default": "http://localhost:18789", "label": "C7a openclaw-gateway", "health": "/healthz"},
-    "c7b": {"env": "C7B_URL", "default": "http://localhost:8080",  "label": "C7b openclaw-cli",     "health": "/health"},
-    "c8":  {"env": "C8_URL",  "default": "http://localhost:8080",  "label": "C8 hermes-agent",      "health": "/health"},
-    "c10": {"env": "C10_URL", "default": "http://c10-sandbox:8100", "label": "C10 agent sandbox",  "health": "/health"},
-    "c11": {"env": "C11_URL", "default": "http://c11-sandbox:8200", "label": "C11 multi-agent sandbox", "health": "/health"},
-    "c12b": {"env": "C12B_URL", "default": "http://c12b-sandbox:8210", "label": "C12b lean sandbox", "health": "/health"},
+    "c1":  {"env": "C1_URL",  "default": "http://localhost:8000",  "label": "C1b copilot-api",       "health": "/health"},
+    "c2":  {"env": "C2_URL",  "default": "http://localhost:8080",  "label": "C2b agent-terminal",    "health": "/health"},
+    "c3":  {"env": "C3_URL",  "default": "http://localhost:8001",  "label": "C3b browser-auth",      "health": "/health"},
+    "c5":  {"env": "C5_URL",  "default": "http://localhost:8080",  "label": "C5b claude-code",       "health": "/health"},
+    "c6":  {"env": "C6_URL",  "default": "http://localhost:8080",  "label": "C6b kilocode",          "health": "/health"},
+    "c7a": {"env": "C7A_URL", "default": "http://localhost:18789", "label": "C7ab openclaw-gateway", "health": "/healthz"},
+    "c7b": {"env": "C7B_URL", "default": "http://localhost:8080",  "label": "C7bb openclaw-cli",     "health": "/health"},
+    "c8":  {"env": "C8_URL",  "default": "http://localhost:8080",  "label": "C8b hermes-agent",      "health": "/health"},
+    "c10":  {"env": "C10_URL",  "default": "http://c10b-sandbox:8210", "label": "C10b agent sandbox",       "health": "/health", "hidden": True},
+    "c10b": {"env": "C10B_URL", "default": "http://c10b-sandbox:8210", "label": "C10b agent sandbox",       "health": "/health"},
+    "c11":  {"env": "C11_URL",  "default": "http://c11b-sandbox:8200", "label": "C11b multi-agent sandbox", "health": "/health", "hidden": True},
+    "c11b": {"env": "C11B_URL", "default": "http://c11b-sandbox:8200", "label": "C11b multi-agent sandbox", "health": "/health"},
+    "c12b": {"env": "C12B_URL", "default": "http://c12b-sandbox:8210", "label": "C12b lean sandbox",        "health": "/health"},
 }
 
 # ── AI agents that can chat ───────────────────────────────────────────────────
 AGENTS = [
-    {"id": "c2-aider",       "label": "C2 Aider (OpenAI)"},
-    {"id": "c5-claude-code", "label": "C5 Claude Code (Anthropic)"},
-    {"id": "c6-kilocode",    "label": "C6 KiloCode (OpenAI)"},
-    {"id": "c7-openclaw",    "label": "C7b OpenClaw"},
-    {"id": "c8-hermes",      "label": "C8 Hermes Agent"},
-    {"id": "c9-jokes",       "label": "C9 (generic session)"},
+    {"id": "c2-aider",       "label": "C2b Aider (OpenAI)"},
+    {"id": "c5-claude-code", "label": "C5b Claude Code (Anthropic)"},
+    {"id": "c6-kilocode",    "label": "C6b KiloCode (OpenAI)"},
+    {"id": "c7-openclaw",    "label": "C7bb OpenClaw"},
+    {"id": "c8-hermes",      "label": "C8b Hermes Agent"},
+    {"id": "c9-jokes",       "label": "C9b (generic session)"},
 ]
 
 TASK_MODE_OPTIONS = [
@@ -85,13 +94,21 @@ TASK_WORKFLOW_STEP_KINDS = [
     {"id": "complete", "label": "Complete"},
 ]
 
+TASKED_TYPE_OPTIONS = [
+    {"id": "output",   "label": "Output",      "desc": "Produces AI text or data output to review"},
+    {"id": "alert",    "label": "Alert Only",   "desc": "Creates alerts when conditions are met, no readable output"},
+    {"id": "action",   "label": "Action",       "desc": "Performs an action (file op, API call) with no review output"},
+    {"id": "hook",     "label": "Hook/Trigger", "desc": "Triggers external systems or webhooks"},
+    {"id": "combined", "label": "Combined",     "desc": "Combination: output + alert or multiple types"},
+]
+
 TASK_AGENT_TARGET_OPTIONS = [
-    {"id": "c2-aider", "label": "C2"},
-    {"id": "c5-claude-code", "label": "C5"},
-    {"id": "c6-kilocode", "label": "C6"},
-    {"id": "c7-openclaw", "label": "C7b"},
-    {"id": "c8-hermes", "label": "C8"},
-    {"id": "c9-jokes", "label": "C9 Generic"},
+    {"id": "c2-aider", "label": "C2b"},
+    {"id": "c5-claude-code", "label": "C5b"},
+    {"id": "c6-kilocode", "label": "C6b"},
+    {"id": "c7-openclaw", "label": "C7bb"},
+    {"id": "c8-hermes", "label": "C8b"},
+    {"id": "c9-jokes", "label": "C9b Generic"},
 ]
 
 TASK_SANDBOX_DEFAULTS = {
@@ -842,6 +859,7 @@ def _ensure_db() -> None:
         "ALTER TABLE task_alerts ADD COLUMN severity TEXT DEFAULT 'info'",
         "ALTER TABLE task_alerts ADD COLUMN repeat_key TEXT DEFAULT ''",
         "ALTER TABLE task_alerts ADD COLUMN closed_by_run_id TEXT DEFAULT ''",
+        "ALTER TABLE task_definitions ADD COLUMN tasked_type TEXT DEFAULT 'output'",
     ):
         try:
             with sqlite3.connect(DEFAULT_DB) as conn:
@@ -1594,6 +1612,169 @@ async def _c12b_exec(
             }
 
 
+# ── C10b Sandbox helpers (shared coding sandbox for /agent + /multi-agento) ──
+
+async def _c10b_exec(
+    command: str,
+    timeout: int = 30,
+    cwd: str = ".",
+    session_id: str = "",
+    *,
+    step_id: str = "",
+    scope: str = "sandbox",
+    page: str = "sandbox",
+    owner_id: str = "",
+    task_id: str = "",
+    run_id: str = "",
+    operation: str = "exec",
+    recovery_session_id: str = "",
+    max_retries: int = 2,
+) -> dict:
+    client = _get_http()
+    base_timeout_ms = max(1000, int(timeout * 1000))
+    adaptive_timeout_ms = _session_manager_timeout_ms(scope, "c10b", operation, base_timeout_ms)
+    resume_payload = {
+        "scope": scope,
+        "page": page,
+        "owner_id": owner_id,
+        "task_id": task_id,
+        "run_id": run_id,
+        "step_id": step_id,
+        "upstream": "c10b",
+        "operation": operation,
+        "command": command,
+        "cwd": cwd,
+        "session_id": session_id,
+    }
+    session = _session_manager_create(
+        scope=scope,
+        page=page,
+        owner_id=owner_id or session_id,
+        task_id=task_id,
+        run_id=run_id,
+        upstream="c10b",
+        operation=operation,
+        timeout_ms=base_timeout_ms,
+        adaptive_timeout_ms=adaptive_timeout_ms,
+        max_retries=max_retries,
+        resume_payload=resume_payload,
+        state={"cwd": cwd, "command": command},
+        external_session_id=session_id,
+        session_id=recovery_session_id,
+    )
+    timeout_s = max(timeout, int((adaptive_timeout_ms + 999) / 1000))
+    attempts = 0
+    while True:
+        t0 = time.monotonic()
+        try:
+            r = await client.post(
+                f"{C10B_URL}/exec",
+                json={"command": command, "timeout": timeout_s, "cwd": cwd, "session_id": session_id},
+                timeout=timeout_s + 10,
+            )
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            try:
+                payload = r.json()
+            except Exception:
+                payload = {"stdout": "", "stderr": r.text[:2000], "exit_code": -1, "timed_out": False}
+            payload["session_manager_id"] = session["id"]
+            payload["adaptive_timeout_ms"] = adaptive_timeout_ms
+            payload["timeout_used_ms"] = timeout_s * 1000
+            transient = bool(payload.get("timed_out")) or (r.status_code >= 500)
+            if transient and attempts < 1:
+                attempts += 1
+                timeout_s = max(timeout_s + 15, int((adaptive_timeout_ms * 1.35 + 999) / 1000))
+                _session_manager_update(
+                    session["id"],
+                    status="retrying",
+                    last_error="timeout or server error — retrying",
+                    last_elapsed_ms=elapsed_ms,
+                    adaptive_timeout_ms=timeout_s * 1000,
+                    state={"cwd": cwd, "command": command, "attempts": attempts},
+                )
+                continue
+            if transient:
+                current = _session_manager_get(session["id"]) or session
+                if int(current.get("retry_count") or 0) < int(current.get("max_retries") or max_retries):
+                    pending = _session_manager_mark_retryable(
+                        session["id"],
+                        elapsed_ms=elapsed_ms,
+                        error_text="timeout or server error",
+                        resume_payload=resume_payload,
+                        state={"cwd": cwd, "command": command, "timed_out": bool(payload.get("timed_out")), "attempts": attempts + 1},
+                    ) or current
+                    payload["retryable"] = True
+                    payload["resumable"] = True
+                    payload["session_manager"] = pending
+                    return payload
+            status = "completed" if int(payload.get("exit_code") or 0) == 0 and not payload.get("timed_out") and 200 <= r.status_code < 300 else "failed"
+            _session_manager_finish(
+                session["id"],
+                status=status,
+                elapsed_ms=elapsed_ms,
+                last_error=(payload.get("stderr") or f"HTTP {r.status_code}")[:1500] if status != "completed" else "",
+                state={"cwd": cwd, "command": command, "exit_code": payload.get("exit_code"), "timed_out": bool(payload.get("timed_out"))},
+                external_session_id=str(payload.get("session_id") or session_id),
+            )
+            return payload
+        except Exception as exc:
+            elapsed_ms = int((time.monotonic() - t0) * 1000)
+            error_text = str(exc)
+            transient = _is_timeoutish(error_text) or _is_networkish(error_text)
+            if transient and attempts < 1:
+                attempts += 1
+                timeout_s = max(timeout_s + 15, int((adaptive_timeout_ms * 1.35 + 999) / 1000))
+                _session_manager_update(
+                    session["id"],
+                    status="retrying",
+                    last_error=error_text[:1500],
+                    last_elapsed_ms=elapsed_ms,
+                    adaptive_timeout_ms=timeout_s * 1000,
+                    state={"cwd": cwd, "command": command, "attempts": attempts},
+                )
+                continue
+            if transient:
+                current = _session_manager_get(session["id"]) or session
+                if int(current.get("retry_count") or 0) < int(current.get("max_retries") or max_retries):
+                    pending = _session_manager_mark_retryable(
+                        session["id"],
+                        elapsed_ms=elapsed_ms,
+                        error_text=error_text,
+                        resume_payload=resume_payload,
+                        state={"cwd": cwd, "command": command, "attempts": attempts + 1},
+                    ) or current
+                    return {
+                        "stdout": "",
+                        "stderr": error_text,
+                        "exit_code": -1,
+                        "timed_out": _is_timeoutish(error_text),
+                        "session_id": session_id,
+                        "session_manager_id": session["id"],
+                        "adaptive_timeout_ms": adaptive_timeout_ms,
+                        "retryable": True,
+                        "resumable": True,
+                        "session_manager": pending,
+                    }
+            _session_manager_finish(
+                session["id"],
+                status="failed",
+                elapsed_ms=elapsed_ms,
+                last_error=error_text,
+                state={"cwd": cwd, "command": command, "attempts": attempts + 1},
+                external_session_id=session_id,
+            )
+            return {
+                "stdout": "",
+                "stderr": error_text,
+                "exit_code": -1,
+                "timed_out": _is_timeoutish(error_text),
+                "session_id": session_id,
+                "session_manager_id": session["id"],
+                "adaptive_timeout_ms": adaptive_timeout_ms,
+                "retryable": False,
+            }
+
+
 # ── Agentic loop — system prompt ──────────────────────────────────────────────
 
 AGENT_SYSTEM_PROMPT = """You are an AI coding assistant with access to a live Linux sandbox (Python 3.11, Node.js 20, pip, npm, bash).
@@ -1952,7 +2133,8 @@ async def _probe_health(client: httpx.AsyncClient, name: str, url: str, path: st
             "url": full,
             "ok": False,
             "http_status": None,
-            "error": str(e),
+            "body": None,
+            "error": str(e) or repr(e),
             "elapsed_ms": elapsed_ms,
         }
 
@@ -3267,6 +3449,9 @@ def _task_run_to_dict(row: sqlite3.Row | dict) -> dict:
     raw["task_url"] = f"/tasked?task_id={quote(str(raw.get('task_id') or ''))}" if raw.get("task_id") else "/tasked"
     raw["pipeline_url"] = f"/piplinetask?task_id={quote(str(raw.get('task_id') or ''))}" if raw.get("task_id") else "/piplinetask"
     raw["completed_url"] = f"/task-completed?task_id={quote(str(raw.get('task_id') or ''))}" if raw.get("task_id") else "/task-completed"
+    _tid = quote(str(raw.get('task_id') or ''))
+    _rid = quote(str(raw.get('id') or ''))
+    raw["preview_url"] = f"/tasked-preview?task_id={_tid}&run_id={_rid}" if raw.get("task_id") else "/tasked-preview"
     raw["is_running"] = (raw.get("status") or "").lower() == "running" and not raw.get("finished_at")
     raw["duration_ms"] = _duration_ms(raw.get("started_at") or raw.get("created_at"), raw.get("finished_at"))
     raw["duration_label"] = _duration_label(raw.get("duration_ms"))
@@ -3295,6 +3480,9 @@ def _task_alert_to_dict(row: sqlite3.Row | dict) -> dict:
     raw["task_url"] = f"/tasked?task_id={quote(str(raw.get('task_id') or ''))}" if raw.get("task_id") else "/tasked"
     raw["pipeline_url"] = f"/piplinetask?task_id={quote(str(raw.get('task_id') or ''))}" if raw.get("task_id") else "/piplinetask"
     raw["completed_url"] = f"/task-completed?task_id={quote(str(raw.get('task_id') or ''))}" if raw.get("task_id") else "/task-completed"
+    _atid = quote(str(raw.get('task_id') or ''))
+    _arid = quote(str(raw.get('run_id') or ''))
+    raw["preview_url"] = f"/tasked-preview?task_id={_atid}&run_id={_arid}" if raw.get("task_id") else "/tasked-preview"
     raw["schedule_label"] = _task_schedule_label(raw.get("schedule_kind") or "manual", raw.get("interval_minutes") or 0, raw.get("active"))
     raw["severity"] = raw.get("severity") or "info"
     raw["repeat_key"] = raw.get("repeat_key") or ""
@@ -3433,6 +3621,9 @@ def _task_row_to_dict(row: sqlite3.Row | dict) -> dict:
     raw["lifecycle_label"] = raw["lifecycle_state"].replace("-", " ").title()
     raw["mode_label"] = _task_mode_label(raw.get("mode") or "")
     raw["template_label"] = _task_template_label(raw.get("template_key") or "")
+    raw["tasked_type"] = raw.get("tasked_type") or "output"
+    raw["tasked_type_label"] = _task_output_type_label(raw["tasked_type"])
+    raw["preview_url"] = f"/tasked-preview?task_id={quote(str(raw.get('id') or ''))}" if raw.get("id") else "/tasked-preview"
     return raw
 
 
@@ -3446,6 +3637,59 @@ def _task_executor_target_label(target: str) -> str:
 
 def _task_template_label(template_key: str) -> str:
     return next((item["name"] for item in _task_templates_payload(active_only=False) if item["key"] == template_key), template_key or "custom")
+
+
+def _task_output_type_label(tasked_type: str) -> str:
+    return next((item["label"] for item in TASKED_TYPE_OPTIONS if item["id"] == (tasked_type or "output")), "Output")
+
+
+def _compile_task_output_text(steps: list[dict], run: dict | None = None) -> str:
+    """Extract and compile readable output text from task step results."""
+    parts: list[str] = []
+    for step in steps:
+        kind = str(step.get("step_kind") or "")
+        name = str(step.get("step_name") or step.get("step_id") or "Step")
+        output = step.get("output") or {}
+        if not isinstance(output, dict):
+            output = {}
+        if kind == "trigger":
+            continue
+        elif kind == "condition":
+            matched = bool(output.get("matched"))
+            parts.append(f"[Condition: {name}] → {'MATCHED ✓' if matched else 'NOT MATCHED ✗'}")
+        elif kind == "chat":
+            text = str(output.get("text") or "").strip()
+            if text:
+                parts.append(f"=== {name} ===\n{text}")
+        elif kind == "sandbox":
+            text = str(output.get("text") or output.get("stdout") or "").strip()
+            if text:
+                parts.append(f"=== {name} (Sandbox) ===\n{text}")
+            val = str(output.get("validation_excerpt") or "").strip()
+            if val:
+                parts.append(f"--- Validation ---\n{val}")
+            tst = str(output.get("test_excerpt") or "").strip()
+            if tst:
+                parts.append(f"--- Test ---\n{tst}")
+        elif kind in ("agent", "multi-agent", "multi-agento"):
+            url = str(output.get("launch_url") or "")
+            parts.append(f"[{name}] Agent launched" + (f" → {url}" if url else " (no URL captured)"))
+        elif kind == "alert":
+            title = str(output.get("title") or "")
+            summary = str(output.get("summary") or "")
+            if title:
+                parts.append(f"[Alert] {title}" + (f"\n{summary}" if summary else ""))
+        elif kind == "complete":
+            summary = str(output.get("summary") or "").strip()
+            parts.append("[Complete] " + (summary or "Workflow finished."))
+    if not parts and run:
+        excerpt = str(run.get("output_excerpt") or "").strip()
+        if excerpt:
+            parts.append(f"=== Output ===\n{excerpt}")
+        err = str(run.get("error_text") or "").strip()
+        if err:
+            parts.append(f"=== Error ===\n{err}")
+    return "\n\n".join(parts) if parts else "(No output captured for this run.)"
 
 
 def _task_pipeline_build(
@@ -5373,11 +5617,13 @@ def _task_mark_terminal(task_row: dict, run_id: str, *, status: str, text: str =
 
 
 async def _task_execute_chat_step(task_row: dict, step: dict, context: dict, *, run_id: str = "", recovery_session_id: str = "") -> dict:
-    prompt = str(_json_load_object(step.get("config")).get("prompt") or task_row.get("executor_prompt") or task_row.get("planner_prompt") or "").strip()
+    config = _json_load_object(step.get("config"))
+    prompt = str(config.get("prompt") or task_row.get("executor_prompt") or task_row.get("planner_prompt") or "").strip()
+    agent_id = str(config.get("agent_id") or "c6-kilocode")
     if not prompt:
         return {"ok": False, "error": "chat prompt required", "text": ""}
     return await _chat_one(
-        "c9-jokes-task",
+        agent_id,
         prompt,
         _urls()["c1"],
         chat_mode="deep",
@@ -6000,6 +6246,7 @@ async def page_task_legacy(request: Request):
 async def page_tasked(request: Request):
     return templates.TemplateResponse(request, "tasked.html", {
         "task_modes": TASK_MODE_OPTIONS,
+        "tasked_type_options": json.dumps(TASKED_TYPE_OPTIONS, ensure_ascii=False),
         "task_executor_targets": json.dumps(TASK_EXECUTOR_TARGET_OPTIONS, ensure_ascii=False),
         "task_step_kinds": json.dumps(TASK_WORKFLOW_STEP_KINDS, ensure_ascii=False),
         "task_agent_targets": json.dumps(TASK_AGENT_TARGET_OPTIONS, ensure_ascii=False),
@@ -6036,6 +6283,102 @@ async def page_piplinetask(request: Request):
         "task_step_kinds": json.dumps(TASK_WORKFLOW_STEP_KINDS, ensure_ascii=False),
         "task_templates": json.dumps(_task_templates_payload(), ensure_ascii=False),
     })
+
+
+@app.get("/tasked-preview", response_class=HTMLResponse, name="page_tasked_preview")
+async def page_tasked_preview(request: Request):
+    return templates.TemplateResponse(request, "tasked_preview.html", {
+        "task_modes": json.dumps(TASK_MODE_OPTIONS, ensure_ascii=False),
+        "tasked_type_options": json.dumps(TASKED_TYPE_OPTIONS, ensure_ascii=False),
+        "task_executor_targets": json.dumps(TASK_EXECUTOR_TARGET_OPTIONS, ensure_ascii=False),
+    })
+
+
+@app.get("/tasked-live-doc", response_class=HTMLResponse, name="page_tasked_live_doc")
+async def page_tasked_live_doc(request: Request):
+    return templates.TemplateResponse(request, "tasked_live_doc.html", {
+        "tasked_type_options": json.dumps(TASKED_TYPE_OPTIONS, ensure_ascii=False),
+        "task_modes": json.dumps(TASK_MODE_OPTIONS, ensure_ascii=False),
+        "task_executor_targets": json.dumps(TASK_EXECUTOR_TARGET_OPTIONS, ensure_ascii=False),
+        "task_step_kinds": json.dumps(TASK_WORKFLOW_STEP_KINDS, ensure_ascii=False),
+    })
+
+
+@app.get("/api/task-preview", name="api_task_preview")
+async def api_task_preview(task_id: str = "", run_id: str = ""):
+    """Return full task input parameters + compiled output for the Tasked Preview page."""
+    if not task_id and not run_id:
+        return JSONResponse({"ok": False, "error": "task_id or run_id required"}, status_code=400)
+    try:
+        with _db() as conn:
+            # Resolve task_id from run_id if needed
+            if run_id and not task_id:
+                rr = conn.execute("SELECT task_id FROM task_runs WHERE id=?", (run_id,)).fetchone()
+                task_id = rr["task_id"] if rr else ""
+            if not task_id:
+                return JSONResponse({"ok": False, "error": "Task not found for given run_id"}, status_code=404)
+
+            task_row = conn.execute("SELECT * FROM task_definitions WHERE id=?", (task_id,)).fetchone()
+            if not task_row:
+                return JSONResponse({"ok": False, "error": "Task not found"}, status_code=404)
+            task = _task_row_to_dict(task_row)
+
+            # Step definitions (workflow design)
+            step_def_rows = conn.execute(
+                "SELECT * FROM task_workflow_steps WHERE task_id=? AND active=1 ORDER BY position ASC",
+                (task_id,),
+            ).fetchall()
+            step_definitions = [_task_step_to_dict(r) for r in step_def_rows]
+            task["steps"] = step_definitions or _task_build_default_steps(task)
+
+            # Run to preview (specified or latest)
+            if run_id:
+                run_row = conn.execute("SELECT * FROM task_runs WHERE id=?", (run_id,)).fetchone()
+            else:
+                run_row = conn.execute(
+                    "SELECT * FROM task_runs WHERE task_id=? ORDER BY created_at DESC LIMIT 1",
+                    (task_id,),
+                ).fetchone()
+            run = _task_run_to_dict(run_row) if run_row else None
+            actual_run_id = (run or {}).get("id") or ""
+
+            # Recent runs list (for run selector)
+            recent_run_rows = conn.execute(
+                "SELECT id, created_at, status, source FROM task_runs WHERE task_id=? ORDER BY created_at DESC LIMIT 20",
+                (task_id,),
+            ).fetchall()
+            recent_runs = [dict(r) for r in recent_run_rows]
+
+            # Step results for selected run
+            step_results: list[dict] = []
+            if actual_run_id:
+                sr_rows = conn.execute(
+                    "SELECT * FROM task_step_results WHERE run_id=? ORDER BY started_at ASC",
+                    (actual_run_id,),
+                ).fetchall()
+                step_results = [_task_step_result_to_dict(r) for r in sr_rows]
+
+            # Alerts for selected run
+            alert_rows = conn.execute(
+                "SELECT * FROM task_alerts WHERE run_id=? ORDER BY created_at DESC",
+                (actual_run_id,),
+            ).fetchall() if actual_run_id else []
+            alerts = [_task_alert_to_dict(r) for r in alert_rows]
+
+            # Compile text output
+            output_text = _compile_task_output_text(step_results, run)
+
+            return JSONResponse({
+                "ok": True,
+                "task": task,
+                "run": run,
+                "recent_runs": recent_runs,
+                "step_results": step_results,
+                "alerts": alerts,
+                "output_text": output_text,
+            })
+    except sqlite3.Error as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
 
 @app.get("/pairs", response_class=HTMLResponse, name="page_pairs")
@@ -6329,6 +6672,93 @@ async def api_task_template_archive(template_key: str):
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
 
+@app.post("/api/tasks/bulk", name="api_tasks_bulk")
+async def api_tasks_bulk(request: Request):
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    action = (body.get("action") or "").strip().lower()
+    valid_actions = {"stop_all", "complete_all", "delete_completed", "delete_all", "archive_completed"}
+    if action not in valid_actions:
+        return JSONResponse({"ok": False, "error": f"action must be one of {sorted(valid_actions)}"}, status_code=400)
+    now = _iso_now()
+    try:
+        with _db() as conn:
+            if action == "stop_all":
+                rows = conn.execute(
+                    "SELECT DISTINCT task_id FROM task_runs WHERE status IN ('queued','running','launch-pending','waiting-feedback')"
+                ).fetchall()
+                task_ids = [r["task_id"] for r in rows]
+                conn.execute(
+                    "UPDATE task_runs SET status='cancelled', finished_at=?, completed_at=?, terminal_reason='stopped-by-user' "
+                    "WHERE status IN ('queued','running','launch-pending','waiting-feedback')",
+                    (now, now),
+                )
+                for tid in task_ids:
+                    conn.execute("UPDATE task_definitions SET last_status='cancelled', updated_at=? WHERE id=?", (now, tid))
+                _record_task_event("*", "task-stopped", f"Bulk stop-all: {len(task_ids)} task(s) cancelled.", status="cancelled")
+                return JSONResponse({"ok": True, "action": action, "affected": len(task_ids)})
+
+            elif action == "complete_all":
+                rows = conn.execute(
+                    "SELECT DISTINCT task_id FROM task_runs WHERE status IN ('queued','running','launch-pending','waiting-feedback','alert-open')"
+                ).fetchall()
+                task_ids = [r["task_id"] for r in rows]
+                conn.execute(
+                    "UPDATE task_runs SET status='completed', finished_at=COALESCE(finished_at,?), completed_at=?, terminal_reason='marked-complete-by-user' "
+                    "WHERE status IN ('queued','running','launch-pending','waiting-feedback','alert-open')",
+                    (now, now),
+                )
+                for tid in task_ids:
+                    conn.execute("UPDATE task_definitions SET last_status='completed', updated_at=? WHERE id=?", (now, tid))
+                return JSONResponse({"ok": True, "action": action, "affected": len(task_ids)})
+
+            elif action == "archive_completed":
+                rows = conn.execute(
+                    "SELECT id FROM task_definitions WHERE last_status IN ('completed','failed','cancelled') AND (archived_at IS NULL OR archived_at='')"
+                ).fetchall()
+                task_ids = [r["id"] for r in rows]
+                conn.execute(
+                    "UPDATE task_definitions SET archived_at=?, updated_at=? "
+                    "WHERE last_status IN ('completed','failed','cancelled') AND (archived_at IS NULL OR archived_at='')",
+                    (now, now),
+                )
+                return JSONResponse({"ok": True, "action": action, "affected": len(task_ids)})
+
+            elif action == "delete_completed":
+                rows = conn.execute(
+                    "SELECT id FROM task_definitions WHERE last_status IN ('completed','failed','cancelled')"
+                ).fetchall()
+                task_ids = [r["id"] for r in rows]
+                for tid in task_ids:
+                    conn.execute("DELETE FROM task_run_claims WHERE task_id=?", (tid,))
+                    conn.execute("DELETE FROM task_step_results WHERE task_id=?", (tid,))
+                    conn.execute("DELETE FROM task_workflow_steps WHERE task_id=?", (tid,))
+                    conn.execute("DELETE FROM task_feedback_events WHERE task_id=?", (tid,))
+                    conn.execute("DELETE FROM task_alerts WHERE task_id=?", (tid,))
+                    conn.execute("DELETE FROM task_events WHERE task_id=?", (tid,))
+                    conn.execute("DELETE FROM task_runs WHERE task_id=?", (tid,))
+                    conn.execute("DELETE FROM task_definitions WHERE id=?", (tid,))
+                return JSONResponse({"ok": True, "action": action, "affected": len(task_ids)})
+
+            elif action == "delete_all":
+                rows = conn.execute("SELECT id FROM task_definitions").fetchall()
+                count = len(rows)
+                conn.execute("DELETE FROM task_run_claims")
+                conn.execute("DELETE FROM task_step_results")
+                conn.execute("DELETE FROM task_workflow_steps")
+                conn.execute("DELETE FROM task_feedback_events")
+                conn.execute("DELETE FROM task_alerts")
+                conn.execute("DELETE FROM task_events")
+                conn.execute("DELETE FROM task_runs")
+                conn.execute("DELETE FROM task_definitions")
+                return JSONResponse({"ok": True, "action": action, "affected": count})
+
+    except sqlite3.Error as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
 @app.post("/api/tasks/seed-examples", name="api_tasks_seed_examples")
 async def api_tasks_seed_examples():
     try:
@@ -6394,6 +6824,9 @@ async def api_tasks_upsert(request: Request):
     except Exception:
         tabs_required = 1
     active = 1 if body.get("active", True) else 0
+    tasked_type = (body.get("tasked_type") or "output").strip().lower()
+    if tasked_type not in {item["id"] for item in TASKED_TYPE_OPTIONS}:
+        tasked_type = "output"
 
     if not name:
         return JSONResponse({"ok": False, "error": "name required"}, status_code=400)
@@ -6471,6 +6904,7 @@ async def api_tasks_upsert(request: Request):
                         json.dumps(completion_policy, ensure_ascii=False), json.dumps(alert_policy, ensure_ascii=False), 1,
                     ),
                 )
+            conn.execute("UPDATE task_definitions SET tasked_type=? WHERE id=?", (tasked_type, task_id))
             _task_save_steps(conn, task_id, normalized_steps)
             row = conn.execute("SELECT * FROM task_definitions WHERE id=?", (task_id,)).fetchone()
         task = _task_row_to_dict(row)
@@ -6796,6 +7230,67 @@ async def api_task_redo(task_id: str):
 async def api_task_archive(task_id: str):
     result = _task_archive_definition(task_id)
     return JSONResponse(result, status_code=200 if result.get("ok") else 404)
+
+
+@app.post("/api/tasks/{task_id}/stop", name="api_task_stop")
+async def api_task_stop(task_id: str):
+    now = _iso_now()
+    try:
+        with _db() as conn:
+            conn.execute(
+                "UPDATE task_runs SET status='cancelled', finished_at=?, completed_at=?, terminal_reason='stopped-by-user' "
+                "WHERE task_id=? AND status IN ('queued','running','launch-pending','waiting-feedback')",
+                (now, now, task_id),
+            )
+            conn.execute(
+                "UPDATE task_definitions SET last_status='cancelled', updated_at=? WHERE id=?",
+                (now, task_id),
+            )
+        _record_task_event(task_id, "task-stopped", "Task stopped by user.", status="cancelled")
+        return JSONResponse({"ok": True, "task_id": task_id, "status": "cancelled"})
+    except sqlite3.Error as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+@app.post("/api/tasks/{task_id}/complete", name="api_task_complete")
+async def api_task_complete(task_id: str):
+    now = _iso_now()
+    try:
+        with _db() as conn:
+            conn.execute(
+                "UPDATE task_runs SET status='completed', finished_at=COALESCE(finished_at,?), completed_at=?, terminal_reason='marked-complete-by-user' "
+                "WHERE task_id=? AND status IN ('queued','running','launch-pending','waiting-feedback','alert-open')",
+                (now, now, task_id),
+            )
+            conn.execute(
+                "UPDATE task_definitions SET last_status='completed', updated_at=? WHERE id=?",
+                (now, task_id),
+            )
+        _record_task_event(task_id, "task-completed", "Task marked complete by user.", status="completed")
+        return JSONResponse({"ok": True, "task_id": task_id, "status": "completed"})
+    except sqlite3.Error as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+@app.delete("/api/tasks/{task_id}", name="api_task_delete")
+async def api_task_delete(task_id: str):
+    try:
+        with _db() as conn:
+            row = conn.execute("SELECT id, name FROM task_definitions WHERE id=?", (task_id,)).fetchone()
+            if not row:
+                return JSONResponse({"ok": False, "error": "Task not found"}, status_code=404)
+            name = row["name"]
+            conn.execute("DELETE FROM task_run_claims WHERE task_id=?", (task_id,))
+            conn.execute("DELETE FROM task_step_results WHERE task_id=?", (task_id,))
+            conn.execute("DELETE FROM task_workflow_steps WHERE task_id=?", (task_id,))
+            conn.execute("DELETE FROM task_feedback_events WHERE task_id=?", (task_id,))
+            conn.execute("DELETE FROM task_alerts WHERE task_id=?", (task_id,))
+            conn.execute("DELETE FROM task_events WHERE task_id=?", (task_id,))
+            conn.execute("DELETE FROM task_runs WHERE task_id=?", (task_id,))
+            conn.execute("DELETE FROM task_definitions WHERE id=?", (task_id,))
+        return JSONResponse({"ok": True, "deleted": task_id, "name": name})
+    except sqlite3.Error as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
 
 @app.post("/api/task-feedback", name="api_task_feedback")
@@ -7903,16 +8398,18 @@ async def api_agent_run(
 
     async def generate():
         nonlocal task, session_id
+        # Persistent HTTP client for the lifetime of this SSE stream
+        _http_agent = httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=360.0, write=10.0, pool=10.0))
 
-        # Check C10 is reachable
-        client = _get_http()
+        # Check C10/C10b is reachable (use fresh client to avoid stale connections)
         try:
-            health_r = await client.get(f"{C10_URL}/health", timeout=5)
-            if health_r.status_code != 200:
-                yield _sse("error", {"message": f"C10 sandbox unhealthy (HTTP {health_r.status_code}). Is c10-sandbox running?"})
-                return
+            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0)) as _hc:
+                health_r = await _hc.get(f"{C10_URL}/health", timeout=5)
+                if health_r.status_code != 200:
+                    yield _sse("error", {"message": f"C10b sandbox unhealthy (HTTP {health_r.status_code}). Is c10b-sandbox running?"})
+                    return
         except Exception as exc:
-            yield _sse("error", {"message": f"C10 sandbox unreachable: {exc}. Run: docker compose up c10-sandbox -d"})
+            yield _sse("error", {"message": f"C10b sandbox unreachable ({C10_URL}): {exc}"})
             return
 
         # ── Auth pre-flight: verify M365 session BEFORE sending any task ─────
@@ -7920,10 +8417,12 @@ async def api_agent_run(
         # Copilot is actually reachable and responding (not just authenticated).
         c3_url = _urls().get("c3", "http://browser-auth:8001")
         _session_status = "unknown"
+        _auth_data = {}
         try:
-            _auth_r = await client.get(f"{c3_url}/session-health", timeout=8)
-            _auth_data = _auth_r.json() if _auth_r.status_code == 200 else {}
-            _session_status = _auth_data.get("session", "unknown")
+            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0)) as _ac:
+                _auth_r = await _ac.get(f"{c3_url}/session-health", timeout=8)
+                _auth_data = _auth_r.json() if _auth_r.status_code == 200 else {}
+                _session_status = _auth_data.get("session", "unknown")
         except Exception as _auth_exc:
             _auth_data = {"reason": str(_auth_exc)}
 
@@ -7947,7 +8446,7 @@ async def api_agent_run(
             "experiencing high demand", "we're experiencing",
         )
         try:
-            _hi_r = await client.post(
+            _hi_r = await _http_agent.post(
                 f"{c1}/v1/chat/completions",
                 headers={"Content-Type": "application/json", "X-Agent-ID": f"{agent_id}-preflight"},
                 json={"model": "copilot", "messages": [{"role": "user", "content": "hi"}], "stream": False},
@@ -8797,6 +9296,17 @@ async def api_sandbox_exec(request: Request):
             owner_id=session_id or "api-sandbox",
             operation="api-sandbox-exec",
         )
+    elif sandbox == "c10b":
+        result = await _c10b_exec(
+            command,
+            timeout=timeout,
+            cwd=cwd,
+            session_id=session_id,
+            scope="api",
+            page="api",
+            owner_id=session_id or "api-sandbox",
+            operation="api-sandbox-exec",
+        )
     else:
         result = await _c10_exec(command, timeout=timeout, cwd=cwd)
     return JSONResponse(result)
@@ -8805,9 +9315,9 @@ async def api_sandbox_exec(request: Request):
 # ── Container control API (start/stop optional containers) ───────────────────
 
 # Containers that can be toggled on/off to save resources
-_OPTIONAL_CONTAINERS = {"C2_agent-terminal", "C5_claude-code", "C7a_openclaw-gateway", "C7b_openclaw-cli", "C8_hermes-agent", "C12_sandbox", "C12b_sandbox"}
+_OPTIONAL_CONTAINERS = {"C2b_agent-terminal", "C5b_claude-code", "C7ab_openclaw-gateway", "C7bb_openclaw-cli", "C8b_hermes-agent", "C12b_sandbox"}
 # Containers that must stay running
-_CORE_CONTAINERS = {"C1_copilot-api", "C3_browser-auth", "C6_kilocode", "C9_jokes", "C10_sandbox", "C11_sandbox"}
+_CORE_CONTAINERS = {"C1b_copilot-api", "C3b_browser-auth", "C6b_kilocode", "C9b_jokes", "C10b_sandbox", "C11b_sandbox"}
 
 
 @app.get("/api/containers", name="api_containers")
@@ -9766,13 +10276,16 @@ async def api_ma_run(
     max_steps: int = 8,
     chat_mode: str = "auto",
     work_mode: str = "work",
+    agent_id: str = "c6-kilocode",
 ):
-    """SSE stream for /multi-Agento parallel execution using C11 session-scoped workspace."""
+    """SSE stream for /multi-Agento parallel execution using C11b session-scoped workspace."""
     if not task.strip():
         return JSONResponse({"error": "task required"}, status_code=400)
 
     c1 = _urls().get("c1", "http://localhost:8000")
-    agent_id = "c9-jokes"
+    _MA_TEST_AGENTS = {"c2-aider", "c6-kilocode"}
+    if agent_id not in _MA_TEST_AGENTS:
+        agent_id = "c6-kilocode"
     max_steps = max(2, min(12, max_steps))
 
     if not session_id:
@@ -9785,6 +10298,28 @@ async def api_ma_run(
             return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
         yield _sse("session", {"session_id": session_id, "roles": active_roles})
+
+        # ── C3b M365 auth guard (mirrors /api/agent/run pattern) ──────────────
+        c3_url = _urls().get("c3", "http://browser-auth:8001")
+        _session_status = "unknown"
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=5.0, read=8.0, write=5.0, pool=5.0)) as _ac:
+                _auth_r = await _ac.get(f"{c3_url}/session-health", timeout=8)
+                _auth_body = _auth_r.json() if _auth_r.status_code == 200 else {}
+                _session_status = _auth_body.get("session", "unknown")
+        except Exception:
+            _session_status = "unknown"
+
+        if _session_status != "active":
+            yield _sse("auth_required", {
+                "message": (
+                    f"M365 Copilot is not authenticated (status: {_session_status}). "
+                    f"Please sign in via the browser at localhost:6080"
+                ),
+                "session_status": _session_status,
+                "auth_url": "http://localhost:6080/?resize=scale&autoconnect=true",
+            })
+            return
 
         # Persist session start
         now = datetime.now(timezone.utc).isoformat()
@@ -9892,6 +10427,10 @@ async def api_ma_run(
             pane_id = f"ma-{r}"
             yield _sse("pane_init", {"pane_id": pane_id, "role": r, "assignment": assignments[r],
                                       "label": _MA_ROLES.get(r, {}).get("label", r.title())})
+
+        # Yield initial token estimate after supervisor step
+        _sup_tokens = _estimate_tokens([{"role": "user", "content": sup_prompt}])
+        yield _sse("token_estimate", {"tokens": _sup_tokens, "step": 0, "budget": TOKEN_BUDGET})
 
         # Run all roles concurrently
         event_queue: asyncio.Queue = asyncio.Queue()
@@ -10145,7 +10684,7 @@ async def api_ma_project_delete(name: str = "", session_id: str = ""):
 @app.get("/api/ma/preview", name="api_ma_preview")
 async def api_ma_preview(port: int = 3000, path: str = "/"):
     """Proxy to a web server running inside C11 sandbox."""
-    c11_host = C11_URL.split("://")[-1].split(":")[0]  # e.g. "c11-sandbox"
+    c11_host = C11_URL.split("://")[-1].split(":")[0]  # e.g. "c11b-sandbox"
     target = f"http://{c11_host}:{port}{path}"
     client = _get_http()
     try:
@@ -10156,7 +10695,7 @@ async def api_ma_preview(port: int = 3000, path: str = "/"):
         return HTMLResponse(
             f"<html><body style='font-family:system-ui;background:#0f1419;color:#e6edf3;padding:2rem'>"
             f"<h3>🔌 Preview not available</h3>"
-            f"<p>Could not reach <code>http://c11-sandbox:{port}/</code></p>"
+            f"<p>Could not reach <code>http://c11b-sandbox:{port}/</code></p>"
             f"<p style='color:#8b949e'>{exc}</p>"
             f"<p>The web server may still be starting. Wait a moment and refresh.</p>"
             f"</body></html>",

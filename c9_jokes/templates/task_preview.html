@@ -1,0 +1,335 @@
+{% extends "base.html" %}
+{% block title %}Tasked Preview{% endblock %}
+{% block content %}
+<style>
+  .tp-wrap { max-width: 1100px; margin: 0 auto; padding: 1.5rem 1rem; }
+  .tp-header { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.2rem; }
+  .tp-header h1 { font-size: 1.35rem; font-weight: 700; margin: 0; }
+  .tp-pill { display: inline-block; padding: .18em .7em; border-radius: 12px; font-size: .78rem; font-weight: 600; background: #1e293b; color: #94a3b8; border: 1px solid #334155; }
+  .tp-pill.output   { background:#0c2a1a; color:#4ade80; border-color:#166534; }
+  .tp-pill.alertonly{ background:#2a1a0c; color:#fb923c; border-color:#7c2d12; }
+  .tp-pill.hook     { background:#0c1a2a; color:#60a5fa; border-color:#1e40af; }
+  .tp-pill.action   { background:#1a0c2a; color:#c084fc; border-color:#6b21a8; }
+  .tp-pill.combination { background:#2a2a0c; color:#facc15; border-color:#854d0e; }
+  .tp-filters { display: flex; gap: .6rem; flex-wrap: wrap; margin-bottom: 1rem; align-items: center; }
+  .tp-filters label { font-size: .82rem; color: #94a3b8; }
+  .tp-filters select, .tp-filters input { background: #0f172a; border: 1px solid #334155; color: #e2e8f0; border-radius: 6px; padding: .3em .6em; font-size: .82rem; }
+  .tp-filters button { background: #1e40af; color: #fff; border: none; border-radius: 6px; padding: .35em .9em; font-size: .82rem; cursor: pointer; }
+  .tp-filters button:hover { background: #2563eb; }
+  .tp-card { background: #0f172a; border: 1px solid #1e293b; border-radius: 10px; padding: 1.1rem 1.2rem; margin-bottom: 1rem; }
+  .tp-card-title { font-size: .92rem; font-weight: 700; color: #cbd5e1; margin-bottom: .6rem; display: flex; align-items: center; gap: .5rem; }
+  .tp-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem 1.2rem; font-size: .82rem; }
+  .tp-grid2 .tp-label { color: #64748b; }
+  .tp-grid2 .tp-val  { color: #e2e8f0; word-break: break-word; }
+  .tp-output-box { font-family: 'Courier New', monospace; font-size: .8rem; background: #020617; border: 1px solid #1e293b; border-radius: 8px;
+    padding: 1rem; color: #a3e635; white-space: pre-wrap; word-break: break-word; max-height: 520px; overflow-y: auto; line-height: 1.55; }
+  .tp-steps-table { width: 100%; border-collapse: collapse; font-size: .8rem; }
+  .tp-steps-table th { background: #1e293b; color: #94a3b8; padding: .4rem .6rem; text-align: left; font-weight: 600; }
+  .tp-steps-table td { padding: .38rem .6rem; border-bottom: 1px solid #1e293b; color: #cbd5e1; vertical-align: top; }
+  .tp-steps-table tr:last-child td { border-bottom: none; }
+  .tp-status { display: inline-block; padding: .12em .55em; border-radius: 8px; font-size: .75rem; font-weight: 600; }
+  .tp-status.completed { background:#0c2a1a; color:#4ade80; }
+  .tp-status.running   { background:#0c2040; color:#60a5fa; }
+  .tp-status.failed    { background:#2a0c0c; color:#f87171; }
+  .tp-status.queued    { background:#1e293b; color:#94a3b8; }
+  .tp-run-select { display: flex; gap: .5rem; flex-wrap: wrap; margin-bottom: .6rem; }
+  .tp-run-btn { background: #1e293b; border: 1px solid #334155; color: #94a3b8; border-radius: 6px; padding: .22em .7em; font-size: .78rem; cursor: pointer; }
+  .tp-run-btn.active, .tp-run-btn:hover { background: #1e40af; color: #fff; border-color: #2563eb; }
+  .tp-links { display: flex; gap: .6rem; flex-wrap: wrap; margin-top: .6rem; }
+  .tp-link { background: #1e293b; color: #94a3b8; border: 1px solid #334155; border-radius: 6px; padding: .25em .75em; font-size: .8rem; text-decoration: none; }
+  .tp-link:hover { background: #334155; color: #e2e8f0; }
+  .tp-link.primary { background: #1e40af; color: #fff; border-color: #2563eb; }
+  .tp-link.primary:hover { background: #2563eb; }
+  .tp-note { color: #475569; font-size: .8rem; padding: .5rem 0; }
+  .tp-feedback-item { background: #020617; border: 1px solid #1e293b; border-radius: 6px; padding: .5rem .8rem; margin-bottom: .4rem; font-size: .8rem; color: #94a3b8; }
+  .tp-feedback-item strong { color: #60a5fa; }
+  .tp-empty { text-align: center; color: #475569; padding: 2.5rem 1rem; font-size: .9rem; }
+  .tp-refresh-note { font-size: .75rem; color: #475569; }
+  .tp-section-sep { border: none; border-top: 1px solid #1e293b; margin: .8rem 0; }
+  @media (max-width: 680px) { .tp-grid2 { grid-template-columns: 1fr; } }
+</style>
+
+<div class="tp-wrap">
+  <div class="tp-header">
+    <h1>Tasked Preview</h1>
+    <span id="tp-type-pill" class="tp-pill">—</span>
+    <span id="tp-mode-pill" class="tp-pill">—</span>
+    <span class="tp-refresh-note" id="tp-refresh-note"></span>
+  </div>
+
+  <div class="tp-filters">
+    <label>Task ID</label>
+    <input type="text" id="tp-task-id-input" placeholder="task_example_…" style="min-width:200px">
+    <label>Run ID</label>
+    <input type="text" id="tp-run-id-input" placeholder="trun_… (optional)">
+    <button id="tp-load-btn">Load</button>
+    <span id="tp-filter-note" class="tp-note"></span>
+  </div>
+
+  <div id="tp-task-section" style="display:none">
+    <div class="tp-card">
+      <div class="tp-card-title">Task Input</div>
+      <div class="tp-grid2" id="tp-task-meta"></div>
+      <hr class="tp-section-sep">
+      <div class="tp-grid2" id="tp-task-prompts"></div>
+      <div class="tp-links" id="tp-task-links"></div>
+    </div>
+
+    <div class="tp-card">
+      <div class="tp-card-title">Run History
+        <span class="tp-note" id="tp-run-count"></span>
+      </div>
+      <div class="tp-run-select" id="tp-run-select"></div>
+    </div>
+
+    <div class="tp-card" id="tp-output-card" style="display:none">
+      <div class="tp-card-title" id="tp-output-title">Output</div>
+      <div id="tp-output-box" class="tp-output-box"></div>
+      <div class="tp-links" id="tp-output-links" style="margin-top:.6rem"></div>
+    </div>
+
+    <div class="tp-card">
+      <div class="tp-card-title">Step Results</div>
+      <div id="tp-steps-wrap">
+        <div class="tp-note">Select a run above to view step results.</div>
+      </div>
+    </div>
+
+    <div class="tp-card" id="tp-feedback-card" style="display:none">
+      <div class="tp-card-title">Agent Feedback</div>
+      <div id="tp-feedback-wrap"></div>
+    </div>
+  </div>
+
+  <div id="tp-empty" class="tp-empty">
+    Enter a Task ID above and click <strong>Load</strong> — or navigate here from the TaskCompleted page via a task's <strong>Preview</strong> button.
+  </div>
+  <div id="tp-error" class="tp-note" style="color:#f87171;display:none"></div>
+</div>
+
+<script>
+(function() {
+  var TASKED_OUTPUT_TYPES = {{ tasked_output_types|safe }};
+
+  function qs(id) { return document.getElementById(id); }
+  function esc(s) { return String(s == null ? '' : s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+  function fmtTs(ts) {
+    if (!ts) return '—';
+    try { return new Date(ts).toLocaleString(); } catch(e) { return ts; }
+  }
+
+  var state = { taskId: '', runId: '', data: null, outputs: [], selectedRunId: '' };
+
+  var taskIdInput = qs('tp-task-id-input');
+  var runIdInput  = qs('tp-run-id-input');
+  var loadBtn     = qs('tp-load-btn');
+  var filterNote  = qs('tp-filter-note');
+  var typePill    = qs('tp-type-pill');
+  var modePill    = qs('tp-mode-pill');
+  var refreshNote = qs('tp-refresh-note');
+
+  // Pre-fill from URL params
+  var params = new URLSearchParams(window.location.search);
+  if (params.get('task_id')) taskIdInput.value = params.get('task_id');
+  if (params.get('run_id'))  runIdInput.value  = params.get('run_id');
+
+  loadBtn.addEventListener('click', function() { loadPreview(); });
+  taskIdInput.addEventListener('keydown', function(e) { if (e.key === 'Enter') loadPreview(); });
+  runIdInput.addEventListener('keydown', function(e) { if (e.key === 'Enter') loadPreview(); });
+
+  async function loadPreview() {
+    var taskId = taskIdInput.value.trim();
+    var runId  = runIdInput.value.trim();
+    if (!taskId) { filterNote.textContent = 'Task ID required.'; return; }
+    filterNote.textContent = 'Loading…';
+    qs('tp-error').style.display = 'none';
+    qs('tp-task-section').style.display = 'none';
+    qs('tp-empty').style.display = 'none';
+    try {
+      var url = '/api/task-preview/' + encodeURIComponent(taskId);
+      if (runId) url += '?run_id=' + encodeURIComponent(runId);
+      var res = await fetch(url, { cache: 'no-store' });
+      var data = await res.json();
+      if (!data.ok) { showError(data.error || 'Failed to load preview'); return; }
+      state.data = data;
+      state.taskId = taskId;
+      state.runId = runId;
+      state.outputs = data.outputs || [];
+      state.selectedRunId = data.selected_run_id || '';
+      filterNote.textContent = 'Loaded at ' + new Date().toLocaleTimeString();
+      renderPreview(data);
+      // Push state
+      var newUrl = '/task-preview?task_id=' + encodeURIComponent(taskId) + (runId ? '&run_id=' + encodeURIComponent(runId) : '');
+      history.replaceState(null, '', newUrl);
+    } catch(e) {
+      showError('Network error: ' + e.message);
+    }
+  }
+
+  function showError(msg) {
+    var el = qs('tp-error');
+    el.textContent = msg;
+    el.style.display = 'block';
+    qs('tp-empty').style.display = 'none';
+  }
+
+  function renderPreview(data) {
+    var task = data.task || {};
+    var runs = data.runs || [];
+    var steps = data.steps || [];
+    var feedback = data.feedback || [];
+
+    // Type + mode pills
+    var tt = task.tasked_type || 'output';
+    var ttLabel = task.tasked_type_label || tt;
+    typePill.textContent = ttLabel;
+    typePill.className = 'tp-pill ' + tt.replace('-only','only');
+    modePill.textContent = task.mode_label || task.mode || '—';
+
+    // Task meta
+    qs('tp-task-meta').innerHTML =
+      metaRow('Task ID', task.id || '—') +
+      metaRow('Name', task.name || '—') +
+      metaRow('Type', ttLabel) +
+      metaRow('Mode', task.mode_label || task.mode || '—') +
+      metaRow('Schedule', task.schedule_label || '—') +
+      metaRow('Last status', task.last_status || '—') +
+      metaRow('Last run', fmtTs(task.last_run_at)) +
+      metaRow('Next run', fmtTs(task.next_run_at));
+
+    qs('tp-task-prompts').innerHTML =
+      metaRow('Planner prompt', (task.planner_prompt || '—').slice(0,400)) +
+      metaRow('Executor prompt', (task.executor_prompt || '—').slice(0,400)) +
+      metaRow('Trigger', task.trigger_text || '—') +
+      metaRow('Context handoff', task.context_handoff || '—') +
+      metaRow('Sandbox target', task.executor_target || '—') +
+      metaRow('Workspace dir', task.workspace_dir || '—') +
+      metaRow('Tabs required', task.tabs_required || 1);
+
+    qs('tp-task-links').innerHTML =
+      '<a class="tp-link" href="' + esc(task.task_url || '/tasked?task_id=' + encodeURIComponent(task.id || '')) + '">Open in Tasked</a>' +
+      '<a class="tp-link" href="' + esc(task.pipeline_url || '/piplinetask?task_id=' + encodeURIComponent(task.id || '')) + '">Pipeline trace</a>' +
+      '<a class="tp-link" href="' + esc(task.completed_url || '/task-completed?task_id=' + encodeURIComponent(task.id || '')) + '">Completed runs</a>' +
+      '<a class="tp-link" href="/alerts">Alerts</a>';
+
+    // Run selector
+    qs('tp-run-count').textContent = runs.length + ' run' + (runs.length !== 1 ? 's' : '');
+    var runHtml = '';
+    if (!runs.length) {
+      runHtml = '<span class="tp-note">No runs yet for this task.</span>';
+    } else {
+      runs.forEach(function(r) {
+        var active = r.id === state.selectedRunId ? ' active' : '';
+        runHtml += '<button class="tp-run-btn' + active + '" data-run-id="' + esc(r.id) + '" data-run-status="' + esc(r.status) + '">' +
+          esc(r.id.slice(0,18)) + ' · ' + esc(r.status) + ' · ' + esc(fmtTs(r.created_at)) + '</button>';
+      });
+    }
+    qs('tp-run-select').innerHTML = runHtml;
+    qs('tp-run-select').querySelectorAll('button[data-run-id]').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        state.selectedRunId = btn.dataset.runId;
+        qs('tp-run-select').querySelectorAll('button').forEach(function(b) { b.classList.remove('active'); });
+        btn.classList.add('active');
+        loadRunDetail(state.taskId, state.selectedRunId);
+      });
+    });
+
+    // Show output for selected run
+    renderRunDetail(steps, feedback, data.outputs || []);
+
+    qs('tp-task-section').style.display = 'block';
+
+    // Auto-refresh if any run is active
+    var hasActive = runs.some(function(r) { return r.status === 'running' || r.status === 'queued'; });
+    if (hasActive) {
+      refreshNote.textContent = 'Auto-refreshing (run active)…';
+      setTimeout(function() { loadPreview(); }, 5000);
+    } else {
+      refreshNote.textContent = '';
+    }
+  }
+
+  async function loadRunDetail(taskId, runId) {
+    try {
+      var url = '/api/task-preview/' + encodeURIComponent(taskId) + '?run_id=' + encodeURIComponent(runId);
+      var res = await fetch(url, { cache: 'no-store' });
+      var data = await res.json();
+      if (data.ok) {
+        renderRunDetail(data.steps || [], data.feedback || [], data.outputs || []);
+      }
+    } catch(e) {}
+  }
+
+  function renderRunDetail(steps, feedback, outputs) {
+    // Steps
+    var stepsWrap = qs('tp-steps-wrap');
+    if (!steps.length) {
+      stepsWrap.innerHTML = '<div class="tp-note">No step results for this run.</div>';
+    } else {
+      var html = '<table class="tp-steps-table"><thead><tr><th>#</th><th>Step</th><th>Kind</th><th>Status</th><th>Duration</th><th>Output excerpt</th></tr></thead><tbody>';
+      steps.forEach(function(s, i) {
+        var out = s.output || {};
+        var outText = out.text || out.summary || out.stdout || out.stderr || '';
+        if (!outText && typeof out === 'object') outText = JSON.stringify(out).slice(0,120);
+        html += '<tr>' +
+          '<td>' + (i+1) + '</td>' +
+          '<td>' + esc(s.step_name || s.step_id || '—') + '</td>' +
+          '<td>' + esc(s.step_kind || '—') + '</td>' +
+          '<td><span class="tp-status ' + esc(s.status || '') + '">' + esc(s.status || '—') + '</span></td>' +
+          '<td>' + esc(s.duration_label || '—') + '</td>' +
+          '<td style="max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(outText) + '">' + esc((outText || '').slice(0,120)) + '</td>' +
+        '</tr>';
+      });
+      html += '</tbody></table>';
+      stepsWrap.innerHTML = html;
+    }
+
+    // Feedback
+    var fbCard = qs('tp-feedback-card');
+    var fbWrap = qs('tp-feedback-wrap');
+    if (feedback && feedback.length) {
+      fbCard.style.display = 'block';
+      fbWrap.innerHTML = feedback.map(function(fb) {
+        return '<div class="tp-feedback-item"><strong>' + esc((fb.agent_id || 'agent').toUpperCase()) + '</strong> · ' +
+          esc(fb.feedback_type || '') + ' · <span class="tp-status ' + esc(fb.status || '') + '">' + esc(fb.status || '—') + '</span><br>' +
+          esc((fb.summary || '').slice(0,400)) + '</div>';
+      }).join('');
+    } else {
+      fbCard.style.display = 'none';
+    }
+
+    // Output
+    var outCard = qs('tp-output-card');
+    var outBox = qs('tp-output-box');
+    var outLinks = qs('tp-output-links');
+    var outTitle = qs('tp-output-title');
+    if (outputs && outputs.length) {
+      var latest = outputs[0];
+      outCard.style.display = 'block';
+      outTitle.textContent = 'Output — ' + (latest.output_type || 'text').toUpperCase() +
+        ' · ' + fmtTs(latest.created_at);
+      outBox.textContent = latest.content_text || '(empty output)';
+      var linksHtml = '';
+      if (latest.file_url) {
+        linksHtml += '<a class="tp-link primary" href="' + esc(latest.file_url) + '" target="_blank" download>Download .txt</a>';
+      }
+      if (outputs.length > 1) {
+        linksHtml += '<span class="tp-note">' + outputs.length + ' output records for this task</span>';
+      }
+      outLinks.innerHTML = linksHtml;
+    } else {
+      outCard.style.display = 'none';
+    }
+  }
+
+  function metaRow(label, val) {
+    return '<div class="tp-label">' + esc(label) + '</div><div class="tp-val">' + esc(val) + '</div>';
+  }
+
+  // Auto-load if task_id in URL
+  if (taskIdInput.value.trim()) {
+    loadPreview();
+  }
+})();
+</script>
+{% endblock %}
