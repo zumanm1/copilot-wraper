@@ -1,13 +1,116 @@
 {% extends "base.html" %}
-{% block title %}C1 sessions{% endblock %}
+{% block title %}Chat sessions{% endblock %}
 {% block content %}
-<h2>C1 agent sessions</h2>
-<p>Source: <code>{{ c1_url }}/v1/sessions</code></p>
-{% if error %}
-  <div class="card"><pre>{{ error }}</pre></div>
-{% elif data is mapping %}
-  <pre>{{ data | tojson(indent=2) }}</pre>
-{% else %}
-  <pre>{{ data }}</pre>
-{% endif %}
+<style>
+.sess-page-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:0.6rem;margin-bottom:0.85rem;}
+.sess-search{flex:1;min-width:160px;max-width:320px;background:var(--surface2);border:1px solid var(--border);
+  border-radius:6px;padding:4px 10px;font-size:0.82rem;color:var(--fg);}
+.sess-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:0.65rem;}
+.sess-card{background:var(--card);border:1px solid var(--border);border-radius:10px;padding:0.75rem 0.9rem;
+  display:flex;flex-direction:column;gap:0.35rem;transition:border-color 0.15s;}
+.sess-card:hover{border-color:var(--accent);}
+.sess-card-title{font-size:0.88rem;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.sess-card-meta{font-size:0.72rem;color:var(--muted);display:flex;gap:0.6rem;flex-wrap:wrap;}
+.sess-card-actions{display:flex;gap:0.4rem;margin-top:0.3rem;}
+.sess-empty{color:var(--muted);text-align:center;padding:3rem 0;font-size:0.9rem;}
+#sess-count{font-size:0.78rem;color:var(--muted);}
+</style>
+
+<div class="sess-page-toolbar">
+  <h2 style="margin:0">Chat sessions <span class="muted" style="font-size:0.7em;" id="sess-count">Loading…</span></h2>
+  <div style="display:flex;gap:0.5rem;align-items:center;">
+    <input type="search" id="sess-search" class="sess-search" placeholder="Search sessions…">
+    <button class="btn-sm" id="sess-reload">↺ Refresh</button>
+  </div>
+</div>
+
+<div id="sess-msg" style="font-size:0.82rem;min-height:1.2em;margin-bottom:0.4rem;"></div>
+<div class="sess-grid" id="sess-grid">
+  <div class="sess-empty">Loading…</div>
+</div>
+
+<script>
+(function(){
+  var grid    = document.getElementById('sess-grid');
+  var countEl = document.getElementById('sess-count');
+  var msgEl   = document.getElementById('sess-msg');
+  var search  = document.getElementById('sess-search');
+  var allSess = [];
+
+  function esc(s){ return String(s||'').replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  function fmtDate(ts){ if(!ts) return '—'; try{ return new Date(ts).toLocaleString(); }catch(_){ return ts; } }
+  function fmtK(n){ if(!n) return '0'; return n >= 1000 ? (n/1000).toFixed(1)+'k' : n; }
+
+  function showMsg(t, ok){
+    msgEl.textContent = t;
+    msgEl.style.color = ok ? 'var(--ok)' : 'var(--fail)';
+    setTimeout(function(){ msgEl.textContent=''; }, 4000);
+  }
+
+  function render(list) {
+    if (!list.length) {
+      grid.innerHTML = '<div class="sess-empty">No sessions found.</div>';
+      return;
+    }
+    grid.innerHTML = list.map(function(s) {
+      var tok  = s.token_estimate ? fmtK(s.token_estimate) + ' tokens' : '';
+      var msgs = s.message_count  ? s.message_count + ' msgs' : '';
+      var dt   = fmtDate(s.updated_at || s.created_at);
+      var agent = s.agent_id ? '<code style="font-size:0.7rem">'+esc(s.agent_id)+'</code>' : '';
+      return '<div class="sess-card" data-sid="'+esc(s.id)+'">'
+        + '<div class="sess-card-title" title="'+esc(s.id)+'">'+esc(s.title || 'Untitled chat')+'</div>'
+        + '<div class="sess-card-meta">'
+        +   (agent ? agent + ' &nbsp;' : '')
+        +   (msgs  ? '<span>'+esc(msgs)+'</span>' : '')
+        +   (tok   ? '<span>'+esc(tok)+'</span>'  : '')
+        +   '<span>'+esc(dt)+'</span>'
+        + '</div>'
+        + '<div class="sess-card-actions">'
+        +   '<a class="btn-sm" href="/chat?session_id='+encodeURIComponent(s.id)+'" title="Open in chat">&#9654; Resume</a>'
+        +   '<button class="btn-sm sess-del-btn" data-sid="'+esc(s.id)+'" style="color:var(--muted);" title="Delete session">&#128465;</button>'
+        + '</div>'
+        + '</div>';
+    }).join('');
+
+    grid.querySelectorAll('.sess-del-btn').forEach(function(btn){
+      btn.addEventListener('click', function(e){
+        e.stopPropagation();
+        if (!confirm('Delete this session?')) return;
+        fetch('/api/chat/session/'+encodeURIComponent(btn.dataset.sid), {method:'DELETE'})
+          .then(function(r){ return r.json(); })
+          .then(function(){ showMsg('Session deleted.', true); load(); })
+          .catch(function(e){ showMsg('Delete failed: '+e.message, false); });
+      });
+    });
+  }
+
+  function applySearch() {
+    var q = (search.value||'').toLowerCase().trim();
+    var filtered = !q ? allSess : allSess.filter(function(s){
+      return (s.title||'').toLowerCase().indexOf(q) !== -1
+          || (s.agent_id||'').toLowerCase().indexOf(q) !== -1;
+    });
+    countEl.textContent = '(' + filtered.length + ' of ' + allSess.length + ')';
+    render(filtered);
+  }
+
+  function load() {
+    grid.innerHTML = '<div class="sess-empty">Loading…</div>';
+    fetch('/api/chat/sessions?limit=100')
+      .then(function(r){ return r.json(); })
+      .then(function(rows){
+        allSess = rows || [];
+        countEl.textContent = '(' + allSess.length + ')';
+        applySearch();
+      })
+      .catch(function(e){
+        grid.innerHTML = '<div class="sess-empty" style="color:var(--fail)">Failed: '+esc(e.message)+'</div>';
+      });
+  }
+
+  search.addEventListener('input', applySearch);
+  document.getElementById('sess-reload').addEventListener('click', load);
+  load();
+})();
+</script>
 {% endblock %}

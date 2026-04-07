@@ -1,10 +1,22 @@
 {% extends "base.html" %}
 {% block title %}Container health{% endblock %}
 {% block content %}
+<style>
+.health-spark{display:inline-block;vertical-align:middle;margin-left:6px;}
+.hist-dot{font-size:0.75rem;margin-right:1px;line-height:1;}
+.hist-dot.ok{color:#30d158;}
+.hist-dot.fail{color:#ff453a;}
+.uptime-badge{display:inline-block;border-radius:999px;padding:2px 8px;font-size:0.72rem;font-weight:600;}
+.uptime-badge.good{background:rgba(48,209,88,0.15);color:#30d158;border:1px solid rgba(48,209,88,0.3);}
+.uptime-badge.warn{background:rgba(255,160,0,0.15);color:#ffa000;border:1px solid #ffa000;}
+.uptime-badge.bad {background:rgba(255,69,58,0.15);color:#ff453a;border:1px solid #ff453a;}
+#health-countdown{font-size:0.72rem;color:var(--muted);font-variant-numeric:tabular-nums;min-width:3ch;text-align:right;}
+</style>
 <div class="toolbar">
   <h2 style="margin:0">Container health</h2>
   <div style="display:flex;align-items:center;gap:0.75rem;">
     <span class="muted" id="health-ts">Last checked: —</span>
+    <span id="health-countdown"></span>
     <button type="button" id="health-refresh" class="btn-sm">Refresh now</button>
   </div>
 </div>
@@ -16,8 +28,9 @@
       <th>URL</th>
       <th>Status</th>
       <th>Response time</th>
+      <th>Uptime</th>
       <th>Detail</th>
-      <th>Last 5 checks</th>
+      <th>Last 5 &amp; trend</th>
     </tr>
   </thead>
   <tbody>
@@ -34,6 +47,7 @@
       <td id="hbody-{{ loop.index0 }}">
         {% if p.error %}<pre>{{ p.error }}</pre>{% else %}<pre>{{ p.body | tojson(indent=2) }}</pre>{% endif %}
       </td>
+      <td id="huptime-{{ loop.index0 }}"><span class="muted">—</span></td>
       <td id="hhistory-{{ loop.index0 }}" class="history-cell">
         <span class="muted">—</span>
       </td>
@@ -50,22 +64,57 @@
 
   function fmtTime(d) { return d.toLocaleTimeString(); }
 
-  function renderHistory(cell, items) {
+  function renderHistory(cell, items, uptimeCell) {
     if (!items || !items.length) { cell.innerHTML = '<span class="muted">—</span>'; return; }
-    const dots = items.slice(0, 5).reverse().map(function(item) {
-      const ok = item.http_status === 200;
+    var last5 = items.slice(0, 5).reverse();
+    /* dots */
+    var dots = last5.map(function(item) {
+      var ok = item.http_status === 200;
       return '<span class="hist-dot ' + (ok ? 'ok' : 'fail') + '" title="' +
-        item.captured_at + ' HTTP ' + (item.http_status || '?') + '">●</span>';
+        (item.captured_at||'') + ' · HTTP ' + (item.http_status || '?') +
+        (item.elapsed_ms ? ' · ' + item.elapsed_ms + 'ms' : '') + '">●</span>';
     }).join('');
-    cell.innerHTML = dots;
+    /* sparkline of response times */
+    var times = last5.map(function(item) { return item.elapsed_ms || 0; });
+    var maxT = Math.max.apply(null, times) || 1;
+    var W = 60, H = 20;
+    var step = W / (times.length - 1 || 1);
+    var pts = times.map(function(v, i) {
+      return (i * step).toFixed(1) + ',' + (H - (v / maxT) * (H - 2) - 1).toFixed(1);
+    }).join(' ');
+    var spark = '<canvas class="health-spark" width="' + W + '" height="' + H + '" id="spark-' + cell.id + '"></canvas>';
+    cell.innerHTML = dots + spark;
+    /* draw on canvas */
+    var cv = cell.querySelector('canvas');
+    if (cv && times.length > 1) {
+      var ctx = cv.getContext('2d');
+      ctx.clearRect(0, 0, W, H);
+      ctx.beginPath();
+      times.forEach(function(v, i) {
+        var x = i * step, y = H - (v / maxT) * (H - 2) - 1;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      });
+      ctx.strokeStyle = '#0a84ff';
+      ctx.lineWidth = 1.5;
+      ctx.lineJoin = 'round';
+      ctx.stroke();
+    }
+    /* uptime badge */
+    if (uptimeCell) {
+      var okCount = last5.filter(function(i){ return i.http_status === 200; }).length;
+      var pct = Math.round(okCount / last5.length * 100);
+      var cls = pct === 100 ? 'good' : pct >= 60 ? 'warn' : 'bad';
+      uptimeCell.innerHTML = '<span class="uptime-badge ' + cls + '">' + pct + '%</span>';
+    }
   }
 
   async function loadHistory(key, idx) {
     try {
       const resp = await fetch('/api/health-history?target=' + encodeURIComponent(key) + '&limit=5');
       const data = await resp.json();
-      const cell = document.getElementById('hhistory-' + idx);
-      if (cell) renderHistory(cell, data);
+      const cell    = document.getElementById('hhistory-' + idx);
+      const upCell  = document.getElementById('huptime-'  + idx);
+      if (cell) renderHistory(cell, data, upCell);
     } catch(e) {}
   }
 
@@ -111,8 +160,19 @@
     timer = setInterval(refresh, INTERVAL);
   });
 
+  /* countdown ticker */
+  var remaining = INTERVAL / 1000;
+  var countdownEl = document.getElementById('health-countdown');
+  function tickCountdown() {
+    if (countdownEl) countdownEl.textContent = remaining + 's';
+    remaining--;
+    if (remaining < 0) remaining = INTERVAL / 1000;
+  }
+  tickCountdown();
+  setInterval(tickCountdown, 1000);
+
   document.getElementById('health-ts').textContent = 'Last checked: ' + fmtTime(new Date());
-  timer = setInterval(refresh, INTERVAL);
+  timer = setInterval(function() { remaining = INTERVAL / 1000; refresh(); }, INTERVAL);
 })();
 </script>
 {% endblock %}
