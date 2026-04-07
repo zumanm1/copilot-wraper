@@ -4,32 +4,58 @@
 
 ---
 
-## ⚡ 5-Step Quick Start (copy-paste)
+## ⚡ Quick Start — Clone → CORE → (optional) Agents & Sandboxes
+
+### Step 1 — Clone & configure
 
 ```bash
-# 1. Clone
 git clone https://github.com/zumanm1/copilot-wraper.git
 cd copilot-wraper
-
-# 2. Create env file
 cp .env.example .env
-
-# 3. Build all 13 images (~15 min first run)
-docker compose build
-
-# 4. Start CORE first, authenticate via browser
-docker compose up app browser-auth -d
-open http://localhost:6080          # macOS — log in to Copilot in the noVNC browser
-# xdg-open http://localhost:6080    # Linux
-curl -X POST http://localhost:8001/extract         # pull cookies into .env
-curl -X POST http://localhost:8000/v1/reload-config # reload C1b
-
-# 5. Start ALL 13 containers (CORE + AI Agents + Sandboxes)
-docker compose up -d
-docker compose ps
 ```
 
-All 13 containers start automatically in step 5. Use the **Container Manager** at `http://localhost:6090/` to manage them visually.
+### Step 2 — Build & start CORE (mandatory, ~8 min)
+
+```bash
+# Build only the 4 CORE images
+docker compose build app browser-auth kilocode-terminal c9-jokes
+
+# Start CORE
+docker compose up app browser-auth kilocode-terminal c9-jokes -d
+
+# Authenticate via noVNC browser
+open http://localhost:6080           # macOS
+# xdg-open http://localhost:6080     # Linux
+curl -X POST http://localhost:8001/extract          # extract cookies → .env
+curl -X POST http://localhost:8000/v1/reload-config  # reload C1b
+
+# Verify CORE is healthy
+curl http://localhost:8000/health       # C1b ✓
+curl http://localhost:8001/health       # C3b ✓
+curl http://localhost:6090/api/status   # C9b ✓
+```
+
+### Step 3 — (Optional) Build & start AI Agents (~10 min)
+
+```bash
+# Build AI Agent images
+docker compose build agent-terminal claude-code-terminal openclaw-gateway openclaw-cli hermes-agent
+
+# Start AI Agents
+docker compose up agent-terminal claude-code-terminal openclaw-gateway openclaw-cli hermes-agent -d
+```
+
+### Step 4 — (Optional) Build & start Sandboxes (~5 min)
+
+```bash
+# Build Sandbox images
+docker compose build c10b-sandbox c11b-sandbox c12b-sandbox
+
+# Start Sandboxes
+docker compose up c10b-sandbox c11b-sandbox c12b-sandbox -d
+```
+
+> **Tip:** Once CORE is running, open the **Container Manager** at `http://localhost:6090/` to build, start, stop, or restart any container visually — no CLI required.
 
 ---
 
@@ -412,27 +438,30 @@ docker stop C10b_sandbox C11b_sandbox C12b_sandbox
 # 1. Clone
 git clone https://github.com/zumanm1/copilot-wraper.git
 cd copilot-wraper
-
-# 2. Env file
 cp .env.example .env
 
-# 3. Build all 13 images
-docker compose build
+# 2. Build CORE images first (~8 min)
+docker compose build app browser-auth kilocode-terminal c9-jokes
 
-# 4. Start CORE + authenticate
-docker compose up app browser-auth -d
-open http://localhost:6080                         # macOS — log in via noVNC
-# xdg-open http://localhost:6080                  # Linux
+# 3. Start CORE + authenticate
+docker compose up app browser-auth kilocode-terminal c9-jokes -d
+open http://localhost:6080                          # macOS — log in via noVNC
+# xdg-open http://localhost:6080                   # Linux
 curl -X POST http://localhost:8001/extract
 curl -X POST http://localhost:8000/v1/reload-config
 
-# 5. Start ALL 13 containers
-docker compose up -d
+# 4. (Optional) Build & start AI Agents (~10 min)
+docker compose build agent-terminal claude-code-terminal openclaw-gateway openclaw-cli hermes-agent
+docker compose up agent-terminal claude-code-terminal openclaw-gateway openclaw-cli hermes-agent -d
+
+# 5. (Optional) Build & start Sandboxes (~5 min)
+docker compose build c10b-sandbox c11b-sandbox c12b-sandbox
+docker compose up c10b-sandbox c11b-sandbox c12b-sandbox -d
 
 # 6. Verify
 docker compose ps
-curl http://localhost:8000/health
-curl http://localhost:6090/api/status
+curl http://localhost:8000/health        # C1b
+curl http://localhost:6090/api/status    # C9b
 ```
 
 **Using the automated startup script:**
