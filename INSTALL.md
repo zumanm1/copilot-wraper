@@ -38,21 +38,23 @@ curl http://localhost:6090/api/status   # C9b ✓
 ### Step 3 — (Optional) Build & start AI Agents (~10 min)
 
 ```bash
-# Build AI Agent images
-docker compose build agent-terminal claude-code-terminal openclaw-gateway openclaw-cli hermes-agent
+# Build AI Agent images (requires --profile optional)
+docker compose --profile optional build agent-terminal claude-code-terminal openclaw-gateway openclaw-cli hermes-agent
 
 # Start AI Agents
-docker compose up agent-terminal claude-code-terminal openclaw-gateway openclaw-cli hermes-agent -d
+docker compose --profile optional up agent-terminal claude-code-terminal openclaw-gateway openclaw-cli hermes-agent -d
 ```
 
 ### Step 4 — (Optional) Build & start Sandboxes (~5 min)
 
 ```bash
 # Build Sandbox images
-docker compose build c10b-sandbox c11b-sandbox c12b-sandbox
+docker compose build c10-sandbox c11-sandbox               # C10b + C11b (no profile needed)
+docker compose --profile optional build c12b-sandbox       # C12b (optional profile)
 
 # Start Sandboxes
-docker compose up c10b-sandbox c11b-sandbox c12b-sandbox -d
+docker compose up c10-sandbox c11-sandbox -d                           # C10b + C11b
+docker compose --profile optional up c12b-sandbox -d                   # C12b
 ```
 
 > **Tip:** Once CORE is running, open the **Container Manager** at `http://localhost:6090/` to build, start, stop, or restart any container visually — no CLI required.
@@ -95,8 +97,8 @@ This project wraps Microsoft Copilot behind a standard OpenAI- and Anthropic-com
 | C7bb | `openclaw-cli` | — (internal 8080) | OpenClaw CLI / TUI |
 | C8b | `hermes-agent` | — (internal 8080) | Hermes Agent — persistent memory, skills, cron jobs |
 | C9b | `c9-jokes` | **6090** (host) | Validation console — chat, agent, multi-agento, logs, tasked, health UI |
-| C10b | `c10b-sandbox` | **8310** (host) / 8210 (internal) | Agent workspace sandbox for C9b `/api/agent/*` |
-| C11b | `c11b-sandbox` | **8410** (host) / 8200 (internal) | Multi-agent session sandbox for C9b `/api/multi-Agento/*` |
+| C10b | `c10-sandbox` | internal :8100 only | Agent workspace sandbox for C9b `/api/agent/*` |
+| C11b | `c11-sandbox` | internal :8200 only | Multi-agent session sandbox for C9b `/api/multi-Agento/*` |
 | C12b | `c12b-sandbox` | **8210** (host) | Lean coding/test sandbox for Tasked pipeline `/api/sandbox/exec` |
 
 All containers share the `copilot-net` Docker bridge network. Only the ports listed above are exposed to the host.
@@ -413,7 +415,7 @@ docker compose up app browser-auth kilocode-terminal c9-jokes -d
 #### 🤖 AI AGENTS — add when needed
 
 ```bash
-docker compose up agent-terminal claude-code-terminal openclaw-gateway openclaw-cli hermes-agent -d
+docker compose --profile optional up agent-terminal claude-code-terminal openclaw-gateway openclaw-cli hermes-agent -d
 
 # Or stop them to free resources:
 docker stop C2b_agent-terminal C5b_claude-code C7ab_openclaw-gateway C7bb_openclaw-cli C8b_hermes-agent
@@ -422,7 +424,8 @@ docker stop C2b_agent-terminal C5b_claude-code C7ab_openclaw-gateway C7bb_opencl
 #### 📦 SANDBOX — add when a feature needs it
 
 ```bash
-docker compose up c10b-sandbox c11b-sandbox c12b-sandbox -d
+docker compose up c10-sandbox c11-sandbox -d                  # C10b + C11b (no profile)
+docker compose --profile optional up c12b-sandbox -d          # C12b (optional profile)
 
 # Or stop them:
 docker stop C10b_sandbox C11b_sandbox C12b_sandbox
@@ -449,12 +452,14 @@ curl -X POST http://localhost:8001/extract
 curl -X POST http://localhost:8000/v1/reload-config
 
 # 4. (Optional) Build & start AI Agents (~10 min)
-docker compose build agent-terminal claude-code-terminal openclaw-gateway openclaw-cli hermes-agent
-docker compose up agent-terminal claude-code-terminal openclaw-gateway openclaw-cli hermes-agent -d
+docker compose --profile optional build agent-terminal claude-code-terminal openclaw-gateway openclaw-cli hermes-agent
+docker compose --profile optional up agent-terminal claude-code-terminal openclaw-gateway openclaw-cli hermes-agent -d
 
 # 5. (Optional) Build & start Sandboxes (~5 min)
-docker compose build c10b-sandbox c11b-sandbox c12b-sandbox
-docker compose up c10b-sandbox c11b-sandbox c12b-sandbox -d
+docker compose build c10-sandbox c11-sandbox
+docker compose --profile optional build c12b-sandbox
+docker compose up c10-sandbox c11-sandbox -d
+docker compose --profile optional up c12b-sandbox -d
 
 # 6. Verify
 docker compose ps
@@ -500,9 +505,9 @@ curl http://localhost:6090/api/status
 # → JSON dict with keys for each container
 
 # ── C10b / C11b / C12b — Sandboxes (host-exposed in c3btest) ─
-curl -sf http://localhost:8310/health   # C10b agent sandbox
-curl -sf http://localhost:8410/health   # C11b multi-agent sandbox
-curl -sf http://localhost:8210/health   # C12b lean sandbox
+docker compose exec c10-sandbox  curl -sf http://localhost:8100/health  # C10b (internal only)
+docker compose exec c11-sandbox  curl -sf http://localhost:8200/health  # C11b (internal only)
+curl -sf http://localhost:8210/health   # C12b lean sandbox (host port)
 
 # ── Agent containers (health via exec) ───────────────────────
 docker compose exec agent-terminal       curl -sf http://localhost:8080/health
@@ -526,8 +531,8 @@ docker compose exec hermes-agent         curl -sf http://localhost:8080/health
 | C7bb | `openclaw-cli` | `docker compose exec openclaw-cli curl -sf http://localhost:8080/health` | `ok` |
 | C8b | `hermes-agent` | `docker compose exec hermes-agent curl -sf http://localhost:8080/health` | `ok` |
 | C9b | `c9-jokes` | `curl http://localhost:6090/api/status` | JSON dict |
-| C10b | `c10b-sandbox` | `curl -sf http://localhost:8310/health` | `200 OK` JSON |
-| C11b | `c11b-sandbox` | `curl -sf http://localhost:8410/health` | `200 OK` JSON |
+| C10b | `c10-sandbox` | `docker compose exec c10-sandbox curl -sf http://localhost:8100/health` | `200 OK` (internal) |
+| C11b | `c11-sandbox` | `docker compose exec c11-sandbox curl -sf http://localhost:8200/health` | `200 OK` (internal) |
 | C12b | `c12b-sandbox` | `curl -sf http://localhost:8210/health` | `200 OK` JSON |
 
 ---
@@ -542,8 +547,8 @@ docker compose exec hermes-agent         curl -sf http://localhost:8080/health
 | **C3 Setup** | `http://localhost:8001/setup` | Portal profile configuration form |
 | **C7a Gateway** | `http://localhost:18789` | OpenClaw WebSocket gateway |
 | **C9 Console** | `http://localhost:6090` | Validation dashboard — chat, pairs, logs, health |
-| **C10b Sandbox** | `http://localhost:8310` (host) | Agent workspace sandbox — used by C9b `/api/agent/*` APIs |
-| **C11b Sandbox** | `http://localhost:8410` (host) | Multi-agent session sandbox — used by C9b `/api/multi-Agento/*` APIs |
+| **C10b Sandbox** | internal only (`:8100`) | Agent workspace sandbox — used by C9b `/api/agent/*` APIs |
+| **C11b Sandbox** | internal only (`:8200`) | Multi-agent session sandbox — used by C9b `/api/multi-Agento/*` APIs |
 | **C12b Sandbox** | `http://localhost:8210` (host) | Lean coding/test sandbox — used by Tasked pipeline `/api/sandbox/exec` |
 
 **C9 Pages:**
