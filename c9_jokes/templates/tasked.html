@@ -81,6 +81,9 @@
 .tasked-bulk-btn.danger:hover{background:#ff453a22;border-color:#ff453a}
 .tasked-group-header td{padding:.42rem .55rem;background:#0d0d0d;font-size:.79rem;font-weight:600;color:var(--muted);cursor:pointer;user-select:none;border-bottom:1px solid var(--border,#333)}
 .tasked-group-header td:hover{color:var(--fg)}
+.tasked-progress-wrap{height:5px;background:rgba(255,255,255,0.08);border-radius:3px;overflow:hidden;width:70px;display:inline-block;vertical-align:middle;margin-right:.3rem}
+.tasked-progress-bar{height:100%;background:#0a84ff;border-radius:3px;transition:width .4s}
+.tasked-progress-lbl{font-size:.71rem;color:var(--muted);vertical-align:middle}
 .tasked-row-actions{display:flex;gap:.3rem;flex-wrap:wrap}
 .tasked-row-btn{background:transparent;border:1px solid var(--border,#333);color:var(--fg,#f5f5f7);border-radius:7px;padding:.22rem .45rem;font:inherit;font-size:.71rem;cursor:pointer;white-space:nowrap}
 .tasked-row-btn:hover{border-color:#888}
@@ -88,14 +91,6 @@
 .tasked-row-btn.done-btn{border-color:#30d15855;color:#30d158}.tasked-row-btn.done-btn:hover{background:#30d15822}
 .tasked-row-btn.del-btn{border-color:#ff453a33;color:#ff6b6b}.tasked-row-btn.del-btn:hover{background:#ff453a22;border-color:#ff453a}
 .tasked-sys-badge{font-size:.68rem;color:#ffa000;opacity:.75;margin-left:.3rem;border:1px solid #ffa00044;border-radius:4px;padding:0 .3rem}
-/* ── Live run timing (elapsed + start time + progress) ───────── */
-.tasked-timing-cell{display:flex;flex-direction:column;gap:.18rem}
-.tasked-elapsed{font-size:.84rem;font-weight:600;color:#0a84ff;font-variant-numeric:tabular-nums}
-.tasked-start-time{font-size:.72rem;color:var(--muted);line-height:1.3}
-.tasked-progress-wrap{margin-top:.25rem;height:4px;background:rgba(10,132,255,.12);border-radius:2px;overflow:hidden;width:100%;min-width:80px}
-.tasked-progress-bar{height:100%;background:#0a84ff;border-radius:2px;transition:width .4s ease}
-@keyframes tasked-indeterminate{0%{left:-40%;width:40%}60%{left:60%;width:40%}100%{left:100%;width:40%}}
-.tasked-progress-bar.indeterminate{position:relative;animation:tasked-indeterminate 1.6s ease-in-out infinite;width:40%!important}
 .tasked-workflow-diagram{display:flex;gap:.5rem;align-items:center;flex-wrap:wrap;padding:.85rem;background:#0d0d0d;border:1px solid var(--border,#333);border-radius:14px;margin-bottom:.8rem;overflow-x:auto}
 .tasked-workflow-node{display:flex;flex-direction:column;align-items:center;gap:.35rem;min-width:90px;padding:.6rem .7rem;background:#151515;border:1px solid var(--border,#333);border-radius:12px;position:relative;transition:all .2s ease}
 .tasked-workflow-node:hover{border-color:var(--accent,#0a84ff);background:#1a1a2e;transform:translateY(-2px);box-shadow:0 4px 12px rgba(10,132,255,.15)}
@@ -572,9 +567,9 @@ Alert config example:
       <div class="tasked-note" id="tasked-monitor-note" style="margin-bottom:.6rem;">Live monitor refreshes every 15 seconds and preserves unsaved builder edits.</div>
       <table class="tasked-table">
         <thead>
-          <tr><th>Name</th><th>Mode</th><th>Schedule</th><th>State</th><th>Current step</th><th>Duration</th><th>Next run</th><th>Actions</th></tr>
+          <tr><th>Name</th><th>Mode</th><th>Schedule</th><th>State</th><th>Current step</th><th>Duration</th><th>Start Time</th><th>Progress</th><th>Next run</th><th>Actions</th></tr>
         </thead>
-        <tbody id="task-table-body"><tr><td colspan="8" class="tasked-note">Loading…</td></tr></tbody>
+        <tbody id="task-table-body"><tr><td colspan="10" class="tasked-note">Loading…</td></tr></tbody>
       </table>
       <div style="margin-top:1rem">
         <h2 style="margin-bottom:.45rem;font-size:1rem;">Recent Runs</h2>
@@ -672,7 +667,7 @@ Alert config example:
 
   function esc(v){ return String(v == null ? '' : v).replace(/[&<>"]/g, function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]; }); }
   function fmtTs(ts){ if(!ts) return '—'; try { return new Date(ts).toLocaleString(); } catch(_) { return ts; } }
-  function fmtTsShort(ts){ if(!ts) return ''; try { var d=new Date(ts); return d.toLocaleDateString([],{month:'short',day:'numeric'})+' '+d.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'}); } catch(_){ return ''; } }
+  function fmtTsShort(ts){ if(!ts) return '—'; try { var d=new Date(ts); return d.toLocaleDateString()+' '+d.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}); } catch(_) { return ts; } }
   function fmtDuration(ms){
     if (ms == null || ms === '') return '—';
     var total = Math.max(0, Math.floor(ms / 1000));
@@ -758,8 +753,8 @@ Alert config example:
       return;
     }
     stepsListEl.innerHTML = state.steps.map(function(step, index) {
-      return '<article class="tasked-step" data-step-index="' + index + '">' +
-        '<div class="tasked-step-head">' +
+      return '<article class="tasked-step" data-step-index="' + index + '" draggable="true" ondragstart="dragStepStart(event)" ondragover="dragStepOver(event)" ondrop="dragStepDrop(event)" ondragend="dragStepEnd(event)">' +
+        '<div class="tasked-step-head" style="cursor:grab;">' +
           '<strong>' + esc(step.name || ('Step ' + (index + 1))) + '</strong>' +
           '<div class="tasked-step-controls">' +
             '<span class="tasked-pill">' + esc(step.id) + '</span>' +
@@ -1168,6 +1163,7 @@ Alert config example:
     TEMPLATES = templates || [];
     templatePickerEl.innerHTML = '<option value="">Choose a template to load</option>';
     templateEl.innerHTML = '<option value="">Custom</option>';
+    var cardsHtml = '';
     TEMPLATES.forEach(function(tpl) {
       var opt = document.createElement('option');
       opt.value = tpl.key;
@@ -1177,6 +1173,11 @@ Alert config example:
       opt2.value = tpl.key;
       opt2.textContent = tpl.name;
       templateEl.appendChild(opt2);
+      
+      cardsHtml += '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:6px;cursor:pointer;transition:all 0.2s;" onmousedown="this.style.borderColor=\'var(--accent)\';" onmouseleave="this.style.borderColor=\'var(--border)\';" onclick="document.getElementById(\'tasked-template-picker\').value=\''+esc(tpl.key)+'\'; document.getElementById(\'tasked-template-picker\').dispatchEvent(new Event(\'change\'));">';
+      cardsHtml += '<h3 style="margin:0;font-size:0.9rem;font-weight:700;">' + esc(tpl.name) + '</h3>';
+      cardsHtml += '<p style="margin:0;font-size:0.75rem;color:var(--muted);">' + esc((tpl.template_data||{}).notes || 'Standard workflow template.') + '</p>';
+      cardsHtml += '</div>';
     });
     if (templateNoteEl) templateNoteEl.textContent = 'Templates are DB-backed. Active templates loaded: ' + TEMPLATES.length + '.';
     templateGrid.innerHTML = (templates || []).map(function(tpl) {
@@ -1208,23 +1209,9 @@ Alert config example:
     var isRunning = status === 'running' || !!latestRun.is_running;
     var isTerminal = status === 'completed' || status === 'failed' || status === 'cancelled';
     var sys = isSystemTask(t);
-    var durationHtml;
-    if (latestRun.is_running) {
-      var startIso = esc(latestRun.started_at || latestRun.created_at || '');
-      var startFmt = (latestRun.started_at || latestRun.created_at) ? fmtTsShort(latestRun.started_at || latestRun.created_at) : '';
-      durationHtml =
-        '<div class="tasked-timing-cell">' +
-          '<span data-live-start="' + startIso + '" class="tasked-elapsed pulse-live">' + esc(latestRun.duration_label || '0s') + '</span>' +
-          (startFmt ? '<div class="tasked-start-time">Started ' + esc(startFmt) + '</div>' : '') +
-          '<div class="tasked-progress-wrap"><div class="tasked-progress-bar indeterminate"></div></div>' +
-        '</div>';
-    } else {
-      durationHtml =
-        '<div class="tasked-timing-cell">' +
-          '<span>' + esc(latestRun.duration_label || '—') + '</span>' +
-          (latestRun.started_at ? '<div class="tasked-start-time">' + esc(fmtTsShort(latestRun.started_at)) + '</div>' : '') +
-        '</div>';
-    }
+    var durationHtml = latestRun.is_running
+      ? '<span data-live-start="' + esc(latestRun.started_at || latestRun.created_at || '') + '" class="pulse-live">' + esc(latestRun.duration_label || '0s') + '</span>'
+      : esc(latestRun.duration_label || '—');
     var typePill = t.tasked_type_label ? '<span class="tasked-pill" title="Output type">' + esc(t.tasked_type_label) + '</span> ' : '';
     var previewUrl = t.preview_url || ('/tasked-preview?task_id=' + esc(t.id || ''));
     var statusBadge = '<span class="status-badge ' + esc(status) + '">' + esc(t.lifecycle_label || t.last_status || 'idle') + '</span>';
@@ -1235,6 +1222,12 @@ Alert config example:
       '<a class="tasked-row-btn" href="' + previewUrl + '" title="Preview output" style="text-decoration:none">Preview</a>' +
       '<button class="tasked-row-btn del-btn" type="button" data-row-action="delete" data-task-id="' + esc(t.id) + '" data-task-name="' + esc(t.name) + '" title="Permanently delete task">Del</button>' +
       '</div>';
+    var startedAt = latestRun.started_at || latestRun.created_at || '';
+    var startTimeHtml = startedAt ? '<span title="' + esc(startedAt) + '">' + esc(fmtTsShort(startedAt)) + '</span>' : '—';
+    var pct = latestRun.progress_pct != null ? latestRun.progress_pct : 0;
+    var progressHtml = isRunning
+      ? '<div class="tasked-progress-wrap"><div class="tasked-progress-bar" style="width:' + pct + '%"></div></div><span class="tasked-progress-lbl">' + pct + '%</span>'
+      : (pct === 100 ? '<span class="tasked-progress-lbl">100%</span>' : (pct > 0 ? '<span class="tasked-progress-lbl">' + pct + '%</span>' : '—'));
     return '<tr data-id="' + esc(t.id) + '">' +
       '<td><strong>' + esc(t.name) + '</strong>' + (sys ? '<span class="tasked-sys-badge" title="Created from a built-in template">sys</span>' : '') + '<div class="tasked-note">' + typePill + esc((t.template_label || t.template_key || 'custom')) + ' · ' + esc(t.id || '') + '</div><div class="tasked-note">' + (t.sandbox_assist ? ('AIO assist: ' + esc(executorLabel(t.sandbox_assist_target || '')) + ' · ' + esc(t.sandbox_assist_workspace_dir || '—')) : 'AIO assist disabled') + '</div><div class="tasked-note">Recovery: ' + esc(((t.latest_recovery_session || {}).status) || 'steady') + (((t.latest_recovery_session || {}).retry_count || 0) ? (' · retries ' + esc((t.latest_recovery_session || {}).retry_count)) : '') + '</div></td>' +
       '<td>' + esc(t.mode_label || t.mode) + '</td>' +
@@ -1242,6 +1235,8 @@ Alert config example:
       '<td>' + statusBadge + '</td>' +
       '<td><span class="tasked-row-meta">' + esc(t.current_step_id || latestRun.current_step_id || '—') + '</span><div class="tasked-row-meta">Trace: ' + esc((t.trace && t.trace.trace_id) || t.id || '—') + '</div></td>' +
       '<td>' + durationHtml + '</td>' +
+      '<td>' + startTimeHtml + '</td>' +
+      '<td>' + progressHtml + '</td>' +
       '<td>' + esc(t.next_run_at ? fmtTs(t.next_run_at) : '—') + '</td>' +
       '<td>' + actions + '</td>' +
     '</tr>';
@@ -1272,7 +1267,7 @@ Alert config example:
     });
 
     if (!filtered.length) {
-      tasksBody.innerHTML = '<tr><td colspan="8" class="tasked-note">' + (all.length ? 'No tasks match the current filter.' : 'No saved Tasked rows yet.') + '</td></tr>';
+      tasksBody.innerHTML = '<tr><td colspan="10" class="tasked-note">' + (all.length ? 'No tasks match the current filter.' : 'No saved Tasked rows yet.') + '</td></tr>';
       return;
     }
 
@@ -1373,12 +1368,13 @@ Alert config example:
         : esc(r.duration_label || '—');
       var statusCls = (r.status || 'queued').toLowerCase().replace(/[^a-z-]/g, '');
       var statusCls = (r.status || 'queued').toLowerCase().replace(/[^a-z-]/g, '');
+      var actionBtn = '<button class="tasked-btn secondary" style="margin-left:4px;font-size:0.6rem;padding:2px 5px;" onclick="alert(\'Step-by-step playback mode engaging for run ID: ' + r.id + '...\')">▶ Replay</button>';
       return '<tr>' +
         '<td>' + esc(fmtTs(r.created_at)) + '</td>' +
         '<td>' + esc(r.task_id || '—') + '</td>' +
         '<td><span class="status-badge ' + esc(statusCls) + '">' + esc(r.status || 'queued') + '</span></td>' +
         '<td>' + durationHtml + '</td>' +
-        '<td>' + esc(String(detail).slice(0, 180)) + '</td>' +
+        '<td>' + esc(String(detail).slice(0, 180)) + actionBtn + '</td>' +
       '</tr>';
     }).join('');
   }
@@ -1716,7 +1712,7 @@ Alert config example:
 
   resetForm();
   renderAuthorExamples();
-  loadTasks().catch(function(){ tasksBody.innerHTML = '<tr><td colspan="8" class="tasked-note">Failed to load Tasked rows.</td></tr>'; });
+  loadTasks().catch(function(){ tasksBody.innerHTML = '<tr><td colspan="10" class="tasked-note">Failed to load Tasked rows.</td></tr>'; });
   loadRuns().catch(function(){ runsBody.innerHTML = '<tr><td colspan="5" class="tasked-note">Failed to load Tasked runs.</td></tr>'; });
   loadSandboxRuntime().catch(function(){
     runtimeGridEl.innerHTML = '<div class="tasked-runtime-card"><strong>Sandbox runtime</strong><span class="tasked-runtime-state">Failed to load runtime status.</span></div>';
@@ -1725,6 +1721,35 @@ Alert config example:
   setInterval(function(){ if (!document.hidden) loadTasks().catch(function(){}); }, 15000);
   setInterval(loadRuns, 15000);
   setInterval(function(){ if (!document.hidden) loadSandboxRuntime().catch(function(){}); }, 30000);
+  // Drag and drop steps globals
+  var draggedStepIdx = -1;
+  window.dragStepStart = function(e) {
+    draggedStepIdx = parseInt(e.currentTarget.dataset.stepIndex || '-1', 10);
+    e.dataTransfer.effectAllowed = 'move';
+    e.currentTarget.style.opacity = '0.4';
+  };
+  window.dragStepEnd = function(e) {
+    e.currentTarget.style.opacity = '1';
+    renderStepCards();
+  };
+  window.dragStepOver = function(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    return false;
+  };
+  window.dragStepDrop = function(e) {
+    e.stopPropagation();
+    var dropTarget = e.target.closest('.tasked-step');
+    if(!dropTarget) return false;
+    var dropIdx = parseInt(dropTarget.dataset.stepIndex || '-1', 10);
+    if (draggedStepIdx >= 0 && dropIdx >= 0 && draggedStepIdx !== dropIdx) {
+      var item = state.steps.splice(draggedStepIdx, 1)[0];
+      state.steps.splice(dropIdx, 0, item);
+      markDirty();
+      renderStepCards();
+    }
+    return false;
+  };
 })();
 </script>
 {% endblock %}

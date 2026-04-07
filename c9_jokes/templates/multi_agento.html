@@ -1051,13 +1051,37 @@
   <div class="mao-right">
     <div class="mao-rtabs">
       <button class="mao-rtab active" data-tab="files">📁 Files</button>
+      <button class="mao-rtab" data-tab="dag">🕸 DAG</button>
+      <button class="mao-rtab" data-tab="diff">📝 Diff</button>
       <button class="mao-rtab" data-tab="shell">🐧 Shell</button>
-      <button class="mao-rtab"        data-tab="preview">🌐 Preview</button>
+      <button class="mao-rtab" data-tab="preview">🌐 Preview</button>
     </div>
     <!-- Files tab -->
     <div class="mao-rpanel active" id="rpanel-files">
       <div class="mao-ftree" id="mao-ftree">
         <div class="mao-fempty" id="mao-fempty">Empty workspace</div>
+      </div>
+    </div>
+    <!-- DAG tab -->
+    <div class="mao-rpanel" id="rpanel-dag">
+      <div id="mao-dag-view" style="flex:1;background:var(--bg);color:var(--muted);display:flex;align-items:center;justify-content:center;text-align:center;padding:1rem;flex-direction:column;gap:10px;">
+        <span style="font-size:2rem;">🕸</span>
+        <span style="font-size:0.8rem;">DAG Visualization of Agent Roles</span>
+        <div id="mao-dag-network" style="width:100%;height:300px;border:1px dashed rgba(255,255,255,0.1);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:0.75rem;">Loading graph...</div>
+      </div>
+    </div>
+    <!-- Diff tab -->
+    <div class="mao-rpanel" id="rpanel-diff">
+      <div class="mao-preview-tb" style="justify-content: space-between;">
+          <span>Workspace Diff</span>
+          <div style="display:flex; gap:0.4rem;">
+              <button class="btn-sm" id="btn-refresh-diff" title="Refresh git diff">↺ refresh</button>
+              <button class="btn-sm" id="btn-snap-ws" style="color:var(--accent);" title="Commit current state to git HEAD">📸 snap</button>
+              <button class="btn-sm" id="btn-rollback-ws" style="color:var(--fail);" title="Revert files to last snapshot">⏪ rollback</button>
+          </div>
+      </div>
+      <div class="mao-mbody" style="padding:0;">
+          <pre id="mao-diff-out" style="border:none; border-radius:0; height:100%; margin:0;">No changes since last snapshot.</pre>
       </div>
     </div>
     <!-- Preview tab -->
@@ -1725,8 +1749,101 @@ document.getElementById('btn-sessions-history').addEventListener('click',functio
   if(pwdBtn)pwdBtn.addEventListener('click',function(){shellRun('pwd');});
 })();
 
+// ── Workspace Diff & Snapshot Logic ───────────────────────────────────────
+async function loadDiff() {
+    var out = document.getElementById('mao-diff-out');
+    out.textContent = 'Loading diff...';
+    try {
+        var r = await fetch('/api/workspace/diff');
+        var d = await r.json();
+        if (d.status === 'ok') {
+            if (!d.diff || !d.diff.trim()) {
+                out.textContent = 'No changes since last snapshot.';
+            } else {
+                out.textContent = d.diff;
+            }
+        } else {
+            out.textContent = 'Error: ' + d.message;
+        }
+    } catch(e) {
+        out.textContent = 'Error loading diff: ' + e.message;
+    }
+}
+
+async function snapshotWorkspace() {
+    try {
+        var r = await fetch('/api/workspace/snapshot', { method: 'POST' });
+        var d = await r.json();
+        alert(d.message || d.status);
+        loadDiff();
+    } catch(e) {
+        alert('Snapshot error: ' + e.message);
+    }
+}
+
+async function rollbackWorkspace() {
+    if (!confirm('Are you sure you want to rollback to the last snapshot? You will lose uncommitted changes.')) return;
+    try {
+        var r = await fetch('/api/workspace/rollback', { method: 'POST' });
+        var d = await r.json();
+        alert(d.message || d.status);
+        loadDiff();
+        refreshFiles();
+    } catch(e) {
+        alert('Rollback error: ' + e.message);
+    }
+}
+
+if(document.getElementById('btn-refresh-diff')) document.getElementById('btn-refresh-diff').addEventListener('click', loadDiff);
+if(document.getElementById('btn-snap-ws')) document.getElementById('btn-snap-ws').addEventListener('click', snapshotWorkspace);
+if(document.getElementById('btn-rollback-ws')) document.getElementById('btn-rollback-ws').addEventListener('click', rollbackWorkspace);
+
+// ── Visual DAG ──────────────────────────────────────────────────────────
+function renderDAG() {
+    var view = document.getElementById('mao-dag-network');
+    if (!view) return;
+    var activeRoles = Array.from(document.querySelectorAll('.mao-chip.active')).map(c => c.dataset.role);
+    if (!activeRoles.length) {
+        view.innerHTML = '<span style="color:var(--muted);">No agents selected</span>';
+        return;
+    }
+    
+    var html = '<div style="display:flex;flex-direction:column;align-items:center;gap:15px;padding:20px;width:100%;">';
+    // Task Node
+    html += '<div style="border:2px solid var(--fg);background:rgba(255,255,255,0.05);padding:5px 15px;border-radius:20px;font-weight:700;">Start Task</div>';
+    html += '<div style="width:2px;height:20px;background:var(--fg);"></div>';
+    
+    // Supervisor Node
+    html += '<div style="border:2px solid var(--accent);background:rgba(10,132,255,0.2);padding:5px 15px;border-radius:20px;font-weight:700;color:var(--accent);">🧭 Supervisor</div>';
+    html += '<div style="display:flex;width:100%;justify-content:center;position:relative;margin-top:10px;">';
+    
+    // Connectors
+    html += '<div style="position:absolute;top:-10px;width:' + Math.max(0, (activeRoles.length-1)*60) + 'px;height:2px;background:var(--accent);"></div>';
+    html += '<div style="display:flex;gap:10px;justify-content:center;z-index:2;margin-top:10px;">';
+    activeRoles.forEach(r => {
+        var lbl = document.querySelector('.mao-chip[data-role="'+r+'"]')?.textContent || r;
+        html += '<div style="display:flex;flex-direction:column;align-items:center;">';
+        html += '<div style="width:2px;height:10px;background:var(--accent);margin-top:-20px;margin-bottom:10px;"></div>';
+        html += '<div style="border:1px solid rgba(255,255,255,0.3);background:rgba(255,255,255,0.05);padding:5px 10px;border-radius:5px;">' + lbl + '</div>';
+        html += '</div>';
+    });
+    html += '</div></div>';
+    
+    view.innerHTML = html;
+}
+
+// Watch role clicks to re-render DAG
+document.getElementById('role-chips').addEventListener('click', function(e) {
+    if (e.target.closest('.mao-chip')) {
+        setTimeout(renderDAG, 50);
+    }
+});
+
 renderTraceBar();
 loadRecoveryBar();
+renderDAG();
+// Intentionally delay the diff load so we don't block render
+setTimeout(loadDiff, 500);
 })();
 </script>
 {% endblock %}
