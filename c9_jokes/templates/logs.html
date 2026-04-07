@@ -7,7 +7,7 @@
 
 <div class="filter-bar">
   <form method="GET" action="{{ url_for('page_logs') }}" style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
-    <label for="agent-filter" style="font-size:0.85rem;color:var(--muted);">Filter by agent:</label>
+    <label for="agent-filter" style="font-size:0.85rem;color:var(--muted);">Agent:</label>
     <select id="agent-filter" name="agent" onchange="this.form.submit()">
       <option value="">All agents</option>
       {% for agent in agents %}
@@ -15,12 +15,27 @@
       {% endfor %}
     </select>
     {% if agent_filter %}
-    <a href="{{ url_for('page_logs') }}" class="btn-sm">Clear filter</a>
+    <a href="{{ url_for('page_logs') }}" class="btn-sm">Clear</a>
     {% endif %}
     <span class="muted" style="font-size:0.82rem;">
       Showing {{ offset + 1 }}–{{ [offset + limit, total] | min }} of {{ total }}
     </span>
   </form>
+  <!-- Client-side live search (no page reload) -->
+  <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-top:0.4rem;">
+    <input id="log-search" type="search" placeholder="Search prompt / response…"
+      style="flex:1;min-width:180px;max-width:340px;background:var(--surface2);border:1px solid var(--border);
+             border-radius:6px;padding:4px 10px;font-size:0.82rem;color:var(--fg);">
+    <select id="log-http-filter" style="background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:4px 8px;font-size:0.82rem;color:var(--fg);">
+      <option value="">All HTTP</option>
+      <option value="200">200 OK</option>
+      <option value="err">Non-200</option>
+    </select>
+    <span id="log-match-count" style="font-size:0.78rem;color:var(--muted);"></span>
+    <label style="font-size:0.78rem;color:var(--muted);display:flex;align-items:center;gap:4px;cursor:pointer;">
+      <input type="checkbox" id="log-autorefresh" style="cursor:pointer;"> Auto-refresh
+    </label>
+  </div>
 </div>
 
 <table class="logs-table">
@@ -70,14 +85,21 @@
       <td class="muted" style="font-size:0.8rem">
         {{ row['elapsed_ms'] if row['elapsed_ms'] is not none else '—' }}
       </td>
+      <td style="width:2rem">
+        <button type="button" class="log-copy-btn btn-sm"
+          data-prompt="{{ row['prompt_excerpt'] | replace('"','&quot;') }}"
+          data-response="{{ row['response_excerpt'] | replace('"','&quot;') }}"
+          title="Copy prompt + response">⎘</button>
+      </td>
     </tr>
   {% endfor %}
   {% if not rows %}
-    <tr><td colspan="6" style="text-align:center;padding:2rem;" class="muted">
+    <tr><td colspan="9" style="text-align:center;padding:2rem;" class="muted">
       No logs yet — use the <a href="{{ url_for('page_chat') }}">Chat page</a> or
       <a href="{{ url_for('page_pairs') }}">Pairs validation</a>.
     </td></tr>
   {% endif %}
+  <tr id="log-no-match" style="display:none"><td colspan="9" style="text-align:center;padding:2rem;" class="muted">No rows match the current search.</td></tr>
   </tbody>
 </table>
 
@@ -100,21 +122,73 @@
 </div>
 
 <script>
-document.querySelectorAll('.expand-btn').forEach(function(btn) {
-  btn.addEventListener('click', function() {
-    const id = btn.dataset.id;
-    const full = document.getElementById('full-' + id);
-    const preview = btn.previousElementSibling;
-    if (full.style.display === 'none') {
-      full.style.display = '';
-      preview.style.display = 'none';
-      btn.textContent = 'Collapse';
+(function(){
+  /* ── Expand/collapse ── */
+  document.querySelectorAll('.expand-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var id = btn.dataset.id;
+      var full = document.getElementById('full-' + id);
+      var preview = btn.previousElementSibling;
+      if (full.style.display === 'none') {
+        full.style.display = '';
+        preview.style.display = 'none';
+        btn.textContent = 'Collapse';
+      } else {
+        full.style.display = 'none';
+        preview.style.display = '';
+        btn.textContent = 'Expand';
+      }
+    });
+  });
+
+  /* ── Copy button ── */
+  document.querySelectorAll('.log-copy-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var text = 'Prompt: ' + (btn.dataset.prompt || '') + '\n\nResponse: ' + (btn.dataset.response || '');
+      navigator.clipboard.writeText(text).then(function() {
+        btn.textContent = '✓';
+        setTimeout(function() { btn.textContent = '⎘'; }, 1500);
+      });
+    });
+  });
+
+  /* ── Live search + HTTP filter ── */
+  var searchEl    = document.getElementById('log-search');
+  var httpEl      = document.getElementById('log-http-filter');
+  var matchCount  = document.getElementById('log-match-count');
+  var noMatch     = document.getElementById('log-no-match');
+  var rows        = Array.from(document.querySelectorAll('tr.log-row'));
+
+  function applyFilter() {
+    var q    = (searchEl.value || '').toLowerCase().trim();
+    var http = httpEl.value;
+    var visible = 0;
+    rows.forEach(function(tr) {
+      var text = tr.textContent.toLowerCase();
+      var httpOk = !http ||
+        (http === '200'  && tr.innerHTML.indexOf('badge ok') !== -1) ||
+        (http === 'err'  && tr.innerHTML.indexOf('badge ok') === -1);
+      var textOk = !q || text.indexOf(q) !== -1;
+      var show = httpOk && textOk;
+      tr.style.display = show ? '' : 'none';
+      if (show) visible++;
+    });
+    matchCount.textContent = q || http ? visible + ' visible' : '';
+    noMatch.style.display  = visible === 0 ? '' : 'none';
+  }
+
+  searchEl.addEventListener('input', applyFilter);
+  httpEl.addEventListener('change', applyFilter);
+
+  /* ── Auto-refresh ── */
+  var arTimer = null;
+  document.getElementById('log-autorefresh').addEventListener('change', function(e) {
+    if (e.target.checked) {
+      arTimer = setInterval(function() { location.reload(); }, 15000);
     } else {
-      full.style.display = 'none';
-      preview.style.display = '';
-      btn.textContent = 'Expand';
+      clearInterval(arTimer);
     }
   });
-});
+})();
 </script>
 {% endblock %}
