@@ -36,7 +36,6 @@ from cookie_extractor import (
     extract_and_save,
     extract_access_token,
     finish_tab1_auth_progress,
-    mark_tab1_auth_progress_done,
     get_context,
     get_pool_monitor_snapshot,
     get_tab1_auth_progress_snapshot,
@@ -44,7 +43,6 @@ from cookie_extractor import (
     patch_env_variable,
     portal_settings_from_env_file,
     prepare_pool_from_tab1,
-    update_tab1_auth_progress,
     validate_tab1_with_hello,
     warm_browser_for_novnc,
 )
@@ -436,7 +434,6 @@ async def validate_auth():
         pool_tabs_reloaded = 0
         pool_tabs_added = 0
         if result.get("validated"):
-            mark_tab1_auth_progress_done("pool_ready", "Tab 1 validated; pool preparation starting")
             pool_result = await prepare_pool_from_tab1(reload_existing=True)
             pool_tabs_reloaded = int(pool_result.get("pool_tabs_reloaded") or 0)
             pool_tabs_added = int(pool_result.get("pool_tabs_added") or 0)
@@ -663,6 +660,143 @@ async def navigate(request: Request):
         return {"status": "ok", "url": page.url}
     except Exception as e:
         return {"status": "error", "message": str(e)}
+
+
+@app.post("/api/macro")
+async def r_macro(request: Request):
+    """Execute a predefined automation macro in the browser.
+
+    Actions:
+      auto-login-m365      — navigate Tab 1 to M365 Copilot login page
+      auto-login-consumer  — navigate Tab 1 to consumer Copilot login page
+      clear-cache          — clear browser cookies + cache via CDP
+      screenshot           — capture current VNC frame as base64 PNG
+      pool-reload          — reload all pool tabs after manual login
+    """
+    import base64
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"status": "error", "message": "Invalid JSON"}, status_code=400)
+
+    action = (body.get("action") or "").strip()
+    try:
+        context = await get_context()
+        page = context.pages[0] if context.pages else await context.new_page()
+
+        if action == "auto-login-m365":
+            invalidate_tab1_ready_state("macro_autologin_m365")
+            await page.goto("https://m365.cloud.microsoft/chat/",
+                            wait_until="domcontentloaded", timeout=30_000)
+            return {"status": "ok", "message": "Navigated to M365 Copilot — sign in via noVNC then click Extract Cookies"}
+
+        elif action == "auto-login-consumer":
+            invalidate_tab1_ready_state("macro_autologin_consumer")
+            await page.goto("https://copilot.microsoft.com/",
+                            wait_until="domcontentloaded", timeout=30_000)
+            return {"status": "ok", "message": "Navigated to Consumer Copilot — sign in via noVNC then click Extract Cookies"}
+
+        elif action == "clear-cache":
+            # Clear cookies via Playwright context + CDP cache clear
+            await context.clear_cookies()
+            try:
+                cdp = await context.new_cdp_session(page)
+                await cdp.send("Network.clearBrowserCache")
+                await cdp.detach()
+            except Exception:
+                pass
+            invalidate_tab1_ready_state("macro_clear_cache")
+            return {"status": "ok", "message": "Browser cookies and cache cleared — sign in again via noVNC"}
+
+        elif action == "screenshot":
+            # Capture current page screenshot as base64 PNG
+            png_bytes = await page.screenshot(type="png", full_page=False)
+            b64 = base64.b64encode(png_bytes).decode()
+            return {"status": "ok", "image": f"data:image/png;base64,{b64}",
+                    "message": f"Screenshot captured ({len(png_bytes)} bytes)"}
+
+        elif action == "pool-reload":
+            # Reload pool tabs after manual login in noVNC
+            pool = _ce._page_pool
+            if pool is None or not pool._initialized:
+                return JSONResponse({"status": "skipped", "reason": "pool not initialized — call /extract first"})
+            reloaded = await pool.reload_all_tabs()
+            return {"status": "ok", "message": f"Reloaded {reloaded} pool tab(s)"}
+
+        else:
+            return JSONResponse(
+                {"status": "error", "message": f"Unknown action '{action}'. Valid: auto-login-m365, auto-login-consumer, clear-cache, screenshot, pool-reload"},
+                status_code=400,
+            )
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
+@app.post("/api/clipboard/push")
+async def clipboard_push(request: Request):
+    """Push text from the host browser into the VNC session clipboard via xclip.
+
+    Body: {"text": "..."}
+    Uses xclip to write to the X11 CLIPBOARD selection inside the container.
+    x11vnc -clip both then forwards it as an RFB cut-text event to all VNC clients.
+    """
+    import subprocess
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"status": "error", "message": "Invalid JSON"}, status_code=400)
+    text = body.get("text", "")
+    if not isinstance(text, str):
+        return JSONResponse({"status": "error", "message": "text must be a string"}, status_code=400)
+    try:
+        display = os.getenv("DISPLAY", ":99")
+        env = {**os.environ, "DISPLAY": display}
+        result = subprocess.run(
+            ["xclip", "-selection", "clipboard"],
+            input=text.encode("utf-8"),
+            capture_output=True,
+            timeout=5,
+            env=env,
+        )
+        if result.returncode != 0:
+            return JSONResponse(
+                {"status": "error", "message": result.stderr.decode(errors="replace")},
+                status_code=500,
+            )
+        return {"status": "ok", "bytes_written": len(text.encode("utf-8"))}
+    except FileNotFoundError:
+        return JSONResponse({"status": "error", "message": "xclip not found in container"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+
+@app.get("/api/clipboard/pull")
+async def clipboard_pull():
+    """Pull the current VNC session clipboard text via xclip.
+
+    Reads the X11 CLIPBOARD selection from inside the container.
+    Returns: {"status": "ok", "text": "..."}
+    """
+    import subprocess
+    try:
+        display = os.getenv("DISPLAY", ":99")
+        env = {**os.environ, "DISPLAY": display}
+        result = subprocess.run(
+            ["xclip", "-selection", "clipboard", "-o"],
+            capture_output=True,
+            timeout=5,
+            env=env,
+        )
+        if result.returncode != 0:
+            # Empty clipboard returns exit code 1 on some xclip versions — treat as empty
+            return {"status": "ok", "text": ""}
+        text = result.stdout.decode("utf-8", errors="replace")
+        return {"status": "ok", "text": text}
+    except FileNotFoundError:
+        return JSONResponse({"status": "error", "message": "xclip not found in container"}, status_code=500)
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
 
 
 @app.post("/trace/m365-bootstrap")

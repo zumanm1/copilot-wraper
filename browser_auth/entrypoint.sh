@@ -204,9 +204,10 @@ if p.exists():
             print("[browser-auth] WARNING: rfb.resizeSession anchor not found — clipboard inject skipped")
     else:
         print("[browser-auth] noVNC index.html clipboard autosync already present — skipping")
-else:
-    print("[browser-auth] WARNING: index.html not found — clipboard inject skipped")
+        print("[browser-auth] WARNING: index.html not found — clipboard inject skipped")
 CLIPHTML
+    # Inject rich action overlays + macro triggers + clipboard bridge into index.html
+    python3 /browser-auth/inject_overlay.py
     # Patch app/ui.js for seamless clipboard sync (both directions):
     #   VNC→host: clipboardReceive writes to navigator.clipboard automatically
     #   host→VNC: focus event + paste event push host clipboard to VNC session
