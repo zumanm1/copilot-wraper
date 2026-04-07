@@ -7,27 +7,86 @@
   <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}"/>
 </head>
 <body>
+  <style>
+  /* ── Nav groups ── */
+  nav { display:flex; align-items:center; gap:0; flex-wrap:wrap; }
+  .nav-group { display:flex; align-items:center; gap:0; position:relative; }
+  .nav-group-label {
+    font-size:0.62rem; color:var(--muted,#666); text-transform:uppercase;
+    letter-spacing:.06em; padding:0 4px 0 10px; white-space:nowrap;
+    border-left:1px solid rgba(255,255,255,0.08); margin-left:4px;
+    pointer-events:none; user-select:none;
+  }
+  nav a { white-space:nowrap; }
+  nav a.nav-active {
+    color:#fff !important;
+    background:rgba(10,132,255,0.18) !important;
+    border-bottom:2px solid #0a84ff !important;
+    font-weight:600;
+  }
+  /* ── Hamburger (mobile) ── */
+  #nav-hamburger {
+    display:none; background:none; border:1px solid rgba(255,255,255,0.18);
+    border-radius:6px; padding:4px 8px; cursor:pointer; color:var(--fg,#eee);
+    font-size:1rem; line-height:1; flex-shrink:0;
+  }
+  /* ── Keyboard shortcut hint ── */
+  #nav-shortcut-hint {
+    position:fixed; bottom:18px; right:18px; z-index:9999;
+    background:rgba(30,30,30,0.92); border:1px solid rgba(255,255,255,0.12);
+    border-radius:10px; padding:8px 14px; font-size:0.75rem;
+    color:#ccc; pointer-events:none; opacity:0;
+    transition:opacity 0.2s; white-space:nowrap;
+  }
+  @media(max-width:860px){
+    #nav-hamburger { display:inline-block; }
+    nav { display:none; flex-direction:column; align-items:flex-start;
+          width:100%; background:var(--card,#1c1c1e); padding:6px 0;
+          border-bottom:1px solid rgba(255,255,255,0.08); }
+    nav.nav-open { display:flex; }
+    .nav-group { flex-direction:column; align-items:flex-start; width:100%; }
+    .nav-group-label { border-left:none; padding:6px 12px 2px; }
+    nav a { padding:7px 18px !important; width:100%; }
+  }
+  </style>
   <header>
     <h1>APP C9</h1>
-    <nav>
-      <a href="{{ url_for('dashboard') }}">Dashboard</a>
-      <a href="{{ url_for('page_health') }}">Health</a>
-      <a href="{{ url_for('page_c3_auth') }}">C3 Auth</a>
-      <a href="{{ url_for('page_tasked') }}">Tasked</a>
-      <a href="{{ url_for('page_piplinetask') }}">piplinetask</a>
-      <a href="{{ url_for('page_alerts') }}">Alerts</a>
-      <a href="{{ url_for('page_task_completed') }}">TaskCompleted</a>
-      <a href="{{ url_for('page_pairs') }}">Pairs</a>
-      <a href="{{ url_for('page_chat') }}">Chat</a>
-      <a href="{{ url_for('page_logs') }}">Logs</a>
-      <a href="{{ url_for('page_sessions') }}">Sessions</a>
-      <a href="{{ url_for('page_api_reference') }}">API</a>
-      <a href="{{ url_for('page_tasked_live_doc') }}">Live Docs</a>
-      <a href="{{ url_for('page_agent') }}">Agent</a>
-      <a href="{{ url_for('page_multi_agent') }}">Multi-Agent</a>
-      <a href="{{ url_for('page_multi_agento') }}">multi-Agento</a>
-      <a href="{{ url_for('page_token_counter') }}">Token Counter</a>
+    <button id="nav-hamburger" aria-label="Toggle navigation" onclick="document.querySelector('nav').classList.toggle('nav-open')">☰</button>
+    <nav id="main-nav">
+      <div class="nav-group">
+        <span class="nav-group-label">Monitor</span>
+        <a href="{{ url_for('dashboard') }}" data-path="/">Dashboard</a>
+        <a href="{{ url_for('page_health') }}" data-path="/health">Health</a>
+        <a href="{{ url_for('page_c3_auth') }}" data-path="/c3-auth">C3 Auth</a>
+        <a href="{{ url_for('page_alerts') }}" data-path="/alerts">Alerts</a>
+      </div>
+      <div class="nav-group">
+        <span class="nav-group-label">Tasks</span>
+        <a href="{{ url_for('page_tasked') }}" data-path="/tasked">Tasked</a>
+        <a href="{{ url_for('page_piplinetask') }}" data-path="/piplinetask">Pipeline</a>
+        <a href="{{ url_for('page_task_completed') }}" data-path="/task-completed">Completed</a>
+        <a href="{{ url_for('page_pairs') }}" data-path="/pairs">Pairs</a>
+      </div>
+      <div class="nav-group">
+        <span class="nav-group-label">Chat</span>
+        <a href="{{ url_for('page_chat') }}" data-path="/chat">Chat</a>
+        <a href="{{ url_for('page_logs') }}" data-path="/logs">Logs</a>
+        <a href="{{ url_for('page_sessions') }}" data-path="/sessions">Sessions</a>
+      </div>
+      <div class="nav-group">
+        <span class="nav-group-label">Agents</span>
+        <a href="{{ url_for('page_agent') }}" data-path="/agent">Agent</a>
+        <a href="{{ url_for('page_multi_agent') }}" data-path="/multi-agent">Multi-Agent</a>
+        <a href="{{ url_for('page_multi_agento') }}" data-path="/multi-Agento">Agento</a>
+      </div>
+      <div class="nav-group">
+        <span class="nav-group-label">Tools</span>
+        <a href="{{ url_for('page_tasked_live_doc') }}" data-path="/tasked-live-doc">Live Docs</a>
+        <a href="{{ url_for('page_token_counter') }}" data-path="/token-counter">Tokens</a>
+        <a href="{{ url_for('page_api_reference') }}" data-path="/api">API</a>
+      </div>
     </nav>
+    <div id="nav-shortcut-hint"></div>
     <div style="display:flex;align-items:center;gap:0.6rem;flex-shrink:0;">
       <!-- Global token counter (top-right) — updated by each page via window._globalTokens -->
       <span id="global-token-badge"
@@ -56,6 +115,46 @@
   </header>
   <script>
   (function() {
+    /* ── Active nav link ── */
+    var path = location.pathname.replace(/\/$/, '') || '/';
+    document.querySelectorAll('#main-nav a[data-path]').forEach(function(a) {
+      var ap = a.dataset.path.replace(/\/$/, '') || '/';
+      if (path === ap || (ap !== '/' && path.startsWith(ap))) {
+        a.classList.add('nav-active');
+      }
+    });
+
+    /* ── g+key keyboard navigation ── */
+    var shortcuts = {
+      'd': '/', 'h': '/health', 'c': '/chat', 'l': '/logs',
+      's': '/sessions', 't': '/tasked', 'p': '/piplinetask',
+      'a': '/alerts', 'g': '/agent', 'm': '/multi-agent',
+      'k': '/token-counter', 'r': '/api'
+    };
+    var hint = document.getElementById('nav-shortcut-hint');
+    var gPressed = false, gTimer = null;
+    document.addEventListener('keydown', function(e) {
+      if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
+      if (e.key === 'g' && !e.ctrlKey && !e.metaKey) {
+        gPressed = true;
+        if (hint) { hint.textContent = 'g + d=Dashboard h=Health c=Chat l=Logs s=Sessions t=Tasked a=Alerts g=Agent m=Multi k=Tokens r=API'; hint.style.opacity = '1'; }
+        clearTimeout(gTimer);
+        gTimer = setTimeout(function() { gPressed = false; if (hint) hint.style.opacity = '0'; }, 2000);
+        return;
+      }
+      if (gPressed) {
+        gPressed = false;
+        clearTimeout(gTimer);
+        if (hint) hint.style.opacity = '0';
+        var dest = shortcuts[e.key.toLowerCase()];
+        if (dest) { e.preventDefault(); location.href = dest; }
+      }
+    });
+
+    /* ── Runtime badge click-to-refresh ── */
+    var rtBadge = document.getElementById('runtime-badge');
+    if (rtBadge) rtBadge.style.cursor = 'pointer';
+
     function updateLed(data) {
       var led = document.getElementById('session-led');
       if (!led) return;
@@ -111,6 +210,7 @@
     pollRuntime();
     setInterval(pollSession, 30000);
     setInterval(pollRuntime, 15000);
+    if (rtBadge) rtBadge.addEventListener('click', function() { pollRuntime(); pollSession(); });
 
     // ── Global token counter (top-right badge) ──────────────────────────────
     // Each page can call window.updateGlobalTokens(n) to push a live value.
