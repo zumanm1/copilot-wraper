@@ -6531,6 +6531,36 @@ async def page_agent(
 # JSON API ROUTES
 # ─────────────────────────────────────────────────────────────────────────────
 
+@app.post("/api/c3-macro", name="api_c3_macro")
+async def api_c3_macro(request: Request):
+    """Proxy a macro action request from the main UI to C3's /api/macro endpoint.
+
+    This allows chat slash commands like /screenshot to trigger Playwright
+    automations in the C3 browser container without exposing C3's port externally.
+
+    Body: {action: str, ...}
+    Forwards verbatim to C3 /api/macro and returns the response.
+    """
+    c3_url = _urls().get("c3", "http://browser-auth:8001")
+    client = _get_http()
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"status": "error", "message": "Invalid JSON"}, status_code=400)
+    try:
+        r = await client.post(
+            f"{c3_url}/api/macro",
+            json=body,
+            timeout=35,
+        )
+        try:
+            return JSONResponse(r.json(), status_code=r.status_code)
+        except Exception:
+            return JSONResponse({"status": "error", "message": r.text[:500]}, status_code=502)
+    except Exception as exc:
+        return JSONResponse({"status": "error", "message": str(exc)}, status_code=502)
+
+
 @app.get("/api/session-health", name="api_session_health")
 async def api_session_health():
     """Proxy C3's /session-health endpoint; used by the LED indicator on all pages."""

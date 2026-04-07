@@ -485,8 +485,9 @@
     if (!text) return '';
     var html = text
       .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-      .replace(/```[\w]*\n([\s\S]*?)```/g, function(_, code) {
-        return '<pre><code>' + code.trimEnd() + '</code></pre>';
+      .replace(/```([\w]*)\n([\s\S]*?)```/g, function(_, lang, code) {
+        var execBtn = '<button class="code-exec-btn" style="position:absolute;top:6px;right:6px;background:rgba(255,255,255,0.1);color:#ccc;border:none;border-radius:4px;cursor:pointer;font-size:0.65rem;padding:3px 6px;z-index:2;transition:all 0.2s;" onmouseover="this.style.background=\'rgba(10,132,255,0.5)\';this.style.color=\'#fff\';" onmouseout="this.style.background=\'rgba(255,255,255,0.1)\';this.style.color=\'#ccc\';" onclick="window.execCodeSandbox(this, \'' + (lang||'').replace(/'/g,"") + '\')">▶ Execute in Sandbox</button>';
+        return '<div style="position:relative;margin:0.5rem 0;" class="code-wrap">' + execBtn + '<pre style="margin:0;"><code class="lang-' + (lang||'') + '">' + code.trimEnd() + '</code></pre><div class="code-exec-out" style="display:none;background:#161b22;color:#e0e0e0;padding:8px;font-size:0.75rem;font-family:monospace;border-top:1px solid #30363d;white-space:pre-wrap;max-height:200px;overflow:auto;"></div></div>';
       })
       .replace(/`([^`\n]+)`/g, '<code>$1</code>')
       .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
@@ -720,78 +721,6 @@
     var el = document.getElementById('typing-indicator');
     if (el) el.remove();
   }
-  function appendBubble(role, htmlContent, meta, isHtml) {
-    chatEmpty.style.display = 'none';
-    var bubble = document.createElement('div');
-    bubble.className = 'bubble ' + role;
-    var header = document.createElement('div');
-    header.className = 'bubble-header';
-    header.textContent = role === 'user' ? 'You' : agentLabel();
-    bubble.appendChild(header);
-    var body = document.createElement('div');
-    body.className = 'bubble-body' + (isHtml ? ' md-body' : '');
-    if (isHtml) {
-      body.innerHTML = htmlContent;
-      body.querySelectorAll('pre').forEach(function(pre) {
-        var wrapper = document.createElement('div');
-        wrapper.className = 'code-block-wrapper';
-        var copyBtn = document.createElement('button');
-        copyBtn.className = 'code-copy-btn';
-        copyBtn.textContent = 'copy';
-        copyBtn.addEventListener('click', function(e) {
-          e.stopPropagation();
-          var code = pre.querySelector('code') || pre;
-          navigator.clipboard.writeText(code.textContent).then(function() {
-            copyBtn.textContent = 'copied!';
-            setTimeout(function() { copyBtn.textContent = 'copy'; }, 1500);
-          });
-        });
-        pre.parentNode.insertBefore(wrapper, pre);
-        wrapper.appendChild(copyBtn);
-        wrapper.appendChild(pre);
-      });
-    } else {
-      body.textContent = htmlContent;
-    }
-    bubble.appendChild(body);
-    if (meta) {
-      var foot = document.createElement('div');
-      foot.className = 'bubble-meta'; foot.textContent = meta;
-      bubble.appendChild(foot);
-    }
-    var copyBtn = document.createElement('button');
-    copyBtn.className = 'bubble-copy-btn';
-    copyBtn.textContent = 'copy';
-    copyBtn.addEventListener('click', function(e) {
-      e.stopPropagation();
-      var text = body.textContent || body.innerText;
-      navigator.clipboard.writeText(text).then(function() {
-        copyBtn.textContent = 'copied!';
-        setTimeout(function() { copyBtn.textContent = 'copy'; }, 1500);
-      });
-    });
-    bubble.appendChild(copyBtn);
-    chatWindow.appendChild(bubble);
-    chatWindow.scrollTop = chatWindow.scrollHeight;
-    return bubble;
-  }
-
-  function showTypingIndicator(agentName) {
-    chatEmpty.style.display = 'none';
-    var bubble = document.createElement('div');
-    bubble.className = 'bubble assistant loading';
-    bubble.id = 'typing-indicator';
-    bubble.innerHTML = '<div class="bubble-header">' + esc(agentName) + '</div>' +
-      '<div class="bubble-body"><div class="typing-dots"><span></span><span></span><span></span></div></div>';
-    chatWindow.appendChild(bubble);
-    chatWindow.scrollTop = chatWindow.scrollHeight;
-    return bubble;
-  }
-
-  function hideTypingIndicator() {
-    var el = document.getElementById('typing-indicator');
-    if (el) el.remove();
-  }
 
   function parseSseBlock(block) {
     var dataLines = block.split('\n').filter(function(line) {
@@ -949,7 +878,51 @@
       .catch(function() { alert('Network error loading session.'); });
   }
 
-  sessionsBtn.addEventListener('click', openSessions);
+  // Listeners
+  window.execCodeSandbox = async function(btn, lang) {
+    var codeWrap = btn.closest('.code-wrap');
+    var codeEl = codeWrap.querySelector('code');
+    var outEl = codeWrap.querySelector('.code-exec-out');
+    var code = codeEl.innerText;
+    
+    btn.textContent = '⏳ Running...';
+    btn.disabled = true;
+    outEl.style.display = 'block';
+    outEl.textContent = 'Executing...';
+    
+    // In many cases, we can write the code to a file and execute it.
+    // If it's python or bash, it's trivial.
+    var cmd = '';
+    if(lang === 'python' || lang === 'py') {
+        cmd = 'cat << \'EOF\' > /tmp/exec.py\n' + code + '\nEOF\npython3 /tmp/exec.py';
+    } else if(lang === 'bash' || lang === 'sh') {
+        cmd = 'cat << \'EOF\' > /tmp/exec.sh\n' + code + '\nEOF\nbash /tmp/exec.sh';
+    } else if(lang === 'javascript' || lang === 'js' || lang === 'node') {
+        cmd = 'cat << \'EOF\' > /tmp/exec.js\n' + code + '\nEOF\nnode /tmp/exec.js';
+    } else {
+        cmd = code; // Try to just run it!
+    }
+
+    try {
+      var r = await fetch('/api/sandbox/exec', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ command: cmd, sandbox: 'c11', timeout: 30 })
+      });
+      var d = await r.json();
+      outEl.textContent = '';
+      if(d.stdout) outEl.textContent += d.stdout + '\n';
+      if(d.stderr) outEl.textContent += 'STDERR:\n' + d.stderr + '\n';
+      if(d.exit_code != null && d.exit_code !== 0) outEl.textContent += 'exit code: ' + d.exit_code;
+      if(!outEl.textContent) outEl.textContent = '(no output)';
+    } catch(e) {
+      outEl.textContent = 'Error: ' + e.message;
+    }
+    btn.textContent = '▶ Execute in Sandbox';
+    btn.disabled = false;
+  };
+
+  sendBtn.addEventListener('click', sendMessage);
   sessClose.addEventListener('click', function() { sessOverlay.classList.remove('open'); });
   sessOverlay.addEventListener('click', function(e) {
     if (e.target === sessOverlay) sessOverlay.classList.remove('open');
@@ -1163,55 +1136,233 @@
   form.addEventListener('submit', function(e) {
     e.preventDefault();
     var p = promptEl.value.trim();
-    if (p || pendingAttachments.length) {
-      promptEl.value = '';
-      send(p || 'Please analyze the attached file.');
-    }
+    if (!p && !pendingAttachments.length) return;
+    if (p && maybeHandleSlashSend(p)) return;
+    promptEl.value = '';
+    send(p || 'Please analyze the attached file.');
   });
 
   document.querySelectorAll('.quick').forEach(function(btn) {
     btn.addEventListener('click', function() { send(btn.dataset.prompt); });
   });
 
+  /* ── Slash-command system ───────────────────────────────────────────── */
+  var SLASH_COMMANDS = [
+    { cmd: '/help',        hint: 'Show all available slash commands',              icon: '❓' },
+    { cmd: '/clear',       hint: 'Clear the chat display (keeps history)',          icon: '🧹' },
+    { cmd: '/new',         hint: 'Start a brand-new chat session',                  icon: '✨' },
+    { cmd: '/sessions',    hint: 'Open the sessions browser',                       icon: '📋' },
+    { cmd: '/agent ',      hint: 'Switch agent — e.g. /agent c2-aider',             icon: '🤖' },
+    { cmd: '/mode ',       hint: 'Set thinking mode: auto | quick | deep',          icon: '🧠' },
+    { cmd: '/work',        hint: 'Switch M365 scope to Work',                       icon: '💼' },
+    { cmd: '/web',         hint: 'Switch M365 scope to Web',                        icon: '🌐' },
+    { cmd: '/screenshot',  hint: 'Capture C3 browser screenshot into chat',         icon: '📷' },
+    { cmd: '/exec ',       hint: 'Run a shell command in sandbox — e.g. /exec ls',  icon: '⚡' },
+    { cmd: '/compress',    hint: 'Manually compress / summarize context history',   icon: '♻️'  },
+    { cmd: '/status',      hint: 'Show M365 session & pool status in chat',         icon: '📡' },
+  ];
+
+  /* Build the popup DOM once */
+  var slashPopup = document.createElement('div');
+  slashPopup.id = 'slash-popup';
+  slashPopup.style.cssText = [
+    'position:absolute','bottom:calc(100% + 6px)','left:0','z-index:300',
+    'background:var(--card)','border:1px solid var(--border)','border-radius:10px',
+    'padding:4px','min-width:320px','max-height:260px','overflow-y:auto',
+    'box-shadow:0 4px 20px rgba(0,0,0,.5)','display:none'
+  ].join(';');
+  /* position relative wrapper */
+  var inputRow = promptEl.closest('.chat-input-row') || promptEl.parentNode;
+  inputRow.style.position = 'relative';
+  inputRow.appendChild(slashPopup);
+
+  var slashActive   = false;
+  var slashSelected = 0;
+  var slashMatches  = [];
+
+  function slashItemHtml(sc, idx, selected) {
+    return '<div class="slash-item' + (selected ? ' slash-selected' : '') + '" data-idx="' + idx + '" style="' +
+      'display:flex;align-items:center;gap:8px;padding:7px 12px;border-radius:8px;cursor:pointer;' +
+      (selected ? 'background:var(--surface3);' : '') + '">' +
+      '<span style="font-size:1em;flex-shrink:0">' + sc.icon + '</span>' +
+      '<span style="font-size:.85rem;font-weight:600;color:var(--fg);flex-shrink:0">' + sc.cmd.trimEnd() + '</span>' +
+      '<span style="font-size:.75rem;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + sc.hint + '</span>' +
+      '</div>';
+  }
+
+  function showSlashPopup(query) {
+    var q = (query || '').toLowerCase();
+    slashMatches = q === '/' ? SLASH_COMMANDS : SLASH_COMMANDS.filter(function(sc) {
+      return sc.cmd.startsWith(q);
+    });
+    if (!slashMatches.length) { hideSlashPopup(); return; }
+    slashSelected = 0;
+    slashPopup.innerHTML = slashMatches.map(function(sc, i) {
+      return slashItemHtml(sc, i, i === 0);
+    }).join('');
+    slashPopup.querySelectorAll('.slash-item').forEach(function(el) {
+      el.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        applySlashCommand(slashMatches[parseInt(el.dataset.idx)]);
+      });
+    });
+    slashPopup.style.display = 'block';
+    slashActive = true;
+  }
+
+  function hideSlashPopup() {
+    slashPopup.style.display = 'none';
+    slashActive = false;
+  }
+
+  function updateSlashSelection() {
+    slashPopup.querySelectorAll('.slash-item').forEach(function(el, i) {
+      el.style.background = i === slashSelected ? 'var(--surface3)' : '';
+      el.classList.toggle('slash-selected', i === slashSelected);
+    });
+    var sel = slashPopup.querySelectorAll('.slash-item')[slashSelected];
+    if (sel) sel.scrollIntoView({ block: 'nearest' });
+  }
+
+  function applySlashCommand(sc) {
+    hideSlashPopup();
+    var cmd = sc.cmd.trimEnd();
+    if (cmd === '/clear')      { promptEl.value = ''; clearBtn && clearBtn.click(); return; }
+    if (cmd === '/new')        { promptEl.value = ''; doNewChat(false); return; }
+    if (cmd === '/sessions')   { promptEl.value = ''; openSessions(); return; }
+    if (cmd === '/work')       { promptEl.value = ''; applyWorkMode('work');
+                                 appendBubble('assistant','<em style="color:var(--muted)">Switched to Work mode.</em>',null,true); return; }
+    if (cmd === '/web')        { promptEl.value = ''; applyWorkMode('web');
+                                 appendBubble('assistant','<em style="color:var(--muted)">Switched to Web mode.</em>',null,true); return; }
+    if (cmd === '/compress')   { promptEl.value = ''; maybeCompress(); return; }
+    if (cmd === '/screenshot') { promptEl.value = ''; runSlashScreenshot(); return; }
+    if (cmd === '/status')     { promptEl.value = ''; runSlashStatus(); return; }
+    if (cmd === '/help')       { promptEl.value = ''; showSlashHelp(); return; }
+    /* Commands with arguments — leave stub in input */
+    promptEl.value = sc.cmd.endsWith(' ') ? sc.cmd : sc.cmd + ' ';
+    promptEl.focus();
+  }
+
+  /* /screenshot — capture C3 browser frame */
+  async function runSlashScreenshot() {
+    appendBubble('assistant','<em style="color:var(--muted)">📷 Capturing screenshot…</em>',null,true);
+    try {
+      var r = await fetch('/api/c3-macro', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({action:'screenshot'})
+      });
+      var d = await r.json();
+      if (d.status === 'ok' && d.image) {
+        appendBubble('assistant',
+          '<div style="font-size:.8rem;color:var(--muted);margin-bottom:4px">📷 C3 Browser Screenshot</div>' +
+          '<img src="' + d.image + '" style="max-width:100%;border-radius:6px;border:1px solid var(--border)" alt="screenshot">',
+          null, true);
+      } else {
+        appendBubble('error', 'Screenshot failed: ' + (d.message || d.status), null, false);
+      }
+    } catch(e) { appendBubble('error', 'Screenshot error: ' + e.message, null, false); }
+  }
+
+  /* /status — show runtime status in chat */
+  async function runSlashStatus() {
+    appendBubble('assistant','<em style="color:var(--muted)">📡 Fetching status…</em>',null,true);
+    try {
+      var r = await fetch('/api/runtime-status');
+      var d = await r.json();
+      var c = d.components || {};
+      var lines = Object.keys(c).map(function(k) {
+        var v = c[k]; var st = v.state || v.status || '?';
+        var dot = st === 'ok' || st === 'active' ? '🟢' : st === 'slow' ? '🟡' : '🔴';
+        return dot + ' **' + k + '**: ' + st + (v.elapsed_ms ? ' · ' + v.elapsed_ms + 'ms' : '') + (v.message ? ' — ' + v.message : '');
+      });
+      appendBubble('assistant', renderMarkdown('**Runtime Status**\n\n' + lines.join('\n')), null, true);
+    } catch(e) { appendBubble('error', 'Status error: ' + e.message, null, false); }
+  }
+
+  /* /help — list all commands */
+  function showSlashHelp() {
+    var lines = SLASH_COMMANDS.map(function(sc) {
+      return sc.icon + ' `' + sc.cmd.trimEnd() + '` — ' + sc.hint;
+    });
+    appendBubble('assistant', renderMarkdown('**Slash Commands**\n\n' + lines.join('\n')), null, true);
+  }
+
+  /* Handle /exec <cmd> and /agent <id> and /mode <val> before sending */
+  function maybeHandleSlashSend(text) {
+    var execM = text.match(/^\/exec\s+(.+)$/s);
+    if (execM) {
+      promptEl.value = '';
+      runSlashExec(execM[1].trim());
+      return true;
+    }
+    var agentM = text.match(/^\/agent\s+(\S+)$/);
+    if (agentM) {
+      promptEl.value = '';
+      var id = agentM[1];
+      var opt = Array.from(agentEl.options).find(function(o) { return o.value === id || o.text.toLowerCase().includes(id.toLowerCase()); });
+      if (opt) { agentEl.value = opt.value; appendBubble('assistant','<em style="color:var(--muted)">Switched to agent: ' + esc(opt.text) + '</em>',null,true); }
+      else { appendBubble('error','Agent not found: ' + esc(id),null,false); }
+      return true;
+    }
+    var modeM = text.match(/^\/mode\s+(auto|quick|deep)$/);
+    if (modeM) {
+      promptEl.value = '';
+      applyThinkingMode(modeM[1]);
+      appendBubble('assistant','<em style="color:var(--muted)">Thinking mode set to: ' + modeM[1] + '</em>',null,true);
+      return true;
+    }
+    return false;
+  }
+
+  async function runSlashExec(cmd) {
+    appendBubble('assistant','<em style="color:var(--muted)">⚡ Running: <code>' + esc(cmd) + '</code>…</em>',null,true);
+    try {
+      var r = await fetch('/api/sandbox/exec', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({command: cmd, sandbox:'c11', timeout:30})
+      });
+      var d = await r.json();
+      var out = '';
+      if (d.stdout) out += d.stdout;
+      if (d.stderr) out += (out ? '\nSTDERR:\n' : '') + d.stderr;
+      if (!out) out = '(no output)';
+      appendBubble('assistant', renderMarkdown('```\n' + out + '\n```'), 'exit ' + (d.exit_code ?? '?'), true);
+    } catch(e) { appendBubble('error','Exec error: ' + e.message, null, false); }
+  }
+
+  /* Wire input events */
+  promptEl.addEventListener('input', function() {
+    var v = promptEl.value;
+    if (v.startsWith('/')) { showSlashPopup(v); } else { hideSlashPopup(); }
+  });
+
+  promptEl.addEventListener('blur', function() {
+    setTimeout(hideSlashPopup, 150);
+  });
+
   promptEl.addEventListener('keydown', function(e) {
+    if (slashActive && slashMatches.length) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        slashSelected = (slashSelected + 1) % slashMatches.length;
+        updateSlashSelection(); return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        slashSelected = (slashSelected - 1 + slashMatches.length) % slashMatches.length;
+        updateSlashSelection(); return;
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        e.preventDefault();
+        applySlashCommand(slashMatches[slashSelected]); return;
+      }
+      if (e.key === 'Escape') { hideSlashPopup(); return; }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       form.dispatchEvent(new Event('submit'));
-    }
-  });
-
-  /* ── Drag & Drop ─────────────────────────────────────────────────────── */
-  var inputArea = document.getElementById('chat-form');
-  var dragCounter = 0;
-  inputArea.addEventListener('dragenter', function(e) {
-    e.preventDefault();
-    dragCounter++;
-    inputArea.classList.add('drag-over');
-  });
-  inputArea.addEventListener('dragleave', function(e) {
-    e.preventDefault();
-    dragCounter--;
-    if (dragCounter === 0) inputArea.classList.remove('drag-over');
-  });
-  inputArea.addEventListener('dragover', function(e) { e.preventDefault(); });
-  inputArea.addEventListener('drop', function(e) {
-    e.preventDefault();
-    dragCounter = 0;
-    inputArea.classList.remove('drag-over');
-    if (e.dataTransfer.files.length) {
-      uploadFiles(Array.from(e.dataTransfer.files));
-    }
-  });
-
-  /* ── Paste from clipboard ────────────────────────────────────────────── */
-  promptEl.addEventListener('paste', function(e) {
-    var items = (e.clipboardData || e.originalEvent.clipboardData).items;
-    for (var i = 0; i < items.length; i++) {
-      if (items[i].kind === 'file') {
-        e.preventDefault();
-        var file = items[i].getAsFile();
-        if (file) uploadFiles([file]);
-      }
     }
   });
 
