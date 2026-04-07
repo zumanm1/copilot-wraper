@@ -122,8 +122,8 @@ C1 receives prompt → POST C3 /chat → Playwright types in M365 UI → SignalR
 | C7bb | `C7bb_openclaw-cli` | `copilot-openclaw-cli:latest` | `8080` (internal health) | OpenClaw CLI / TUI |
 | C8b | `C8b_hermes-agent` | `copilot-hermes-agent:latest` | `8080` (internal health) | Hermes Agent (memory, skills, cron) |
 | C9b | `C9b_jokes` | `copilot-c9-jokes:latest` | `6090` (host) | Validation console — chat, agent, multi-agento, logs, health UI |
-| C10b | `C10b_sandbox` | `copilot-c12b-sandbox:latest` | `8310:8210` (host:internal) | Agent workspace sandbox for `/api/agent/*` flows |
-| C11b | `C11b_sandbox` | `copilot-c11-sandbox:latest` | `8410:8200` (host:internal) | Session-scoped sandbox for `/api/multi-Agento/*` |
+| C10b | `C10b_sandbox` | `copilot-c10-sandbox:latest` | internal `:8100` only | Agent workspace sandbox for `/api/agent/*` flows |
+| C11b | `C11b_sandbox` | `copilot-c11-sandbox:latest` | internal `:8200` only | Session-scoped sandbox for `/api/multi-Agento/*` |
 | C12b | `C12b_sandbox` | `copilot-c12b-sandbox:latest` | `8210` (host) | Lean coding/test sandbox for Tasked pipelines |
 | CT | `CT_tests` | `copilot-openai-wrapper-test:latest` | — | Playwright automated test suite |
 
@@ -211,13 +211,7 @@ The docker-compose.yml mounts your host Chrome profile into C1 (read-only). The 
 echo 'CHROME_DATA_PATH=${HOME}/.config/google-chrome' >> .env
 ```
 
-Or edit `docker-compose.yml` under the `app:` service volumes section:
-```yaml
-# Change:
-- ${HOME}/Library/Application Support/Google/Chrome:/chrome-data:ro
-# To:
-- ${HOME}/.config/google-chrome:/chrome-data:ro
-```
+`docker-compose.yml` picks up `CHROME_DATA_PATH` automatically — no file editing needed.
 
 ### Step 3 — Build and start the core stack (C1 + C3)
 
@@ -271,27 +265,41 @@ curl -X POST http://localhost:8000/v1/messages \
 
 ### Step 6 — Build and start the full stack (all containers)
 
-```bash
-# Build all images (~10–20 min first run)
-docker compose build
+Services are split into two groups in `docker-compose.yml`:
+- **No profile** — CORE (C1b, C3b, C6b, C9b) + C10b/C11b sandboxes
+- **`--profile optional`** — AI Agents (C2b, C5b, C7ab, C7bb, C8b) + C12b sandbox
 
-# Start all containers
-docker compose up -d
+```bash
+# Build CORE images (~8 min)
+docker compose build app browser-auth kilocode-terminal c9-jokes
+
+# Build AI Agent images (~10 min)
+docker compose --profile optional build agent-terminal claude-code-terminal openclaw-gateway openclaw-cli hermes-agent
+
+# Build Sandbox images (~5 min)
+docker compose build c10-sandbox c11-sandbox
+docker compose --profile optional build c12b-sandbox
+
+# Start everything
+docker compose up app browser-auth kilocode-terminal c9-jokes c10-sandbox c11-sandbox -d
+docker compose --profile optional up agent-terminal claude-code-terminal openclaw-gateway openclaw-cli hermes-agent c12b-sandbox -d
 
 # Check status
 docker compose ps
 ```
 
-> **Low-memory machine?** Start only the four core containers and bring sandboxes/agents up on demand:
+> **Low-memory machine?** Start CORE only, add groups on demand:
 >
 > ```bash
-> # Core only: C1b + C3b + C6b + C9b
+> # CORE only
 > docker compose up app browser-auth kilocode-terminal c9-jokes -d
 >
-> # Add sandboxes when needed
-> docker compose up c10b-sandbox -d   # /api/agent/* pages
-> docker compose up c11b-sandbox -d   # /api/multi-Agento/* pages
-> docker compose up c12b-sandbox -d   # Tasked pipeline
+> # Add AI Agents when needed
+> docker compose --profile optional up agent-terminal claude-code-terminal openclaw-gateway openclaw-cli hermes-agent -d
+>
+> # Add Sandboxes when needed
+> docker compose up c10-sandbox c11-sandbox -d
+> docker compose --profile optional up c12b-sandbox -d
 >
 > # Stop unused agents to free CPU/memory
 > docker stop C2b_agent-terminal C5b_claude-code C7ab_openclaw-gateway C7bb_openclaw-cli C8b_hermes-agent
@@ -339,8 +347,8 @@ docker compose exec hermes-agent        curl -sf http://localhost:8080/health
 | C7bb | `openclaw-cli` | (exec only) | `ok` |
 | C8b | `hermes-agent` | (exec only) | `ok` |
 | C9b | `c9-jokes` | `http://localhost:6090/api/status` | JSON dict |
-| C10b | `c10b-sandbox` | `http://localhost:8310/health` | `{"status":"ok"}` |
-| C11b | `c11b-sandbox` | `http://localhost:8410/health` | `{"status":"ok"}` |
+| C10b | `c10-sandbox` | `docker compose exec c10-sandbox curl -sf http://localhost:8100/health` | `ok` (internal) |
+| C11b | `c11-sandbox` | `docker compose exec c11-sandbox curl -sf http://localhost:8200/health` | `ok` (internal) |
 | C12b | `c12b-sandbox` | `http://localhost:8210/health` | `{"status":"ok"}` |
 
 ### Step 8 — Open the C9 Validation Console
