@@ -9349,112 +9349,125 @@ async def api_sandbox_exec(request: Request):
     return JSONResponse(result)
 
 
-# ── Container control API ────────────────────────────────────────────────────
+# ── Container control API (start/stop optional containers) ───────────────────
 
-# Docker Compose project name (matches name: in docker-compose.yml)
-_COMPOSE_PROJECT = "c3btest-feed"
-
-# CORE — always on; restart allowed but stop/delete/rebuild blocked
-_CORE_CONTAINERS    = {"C1b_copilot-api", "C3b_browser-auth", "C6b_kilocode", "C9b_jokes"}
-# AI AGENTS — start/stop/restart/rebuild/delete on demand
-_AGENT_CONTAINERS   = {"C2b_agent-terminal", "C5b_claude-code", "C7ab_openclaw-gateway", "C7bb_openclaw-cli", "C8b_hermes-agent"}
-# SANDBOX — bring up only when a page needs them
-_SANDBOX_CONTAINERS = {"C10b_sandbox", "C11b_sandbox", "C12b_sandbox"}
-# Combined optional set (all non-core)
-_OPTIONAL_CONTAINERS = _AGENT_CONTAINERS | _SANDBOX_CONTAINERS
-# All known containers in this project
-_ALL_PROJECT_CONTAINERS = _CORE_CONTAINERS | _AGENT_CONTAINERS | _SANDBOX_CONTAINERS
-
-# Map container name → compose service name
-_CONTAINER_SERVICE = {
-    "C1b_copilot-api":        "app",
-    "C2b_agent-terminal":     "agent-terminal",
-    "C3b_browser-auth":       "browser-auth",
-    "C5b_claude-code":        "claude-code-terminal",
-    "C6b_kilocode":           "kilocode-terminal",
-    "C7ab_openclaw-gateway":  "openclaw-gateway",
-    "C7bb_openclaw-cli":      "openclaw-cli",
-    "C8b_hermes-agent":       "hermes-agent",
-    "C9b_jokes":              "c9-jokes",
-    "C10b_sandbox":           "c10b-sandbox",
-    "C11b_sandbox":           "c11b-sandbox",
-    "C12b_sandbox":           "c12b-sandbox",
-}
-
-# docker-compose.yml location (app.py lives in <root>/c9_jokes/)
-import os as _ct_os
-_COMPOSE_DIR  = _ct_os.path.dirname(_ct_os.path.dirname(_ct_os.path.abspath(__file__)))
-_COMPOSE_FILE = _ct_os.path.join(_COMPOSE_DIR, "docker-compose.yml")
+# Containers that can be toggled on/off to save resources
+_OPTIONAL_CONTAINERS = {"C2b_agent-terminal", "C5b_claude-code", "C7ab_openclaw-gateway", "C7bb_openclaw-cli", "C8b_hermes-agent", "C12b_sandbox"}
+# Containers that must stay running
+_CORE_CONTAINERS = {"C1b_copilot-api", "C3b_browser-auth", "C6b_kilocode", "C9b_jokes", "C10b_sandbox", "C11b_sandbox"}
 
 
 @app.get("/api/containers", name="api_containers")
 async def api_containers():
-    """Return status of all containers in the c3btest-feed compose project."""
+    """Return status of all Docker containers with toggleable flag and live resource stats."""
     import subprocess
     try:
-        # Filter by project label so only c3btest-feed containers are returned
         r = subprocess.run(
-            [
-                "docker", "ps", "-a",
-                "--filter", f"label=com.docker.compose.project={_COMPOSE_PROJECT}",
-                "--format", "{{.Names}}\t{{.Status}}\t{{.State}}",
-            ],
+            ["docker", "ps", "-a", "--format", "{{.Names}}\t{{.Status}}\t{{.State}}"],
             capture_output=True, text=True, timeout=10,
         )
+        
+        stats_map = {}
+        try:
+            stats_r = subprocess.run(
+                ["docker", "stats", "--no-stream", "--format", "{{.Name}}\t{{.CPUPerc}}\t{{.MemPerc}}"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if stats_r.returncode == 0:
+                for line in stats_r.stdout.strip().split("\n"):
+                    if not line: continue
+                    parts = line.split("\t")
+                    if len(parts) >= 3:
+                        stats_map[parts[0]] = {"cpu": parts[1], "mem": parts[2]}
+        except Exception:
+            pass
+            
         containers = []
-        seen = set()
         for line in r.stdout.strip().split("\n"):
             if not line.strip():
                 continue
             parts = line.split("\t")
             if len(parts) >= 3:
                 name, status, state = parts[0], parts[1], parts[2]
-                if name in seen:
-                    continue
-                seen.add(name)
-                if name in _CORE_CONTAINERS:
-                    group = "core"
-                elif name in _AGENT_CONTAINERS:
-                    group = "agent"
-                elif name in _SANDBOX_CONTAINERS:
-                    group = "sandbox"
-                else:
-                    group = "other"
+                st = stats_map.get(name, {"cpu": "0.00%", "mem": "0.00%"})
                 containers.append({
                     "name": name,
                     "status": status,
                     "state": state,
-                    "group": group,
+                    "cpu_percent": st["cpu"],
+                    "mem_percent": st["mem"],
                     "toggleable": name in _OPTIONAL_CONTAINERS,
                     "core": name in _CORE_CONTAINERS,
                 })
-        # Include known project containers that are not yet created (never started)
-        for name in sorted(_ALL_PROJECT_CONTAINERS):
-            if name not in seen:
-                if name in _CORE_CONTAINERS:
-                    group = "core"
-                elif name in _AGENT_CONTAINERS:
-                    group = "agent"
-                else:
-                    group = "sandbox"
-                containers.append({
-                    "name": name,
-                    "status": "not created",
-                    "state": "absent",
-                    "group": group,
-                    "toggleable": name in _OPTIONAL_CONTAINERS,
-                    "core": name in _CORE_CONTAINERS,
-                })
-        return JSONResponse({"ok": True, "containers": containers, "project": _COMPOSE_PROJECT})
+        return JSONResponse({"ok": True, "containers": containers})
     except Exception as exc:
         return JSONResponse({"ok": False, "error": str(exc), "containers": []})
 
 
+@app.get("/api/container/stats", name="api_container_stats")
+async def api_container_stats():
+    """Return detailed resource stats for all running Docker containers.
+
+    Used by the dashboard sparkline gauges.  Runs docker stats --no-stream with
+    an extended format to get MemUsage, MemLimit, NetIO and BlockIO in addition
+    to the CPU/Mem percentages already returned by /api/containers.
+
+    Returns:
+      {ok: true, ts: "<iso>", stats: [
+        {name, cpu_pct, mem_pct, mem_used, mem_limit, net_in, net_out, block_in, block_out}
+      ]}
+    """
+    import subprocess
+    import datetime
+    fmt = "{{.Name}}\t{{.CPUPerc}}\t{{.MemPerc}}\t{{.MemUsage}}\t{{.NetIO}}\t{{.BlockIO}}"
+    try:
+        r = subprocess.run(
+            ["docker", "stats", "--no-stream", "--format", fmt],
+            capture_output=True, text=True, timeout=12,
+        )
+        stats: list[dict] = []
+        if r.returncode == 0:
+            for line in r.stdout.strip().split("\n"):
+                if not line.strip():
+                    continue
+                parts = line.split("\t")
+                if len(parts) < 6:
+                    continue
+                name = parts[0]
+                cpu_pct  = parts[1]   # e.g. "1.23%"
+                mem_pct  = parts[2]   # e.g. "45.6%"
+                mem_usage = parts[3]  # e.g. "123MiB / 7.77GiB"
+                net_io    = parts[4]  # e.g. "1.23kB / 456B"
+                block_io  = parts[5]  # e.g. "0B / 12.3MB"
+                # Split mem_usage into used / limit
+                mem_parts = mem_usage.split(" / ") if " / " in mem_usage else [mem_usage, ""]
+                mem_used  = mem_parts[0].strip()
+                mem_limit = mem_parts[1].strip() if len(mem_parts) > 1 else ""
+                # Split net/block IO into in/out
+                net_parts   = net_io.split(" / ")   if " / " in net_io   else [net_io, "0B"]
+                block_parts = block_io.split(" / ") if " / " in block_io else [block_io, "0B"]
+                stats.append({
+                    "name":       name,
+                    "cpu_pct":    cpu_pct,
+                    "mem_pct":    mem_pct,
+                    "mem_used":   mem_used,
+                    "mem_limit":  mem_limit,
+                    "net_in":     net_parts[0].strip(),
+                    "net_out":    net_parts[1].strip() if len(net_parts) > 1 else "0B",
+                    "block_in":   block_parts[0].strip(),
+                    "block_out":  block_parts[1].strip() if len(block_parts) > 1 else "0B",
+                })
+        ts = datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")
+        return JSONResponse({"ok": True, "ts": ts, "stats": stats})
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc), "stats": []})
+
+
 @app.post("/api/container/toggle", name="api_container_toggle")
 async def api_container_toggle(request: Request):
-    """Start, stop, or restart a container.
-    Body: {name: str, action: "start"|"stop"|"restart"}
-    Core containers cannot be stopped.
+    """Start or stop an optional container.
+    Body: {name: str, action: "start"|"stop"}
+    Only works for containers in _OPTIONAL_CONTAINERS.
     """
     import subprocess
     try:
@@ -9463,118 +9476,20 @@ async def api_container_toggle(request: Request):
         return JSONResponse({"ok": False, "error": "invalid JSON"}, status_code=400)
     name = (body.get("name") or "").strip()
     action = (body.get("action") or "").strip().lower()
-    if action not in ("start", "stop", "restart"):
-        return JSONResponse({"ok": False, "error": "action must be start, stop, or restart"}, status_code=400)
-    if action == "stop" and name in _CORE_CONTAINERS:
-        return JSONResponse({"ok": False, "error": f"Cannot stop core container '{name}'"}, status_code=400)
-    if name not in _ALL_PROJECT_CONTAINERS:
-        return JSONResponse({"ok": False, "error": f"Container '{name}' is not part of project {_COMPOSE_PROJECT}"}, status_code=400)
+    if name not in _OPTIONAL_CONTAINERS:
+        return JSONResponse({"ok": False, "error": f"Container '{name}' is not toggleable (core container)"}, status_code=400)
+    if action not in ("start", "stop"):
+        return JSONResponse({"ok": False, "error": "action must be 'start' or 'stop'"}, status_code=400)
     try:
-        if action == "start":
-            # Use compose up -d so it works whether container is stopped OR absent
-            service = _CONTAINER_SERVICE.get(name)
-            if not service:
-                return JSONResponse({"ok": False, "error": f"No compose service mapping for '{name}'"}, status_code=400)
-            r = subprocess.run(
-                ["docker", "compose", "-f", _COMPOSE_FILE, "up", "-d", service],
-                capture_output=True, text=True, timeout=60, cwd=_COMPOSE_DIR,
-            )
-        else:
-            r = subprocess.run(
-                ["docker", action, name],
-                capture_output=True, text=True, timeout=60,
-            )
+        r = subprocess.run(
+            ["docker", action, name],
+            capture_output=True, text=True, timeout=30,
+        )
         return JSONResponse({
             "ok": r.returncode == 0,
             "name": name,
             "action": action,
             "output": (r.stdout + r.stderr).strip()[:500],
-        })
-    except Exception as exc:
-        return JSONResponse({"ok": False, "error": str(exc)})
-
-
-@app.post("/api/container/action", name="api_container_action")
-async def api_container_action(request: Request):
-    """Extended container actions: rebuild, delete.
-    Body: {name: str, action: "rebuild"|"delete"}
-    Only works for non-core containers.
-    rebuild = docker compose build <service> + docker compose up -d <service>
-    delete  = docker rm -f <name>
-    """
-    import subprocess
-    try:
-        body = await request.json()
-    except Exception:
-        return JSONResponse({"ok": False, "error": "invalid JSON"}, status_code=400)
-    name   = (body.get("name")   or "").strip()
-    action = (body.get("action") or "").strip().lower()
-    if action not in ("rebuild", "delete"):
-        return JSONResponse({"ok": False, "error": "action must be rebuild or delete"}, status_code=400)
-    if name in _CORE_CONTAINERS:
-        return JSONResponse({"ok": False, "error": f"Cannot {action} core container '{name}'"}, status_code=400)
-    service = _CONTAINER_SERVICE.get(name)
-    if not service:
-        return JSONResponse({"ok": False, "error": f"Unknown container '{name}'"}, status_code=400)
-    if not _ct_os.path.exists(_COMPOSE_FILE):
-        return JSONResponse({"ok": False, "error": f"docker-compose.yml not found at {_COMPOSE_DIR}"}, status_code=500)
-    try:
-        if action == "delete":
-            r = subprocess.run(
-                ["docker", "rm", "-f", name],
-                capture_output=True, text=True, timeout=30,
-            )
-            return JSONResponse({
-                "ok": r.returncode == 0,
-                "name": name,
-                "action": action,
-                "output": (r.stdout + r.stderr).strip()[:1000],
-            })
-        if action == "rebuild":
-            # Step 1: build
-            rb = subprocess.run(
-                ["docker", "compose", "-f", _COMPOSE_FILE, "build", "--no-cache", service],
-                capture_output=True, text=True, timeout=600, cwd=_COMPOSE_DIR,
-            )
-            build_out = (rb.stdout + rb.stderr).strip()[-2000:]
-            if rb.returncode != 0:
-                return JSONResponse({"ok": False, "name": name, "action": action,
-                                     "step": "build", "output": build_out})
-            # Step 2: up
-            ru = subprocess.run(
-                ["docker", "compose", "-f", _COMPOSE_FILE, "up", "-d", service],
-                capture_output=True, text=True, timeout=120, cwd=_COMPOSE_DIR,
-            )
-            up_out = (ru.stdout + ru.stderr).strip()[-1000:]
-            return JSONResponse({
-                "ok": ru.returncode == 0,
-                "name": name,
-                "action": action,
-                "output": build_out[-500:] + "\n---\n" + up_out,
-            })
-    except subprocess.TimeoutExpired:
-        return JSONResponse({"ok": False, "error": "operation timed out"})
-    except Exception as exc:
-        return JSONResponse({"ok": False, "error": str(exc)})
-
-
-@app.get("/api/container/logs", name="api_container_logs")
-async def api_container_logs(name: str = "", lines: int = 40):
-    """Return last N log lines for a container."""
-    import subprocess
-    name = name.strip()
-    if not name:
-        return JSONResponse({"ok": False, "error": "name is required"}, status_code=400)
-    lines = max(5, min(lines, 200))
-    try:
-        r = subprocess.run(
-            ["docker", "logs", "--tail", str(lines), name],
-            capture_output=True, text=True, timeout=10,
-        )
-        return JSONResponse({
-            "ok": True,
-            "name": name,
-            "lines": (r.stdout + r.stderr).strip(),
         })
     except Exception as exc:
         return JSONResponse({"ok": False, "error": str(exc)})
@@ -9872,6 +9787,44 @@ async def _ma_role_loop(
 
     _q("pane_done", {"step": max_steps, "summary": f"Reached {max_steps} step limit.", "files": files_created})
     return {"role": role, "pane_id": pane_id, "done": False, "summary": "step limit reached", "files": files_created, "steps": max_steps}
+
+
+@app.get("/api/workspace/diff", name="api_workspace_diff")
+async def api_workspace_diff():
+    import subprocess
+    try:
+        # Initialize an ephemeral git repo for diff tracking
+        subprocess.run(["git", "init"], cwd="/workspace", capture_output=True)
+        r = subprocess.run(["git", "diff", "--no-color", "HEAD"], cwd="/workspace", capture_output=True, text=True)
+        # If there's no HEAD yet (empty repo), let's just diff against empty tree
+        if r.returncode != 0 and "ambiguous argument 'HEAD'" in r.stderr:
+            r = subprocess.run(["git", "diff", "--no-color", "4b825dc642cb6eb9a060e54bf8d69288fbee4904"], cwd="/workspace", capture_output=True, text=True)
+        return JSONResponse({"status": "ok", "diff": r.stdout})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)})
+
+@app.post("/api/workspace/snapshot", name="api_workspace_snapshot")
+async def api_workspace_snapshot():
+    import subprocess
+    try:
+        subprocess.run(["git", "init"], cwd="/workspace", capture_output=True)
+        subprocess.run(["git", "config", "user.name", "system"], cwd="/workspace", capture_output=True)
+        subprocess.run(["git", "config", "user.email", "sys@local"], cwd="/workspace", capture_output=True)
+        subprocess.run(["git", "add", "-A"], cwd="/workspace", capture_output=True)
+        subprocess.run(["git", "commit", "-m", "snapshot"], cwd="/workspace", capture_output=True)
+        return JSONResponse({"status": "ok", "message": "Snapshot created (git commit)"})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)})
+
+@app.post("/api/workspace/rollback", name="api_workspace_rollback")
+async def api_workspace_rollback():
+    import subprocess
+    try:
+        subprocess.run(["git", "reset", "--hard", "HEAD"], cwd="/workspace", capture_output=True)
+        subprocess.run(["git", "clean", "-fd"], cwd="/workspace", capture_output=True)
+        return JSONResponse({"status": "ok", "message": "Rolled back to latest snapshot"})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)})
 
 
 @app.get("/multi-agent", response_class=HTMLResponse, name="page_multi_agent")
