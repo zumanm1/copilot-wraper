@@ -239,22 +239,19 @@ API_KEY=                           # Optional auth key for C1
 
 ### 5.2 Linux — Chrome data path
 
-The `app` (C1) service mounts your host Chrome profile read-only so it can access saved cookies. The default path in `docker-compose.yml` is the macOS path. On Linux, you must override it.
+The `app` (C1) service mounts your host Chrome profile read-only for cookie access. The default is the macOS path. On Linux, add one line to `.env`:
 
-**Option A — Edit `.env`:**
 ```bash
+# Google Chrome on Linux:
 echo 'CHROME_DATA_PATH=${HOME}/.config/google-chrome' >> .env
+
+# Chromium on Linux:
+# echo 'CHROME_DATA_PATH=${HOME}/.config/chromium' >> .env
 ```
 
-**Option B — Edit `docker-compose.yml`** (under the `app:` service, `volumes:` section):
-```yaml
-# Replace this line:
-- ${HOME}/Library/Application Support/Google/Chrome:/chrome-data:ro
-# With:
-- ${HOME}/.config/google-chrome:/chrome-data:ro
-```
+`docker-compose.yml` automatically picks up `CHROME_DATA_PATH` — no manual file editing needed.
 
-> If you don't have Chrome installed on Linux, you can skip this — C3 handles its own browser session independently. The host Chrome mount is only used for reading pre-existing cookies as a fallback.
+> If Chrome/Chromium is not installed on Linux, skip this step — C3 manages its own browser session independently.
 
 ### 5.3 Optional — Portal profile for M365 enterprise
 

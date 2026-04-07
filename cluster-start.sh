@@ -3,7 +3,7 @@
 # Master Agent Launcher (Phase D)
 # ============================================================
 
-PROJECT_ROOT="/Users/macbook/Documents/API-WRAPPER/copilot-openai-wrapper"
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
     echo "Usage: ./cluster-start.sh [agent-name]"
