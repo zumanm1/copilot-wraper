@@ -59,8 +59,6 @@ docker compose up c10b-sandbox c11b-sandbox c12b-sandbox -d
 
 ---
 
----
-
 ## Table of Contents
 
 1. [Overview](#1-overview)
