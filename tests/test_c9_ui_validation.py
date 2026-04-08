@@ -31,7 +31,7 @@ def record(status, test_name, detail=""):
     print(f"  {icon} {test_name}" + (f": {detail}" if detail else ""))
 
 
-async def test_api_endpoint(client, path, test_name, expected_status=200):
+async def _check_api_endpoint(client, path, test_name, expected_status=200):
     """Test an API endpoint returns expected status."""
     try:
         r = await client.get(f"{BASE_URL}{path}", timeout=10)
@@ -43,7 +43,7 @@ async def test_api_endpoint(client, path, test_name, expected_status=200):
         return None
 
 
-async def test_post_endpoint(client, path, payload, test_name, expected_status=200):
+async def _check_post_endpoint(client, path, payload, test_name, expected_status=200):
     """Test a POST API endpoint."""
     try:
         r = await client.post(f"{BASE_URL}{path}", json=payload, timeout=30)
@@ -66,13 +66,13 @@ async def main():
 
         # ── 1. Core API Health ──────────────────────────────────────────
         print("\n[1] Core API Health")
-        await test_api_endpoint(client, "/health", "GET /health", 200)
-        await test_api_endpoint(client, "/api/status", "GET /api/status", 200)
-        await test_api_endpoint(client, "/api/session-health", "GET /api/session-health", 200)
+        await _check_api_endpoint(client, "/health", "GET /health", 200)
+        await _check_api_endpoint(client, "/api/status", "GET /api/status", 200)
+        await _check_api_endpoint(client, "/api/session-health", "GET /api/session-health", 200)
 
         # ── 2. Chat API ─────────────────────────────────────────────────
         print("\n[2] Chat API")
-        r = await test_post_endpoint(client, "/api/chat", {
+        r = await _check_post_endpoint(client, "/api/chat", {
             "agent_id": "c6-kilocode",
             "prompt": "Say hello in one word.",
             "stream": False
@@ -84,14 +84,14 @@ async def main():
             record(data.get("token_estimate") is not None, "Token estimate returned", str(data.get("token_estimate")))
 
         # Chat sessions
-        r = await test_api_endpoint(client, "/api/chat/sessions?limit=3", "GET /api/chat/sessions", 200)
+        r = await _check_api_endpoint(client, "/api/chat/sessions?limit=3", "GET /api/chat/sessions", 200)
         if r and r.status_code == 200:
             sessions = r.json()
             record(isinstance(sessions, list), "Sessions is array", f"{len(sessions)} sessions")
 
         # ── 3. Tasks API ────────────────────────────────────────────────
         print("\n[3] Tasks API")
-        r = await test_api_endpoint(client, "/api/tasks", "GET /api/tasks", 200)
+        r = await _check_api_endpoint(client, "/api/tasks", "GET /api/tasks", 200)
         if r and r.status_code == 200:
             data = r.json()
             tasks = data.get("tasks", [])
@@ -100,14 +100,14 @@ async def main():
             record(len(cascading) > 0, "Cascading task exists", cascading[0]["id"] if cascading else "not found")
 
         # Task runs
-        r = await test_api_endpoint(client, "/api/task-runs?limit=5", "GET /api/task-runs", 200)
+        r = await _check_api_endpoint(client, "/api/task-runs?limit=5", "GET /api/task-runs", 200)
         if r and r.status_code == 200:
             data = r.json()
             runs = data.get("runs", [])
             record(isinstance(runs, list), "Runs is array", f"{len(runs)} runs")
 
         # Task pipelines
-        r = await test_api_endpoint(client, "/api/task-pipelines?limit=3", "GET /api/task-pipelines", 200)
+        r = await _check_api_endpoint(client, "/api/task-pipelines?limit=3", "GET /api/task-pipelines", 200)
         if r and r.status_code == 200:
             data = r.json()
             pipelines = data.get("pipelines", [])
@@ -121,7 +121,7 @@ async def main():
 
         # ── 4. Alerts API ───────────────────────────────────────────────
         print("\n[4] Alerts API")
-        r = await test_api_endpoint(client, "/api/alerts?limit=5", "GET /api/alerts", 200)
+        r = await _check_api_endpoint(client, "/api/alerts?limit=5", "GET /api/alerts", 200)
         if r and r.status_code == 200:
             data = r.json()
             alerts = data.get("alerts", [])
@@ -135,7 +135,7 @@ async def main():
 
         # ── 5. Task Completed API ───────────────────────────────────────
         print("\n[5] Task Completed API")
-        r = await test_api_endpoint(client, "/api/task-completed?limit=5", "GET /api/task-completed", 200)
+        r = await _check_api_endpoint(client, "/api/task-completed?limit=5", "GET /api/task-completed", 200)
         if r and r.status_code == 200:
             data = r.json()
             items = data.get("items", [])
@@ -147,12 +147,12 @@ async def main():
 
         # ── 6. Task Preview API ─────────────────────────────────────────
         print("\n[6] Task Preview API")
-        r = await test_api_endpoint(client, "/api/tasks", "GET /api/tasks for preview", 200)
+        r = await _check_api_endpoint(client, "/api/tasks", "GET /api/tasks for preview", 200)
         if r and r.status_code == 200:
             tasks = r.json().get("tasks", [])
             if tasks:
                 task_id = tasks[0]["id"]
-                r2 = await test_api_endpoint(client, f"/api/task-preview?task_id={task_id}",
+                r2 = await _check_api_endpoint(client, f"/api/task-preview?task_id={task_id}",
                                              "GET /api/task-preview", 200)
                 if r2 and r2.status_code == 200:
                     data = r2.json()
@@ -163,7 +163,7 @@ async def main():
 
         # ── 7. Sandbox API ──────────────────────────────────────────────
         print("\n[7] Sandbox API (C12b)")
-        r = await test_post_endpoint(client, "/api/sandbox/exec", {
+        r = await _check_post_endpoint(client, "/api/sandbox/exec", {
             "command": "echo 'sandbox test' && python3 --version",
             "sandbox": "c12b",
             "timeout": 10
@@ -175,7 +175,7 @@ async def main():
 
         # ── 8. Runtime Status ───────────────────────────────────────────
         print("\n[8] Runtime Status")
-        r = await test_api_endpoint(client, "/api/runtime-status?force=true",
+        r = await _check_api_endpoint(client, "/api/runtime-status?force=true",
                                     "GET /api/runtime-status", 200)
         if r and r.status_code == 200:
             data = r.json()
@@ -187,7 +187,7 @@ async def main():
 
         # ── 9. Cascading Task Validation ────────────────────────────────
         print("\n[9] Cascading Task Validation")
-        r = await test_api_endpoint(client, "/api/tasks", "GET tasks for cascading check", 200)
+        r = await _check_api_endpoint(client, "/api/tasks", "GET tasks for cascading check", 200)
         if r and r.status_code == 200:
             tasks = r.json().get("tasks", [])
             cascading = [t for t in tasks if "Cascading" in (t.get("name") or "")]

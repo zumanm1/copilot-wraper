@@ -1,0 +1,147 @@
+================================================================================
+  BOUNTY HUNTER — COMPLETED vs PENDING
+  Last updated: 2026-04-08
+  Branch: main  Repo: https://github.com/zumanm1/copilot-wraper
+================================================================================
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✅  COMPLETED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[BUG-1] CRITICAL — sendMessage ReferenceError breaks entire chat UI
+  File   : c9_jokes/templates/chat.html:925
+  Commit : b089fa3
+  Detail : sendBtn.addEventListener('click', sendMessage) referenced a function
+           that was never defined. The ReferenceError fired inside the IIFE with
+           'use strict', halting execution before ALL listeners below line 925
+           were attached — quick-prompt buttons, keyboard shortcuts, session
+           resume banner, thinking-mode dropdown were all dead.
+  Fix    : Replaced with form submit handler (send button is type="submit";
+           form.addEventListener('submit',...) already calls send()). Removed
+           the redundant extra click listener that caused double-send.
+  Test   : Puppeteer E2E 19/19 passed (validate_quick_prompts.mjs).
+
+[BUG-2] CRITICAL — asyncio.wait_for cancels httpx stream iterator (C9)
+  File   : c9_jokes/app.py (streaming loop)
+  Commit : cfc0496
+  Detail : wait_for(line_iter.__anext__(), timeout=15) cancelled the underlying
+           coroutine on heartbeat timeout, corrupting the stream iterator state
+           and causing empty or truncated responses.
+  Fix    : Wrapped with asyncio.shield + asyncio.ensure_future so the read
+           coroutine survives the timeout. Added try/finally to cancel the
+           background task on all exit paths (disconnect, [DONE], error).
+  Test   : tests/test_c9_stream_shield.py — 6 tests, all passing.
+
+[BUG-3] CRITICAL — aiohttp aiodns fails inside Docker (C1 → C3)
+  File   : copilot_backend.py (_get_c3_session)
+  Commit : cfc0496
+  Detail : Default aiohttp TCPConnector uses aiodns (async DNS) which fails
+           inside Docker bridge networks, preventing C1 from resolving C3.
+  Fix    : Added resolver=aiohttp.ThreadedResolver() + force_close=True to
+           TCPConnector to use OS-level DNS and disable stale keepalive.
+  Test   : tests/test_c1_threaded_resolver.py — 6 tests, all passing.
+
+[BUG-4] MEDIUM — Race condition creating duplicate aiohttp sessions (C1)
+  File   : copilot_backend.py (_get_c3_session_lock)
+  Commit : cfc0496
+  Detail : Concurrent requests could both read cls._c3_session is None and
+           create two separate sessions, leaking the first one.
+  Fix    : Added class-level asyncio.Lock (_c3_session_lock); converted
+           _get_c3_session to async classmethod that acquires the lock.
+  Test   : tests/test_c1_threaded_resolver.py::test_concurrent_calls_produce_single_session
+
+[BUG-5] LOW — Helper functions collected as pytest tests (test_c9_ui_validation)
+  File   : tests/test_c9_ui_validation.py
+  Commit : pending (staged)
+  Detail : test_api_endpoint and test_post_endpoint are helper functions with
+           test_ prefix; pytest-flask tried to fixture-inject them and errored.
+  Fix    : Renamed to _check_api_endpoint / _check_post_endpoint.
+  Test   : No longer collected; 0 errors from this file.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🔴  PENDING — BUGS TO FIX
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[P-1] HIGH — test_chat_mode.py: _c3_proxy_call now async but mock returns sync
+  File   : tests/test_chat_mode.py + copilot_backend.py
+  Error  : TypeError: object FakeSession can't be used in 'await' expression
+  Detail : When _get_c3_session was converted to async (BUG-4 fix), the
+           test_chat_mode.py mocks still patch it with a synchronous FakeSession.
+           The mock needs to return a coroutine (AsyncMock / async def).
+  Count  : 7 failing tests in TestC1BackendChatModePayload +
+           TestC1ServerChatModeHeader + TestEdgeCases
+
+[P-2] HIGH — test_chat_mode.py: X-Chat-Mode header not reaching backend
+  File   : server.py (C1 /v1/chat/completions handler)
+  Error  : assert captured.get("chat_mode") == "work"  →  got ''
+  Detail : The X-Chat-Mode header sent by C9 is not being extracted and
+           forwarded to _c3_proxy_call. Header extraction logic in server.py
+           likely needs to read request.headers.get("x-chat-mode","").
+  Count  : 4 failing in TestC1ServerChatModeHeader
+
+[P-3] MEDIUM — test_chat_mode.py: concurrent agent mode test KeyError c2-aider
+  File   : tests/test_chat_mode.py::TestEdgeCases::test_concurrent_agents_get_correct_modes
+  Error  : KeyError: 'c2-aider'
+  Detail : The test fires concurrent requests for multiple agent IDs but
+           the captured dict is not populated for 'c2-aider'. Likely an
+           agent_id routing or mock-capture issue.
+
+[P-4] MEDIUM — test_e2e_c9_validation.py::test_c9_dashboard_page_loads
+  File   : tests/test_e2e_c9_validation.py
+  Error  : Needs investigation (timeout or missing endpoint)
+  Detail : Dashboard page load assertion fails — likely /dashboard 404 or
+           the live C9 container returning unexpected HTML structure.
+
+[P-5] LOW — test_unit_agent_manager.py: RuntimeError: Cannot run event loop
+  File   : tests/test_unit_agent_manager.py
+  Error  : RuntimeError: Cannot run the event loop while another loop is running
+  Detail : Pre-existing asyncio/pytest-asyncio nesting issue in agent manager
+           tests. Needs pytest-asyncio mode or nest_asyncio patch.
+
+[P-6] LOW — Playwright browser not installed (blocks 30+ tests)
+  Files  : tests/test_playwright*.py, tests/test_tasked_pages_playwright.py,
+           tests/test_dual_app_playwright.py, tests/test_token_counter.py
+  Error  : Executable doesn't exist at ms-playwright/chromium_headless_shell-*
+  Fix    : Run: playwright install chromium
+  Note   : Only needed for dev machine Playwright tests; Docker CI unaffected.
+
+[P-7] LOW — C10/C11 containers not running
+  Detail : /api/runtime-status reports c10_down, c11_down (DNS -2 errors).
+           C10b_sandbox is running but not reachable by container name "c10".
+           Likely docker-compose service name mismatch (c10 vs C10b_sandbox).
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📊  TEST SCORECARD (as of 2026-04-08, excluding Playwright-missing errors)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Suite                            Passed   Failed   Skipped   Notes
+  ─────────────────────────────────────────────────────────────────
+  test_c9_stream_shield.py              6        0         0   NEW — BUG-2 regression
+  test_c1_threaded_resolver.py          6        0         0   NEW — BUG-3/4 regression
+  test_integration_api.py              18        0         0   Core API roundtrip
+  test_unit_copilot_backend.py         18        0         0   C1 backend unit
+  Puppeteer E2E (validate_quick_prompts.mjs)  19/19 PASSED    Quick prompts E2E
+  test_chat_mode.py                     ?        9         0   PENDING P-1,P-2,P-3
+  test_e2e_c9_validation.py             ?        1         0   PENDING P-4
+  test_unit_agent_manager.py            0       27         0   PENDING P-5
+  Playwright suites                     0      30+         0   PENDING P-6
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯  RECOMMENDED NEXT BOUNTY SEQUENCE
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+  Priority 1: Fix P-1 — update FakeSession mocks in test_chat_mode.py to
+              AsyncMock so they work with the new async _get_c3_session.
+
+  Priority 2: Fix P-2 — trace X-Chat-Mode header from C9 → C1 server.py
+              → _c3_proxy_call and ensure it's extracted and forwarded.
+
+  Priority 3: Fix P-3 — debug concurrent agent mode capture in test.
+
+  Priority 4: Fix P-6 — run: playwright install chromium
+              (one command, unblocks 30+ tests).
+
+  Priority 5: Fix P-7 — verify docker-compose service names for c10/c11
+              match what /api/runtime-status resolves.
+
+================================================================================
