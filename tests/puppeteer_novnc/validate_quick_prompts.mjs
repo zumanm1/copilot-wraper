@@ -25,7 +25,7 @@
 import puppeteer from 'puppeteer';
 
 const BASE_URL   = process.env.BASE_URL   || 'http://localhost:6090';
-const TIMEOUT_MS = parseInt(process.env.TIMEOUT_MS || '120000', 10); // 2 min per prompt
+const TIMEOUT_MS = parseInt(process.env.TIMEOUT_MS || '150000', 10); // 2.5 min per prompt (accounts for C3 pool wait)
 
 let passed = 0;
 let failed = 0;
@@ -151,6 +151,9 @@ try {
 
     /* Screenshot after */
     await page.screenshot({ path: `/tmp/quick_prompt_${i}_after.png` });
+
+    /* Brief cooldown so the C3 pool tab recycles before the next prompt */
+    if (i < buttonPrompts.length - 1) await new Promise(r => setTimeout(r, 5000));
   }
 
   /* ── 4. Assert no JS errors ── */

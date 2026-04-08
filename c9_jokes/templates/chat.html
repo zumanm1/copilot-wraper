@@ -922,7 +922,7 @@
     btn.disabled = false;
   };
 
-  sendBtn.addEventListener('click', function() { send(promptEl.value.trim()); });
+  /* send button is type="submit" — handled by form submit listener below */
   sessClose.addEventListener('click', function() { sessOverlay.classList.remove('open'); });
   sessOverlay.addEventListener('click', function(e) {
     if (e.target === sessOverlay) sessOverlay.classList.remove('open');
