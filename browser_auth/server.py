@@ -24,6 +24,7 @@ import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Form, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from portal_urls import normalize_copilot_portal_url
@@ -73,6 +74,14 @@ app = FastAPI(
     title="Browser Auth — Cookie Extractor",
     version="1.0.0",
     lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_headers=["*"],
 )
 
 ENV_PATH = os.getenv("ENV_PATH", "/app/.env")
