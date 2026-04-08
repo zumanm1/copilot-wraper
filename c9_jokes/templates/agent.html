@@ -2694,9 +2694,21 @@
   });
 
   // ── Stop ───────────────────────────────────────────────────────────────────
-  btnStop.addEventListener('click', function() {
+  btnStop.addEventListener('click', async function() {
+    const sid = currentSessId;
+    if (sid) {
+      try {
+        await fetch('/api/agent/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ session_id: sid }),
+        });
+      } catch(_) {}
+    }
     if (activeSource) { activeSource.close(); activeSource = null; }
     appendEntry('step_info', '<span class="stream-label">⏹ Stopped</span> Task execution cancelled by user.');
+    refreshHistory();
+    loadRecoveryContext();
     setIdle(false);
   });
 

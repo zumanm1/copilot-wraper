@@ -49,11 +49,12 @@
       <th>Response</th>
       <th style="width:3.5rem">HTTP</th>
       <th style="width:4rem">Time (ms)</th>
+      <th style="width:2rem"></th>
     </tr>
   </thead>
   <tbody>
   {% for row in rows %}
-    <tr class="log-row" id="log-{{ row['id'] }}">
+    <tr class="log-row" id="log-{{ row['id'] }}" data-http-status="{{ row['http_status'] if row['http_status'] is not none else '' }}">
       <td class="muted">{{ row['id'] }}</td>
       <td><small>{{ row['created_at'][:19] if row['created_at'] else '—' }}</small></td>
       <td><code style="font-size:0.78rem">{{ row['agent_id'] }}</code></td>
@@ -165,9 +166,10 @@
     var visible = 0;
     rows.forEach(function(tr) {
       var text = tr.textContent.toLowerCase();
+      var httpStatus = tr.dataset.httpStatus || '';
       var httpOk = !http ||
-        (http === '200'  && tr.innerHTML.indexOf('badge ok') !== -1) ||
-        (http === 'err'  && tr.innerHTML.indexOf('badge ok') === -1);
+        (http === '200'  && httpStatus === '200') ||
+        (http === 'err'  && httpStatus !== '200');
       var textOk = !q || text.indexOf(q) !== -1;
       var show = httpOk && textOk;
       tr.style.display = show ? '' : 'none';

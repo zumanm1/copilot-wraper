@@ -689,6 +689,7 @@
     var session = (payload && payload.session) || {};
     var c3status = (payload && payload.c3_status) || {};
     var pool = progress.pool_monitor || {};
+    var displayPool = (pool.pool_initialized || pool.pool_size || pool.target_size) ? pool : c3status;
     var active = !!progress.active;
     var result = progress.result || (active ? 'running' : 'idle');
 
@@ -698,7 +699,7 @@
     document.getElementById('auth-updated').textContent = progress.updated_at || '—';
     document.getElementById('auth-session').textContent = fmtSession(session);
     document.getElementById('auth-pool').textContent =
-      (c3status.pool_initialized ? ('ready · ' + (c3status.pool_available || 0) + '/' + (c3status.pool_size || 0) + ' free') : 'not initialized');
+      (displayPool.pool_initialized ? ('ready · ' + (displayPool.pool_available || 0) + '/' + (displayPool.pool_size || 0) + ' free') : 'not initialized');
     document.getElementById('runtime-summary').textContent = runtime.summary || '—';
     document.getElementById('runtime-session').textContent = fmtSession((runtime.components || {}).m365 || session);
     document.getElementById('runtime-c3').textContent = c3status.status ? JSON.stringify(c3status) : '—';

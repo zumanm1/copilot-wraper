@@ -15,7 +15,8 @@ CREATE TABLE IF NOT EXISTS health_snapshots (
     captured_at TEXT NOT NULL,
     target TEXT NOT NULL,
     http_status INTEGER,
-    body_json TEXT
+    body_json TEXT,
+    elapsed_ms INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS pair_results (

@@ -526,7 +526,7 @@ python3 tests/validate_all_agents.py --parallel</pre>
 
   // Launch as multi-agent team — use first active pair's prompt as task
   runMaBtn.addEventListener('click', function() {
-    const promptEl = document.querySelector('.pair-prompt');
+    const promptEl = document.getElementById('val-prompt');
     const task = promptEl ? promptEl.value.trim() : '';
     window.location.href = '/multi-agent' + (task ? '?task=' + encodeURIComponent(task) : '');
   });

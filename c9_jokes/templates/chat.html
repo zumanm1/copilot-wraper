@@ -847,6 +847,10 @@
         // Reset UI and history
         doNewChat(true);
         saveSessionId(sid);
+        var session = d.session || {};
+        if (session.agent_id && Array.from(agentSelect.options).some(function(opt) { return opt.value === session.agent_id; })) {
+          agentSelect.value = session.agent_id;
+        }
         // Rebuild chat display and history from stored messages
         // Messages are stored as pairs (turn N user, turn N assistant)
         var msgs = d.messages || [];

@@ -44,10 +44,10 @@
       <td id="htime-{{ loop.index0 }}" class="muted">
         {% if p.elapsed_ms is defined %}{{ p.elapsed_ms }}ms{% else %}—{% endif %}
       </td>
+      <td id="huptime-{{ loop.index0 }}"><span class="muted">—</span></td>
       <td id="hbody-{{ loop.index0 }}">
         {% if p.error %}<pre>{{ p.error }}</pre>{% else %}<pre>{{ p.body | tojson(indent=2) }}</pre>{% endif %}
       </td>
-      <td id="huptime-{{ loop.index0 }}"><span class="muted">—</span></td>
       <td id="hhistory-{{ loop.index0 }}" class="history-cell">
         <span class="muted">—</span>
       </td>

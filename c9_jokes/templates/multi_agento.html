@@ -1519,7 +1519,17 @@ pauseBtn.addEventListener('click',function(){
     fetch('/api/ma/pause/'+_sid,{method:'POST'}).then(function(){_paused=true;pauseBtn.textContent='▶ Resume';});
   }
 });
-stopBtn.addEventListener('click',function(){if(_src){_src.close();_src=null;}setRunning(false);});
+stopBtn.addEventListener('click',function(){
+  var finishStop=function(){
+    if(_src){try{_src.close();}catch(e){}_src=null;}
+    supText.textContent='⏹ multi-Agento session cancelled by user.';
+    setRunning(false);
+    loadSessions();
+    loadRecoveryBar();
+  };
+  if(!_sid){finishStop();return;}
+  fetch('/api/ma/stop/'+_sid,{method:'POST'}).catch(function(){}).finally(finishStop);
+});
 applyRunAvailability();
 
 // File tree

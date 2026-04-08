@@ -401,6 +401,11 @@ def _ensure_db() -> None:
             conn.execute("ALTER TABLE chat_logs ADD COLUMN source TEXT DEFAULT 'chat'")
     except sqlite3.OperationalError:
         pass  # column already exists
+    try:
+        with _db() as conn:
+            conn.execute("ALTER TABLE health_snapshots ADD COLUMN elapsed_ms INTEGER")
+    except sqlite3.OperationalError:
+        pass  # column already exists
     # Migrate: create agent_sessions and agent_messages tables if missing
     try:
         with sqlite3.connect(DEFAULT_DB) as conn:
@@ -2475,6 +2480,15 @@ async def _probe_all() -> list[dict]:
         p["target_key"] = key
         out.append(p)
     return out
+
+
+def _visible_target_keys() -> list[str]:
+    return [key for key, target in TARGETS.items() if not target.get("hidden")]
+
+
+def _filter_visible_probes(probes: list[dict]) -> list[dict]:
+    visible = set(_visible_target_keys())
+    return [probe for probe in probes if probe.get("target_key") in visible]
 
 
 # ── Chat proxy helper (async) ────────────────────────────────────────────────
@@ -6249,16 +6263,17 @@ async def ensure_db_middleware(request: Request, call_next):
 
 @app.get("/", response_class=HTMLResponse, name="dashboard")
 async def dashboard(request: Request):
-    probes = await _probe_all()
+    probes = _filter_visible_probes(await _probe_all())
+    visible_targets = {key: TARGETS[key] for key in _visible_target_keys()}
     up = sum(1 for p in probes if p["ok"])
     return templates.TemplateResponse(request, "dashboard.html", {
-        "probes": probes, "targets": TARGETS, "up": up, "total": len(probes),
+        "probes": probes, "targets": visible_targets, "up": up, "total": len(probes),
     })
 
 
 @app.get("/health", response_class=HTMLResponse, name="page_health")
 async def page_health(request: Request):
-    probes = await _probe_all()
+    probes = _filter_visible_probes(await _probe_all())
     urls = _urls()
     client = _get_http()
     extra = await _probe_health(client, "C3 /status", urls["c3"], "/status")
@@ -6473,20 +6488,7 @@ async def page_logs(request: Request):
 
 @app.get("/sessions", response_class=HTMLResponse, name="page_sessions")
 async def page_sessions(request: Request):
-    urls = _urls()
-    c1 = urls["c1"]
-    data = None
-    err = None
-    client = _get_http()
-    try:
-        r = await client.get(f"{c1}/v1/sessions", timeout=5)
-        ct = r.headers.get("content-type", "")
-        data = r.json() if ct.startswith("application/json") else r.text
-    except Exception as e:
-        err = str(e)
-    return templates.TemplateResponse(request, "sessions.html", {
-        "data": data, "error": err, "c1_url": c1,
-    })
+    return templates.TemplateResponse(request, "sessions.html", {})
 
 
 @app.get("/api", response_class=HTMLResponse, name="page_api_reference")
@@ -7699,6 +7701,7 @@ async def api_status():
             ts, key,
             p.get("http_status"),
             json.dumps(p.get("body") or {"error": p.get("error", "")}),
+            p.get("elapsed_ms"),
         ))
 
     p3s = await _probe_health(client, "C3 /status", urls["c3"], "/status")
@@ -7707,11 +7710,12 @@ async def api_status():
         ts, "c3-status",
         p3s.get("http_status"),
         json.dumps(p3s.get("body") or {"error": p3s.get("error", "")}),
+        p3s.get("elapsed_ms"),
     ))
     try:
         with _db() as conn:
             conn.executemany(
-                "INSERT INTO health_snapshots (captured_at, target, http_status, body_json) VALUES (?,?,?,?)",
+                "INSERT INTO health_snapshots (captured_at, target, http_status, body_json, elapsed_ms) VALUES (?,?,?,?,?)",
                 rows_to_insert,
             )
     except sqlite3.Error:
@@ -7729,13 +7733,13 @@ async def api_health_history(target: str = "", limit: int = 10):
         with _db() as conn:
             if target:
                 rows = conn.execute(
-                    "SELECT captured_at, target, http_status, body_json FROM health_snapshots "
+                    "SELECT captured_at, target, http_status, body_json, elapsed_ms FROM health_snapshots "
                     "WHERE target=? ORDER BY id DESC LIMIT ?",
                     (target, limit),
                 ).fetchall()
             else:
                 rows = conn.execute(
-                    "SELECT captured_at, target, http_status, body_json FROM health_snapshots "
+                    "SELECT captured_at, target, http_status, body_json, elapsed_ms FROM health_snapshots "
                     "ORDER BY id DESC LIMIT ?",
                     (limit,),
                 ).fetchall()
@@ -8299,8 +8303,16 @@ async def api_validate(request: Request):
             "diagnosis": r.get("diagnosis"),
         }
 
-    agent_tasks = [_run_one(agent) for agent in agents_to_run]
-    raw_results = await asyncio.gather(*agent_tasks, return_exceptions=True)
+    if parallel:
+        agent_tasks = [_run_one(agent) for agent in agents_to_run]
+        raw_results = await asyncio.gather(*agent_tasks, return_exceptions=True)
+    else:
+        raw_results = []
+        for agent in agents_to_run:
+            try:
+                raw_results.append(await _run_one(agent))
+            except Exception as exc:
+                raw_results.append(exc)
 
     results = []
     for agent, res in zip(agents_to_run, raw_results):
@@ -8430,6 +8442,52 @@ async def _notes_read() -> str:
     return r.get("content") or ""
 
 
+def _page_session_status(table: str, session_id: str) -> str:
+    if not session_id or table not in {"agent_sessions", "ma_sessions"}:
+        return ""
+    try:
+        with _db() as conn:
+            row = conn.execute(f"SELECT status FROM {table} WHERE id=?", (session_id,)).fetchone()
+    except sqlite3.Error:
+        return ""
+    if not row:
+        return ""
+    try:
+        return str(row["status"] or "")
+    except (TypeError, KeyError, IndexError):
+        return str(row[0] or "")
+
+
+def _mark_page_session_cancelled(table: str, session_id: str, *, summary: str) -> tuple[dict, int]:
+    if not session_id:
+        return {"ok": False, "error": "session_id required"}, 400
+    if table not in {"agent_sessions", "ma_sessions"}:
+        return {"ok": False, "error": "invalid session table"}, 400
+
+    current_status = _page_session_status(table, session_id)
+    if not current_status:
+        return {"ok": False, "error": "session not found"}, 404
+    if current_status in {"completed", "failed", "cancelled"}:
+        return {
+            "ok": True,
+            "session_id": session_id,
+            "status": current_status,
+            "already_terminal": True,
+        }, 200
+
+    now = datetime.now(timezone.utc).isoformat()
+    try:
+        with _db() as conn:
+            conn.execute(
+                f"UPDATE {table} SET status='cancelled', updated_at=?, summary=? WHERE id=?",
+                (now, summary[:500], session_id),
+            )
+    except sqlite3.Error as exc:
+        return {"ok": False, "error": str(exc)}, 500
+
+    return {"ok": True, "session_id": session_id, "status": "cancelled"}, 200
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # AGENT WORKSPACE API ROUTES  (/api/agent/*)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -8453,15 +8511,6 @@ async def api_agent_run(
       chat_mode  — thinking depth: auto | quick | deep
       work_mode  — scope: work | web
       max_steps  — max ReAct iterations (default 15, max 20)
-
-    SSE events (each line: 'event: TYPE\\ndata: JSON\\n\\n'):
-      thinking    — LLM reasoning text before tool call
-      tool_call   — tool being dispatched
-      observation — tool execution result
-      file_update — file created/modified in workspace
-      step_done   — step N complete
-      final       — task complete with summary
-      error       — unrecoverable error
     """
     task = task.strip()
     session_id = session_id.strip()
@@ -8473,692 +8522,600 @@ async def api_agent_run(
 
     async def generate():
         nonlocal task, session_id
-        # Persistent HTTP client for the lifetime of this SSE stream
-        _http_agent = httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=360.0, write=10.0, pool=10.0))
+        client = httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=360.0, write=10.0, pool=10.0))
 
-        # Check C10/C10b is reachable (use fresh client to avoid stale connections)
-        try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0)) as _hc:
-                health_r = await _hc.get(f"{C10_URL}/health", timeout=5)
-                if health_r.status_code != 200:
-                    yield _sse("error", {"message": f"C10b sandbox unhealthy (HTTP {health_r.status_code}). Is c10b-sandbox running?"})
-                    return
-        except Exception as exc:
-            yield _sse("error", {"message": f"C10b sandbox unreachable ({C10_URL}): {exc}"})
-            return
-
-        # ── Auth pre-flight: verify M365 session BEFORE sending any task ─────
-        # Checks C3's /session-health, then sends a short "hi" ping to confirm
-        # Copilot is actually reachable and responding (not just authenticated).
-        c3_url = _urls().get("c3", "http://browser-auth:8001")
-        _session_status = "unknown"
-        _auth_data = {}
-        try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0)) as _ac:
-                _auth_r = await _ac.get(f"{c3_url}/session-health", timeout=8)
-                _auth_data = _auth_r.json() if _auth_r.status_code == 200 else {}
-                _session_status = _auth_data.get("session", "unknown")
-        except Exception as _auth_exc:
-            _auth_data = {"reason": str(_auth_exc)}
-
-        if _session_status != "active":
-            _reason = _auth_data.get("reason", "Session not active")
-            yield _sse("auth_required", {
-                "message": (
-                    f"M365 Copilot is not authenticated (status: {_session_status}). "
-                    f"Please sign in via the browser at localhost:6080"
-                ),
-                "session_status": _session_status,
-                "reason": _reason,
-                "auth_url": "http://localhost:6080/?resize=scale&autoconnect=true",
-            })
-            return
-
-        # Session is active — send a quick "hi" to verify Copilot is actually responding
-        yield _sse("thinking", {"step": 0, "text": "🔐 Auth OK — pinging Copilot...", "total_steps": max_steps})
-        _HI_SERVICE_PHRASES = (
-            "something went wrong", "please try again later",
-            "experiencing high demand", "we're experiencing",
-        )
-        try:
-            _hi_r = await _http_agent.post(
-                f"{c1}/v1/chat/completions",
-                headers={"Content-Type": "application/json", "X-Agent-ID": f"{agent_id}-preflight"},
-                json={"model": "copilot", "messages": [{"role": "user", "content": "hi"}], "stream": False},
-                timeout=30,
-            )
-            if _hi_r.status_code == 200:
-                _hi_text = (_hi_r.json().get("choices", [{}])[0].get("message", {}).get("content", "") or "").strip()
-                if any(p in _hi_text.lower() for p in _HI_SERVICE_PHRASES):
-                    # Copilot responded but with a service error — warn and continue
-                    yield _sse("thinking", {"step": 0, "text":
-                        f"⚠️ Copilot is under load: \"{_hi_text[:80]}\" — task will retry automatically if needed"})
-                elif _hi_text:
-                    yield _sse("thinking", {"step": 0, "text": f"✅ Copilot OK — starting task..."})
-                else:
-                    yield _sse("thinking", {"step": 0, "text": "⚠️ Copilot ping returned empty — proceeding anyway"})
-            else:
-                yield _sse("thinking", {"step": 0, "text": f"⚠️ Copilot ping HTTP {_hi_r.status_code} — proceeding anyway"})
-        except Exception as _hi_exc:
-            yield _sse("thinking", {"step": 0, "text": f"⚠️ Copilot ping failed ({str(_hi_exc)[:60]}) — may be slow"})
-
-        # ── Session management ───────────────────────────────────────────────
-        now = datetime.now(timezone.utc).isoformat()
-        history: list[dict] = []
-        files_created: list[str] = []
-        commands_run:  list[str] = []
-        is_followup = False
-
-        if session_id:
-            # Resume existing session — load conversation history from DB
+        async def _should_stop() -> bool:
             try:
-                with _db() as conn:
-                    sess = conn.execute(
-                        "SELECT task, agent_id, files_created FROM agent_sessions WHERE id=?",
-                        (session_id,)
-                    ).fetchone()
-                    if sess:
-                        is_followup = True
-                        files_created = json.loads(sess["files_created"] or "[]")
-                        msgs = conn.execute(
-                            "SELECT role, content FROM agent_messages WHERE session_id=? ORDER BY turn, id",
-                            (session_id,)
-                        ).fetchall()
-                        history = [{"role": r["role"], "content": r["content"]} for r in msgs]
-                        if not task:
-                            task = sess["task"]
-            except sqlite3.Error:
+                if await request.is_disconnected():
+                    return True
+            except RuntimeError:
                 pass
+            return bool(session_id and _page_session_status("agent_sessions", session_id) == "cancelled")
 
-        if not task:
-            yield _sse("error", {"message": "No task provided."})
-            return
+        async def _sleep_with_stop(delay_s: float) -> bool:
+            remaining = max(0.0, float(delay_s))
+            while remaining > 0:
+                if await _should_stop():
+                    return True
+                chunk = min(0.25, remaining)
+                await asyncio.sleep(chunk)
+                remaining -= chunk
+            return await _should_stop()
 
-        if not session_id:
-            session_id = "sess_" + uuid.uuid4().hex[:8]
-            # Create new session row
+        try:
             try:
-                with _db() as conn:
-                    conn.execute(
-                        "INSERT INTO agent_sessions (id, created_at, updated_at, task, agent_id, chat_mode, work_mode, status) "
-                        "VALUES (?,?,?,?,?,?,?,'running')",
-                        (session_id, now, now, task[:1000], agent_id, chat_mode, work_mode),
-                    )
-            except sqlite3.Error:
-                pass
+                async with httpx.AsyncClient(timeout=httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0)) as hc:
+                    health_r = await hc.get(f"{C10_URL}/health", timeout=5)
+                    if health_r.status_code != 200:
+                        yield _sse("error", {"message": f"C10b sandbox unhealthy (HTTP {health_r.status_code}). Is c10b-sandbox running?"})
+                        return
+            except Exception as exc:
+                yield _sse("error", {"message": f"C10b sandbox unreachable ({C10_URL}): {exc}"})
+                return
 
-        yield _sse("session", {"session_id": session_id, "is_followup": is_followup})
+            c3_url = _urls().get("c3", "http://browser-auth:8001")
+            session_status = "unknown"
+            auth_data = {}
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(connect=5.0, read=10.0, write=5.0, pool=5.0)) as ac:
+                    auth_r = await ac.get(f"{c3_url}/session-health", timeout=8)
+                    auth_data = auth_r.json() if auth_r.status_code == 200 else {}
+                    session_status = auth_data.get("session", "unknown")
+            except Exception as auth_exc:
+                auth_data = {"reason": str(auth_exc)}
 
-        # ── NOTES.md: initialise or load existing notes ──────────────────────
-        if not is_followup:
-            await _notes_init(session_id, task)
-            yield _sse("notes_updated", {"action": "created", "path": NOTES_FILE})
-        else:
-            # For follow-ups, prepend existing NOTES.md content so LLM remembers
-            _prior_notes = await _notes_read()
-            if _prior_notes:
-                yield _sse("notes_updated", {"action": "loaded", "path": NOTES_FILE,
-                                              "preview": _prior_notes[:300]})
+            if session_status != "active":
+                yield _sse("auth_required", {
+                    "message": (
+                        f"M365 Copilot is not authenticated (status: {session_status}). "
+                        f"Please sign in via the browser at localhost:6080"
+                    ),
+                    "session_status": session_status,
+                    "reason": auth_data.get("reason", "Session not active"),
+                    "auth_url": "http://localhost:6080/?resize=scale&autoconnect=true",
+                })
+                return
 
-        # Copilot (C1) does not honour the OpenAI `system` role — it strips it.
-        # Fix: fold task first, then format guide — task-first keeps Copilot
-        # focused on executing rather than acknowledging protocol rules.
-        # Extract filename hint from task for the opening example
-        _fn_hint = "script.py"
-        _fn_m = re.search(r'\b(\w+\.(?:py|js|sh|ts|rb|go))\b', task)
-        if _fn_m:
-            _fn_hint = _fn_m.group(1)
-        initial_user_msg = (
-            f"TASK: {task}\n\n"
-            f"Sandbox: Python 3.11, Node.js 20, bash.\n"
-            f"Reply with ONE action per message in order: write file first, then run it.\n\n"
-            f"Step 1 — write the file:\n"
-            f"FILE: {_fn_hint}\n"
-            f"[complete file content on the following lines]\n\n"
-            f"Step 2 — run it after writing:\n"
-            f"RUN: python3 {_fn_hint}\n\n"
-            f"Step 3 — install packages if needed:\n"
-            f"INSTALL: flask\n\n"
-            f"Step 4 — confirm done:\n"
-            f"DONE: description of what ran and output\n\n"
-            f"For web servers: RUN: nohup python3 app.py > server.log 2>&1 &\n"
-            f"Then verify: RUN: sleep 2 && curl -sf http://localhost:5001/ && echo OK\n"
-            f"Include port in DONE.\n\n"
-            f"Begin with Step 1 now: FILE: {_fn_hint}"
-        )
-        if is_followup and history:
-            # For follow-ups, append the new instruction as a user turn
-            # Seed with NOTES.md content so LLM has persistent memory
-            _prior_notes = await _notes_read()
-            _notes_context = f"\n\n[Session Notes from NOTES.md]:\n{_prior_notes[:800]}" if _prior_notes else ""
-            followup_msg = (
-                f"FOLLOW-UP TASK: {task}\n\n"
-                f"Continue from where you left off. The workspace files still exist. "
-                f"Use FILE:/RUN:/INSTALL: actions as before. "
-                f"When done, write DONE: summary."
-                f"{_notes_context}"
+            yield _sse("thinking", {"step": 0, "text": "🔐 Auth OK — pinging Copilot...", "total_steps": max_steps})
+            hi_service_phrases = (
+                "something went wrong", "please try again later",
+                "experiencing high demand", "we're experiencing",
             )
-            history.append({"role": "user", "content": followup_msg})
-
-        yield _sse("thinking", {"step": 0, "text": f"🚀 Starting agent task: {task[:120]}...", "total_steps": max_steps})
-        turn_counter = len(history)  # track DB turn numbers
-        service_error_retries = 0    # consecutive "Something went wrong" retries
-
-        for step in range(1, max_steps + 1):
-            yield _sse("step_done", {"step": step, "max_steps": max_steps, "status": "running"})
-
-            # Build messages for C1 — no system role (Copilot strips it).
-            # Step 1: send initial_user_msg which has system prompt + task baked in.
-            # Subsequent steps: replay conversation history (max 6 turns to avoid
-            # bloated context with [Assistant]: prefixes confusing Copilot).
-            if not history:
-                messages: list[dict] = [{"role": "user", "content": initial_user_msg}]
-            else:
-                # Keep initial user message + last 5 turns to limit context size
-                _hist = list(history)
-                if len(_hist) > 6:
-                    _hist = [_hist[0]] + _hist[-5:]  # always keep initial prompt
-                messages = _hist
-
-            # ── Token budget check ───────────────────────────────────────────
-            _token_est = _estimate_tokens(messages)
-            yield _sse("token_estimate", {"step": step, "tokens": _token_est,
-                                          "budget": TOKEN_BUDGET, "hard_cap": TOKEN_HARD_CAP})
-            if _token_est >= TOKEN_HARD_CAP:
-                # Auto-compress: summarize all but the first message
-                _to_compress = messages[1:] if len(messages) > 1 else messages
-                yield _sse("context_compressed", {
-                    "step": step, "tokens_before": _token_est,
-                    "message": "Context near limit — auto-compressing history..."
-                })
-                _summary_text = await _summarize_history(_to_compress, c1, agent_id)
-                messages = [
-                    messages[0],  # keep initial task message
-                    {"role": "user", "content": f"[Context summary — earlier steps compressed]:\n{_summary_text}"}
-                ]
-                # Rebuild history to match compressed messages
-                history = messages[:]
-                _new_est = _estimate_tokens(messages)
-                yield _sse("context_compressed", {
-                    "step": step, "tokens_after": _new_est,
-                    "message": f"History compressed: ~{_token_est}→~{_new_est} tokens. Continuing..."
-                })
-            elif _token_est >= TOKEN_BUDGET:
-                yield _sse("token_warning", {
-                    "step": step, "tokens": _token_est, "budget": TOKEN_BUDGET,
-                    "message": f"Context nearing limit (~{_token_est:,} tokens). Will auto-compress at {TOKEN_HARD_CAP:,}."
-                })
-
-            # Call C1 (Copilot LLM)
-            headers = {
-                "Content-Type": "application/json",
-                "X-Agent-ID": agent_id,
-            }
-            if chat_mode:
-                headers["X-Chat-Mode"] = chat_mode
-            if work_mode in ("work", "web"):
-                headers["X-Work-Mode"] = work_mode
-
-            body = {
-                "model": "copilot",
-                "messages": messages,
-                "stream": False,
-            }
-
             try:
-                llm_r = None
-                async for item in _post_with_heartbeats(
-                    client,
+                hi_r = await client.post(
                     f"{c1}/v1/chat/completions",
-                    headers=headers,
-                    body=body,
-                    request_timeout=180,
-                    session_meta={
-                        "scope": "page",
-                        "page": "agent",
-                        "owner_id": session_id,
-                        "upstream": "c1",
-                        "operation": "agent-step",
-                        "external_session_id": session_id,
-                        "max_retries": 2,
-                        "resume_payload": {
-                            "page": "agent",
-                            "session_id": session_id,
-                            "task": task,
-                            "step": step,
-                            "agent_id": agent_id,
-                            "chat_mode": chat_mode,
-                            "work_mode": work_mode,
-                        },
-                        "state": {
-                            "step": step,
-                            "agent_id": agent_id,
-                            "chat_mode": chat_mode,
-                            "work_mode": work_mode,
-                        },
-                    },
-                ):
-                    if item["kind"] == "heartbeat":
-                        wait_msg = _runtime_wait_message(item.get("runtime"))
-                        yield _sse("thinking", {
-                            "step": step,
-                            "text": f"⏳ Working on the response... Please wait. Waiting on Copilot ({item['waited_s']}s)... {wait_msg}",
-                        })
-                        continue
-                    llm_r = item["response"]
-                if llm_r is None:
-                    raise RuntimeError("Copilot request ended without a response")
-                if llm_r.status_code != 200:
-                    raw = llm_r.text[:400]
-                    diagnosis = await _diagnose_copilot_issue(raw or f"HTTP {llm_r.status_code}", client=client)
-                    yield _sse("error", {"message": diagnosis["message"]})
-                    return
-                llm_data = llm_r.json()
-                response_text: str = llm_data.get("choices", [{}])[0].get("message", {}).get("content", "")
-            except SessionRecoveryPending as exc:
-                pending = exc.session or {}
+                    headers={"Content-Type": "application/json", "X-Agent-ID": f"{agent_id}-preflight"},
+                    json={"model": "copilot", "messages": [{"role": "user", "content": "hi"}], "stream": False},
+                    timeout=30,
+                )
+                if hi_r.status_code == 200:
+                    hi_text = (hi_r.json().get("choices", [{}])[0].get("message", {}).get("content", "") or "").strip()
+                    if any(p in hi_text.lower() for p in hi_service_phrases):
+                        yield _sse("thinking", {"step": 0, "text": f"⚠️ Copilot is under load: \"{hi_text[:80]}\" — task will retry automatically if needed"})
+                    elif hi_text:
+                        yield _sse("thinking", {"step": 0, "text": "✅ Copilot OK — starting task..."})
+                    else:
+                        yield _sse("thinking", {"step": 0, "text": "⚠️ Copilot ping returned empty — proceeding anyway"})
+                else:
+                    yield _sse("thinking", {"step": 0, "text": f"⚠️ Copilot ping HTTP {hi_r.status_code} — proceeding anyway"})
+            except Exception as hi_exc:
+                yield _sse("thinking", {"step": 0, "text": f"⚠️ Copilot ping failed ({str(hi_exc)[:60]}) — may be slow"})
+
+            now = datetime.now(timezone.utc).isoformat()
+            history: list[dict] = []
+            files_created: list[str] = []
+            commands_run: list[str] = []
+            is_followup = False
+            session_exists = False
+
+            if session_id:
+                try:
+                    with _db() as conn:
+                        sess = conn.execute(
+                            "SELECT task, agent_id, files_created FROM agent_sessions WHERE id=?",
+                            (session_id,),
+                        ).fetchone()
+                        if sess:
+                            session_exists = True
+                            is_followup = True
+                            files_created = json.loads(sess["files_created"] or "[]")
+                            msgs = conn.execute(
+                                "SELECT role, content FROM agent_messages WHERE session_id=? ORDER BY turn, id",
+                                (session_id,),
+                            ).fetchall()
+                            history = [{"role": r["role"], "content": r["content"]} for r in msgs]
+                            if not task:
+                                task = sess["task"]
+                except sqlite3.Error:
+                    pass
+
+            if not task:
+                yield _sse("error", {"message": "No task provided."})
+                return
+
+            if not session_id:
+                session_id = "sess_" + uuid.uuid4().hex[:8]
                 try:
                     with _db() as conn:
                         conn.execute(
-                            "UPDATE agent_sessions SET status='waiting-retry', updated_at=?, steps_taken=? WHERE id=?",
+                            "INSERT INTO agent_sessions (id, created_at, updated_at, task, agent_id, chat_mode, work_mode, status) "
+                            "VALUES (?,?,?,?,?,?,?,'running')",
+                            (session_id, now, now, task[:1000], agent_id, chat_mode, work_mode),
+                        )
+                except sqlite3.Error:
+                    pass
+            elif session_exists:
+                try:
+                    with _db() as conn:
+                        conn.execute(
+                            "UPDATE agent_sessions SET updated_at=?, task=?, agent_id=?, chat_mode=?, work_mode=?, status='running' WHERE id=?",
+                            (now, task[:1000], agent_id, chat_mode, work_mode, session_id),
+                        )
+                except sqlite3.Error:
+                    pass
+
+            yield _sse("session", {"session_id": session_id, "is_followup": is_followup})
+
+            if not is_followup:
+                await _notes_init(session_id, task)
+                yield _sse("notes_updated", {"action": "created", "path": NOTES_FILE})
+            else:
+                prior_notes = await _notes_read()
+                if prior_notes:
+                    yield _sse("notes_updated", {"action": "loaded", "path": NOTES_FILE, "preview": prior_notes[:300]})
+
+            fn_hint = "script.py"
+            fn_match = re.search(r'\b(\w+\.(?:py|js|sh|ts|rb|go))\b', task)
+            if fn_match:
+                fn_hint = fn_match.group(1)
+            initial_user_msg = (
+                f"TASK: {task}\n\n"
+                f"Sandbox: Python 3.11, Node.js 20, bash.\n"
+                f"Reply with ONE action per message in order: write file first, then run it.\n\n"
+                f"Step 1 — write the file:\n"
+                f"FILE: {fn_hint}\n"
+                f"[complete file content on the following lines]\n\n"
+                f"Step 2 — run it after writing:\n"
+                f"RUN: python3 {fn_hint}\n\n"
+                f"Step 3 — install packages if needed:\n"
+                f"INSTALL: flask\n\n"
+                f"Step 4 — confirm done:\n"
+                f"DONE: description of what ran and output\n\n"
+                f"For web servers: RUN: nohup python3 app.py > server.log 2>&1 &\n"
+                f"Then verify: RUN: sleep 2 && curl -sf http://localhost:5001/ && echo OK\n"
+                f"Include port in DONE.\n\n"
+                f"Begin with Step 1 now: FILE: {fn_hint}"
+            )
+            if is_followup and history:
+                prior_notes = await _notes_read()
+                notes_context = f"\n\n[Session Notes from NOTES.md]:\n{prior_notes[:800]}" if prior_notes else ""
+                history.append({
+                    "role": "user",
+                    "content": (
+                        f"FOLLOW-UP TASK: {task}\n\n"
+                        f"Continue from where you left off. The workspace files still exist. "
+                        f"Use FILE:/RUN:/INSTALL: actions as before. "
+                        f"When done, write DONE: summary."
+                        f"{notes_context}"
+                    ),
+                })
+
+            yield _sse("thinking", {"step": 0, "text": f"🚀 Starting agent task: {task[:120]}...", "total_steps": max_steps})
+            turn_counter = len(history)
+            service_error_retries = 0
+
+            for step in range(1, max_steps + 1):
+                if await _should_stop():
+                    return
+                yield _sse("step_done", {"step": step, "max_steps": max_steps, "status": "running"})
+
+                if not history:
+                    messages: list[dict] = [{"role": "user", "content": initial_user_msg}]
+                else:
+                    hist = list(history)
+                    if len(hist) > 6:
+                        hist = [hist[0]] + hist[-5:]
+                    messages = hist
+
+                token_est = _estimate_tokens(messages)
+                yield _sse("token_estimate", {"step": step, "tokens": token_est, "budget": TOKEN_BUDGET, "hard_cap": TOKEN_HARD_CAP})
+                if token_est >= TOKEN_HARD_CAP:
+                    to_compress = messages[1:] if len(messages) > 1 else messages
+                    yield _sse("context_compressed", {
+                        "step": step,
+                        "tokens_before": token_est,
+                        "message": "Context near limit — auto-compressing history...",
+                    })
+                    summary_text = await _summarize_history(to_compress, c1, agent_id)
+                    messages = [
+                        messages[0],
+                        {"role": "user", "content": f"[Context summary — earlier steps compressed]:\n{summary_text}"},
+                    ]
+                    history = messages[:]
+                    new_est = _estimate_tokens(messages)
+                    yield _sse("context_compressed", {
+                        "step": step,
+                        "tokens_after": new_est,
+                        "message": f"History compressed: ~{token_est}→~{new_est} tokens. Continuing...",
+                    })
+                elif token_est >= TOKEN_BUDGET:
+                    yield _sse("token_warning", {
+                        "step": step,
+                        "tokens": token_est,
+                        "budget": TOKEN_BUDGET,
+                        "message": f"Context nearing limit (~{token_est:,} tokens). Will auto-compress at {TOKEN_HARD_CAP:,}.",
+                    })
+
+                headers = {"Content-Type": "application/json", "X-Agent-ID": agent_id}
+                if chat_mode:
+                    headers["X-Chat-Mode"] = chat_mode
+                if work_mode in ("work", "web"):
+                    headers["X-Work-Mode"] = work_mode
+
+                body = {"model": "copilot", "messages": messages, "stream": False}
+
+                try:
+                    llm_r = None
+                    async for item in _post_with_heartbeats(
+                        client,
+                        f"{c1}/v1/chat/completions",
+                        headers=headers,
+                        body=body,
+                        request_timeout=180,
+                        session_meta={
+                            "scope": "page",
+                            "page": "agent",
+                            "owner_id": session_id,
+                            "upstream": "c1",
+                            "operation": "agent-step",
+                            "external_session_id": session_id,
+                            "max_retries": 2,
+                            "resume_payload": {
+                                "page": "agent",
+                                "session_id": session_id,
+                                "task": task,
+                                "step": step,
+                                "agent_id": agent_id,
+                                "chat_mode": chat_mode,
+                                "work_mode": work_mode,
+                            },
+                            "state": {
+                                "step": step,
+                                "agent_id": agent_id,
+                                "chat_mode": chat_mode,
+                                "work_mode": work_mode,
+                            },
+                        },
+                    ):
+                        if item["kind"] == "heartbeat":
+                            wait_msg = _runtime_wait_message(item.get("runtime"))
+                            yield _sse("thinking", {
+                                "step": step,
+                                "text": f"⏳ Working on the response... Please wait. Waiting on Copilot ({item['waited_s']}s)... {wait_msg}",
+                            })
+                            continue
+                        llm_r = item["response"]
+                    if llm_r is None:
+                        raise RuntimeError("Copilot request ended without a response")
+                    if llm_r.status_code != 200:
+                        diagnosis = await _diagnose_copilot_issue(llm_r.text[:400] or f"HTTP {llm_r.status_code}", client=client)
+                        yield _sse("error", {"message": diagnosis["message"]})
+                        return
+                    response_text = llm_r.json().get("choices", [{}])[0].get("message", {}).get("content", "")
+                except SessionRecoveryPending as exc:
+                    pending = exc.session or {}
+                    try:
+                        with _db() as conn:
+                            conn.execute(
+                                "UPDATE agent_sessions SET status='waiting-retry', updated_at=?, steps_taken=? WHERE id=?",
+                                (datetime.now(timezone.utc).isoformat(), step, session_id),
+                            )
+                    except sqlite3.Error:
+                        pass
+                    yield _sse("error", {
+                        "message": (
+                            "Copilot or the network timed out. The session manager marked this run as recoverable. "
+                            "Resume the task after services recover."
+                        ),
+                        "session_id": session_id,
+                        "session_manager_id": pending.get("id"),
+                        "next_retry_at": pending.get("next_retry_at"),
+                        "retryable": True,
+                    })
+                    return
+                except Exception as exc:
+                    diagnosis = await _diagnose_copilot_issue(str(exc) or type(exc).__name__, client=client)
+                    service_error_retries += 1
+                    if service_error_retries <= 3:
+                        wait_s = service_error_retries * 15
+                        yield _sse("thinking", {"step": step, "text": f"⚠️ {diagnosis['message'][:120]} — retrying in {wait_s}s (attempt {service_error_retries}/3)..."})
+                        if await _sleep_with_stop(wait_s):
+                            return
+                        continue
+                    yield _sse("error", {
+                        "message": (
+                            f"{diagnosis['message'][:220]} after 3 retries. "
+                            "Use the runtime badge to identify whether C1, C3, or M365 is degraded, then resume the session from History."
+                        )
+                    })
+                    return
+
+                refusal_phrases = (
+                    "can't chat about this", "can't respond to this",
+                    "let's try a different topic", "i can't discuss",
+                    "generating response", "copilot\ncopilot",
+                )
+                if any(p in response_text.lower() for p in refusal_phrases):
+                    if await _sleep_with_stop(4):
+                        return
+                    history = [{"role": "user", "content": initial_user_msg}]
+                    yield _sse("thinking", {"step": step, "text": "⚠️ Copilot content filter — retrying with fresh context..."})
+                    continue
+
+                service_error_phrases = (
+                    "something went wrong", "please try again later", "please retry",
+                    "try again later", "experiencing high demand", "we're experiencing", "high demand",
+                )
+                if not response_text.strip():
+                    diagnosis = await _diagnose_copilot_issue("empty response from Copilot", client=client)
+                    yield _sse("error", {"message": diagnosis["message"]})
+                    return
+                if any(p in response_text.lower() for p in service_error_phrases):
+                    service_error_retries += 1
+                    if service_error_retries > 3:
+                        diagnosis = await _diagnose_copilot_issue(response_text, client=client)
+                        yield _sse("error", {"message": diagnosis["message"]})
+                        return
+                    wait_s = service_error_retries * 15
+                    diagnosis = await _diagnose_copilot_issue(response_text, client=client)
+                    yield _sse("thinking", {"step": step, "text": f"⚠️ {diagnosis['summary']} — waiting {wait_s}s then retrying (attempt {service_error_retries}/3)..."} )
+                    if await _sleep_with_stop(wait_s):
+                        return
+                    continue
+
+                service_error_retries = 0
+                if await _sleep_with_stop(6):
+                    return
+
+                thinking_text = _strip_tool_xml(response_text)
+                if thinking_text:
+                    yield _sse("thinking", {"step": step, "text": thinking_text})
+
+                final_answer = _parse_final_answer(response_text)
+                if final_answer and files_created and commands_run:
+                    port_match = re.search(r'port[= :]?\s*(\d{4,5})', final_answer, re.IGNORECASE)
+                    web_port = int(port_match.group(1)) if port_match else None
+                    await _notes_append(step, final_answer[:200])
+                    yield _sse("notes_updated", {"action": "appended", "path": NOTES_FILE, "step": step, "preview": final_answer[:120]})
+                    try:
+                        with _db() as conn:
+                            conn.execute(
+                                "UPDATE agent_sessions SET status='completed', updated_at=?, steps_taken=?, files_created=?, summary=? WHERE id=?",
+                                (datetime.now(timezone.utc).isoformat(), step, json.dumps(files_created), final_answer[:500], session_id),
+                            )
+                    except sqlite3.Error:
+                        pass
+                    event = {"summary": final_answer, "steps_taken": step, "files_created": files_created, "session_id": session_id}
+                    if web_port:
+                        event["web_port"] = web_port
+                    yield _sse("final", event)
+                    return
+                elif final_answer:
+                    final_answer = None
+
+                stripped_resp = response_text.strip()
+                is_copilot_exec = False
+                exec_data: dict = {}
+                if stripped_resp.startswith("{") and '"executedCode"' in stripped_resp:
+                    try:
+                        exec_data = json.loads(stripped_resp)
+                        is_copilot_exec = bool(exec_data.get("executedCode"))
+                    except json.JSONDecodeError:
+                        pass
+                elif ("Coding and executing" in response_text or ("**RUN:" in response_text and "Commands executed" in response_text)):
+                    if not re.search(r"^(FILE|RUN|INSTALL|DONE):", response_text, re.MULTILINE):
+                        is_copilot_exec = True
+                if is_copilot_exec:
+                    downloaded: list[str] = []
+                    if exec_data.get("outputFiles"):
+                        for output_file in exec_data["outputFiles"]:
+                            furl = output_file.get("codeResultFileUrl", "")
+                            fname = output_file.get("fileName", "")
+                            if furl and fname and not fname.startswith("."):
+                                try:
+                                    dl = await client.get(furl, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+                                    if dl.status_code == 200:
+                                        wr = await _c10_write_file(fname, dl.text)
+                                        if wr.get("ok"):
+                                            downloaded.append(fname)
+                                            if fname not in files_created:
+                                                files_created.append(fname)
+                                            yield _sse("file_update", {"path": fname, "action": "created", "source": "copilot-exec"})
+                                except Exception:
+                                    pass
+                    exec_stdout = exec_data.get("stdout", "")
+                    if downloaded:
+                        commands_run.append("(copilot-exec)")
+                        if not history:
+                            history.append({"role": "user", "content": initial_user_msg})
+                        history.append({"role": "assistant", "content": response_text})
+                        history.append({
+                            "role": "user",
+                            "content": (
+                                f"Files saved. Output: {exec_stdout[:300]}\n"
+                                f"Now RUN: python3 {downloaded[0]} to verify, or DONE: summary."
+                            ),
+                        })
+                        yield _sse("thinking", {"step": step, "text": f"📥 Downloaded from Copilot executor: {', '.join(downloaded)}\nstdout: {exec_stdout[:300]}"})
+                        continue
+                    if not history:
+                        history.append({"role": "user", "content": initial_user_msg})
+                    history.append({"role": "assistant", "content": response_text})
+                    history.append({"role": "user", "content": "Write the file using FILE: filename then the content below. Then RUN: command to execute it."})
+                    yield _sse("thinking", {"step": step, "text": "⚠️ Copilot ran code in its own environment. Requesting FILE: action..."})
+                    continue
+
+                tools = _parse_all_actions(response_text)
+                if not tools:
+                    if not history:
+                        history.append({"role": "user", "content": initial_user_msg})
+                    history.append({"role": "assistant", "content": response_text})
+                    history.append({"role": "user", "content": "Write your next action: FILE: filename (then content), or RUN: command, or INSTALL: package, or DONE: summary."})
+                    continue
+
+                observations: list[str] = []
+                last_tool_name = ""
+                last_meta: dict = {}
+
+                if not history:
+                    history.append({"role": "user", "content": initial_user_msg})
+                history.append({"role": "assistant", "content": response_text})
+                turn_counter += 1
+                try:
+                    with _db() as conn:
+                        conn.execute(
+                            "INSERT INTO agent_messages (session_id, turn, role, content) VALUES (?,?,?,?)",
+                            (session_id, turn_counter, "assistant", response_text[:4000]),
+                        )
+                        conn.execute(
+                            "UPDATE agent_sessions SET updated_at=?, steps_taken=? WHERE id=?",
                             (datetime.now(timezone.utc).isoformat(), step, session_id),
                         )
                 except sqlite3.Error:
                     pass
-                yield _sse("error", {
-                    "message": (
-                        "Copilot or the network timed out. The session manager marked this run as recoverable. "
-                        "Resume the task after services recover."
-                    ),
-                    "session_id": session_id,
-                    "session_manager_id": pending.get("id"),
-                    "next_retry_at": pending.get("next_retry_at"),
-                    "retryable": True,
-                })
-                return
-            except Exception as exc:
-                diagnosis = await _diagnose_copilot_issue(str(exc) or type(exc).__name__, client=client)
-                err_detail = diagnosis["message"]
-                # Transient errors (ReadTimeout, ConnectError, etc.) — retry up to 3 times
-                service_error_retries += 1
-                if service_error_retries <= 3:
-                    wait_s = service_error_retries * 15  # 15s, 30s, 45s back-off
-                    yield _sse("thinking", {"step": step, "text":
-                        f"⚠️ {err_detail[:120]} — "
-                        f"retrying in {wait_s}s (attempt {service_error_retries}/3)..."})
-                    await asyncio.sleep(wait_s)
-                    continue
-                yield _sse("error", {"message":
-                    f"{err_detail[:220]} after 3 retries. "
-                    f"Use the runtime badge to identify whether C1, C3, or M365 is degraded, then resume the session from History."})
-                return
 
-            # ── Content-filter detection ────────────────────────────────────────────
-            # Copilot M365 sometimes refuses with "Sorry, I can't chat about this."
-            # This response must NOT be added to history — it corrupts context because
-            # server.py flattens history as "[Assistant]: Sorry..." in the next prompt,
-            # which triggers further refusals. Instead, restart with a fresh prompt.
-            _REFUSAL_PHRASES = (
-                "can't chat about this", "can't respond to this",
-                "let's try a different topic", "i can't discuss",
-                "generating response",  # stuck loading page
-                "copilot\ncopilot",     # DOM sender label only, no real content
-            )
-            if any(p in response_text.lower() for p in _REFUSAL_PHRASES):
-                # Wait before retrying — let C3's page pool fully reset
-                await asyncio.sleep(4)
-                # Reset history to just the initial prompt (drops the bad context)
-                history = [{"role": "user", "content": initial_user_msg}]
-                yield _sse("thinking", {"step": step, "text":
-                    "⚠️ Copilot content filter — retrying with fresh context..."})
-                continue
+                for tool in tools:
+                    if await _should_stop():
+                        return
+                    tool_event: dict = {"step": step, "tool": tool["tool"]}
+                    if tool.get("command"):
+                        tool_event["command"] = tool["command"]
+                    if tool.get("path"):
+                        tool_event["path"] = tool["path"]
+                    if tool.get("package"):
+                        tool_event["package"] = tool["package"]
+                    if tool.get("content"):
+                        tool_event["preview"] = tool["content"][:200]
+                    yield _sse("tool_call", tool_event)
 
-            # ── M365 service-error detection ────────────────────────────────────────
-            # Copilot M365 browser UI shows "Something went wrong. Please try again
-            # later." when the service is overloaded or has a transient fault.
-            # C3 extracts this as the response text, which is NOT a real answer.
-            # We must NOT add it to history. Instead: wait, then retry same step.
-            # Three states handled:
-            #   1) Valid response         → normal flow below
-            #   2) "Something went wrong" → wait + retry (up to 3 times)
-            #   3) Empty response         → auth down / no internet → abort
-            _SERVICE_ERROR_PHRASES = (
-                "something went wrong",
-                "please try again later",
-                "please retry",
-                "try again later",
-                "experiencing high demand",
-                "we're experiencing",
-                "high demand",
-            )
-            if not response_text.strip():
-                # Empty response = auth session expired or Copilot unreachable
-                diagnosis = await _diagnose_copilot_issue("empty response from Copilot", client=client)
-                yield _sse("error", {"message": diagnosis["message"]})
-                return
+                    observation, meta = await _execute_tool(tool)
+                    last_tool_name = tool["tool"]
+                    last_meta = meta
 
-            if any(p in response_text.lower() for p in _SERVICE_ERROR_PHRASES):
-                service_error_retries += 1
-                if service_error_retries > 3:
-                    diagnosis = await _diagnose_copilot_issue(response_text, client=client)
-                    yield _sse("error", {"message": diagnosis["message"]})
-                    return
-                wait_s = service_error_retries * 15  # 15s, 30s, 45s
-                diagnosis = await _diagnose_copilot_issue(response_text, client=client)
-                yield _sse("thinking", {"step": step, "text":
-                    f"⚠️ {diagnosis['summary']} — waiting {wait_s}s then retrying "
-                    f"(attempt {service_error_retries}/3)..."})
-                await asyncio.sleep(wait_s)
-                # Do NOT advance history — retry the exact same step
-                continue
+                    if tool["tool"] == "exec":
+                        cmd = tool.get("command", "")
+                        if cmd and cmd not in commands_run:
+                            commands_run.append(cmd)
+                        is_bg = meta.get("background", False) or bool(cmd and ("nohup " in cmd or cmd.strip().endswith("&")))
+                        if is_bg:
+                            search_corpus = cmd + " " + response_text
+                            for fc in files_created:
+                                fr = await _c10_read_file(fc)
+                                search_corpus += " " + (fr.get("content") or "")
+                            port_m = re.search(r'port\s*[=:,( ]\s*(\d{4,5})|\.run\s*\([^)]*port\s*=\s*(\d{4,5})', search_corpus, re.IGNORECASE)
+                            detected_port = None
+                            if port_m:
+                                detected_port = int(port_m.group(1) or port_m.group(2))
+                            if detected_port:
+                                yield _sse("web_server", {"port": detected_port})
 
-            # Good response received — reset service error counter
-            service_error_retries = 0
+                    if tool["tool"] == "write_file" and meta.get("ok"):
+                        path = meta.get("path", "")
+                        file_content = tool.get("content", "")
+                        if path and path not in files_created:
+                            files_created.append(path)
+                        yield _sse("file_update", {"path": path, "action": "created"})
 
-            # ── Inter-step delay ────────────────────────────────────────────────────
-            # Give Copilot's browser page 6 seconds to finish rendering before the
-            # next API call types a new message into the still-active chat box.
-            # Copilot "Coding and executing" responses need extra time to complete.
-            await asyncio.sleep(6)
-
-            # Emit thinking text (stripped of XML)
-            thinking_text = _strip_tool_xml(response_text)
-            if thinking_text:
-                yield _sse("thinking", {"step": step, "text": thinking_text})
-
-            # Check for final answer — require both a file write AND an exec
-            # to have occurred. This prevents the LLM from hallucinating execution
-            # and declaring DONE without actually running anything in C10.
-            final_answer = _parse_final_answer(response_text)
-            if final_answer and files_created and commands_run:
-                # Detect port in DONE summary for web preview
-                port_m2 = re.search(r'port[= :]?\s*(\d{4,5})', final_answer, re.IGNORECASE)
-                web_port = int(port_m2.group(1)) if port_m2 else None
-                # Append DONE summary to NOTES.md for cross-session memory
-                await _notes_append(step, final_answer[:200])
-                yield _sse("notes_updated", {
-                    "action": "appended", "path": NOTES_FILE, "step": step,
-                    "preview": final_answer[:120]
-                })
-                # Save session as completed
-                try:
-                    with _db() as conn:
-                        conn.execute(
-                            "UPDATE agent_sessions SET status='completed', updated_at=?, "
-                            "steps_taken=?, files_created=?, summary=? WHERE id=?",
-                            (datetime.now(timezone.utc).isoformat(), step,
-                             json.dumps(files_created), final_answer[:500], session_id),
+                        web_server_patterns = (
+                            "flask", "fastapi", "uvicorn", "express()", "http.createserver",
+                            "app.listen(", "app.run(", "socketio", "tornado", "django",
                         )
-                except sqlite3.Error:
-                    pass
-                ev = {
-                    "summary": final_answer,
-                    "steps_taken": step,
-                    "files_created": files_created,
-                    "session_id": session_id,
-                }
-                if web_port:
-                    ev["web_port"] = web_port
-                yield _sse("final", ev)
-                return
-            elif final_answer:
-                # DONE claimed too early (no exec yet) — push back with explicit nudge
-                final_answer = None
+                        is_web_server_file = any(p in file_content.lower() for p in web_server_patterns)
+                        remaining_tools = tools[tools.index(tool) + 1:]
+                        has_exec_following = any(t["tool"] == "exec" for t in remaining_tools)
+                        if not has_exec_following and path and not is_web_server_file:
+                            ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
+                            auto_cmd = {"py": f"python3 {path}", "js": f"node {path}", "sh": f"bash {path}"}.get(ext)
+                            if auto_cmd:
+                                yield _sse("tool_call", {"step": step, "tool": "exec", "command": auto_cmd, "auto": True})
+                                run_result, run_meta = await _execute_tool({"tool": "exec", "command": auto_cmd})
+                                if auto_cmd not in commands_run:
+                                    commands_run.append(auto_cmd)
+                                obs_event2 = {"step": step, "tool": "exec", "result": run_result[:800], "auto": True}
+                                if "exit_code" in run_meta:
+                                    obs_event2["exit_code"] = run_meta["exit_code"]
+                                yield _sse("observation", obs_event2)
+                                observations.append(f"[auto-run {auto_cmd}]\n{run_result}")
+                                last_tool_name = "exec"
+                                last_meta = run_meta
 
-            # ── Detect Copilot's built-in code-executor responses ─────────────────
-            # Copilot M365 may execute code itself and return results in two formats:
-            # 1) JSON: {"executedCode":"...","status":"...","stdout":"...","outputFiles":[...]}
-            # 2) Markdown with "Coding and executing" banner or "**RUN: cmd**" blocks
-            # For JSON: download any outputFiles and write to C10, then continue.
-            # For Markdown: only redirect if NO standard FILE:/RUN: keywords present.
-            stripped_resp = response_text.strip()
-            _is_copilot_exec = False
-            _exec_data: dict = {}
-            if stripped_resp.startswith('{') and '"executedCode"' in stripped_resp:
-                try:
-                    _exec_data = json.loads(stripped_resp)
-                    _is_copilot_exec = bool(_exec_data.get("executedCode"))
-                except json.JSONDecodeError:
-                    pass
-            elif ("Coding and executing" in response_text
-                  or ("**RUN:" in response_text and "Commands executed" in response_text)):
-                has_protocol = bool(re.search(r"^(FILE|RUN|INSTALL|DONE):", response_text, re.MULTILINE))
-                if not has_protocol:
-                    _is_copilot_exec = True
-            if _is_copilot_exec:
-                # Try to download outputFiles from Copilot's AMS storage to C10
-                _downloaded: list[str] = []
-                if _exec_data.get("outputFiles"):
-                    for of in _exec_data["outputFiles"]:
-                        furl = of.get("codeResultFileUrl", "")
-                        fname = of.get("fileName", "")
-                        if furl and fname and not fname.startswith("."):
-                            try:
-                                dl = await client.get(furl, timeout=15,
-                                    headers={"User-Agent": "Mozilla/5.0"})
-                                if dl.status_code == 200:
-                                    wr = await _c10_write_file(fname, dl.text)
-                                    if wr.get("ok"):
-                                        _downloaded.append(fname)
-                                        if fname not in files_created:
-                                            files_created.append(fname)
-                                        yield _sse("file_update",
-                                            {"path": fname, "action": "created", "source": "copilot-exec"})
-                            except Exception:
-                                pass
-                exec_stdout = _exec_data.get("stdout", "")
-                exec_status = _exec_data.get("status", "")
-                if _downloaded:
-                    # Files downloaded — treat as a successful file write + run
-                    commands_run.append("(copilot-exec)")
-                    _dl_list = ", ".join(_downloaded)
-                    yield _sse("thinking", {"step": step, "text":
-                        f"📥 Downloaded from Copilot executor: {_dl_list}\nstdout: {exec_stdout[:300]}"})
-                    next_obs = f"Files written: {_dl_list}. Exec output: {exec_stdout[:400]}"
-                    if not history:
-                        history.append({"role": "user", "content": initial_user_msg})
-                    history.append({"role": "assistant", "content": response_text})
-                    history.append({"role": "user", "content":
-                        f"Files saved. Output: {exec_stdout[:300]}\n"
-                        f"Now RUN: python3 {_downloaded[0]} to verify, or DONE: summary."})
-                    continue
+                    obs_event: dict = {"step": step, "tool": tool["tool"], "result": observation[:800]}
+                    if meta.get("background"):
+                        obs_event["exit_code"] = 0
+                        obs_event["background"] = True
+                    elif "exit_code" in meta:
+                        obs_event["exit_code"] = meta["exit_code"]
+                    if meta.get("timed_out"):
+                        obs_event["timed_out"] = True
+                    yield _sse("observation", obs_event)
+                    observations.append(observation)
+
+                combined_obs = re.sub(r'/workspace/', '', "\n---\n".join(observations))
+                if last_tool_name == "exec":
+                    ec = last_meta.get("exit_code", 0)
+                    is_bg = last_meta.get("background", False)
+                    if is_bg or ec == 0:
+                        next_hint = (
+                            f"Output: {combined_obs[:600]}\n\n"
+                            + (
+                                f"Server started. Verify: RUN: sleep 2 && curl -sf http://localhost:{detected_port or 5001}/ && echo OK\n"
+                                if is_bg else
+                                "Output looks correct. Write DONE: summary, or fix issues."
+                            )
+                        )
+                    else:
+                        err_path = tools[-1].get("path", fn_hint) if tools else fn_hint
+                        next_hint = f"Error: {combined_obs[:500]}\n\nFix it: FILE: {err_path}\n[corrected file content]"
+                elif last_tool_name == "install":
+                    next_hint = f"Installed. Now FILE: {fn_hint}\n[file content]"
                 else:
-                    # No files to download — redirect to FILE: protocol
-                    yield _sse("thinking", {"step": step, "text":
-                        "⚠️ Copilot ran code in its own environment. Requesting FILE: action..."})
-                    if not history:
-                        history.append({"role": "user", "content": initial_user_msg})
-                    history.append({"role": "assistant", "content": response_text})
-                    history.append({"role": "user", "content":
-                        "Write the file using FILE: filename then the content below. "
-                        "Then RUN: command to execute it."})
-                    continue
+                    next_hint = f"Result: {combined_obs[:500]}\n\nNext action: FILE: filename, RUN: command, INSTALL: package, or DONE: summary."
+                history.append({"role": "user", "content": next_hint})
 
-            # Parse ALL actions from this response (LLM often writes FILE: + RUN: together)
-            tools = _parse_all_actions(response_text)
-            if not tools:
-                # No action found — nudge LLM to produce one
-                if not history:
-                    history.append({"role": "user", "content": initial_user_msg})
-                history.append({"role": "assistant", "content": response_text})
-                history.append({
-                    "role": "user",
-                    "content": (
-                        "Write your next action: FILE: filename (then content), "
-                        "or RUN: command, or INSTALL: package, or DONE: summary."
-                    ),
-                })
-                continue
-
-            # Execute all actions from this response sequentially
-            observations: list[str] = []
-            last_tool_name = ""
-            last_meta: dict = {}
-
-            if not history:
-                history.append({"role": "user", "content": initial_user_msg})
-            history.append({"role": "assistant", "content": response_text})
-            # Persist assistant turn to DB
-            turn_counter += 1
             try:
                 with _db() as conn:
                     conn.execute(
-                        "INSERT INTO agent_messages (session_id, turn, role, content) VALUES (?,?,?,?)",
-                        (session_id, turn_counter, "assistant", response_text[:4000]),
-                    )
-                    conn.execute(
-                        "UPDATE agent_sessions SET updated_at=?, steps_taken=? WHERE id=?",
-                        (datetime.now(timezone.utc).isoformat(), step, session_id),
+                        "UPDATE agent_sessions SET status='failed', updated_at=?, steps_taken=?, files_created=? WHERE id=?",
+                        (datetime.now(timezone.utc).isoformat(), max_steps, json.dumps(files_created), session_id),
                     )
             except sqlite3.Error:
                 pass
-
-            for tool in tools:
-                # Emit tool_call SSE
-                tool_event: dict = {"step": step, "tool": tool["tool"]}
-                if tool.get("command"):   tool_event["command"] = tool["command"]
-                if tool.get("path"):      tool_event["path"]    = tool["path"]
-                if tool.get("package"):   tool_event["package"] = tool["package"]
-                if tool.get("content"):   tool_event["preview"] = tool["content"][:200]
-                yield _sse("tool_call", tool_event)
-
-                # Execute in C10
-                observation, meta = await _execute_tool(tool)
-                last_tool_name = tool["tool"]
-                last_meta = meta
-
-                # Track commands & files
-                if tool["tool"] == "exec":
-                    cmd = tool.get("command", "")
-                    if cmd and cmd not in commands_run:
-                        commands_run.append(cmd)
-                    # Detect background web server launch — emit web_server event
-                    # Also check background=True from C10 (returned for nohup cmds)
-                    is_bg = meta.get("background", False) or bool(
-                        cmd and ("nohup " in cmd or cmd.strip().endswith("&"))
-                    )
-                    if is_bg:
-                        # Scan command + response text + all written file contents for port
-                        search_corpus = cmd + " " + response_text
-                        for fc in files_created:
-                            fr = await _c10_read_file(fc)
-                            search_corpus += " " + (fr.get("content") or "")
-                        port_m = re.search(
-                            r'port\s*[=:,( ]\s*(\d{4,5})|\.run\s*\([^)]*port\s*=\s*(\d{4,5})',
-                            search_corpus, re.IGNORECASE
-                        )
-                        detected_port = None
-                        if port_m:
-                            detected_port = int(port_m.group(1) or port_m.group(2))
-                        if detected_port:
-                            yield _sse("web_server", {"port": detected_port})
-
-                if tool["tool"] == "write_file" and meta.get("ok"):
-                    path = meta.get("path", "")
-                    file_content = tool.get("content", "")
-                    if path and path not in files_created:
-                        files_created.append(path)
-                    yield _sse("file_update", {"path": path, "action": "created"})
-
-                    # Auto-run the file immediately after writing if no RUN: follows
-                    # BUT: suppress auto-run for web server files (Flask/Express/Fastapi)
-                    # to avoid blocking the event loop with a long-running process.
-                    _web_server_patterns = (
-                        "flask", "fastapi", "uvicorn", "express()", "http.createserver",
-                        "app.listen(", "app.run(", "socketio", "tornado", "django",
-                    )
-                    is_web_server_file = any(p in file_content.lower() for p in _web_server_patterns)
-
-                    remaining_tools = tools[tools.index(tool)+1:]
-                    has_exec_following = any(t["tool"] == "exec" for t in remaining_tools)
-                    if not has_exec_following and path and not is_web_server_file:
-                        ext = path.rsplit(".", 1)[-1].lower() if "." in path else ""
-                        auto_cmd = {"py": f"python3 {path}", "js": f"node {path}",
-                                    "sh": f"bash {path}"}.get(ext)
-                        if auto_cmd:
-                            yield _sse("tool_call", {"step": step, "tool": "exec",
-                                                     "command": auto_cmd, "auto": True})
-                            run_result, run_meta = await _execute_tool(
-                                {"tool": "exec", "command": auto_cmd}
-                            )
-                            if auto_cmd not in commands_run:
-                                commands_run.append(auto_cmd)
-                            obs_event2 = {"step": step, "tool": "exec",
-                                          "result": run_result[:800], "auto": True}
-                            if "exit_code" in run_meta:
-                                obs_event2["exit_code"] = run_meta["exit_code"]
-                            yield _sse("observation", obs_event2)
-                            observations.append(f"[auto-run {auto_cmd}]\n{run_result}")
-                            last_tool_name = "exec"
-                            last_meta = run_meta
-
-                # Emit observation SSE
-                obs_event: dict = {"step": step, "tool": tool["tool"],
-                                   "result": observation[:800]}
-                # Background processes return exit_code=0 always; don't show as error
-                if meta.get("background"):
-                    obs_event["exit_code"] = 0
-                    obs_event["background"] = True
-                elif "exit_code" in meta:
-                    obs_event["exit_code"] = meta["exit_code"]
-                if meta.get("timed_out"): obs_event["timed_out"] = True
-                yield _sse("observation", obs_event)
-                observations.append(observation)
-
-            # Build combined feedback — sanitize paths to avoid content filter triggers
-            def _sanitize_obs(text: str) -> str:
-                """Remove absolute paths like /workspace/ from shell output."""
-                return re.sub(r'/workspace/', '', text)
-            combined_obs = _sanitize_obs("\n---\n".join(observations))
-            if last_tool_name == "exec":
-                ec = last_meta.get("exit_code", 0)
-                is_bg = last_meta.get("background", False)
-                if is_bg or ec == 0:
-                    next_hint = (
-                        f"Output: {combined_obs[:600]}\n\n"
-                        + (
-                            f"Server started. Verify: RUN: sleep 2 && curl -sf http://localhost:{detected_port or 5001}/ && echo OK\n"
-                            if is_bg else
-                            f"Output looks correct. Write DONE: summary, or fix issues."
-                        )
-                    )
-                else:
-                    _err_path = tools[-1].get('path', _fn_hint) if tools else _fn_hint
-                    next_hint = (
-                        f"Error: {combined_obs[:500]}\n\n"
-                        f"Fix it: FILE: {_err_path}\n[corrected file content]"
-                    )
-            elif last_tool_name == "install":
-                next_hint = f"Installed. Now FILE: {_fn_hint}\n[file content]"
-            else:
-                next_hint = (
-                    f"Result: {combined_obs[:500]}\n\n"
-                    f"Next action: FILE: filename, RUN: command, INSTALL: package, or DONE: summary."
-                )
-            history.append({"role": "user", "content": next_hint})
-
-        # Reached max_steps without final_answer
-        try:
-            with _db() as conn:
-                conn.execute(
-                    "UPDATE agent_sessions SET status='failed', updated_at=?, steps_taken=?, files_created=? WHERE id=?",
-                    (datetime.now(timezone.utc).isoformat(), max_steps, json.dumps(files_created), session_id),
-                )
-        except sqlite3.Error:
-            pass
-        yield _sse("final", {
-            "summary": f"Reached maximum steps ({max_steps}). Task may be partially complete. Check the file tree for created files.",
-            "steps_taken": max_steps,
-            "files_created": files_created,
-            "session_id": session_id,
-            "max_steps_reached": True,
-        })
+            yield _sse("final", {
+                "summary": f"Reached maximum steps ({max_steps}). Task may be partially complete. Check the file tree for created files.",
+                "steps_taken": max_steps,
+                "files_created": files_created,
+                "session_id": session_id,
+                "max_steps_reached": True,
+            })
+        finally:
+            await client.aclose()
 
     return StreamingResponse(
         generate(),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.post("/api/agent/stop", name="api_agent_stop")
+async def api_agent_stop(body: dict = Body(...)):
+    session_id = str(body.get("session_id", "")).strip()
+    payload, status_code = _mark_page_session_cancelled(
+        "agent_sessions",
+        session_id,
+        summary="Task execution cancelled by user.",
+    )
+    return JSONResponse(payload, status_code=status_code)
 
 
 @app.post("/api/agent/reset", name="api_agent_reset")
@@ -10488,8 +10445,6 @@ async def api_ma_run(
         def _sse(event: str, data: dict) -> str:
             return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
-        yield _sse("session", {"session_id": session_id, "roles": active_roles})
-
         # ── C3b M365 auth guard (mirrors /api/agent/run pattern) ──────────────
         c3_url = _urls().get("c3", "http://browser-auth:8001")
         _session_status = "unknown"
@@ -10516,12 +10471,21 @@ async def api_ma_run(
         now = datetime.now(timezone.utc).isoformat()
         try:
             with _db() as conn:
-                conn.execute(
-                    "INSERT OR IGNORE INTO ma_sessions (id, created_at, updated_at, task, status, roles) VALUES (?,?,?,?,?,?)",
-                    (session_id, now, now, task, "running", json.dumps(active_roles)),
-                )
+                existing = conn.execute("SELECT id FROM ma_sessions WHERE id=?", (session_id,)).fetchone()
+                if existing:
+                    conn.execute(
+                        "UPDATE ma_sessions SET updated_at=?, task=?, status='running', roles=? WHERE id=?",
+                        (now, task, json.dumps(active_roles), session_id),
+                    )
+                else:
+                    conn.execute(
+                        "INSERT INTO ma_sessions (id, created_at, updated_at, task, status, roles) VALUES (?,?,?,?,?,?)",
+                        (session_id, now, now, task, "running", json.dumps(active_roles)),
+                    )
         except sqlite3.Error:
             pass
+
+        yield _sse("session", {"session_id": session_id, "roles": active_roles})
 
         # Set up pause/inject per-session state
         pause_event = asyncio.Event()
@@ -10644,6 +10608,11 @@ async def api_ma_run(
         total = len(tasks)
 
         while done_count < total:
+            if await request.is_disconnected() or _page_session_status("ma_sessions", session_id) == "cancelled":
+                for t in tasks:
+                    t.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                return
             pending = [t for t in tasks if not t.done()]
             try:
                 evt_text = event_queue.get_nowait()
@@ -10742,6 +10711,19 @@ async def api_ma_agento_resume(session_id: str):
         evt.set()
         return {"ok": True, "state": "running"}
     return {"ok": False, "error": "session not found"}
+
+
+@app.post("/api/ma/stop/{session_id}", name="api_ma_agento_stop")
+async def api_ma_agento_stop(session_id: str):
+    evt = _ma_pause_flags.get(session_id)
+    if evt:
+        evt.set()
+    payload, status_code = _mark_page_session_cancelled(
+        "ma_sessions",
+        session_id,
+        summary="multi-Agento session cancelled by user.",
+    )
+    return JSONResponse(payload, status_code=status_code)
 
 
 @app.post("/api/ma/inject/{session_id}/{pane_id}", name="api_ma_agento_inject")

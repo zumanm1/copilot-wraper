@@ -8,7 +8,9 @@ Strategy:
 """
 from __future__ import annotations
 
+import asyncio
 import json
+import sqlite3
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 import sys
@@ -57,6 +59,43 @@ def _json_response(payload: dict, status: int = 200):
     resp.json = MagicMock(return_value=payload)
     resp.text = json.dumps(payload)
     return resp
+
+
+class _FakeHttpxAsyncClient:
+    def __init__(self, *args, **kwargs):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def aclose(self):
+        return None
+
+    async def get(self, url, *args, **kwargs):
+        if url.endswith("/health"):
+            return _json_response({"ok": True})
+        if url.endswith("/session-health"):
+            return _json_response({"session": "active"})
+        return _json_response({"ok": True})
+
+    async def post(self, url, *args, **kwargs):
+        return _json_response(_make_c1_ok("Preflight ok"))
+
+
+def _make_fake_post_with_heartbeats(responses):
+    response_iter = iter(responses)
+
+    async def _fake(*args, **kwargs):
+        yield {"kind": "response", "response": next(response_iter)}
+
+    return _fake
+
+
+async def _no_sleep(*args, **kwargs):
+    return None
 
 
 class _FakeStreamResponse:
@@ -142,6 +181,18 @@ def c9_app(tmp_path):
 # ── Page route tests ──────────────────────────────────────────────────────────
 
 class TestC9PageRoutes:
+    def test_dashboard_page_returns_200(self, c9_app):
+        r = c9_app.get("/")
+        assert r.status_code == 200
+
+    def test_dashboard_filters_hidden_alias_targets(self, c9_app):
+        r = c9_app.get("/")
+        assert r.status_code == 200
+        html = r.text
+        assert "C3 browser-auth runtime" in html
+        assert html.count("C10b agent sandbox") == 1
+        assert html.count("C11b multi-agent sandbox") == 1
+
     def test_chat_page_returns_200(self, c9_app):
         r = c9_app.get("/chat")
         assert r.status_code == 200
@@ -211,13 +262,95 @@ class TestC9PageRoutes:
         r = c9_app.get("/api")
         assert r.status_code == 200
 
+    def test_api_reference_page_documents_current_multi_agent_routes(self, c9_app):
+        r = c9_app.get("/api")
+        assert r.status_code == 200
+        html = r.text
+        assert "/api/agent/stop" in html
+        assert "/api/multi-agent/pause/{session_id}" in html
+        assert "/api/multi-agent/inject/{session_id}/{pane_id}" in html
+        assert "/api/ma/run" in html
+        assert "/api/ma/stop/{session_id}" in html
+
+    def test_agent_page_stop_button_calls_backend_stop(self, c9_app):
+        r = c9_app.get("/agent")
+        assert r.status_code == 200
+        assert "/api/agent/stop" in r.text
+        assert "refreshHistory()" in r.text
+
+    def test_multi_agento_page_stop_button_calls_backend_stop(self, c9_app):
+        r = c9_app.get("/multi-Agento")
+        assert r.status_code == 200
+        assert "/api/ma/stop/" in r.text
+        assert "multi-Agento session cancelled by user." in r.text
+
     def test_logs_page_returns_200(self, c9_app):
         r = c9_app.get("/logs")
         assert r.status_code == 200
 
+    def test_logs_page_uses_http_status_data_attributes_for_filtering(self, c9_app):
+        c9_app.post("/api/chat", json={"agent_id": "c9-jokes", "prompt": "status row"})
+        r = c9_app.get("/logs")
+        assert r.status_code == 200
+        assert 'data-http-status="' in r.text
+        assert "tr.dataset.httpStatus" in r.text
+
     def test_health_page_returns_200(self, c9_app):
         r = c9_app.get("/health")
         assert r.status_code == 200
+
+    def test_health_page_filters_hidden_alias_targets_and_shows_c3_status(self, c9_app):
+        r = c9_app.get("/health")
+        assert r.status_code == 200
+        html = r.text
+        assert html.count("C10b agent sandbox") == 1
+        assert html.count("C11b multi-agent sandbox") == 1
+        assert "C3 /status" in html
+
+    def test_health_history_returns_elapsed_ms_after_status_probe(self, c9_app):
+        r_status = c9_app.get("/api/status")
+        assert r_status.status_code == 200
+        r_hist = c9_app.get("/api/health-history?target=c1&limit=1")
+        assert r_hist.status_code == 200
+        rows = r_hist.json()
+        assert rows
+        assert "elapsed_ms" in rows[0]
+
+    def test_tasked_page_has_workflow_diagram_anchor(self, c9_app):
+        r = c9_app.get("/tasked")
+        assert r.status_code == 200
+        assert 'id="tasked-workflow-diagram"' in r.text
+        assert "renderWorkflowDiagram" in r.text
+
+    def test_pipeline_page_returns_200(self, c9_app):
+        r = c9_app.get("/piplinetask")
+        assert r.status_code == 200
+        assert "/api/task-pipelines" in r.text
+
+    def test_task_completed_page_returns_200(self, c9_app):
+        r = c9_app.get("/task-completed")
+        assert r.status_code == 200
+        assert "/api/task-completed" in r.text
+
+    def test_live_docs_page_returns_200(self, c9_app):
+        r = c9_app.get("/tasked-live-doc")
+        assert r.status_code == 200
+        assert "Tasked Live Documentation" in r.text
+        assert "Run All" in r.text
+        assert "Validate All" in r.text
+
+    def test_pairs_multi_agent_launcher_uses_main_prompt_input(self, c9_app):
+        r = c9_app.get("/pairs")
+        assert r.status_code == 200
+        assert "document.getElementById('val-prompt')" in r.text
+        assert ".pair-prompt" not in r.text
+
+    def test_chat_resume_restores_saved_agent_selection(self, c9_app):
+        c9_app.post("/api/chat", json={"agent_id": "c6-kilocode", "prompt": "remember me"})
+        r = c9_app.get("/chat")
+        assert r.status_code == 200
+        assert "session.agent_id" in r.text
+        assert "agentSelect.value = session.agent_id" in r.text
 
     def test_pages_include_runtime_status_badge_polling(self, c9_app):
         r = c9_app.get("/chat")
@@ -514,6 +647,41 @@ class TestC9ApiValidate:
         r = c9_app.post("/api/validate", json={"prompt": "Joke", "parallel": False})
         assert r.json()["mode"] == "sequential"
 
+    def test_validate_sequential_runs_one_agent_at_a_time(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        active = 0
+        max_active = 0
+        order = []
+
+        async def fake_chat_one(agent_id, prompt, c1, chat_mode="", work_mode="", attachments=None):
+            nonlocal active, max_active
+            order.append(agent_id)
+            active += 1
+            max_active = max(max_active, active)
+            await asyncio.sleep(0)
+            active -= 1
+            return {
+                "ok": True,
+                "text": f"ok:{agent_id}",
+                "http_status": 200,
+                "elapsed_ms": 1,
+            }
+
+        agent_ids = ["c2-aider", "c6-kilocode", "c8-hermes"]
+        with patch.object(c9_mod, "_chat_one", side_effect=fake_chat_one):
+            r = c9_app.post("/api/validate", json={
+                "prompt": "Joke",
+                "parallel": False,
+                "agent_ids": agent_ids,
+            })
+
+        assert r.status_code == 200
+        body = r.json()
+        assert body["mode"] == "sequential"
+        assert order == agent_ids
+        assert max_active == 1
+
     def test_validate_calls_appear_in_logs(self, c9_app):
         """Validation runs must be visible in /logs (source='validate')."""
         # Run a single-agent validate
@@ -553,6 +721,105 @@ class TestC9ApiValidate:
         latest = rows[0]
         assert latest["http_status"] == 503
         assert "Upstream timeout" in (latest["response_excerpt"] or "")
+
+
+class TestC9AgentAndAgento:
+    def test_agent_stop_endpoint_updates_session_status(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        c9_mod._ensure_db()
+        with sqlite3.connect(c9_mod.DEFAULT_DB) as conn:
+            conn.execute(
+                "INSERT INTO agent_sessions (id, created_at, updated_at, task, agent_id, chat_mode, work_mode, status) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                ("sess-stop", "2026-04-08T00:00:00Z", "2026-04-08T00:00:00Z", "stop me", "c9-jokes", "auto", "work", "running"),
+            )
+
+        r = c9_app.post("/api/agent/stop", json={"session_id": "sess-stop"})
+        assert r.status_code == 200
+        assert r.json()["status"] == "cancelled"
+
+        rows = c9_app.get("/api/agent/sessions").json()
+        stopped = next(row for row in rows if row["id"] == "sess-stop")
+        assert stopped["status"] == "cancelled"
+
+    def test_agent_run_stream_completes_with_stubbed_tools(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        responses = [
+            _json_response(_make_c1_ok('FILE: hello.py\n```python\nprint("hi")\n```\nRUN: python3 hello.py')),
+            _json_response(_make_c1_ok("DONE: Built hello.py and ran it successfully.")),
+        ]
+
+        async def fake_execute_tool(tool):
+            if tool["tool"] == "write_file":
+                return "File written", {"ok": True, "path": tool["path"], "size": len(tool.get("content", ""))}
+            if tool["tool"] == "exec":
+                return "STDOUT:\nhi\nSTDERR:\n\nEXIT_CODE: 0", {"exit_code": 0}
+            return "ok", {}
+
+        with patch.object(c9_mod.httpx, "AsyncClient", _FakeHttpxAsyncClient), \
+             patch.object(c9_mod, "_post_with_heartbeats", new=_make_fake_post_with_heartbeats(responses)), \
+             patch.object(c9_mod, "_execute_tool", side_effect=fake_execute_tool), \
+             patch.object(c9_mod, "_notes_init", new=AsyncMock(return_value=None)), \
+             patch.object(c9_mod, "_notes_read", new=AsyncMock(return_value="")), \
+             patch.object(c9_mod, "_notes_append", new=AsyncMock(return_value=None)), \
+             patch.object(c9_mod.asyncio, "sleep", new=AsyncMock(side_effect=_no_sleep)):
+            r = c9_app.get("/api/agent/run?task=build+hello.py&agent_id=c9-jokes")
+
+        assert r.status_code == 200
+        assert "event: session" in r.text
+        assert "event: tool_call" in r.text
+        assert "event: final" in r.text
+
+        rows = c9_app.get("/api/agent/sessions").json()
+        assert any(row["status"] == "completed" for row in rows)
+
+    def test_multi_agento_stop_endpoint_updates_session_status(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        c9_mod._ensure_db()
+        with sqlite3.connect(c9_mod.DEFAULT_DB) as conn:
+            conn.execute(
+                "INSERT INTO ma_sessions (id, created_at, updated_at, task, roles, status) VALUES (?,?,?,?,?,?)",
+                ("ma-stop", "2026-04-08T00:00:00Z", "2026-04-08T00:00:00Z", "stop us", json.dumps(["builder"]), "running"),
+            )
+
+        r = c9_app.post("/api/ma/stop/ma-stop")
+        assert r.status_code == 200
+        assert r.json()["status"] == "cancelled"
+
+        rows = c9_app.get("/api/ma/sessions").json()
+        stopped = next(row for row in rows if row["id"] == "ma-stop")
+        assert stopped["status"] == "cancelled"
+
+    def test_multi_agento_run_stream_completes_with_stubbed_roles(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        supervisor_response = _json_response(_make_c1_ok("builder: Build the feature\ntester: Validate the feature"))
+
+        async def fake_role_loop(*, pane_id, role, queue, **kwargs):
+            queue.put_nowait(
+                "event: pane_done\ndata: "
+                + json.dumps({"pane_id": pane_id, "role": role, "step": 1, "summary": f"{role} done", "files": [f"{role}.md"]})
+                + "\n\n"
+            )
+            return {"role": role, "pane_id": pane_id, "done": True, "summary": f"{role} done", "files": [f"{role}.md"], "steps": 1}
+
+        with patch.object(c9_mod.httpx, "AsyncClient", _FakeHttpxAsyncClient), \
+             patch.object(c9_mod, "_post_with_heartbeats", new=_make_fake_post_with_heartbeats([supervisor_response])), \
+             patch.object(c9_mod, "_ma_role_loop_c11", side_effect=fake_role_loop), \
+             patch.object(c9_mod.asyncio, "sleep", new=AsyncMock(side_effect=_no_sleep)):
+            r = c9_app.get("/api/ma/run?task=ship+it&roles=builder,tester&agent_id=c6-kilocode")
+
+        assert r.status_code == 200
+        assert "event: session" in r.text
+        assert "event: pane_init" in r.text
+        assert "event: pane_done" in r.text
+        assert "event: final" in r.text
+
+        rows = c9_app.get("/api/ma/sessions").json()
+        assert any(row["status"] == "completed" for row in rows)
 
 
 # ── /pairs page: header correctness tests ────────────────────────────────────
