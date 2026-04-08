@@ -525,14 +525,27 @@ class CopilotBackend:
         return "".join(chunks)
 
     _c3_session: aiohttp.ClientSession | None = None
+    _c3_session_lock: asyncio.Lock | None = None
 
     @classmethod
-    def _get_c3_session(cls) -> aiohttp.ClientSession:
-        if cls._c3_session is None or cls._c3_session.closed:
-            cls._c3_session = aiohttp.ClientSession(
-                connector=aiohttp.TCPConnector(limit=6, keepalive_timeout=120),
-            )
-        return cls._c3_session
+    def _get_c3_session_lock(cls) -> asyncio.Lock:
+        if cls._c3_session_lock is None:
+            cls._c3_session_lock = asyncio.Lock()
+        return cls._c3_session_lock
+
+    @classmethod
+    async def _get_c3_session(cls) -> aiohttp.ClientSession:
+        async with cls._get_c3_session_lock():
+            if cls._c3_session is None or cls._c3_session.closed:
+                cls._c3_session = aiohttp.ClientSession(
+                    connector=aiohttp.TCPConnector(
+                        limit=6,
+                        force_close=True,
+                        enable_cleanup_closed=True,
+                        resolver=aiohttp.ThreadedResolver(),
+                    ),
+                )
+            return cls._c3_session
 
     async def _c3_proxy_call(self, prompt: str, agent_id: str = "", chat_mode: str = "") -> str:
         """Proxy chat through C3 browser-auth /chat endpoint (M365 SignalR)."""
@@ -541,7 +554,7 @@ class CopilotBackend:
         c3_url = os.getenv("C3_URL", "http://browser-auth:8001")
         logger.info("M365 proxy via C3: %s/chat agent=%s mode=%s prompt='%s'", c3_url, agent_id, chat_mode or "env", prompt[:60])
         try:
-            session = self._get_c3_session()
+            session = await self._get_c3_session()
             async with session.post(
                 f"{c3_url}/chat",
                 json={

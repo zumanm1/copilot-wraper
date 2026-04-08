@@ -7840,9 +7840,14 @@ async def api_chat(request: Request):
 
                     line_iter = resp.aiter_lines()
                     waited_s = 0
-                    while True:
+                    _pending_line_task: asyncio.Task | None = None
+                    try:
+                      while True:
                         try:
-                            raw_line = await asyncio.wait_for(line_iter.__anext__(), timeout=WAIT_HEARTBEAT_S)
+                            if _pending_line_task is None or _pending_line_task.done():
+                                _pending_line_task = asyncio.ensure_future(line_iter.__anext__())
+                            raw_line = await asyncio.wait_for(asyncio.shield(_pending_line_task), timeout=WAIT_HEARTBEAT_S)
+                            _pending_line_task = None
                         except StopAsyncIteration:
                             break
                         except asyncio.TimeoutError:
@@ -7894,6 +7899,9 @@ async def api_chat(request: Request):
                             if token:
                                 full_text += token
                                 yield _sse_event({"type": "token", "text": token})
+                    finally:
+                        if _pending_line_task is not None and not _pending_line_task.done():
+                            _pending_line_task.cancel()
             except Exception as exc:
                 now = datetime.now(timezone.utc).isoformat()
                 elapsed_ms = int((time.monotonic() - t0) * 1000)
