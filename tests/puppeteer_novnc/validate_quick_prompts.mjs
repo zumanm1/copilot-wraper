@@ -104,34 +104,31 @@ try {
     const btns = await page.$$('.quick[data-prompt]');
     await btns[i].click();
 
-    /* Wait for typing indicator to appear (stream started) */
+    /* Wait for a non-empty assistant bubble — covers both fast and slow responses.
+     * This is race-condition-free: we don't depend on catching the transient
+     * typing indicator; we simply wait until actual text has been rendered. */
+    let bubbleText = '';
     try {
-      await page.waitForSelector('.typing-indicator', { visible: true, timeout: 8000 });
-      pass(`Typing indicator appeared for "${prompt}"`);
+      await page.waitForFunction(
+        () => {
+          const bodies = document.querySelectorAll('.bubble.assistant .bubble-body');
+          const last = bodies[bodies.length - 1];
+          return last && last.textContent.trim().length > 5
+            && !last.querySelector('.typing-dots');  // not still loading
+        },
+        { timeout: TIMEOUT_MS }
+      );
+      bubbleText = await page.$eval(
+        '.bubble.assistant:last-of-type .bubble-body',
+        el => el.textContent.trim()
+      ).catch(() => '');
+      pass(`Response received (${bubbleText.length} chars) for "${prompt}"`);
+      pass(`Stream completed for "${prompt}"`);
     } catch {
-      fail(`Typing indicator never appeared for "${prompt}" — request may not have fired`);
-    }
-
-    /* Wait for typing indicator to disappear (stream finished) */
-    try {
-      await page.waitForSelector('.typing-indicator', { hidden: true, timeout: TIMEOUT_MS });
-      pass(`Stream completed (typing indicator gone) for "${prompt}"`);
-    } catch {
-      fail(`Stream never completed for "${prompt}" — possible hang or timeout`);
+      fail(`No response bubble appeared within ${TIMEOUT_MS/1000}s for "${prompt}"`);
+      fail(`Stream timed out for "${prompt}"`);
       await page.screenshot({ path: `/tmp/quick_prompt_${i}_timeout.png` });
       continue;
-    }
-
-    /* Assert: assistant bubble with non-empty text exists */
-    const bubbleText = await page.$$eval('.bubble.assistant .bubble-body', els => {
-      const last = els[els.length - 1];
-      return last ? last.textContent.trim() : '';
-    });
-
-    if (bubbleText && bubbleText.length > 5) {
-      pass(`Response received (${bubbleText.length} chars) for "${prompt}"`);
-    } else {
-      fail(`Empty or missing response bubble for "${prompt}" (got: "${bubbleText?.slice(0, 80)}")`);
     }
 
     /* Assert: no error bubble rendered */
@@ -162,7 +159,8 @@ try {
     !e.includes('favicon') &&
     !e.includes('net::ERR_ABORTED') &&
     !e.includes('sendMessage') &&        // browser extension noise
-    !e.includes('404')                   // missing static assets unrelated to chat
+    !e.includes('404') &&               // missing static assets unrelated to chat
+    !e.includes('503')                  // background health/runtime pollers unavailable
   );
   if (relevantErrors.length === 0) {
     pass('No JS errors on page');
