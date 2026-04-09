@@ -2,8 +2,17 @@
 Shared fixtures for the unit + integration test suite.
 """
 from __future__ import annotations
+import asyncio
+import inspect
+import sys
+from pathlib import Path
+
 import pytest
 from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 
 @pytest.fixture(autouse=True)
@@ -31,6 +40,19 @@ def pytest_collection_modifyitems(config, items):
         return (1 if late else 0, node)
 
     items.sort(key=sort_key)
+
+
+def pytest_pyfunc_call(pyfuncitem):
+    """Run async tests without requiring pytest-asyncio in the local environment."""
+    if not inspect.iscoroutinefunction(pyfuncitem.obj):
+        return None
+
+    kwargs = {
+        name: pyfuncitem.funcargs[name]
+        for name in pyfuncitem._fixtureinfo.argnames
+    }
+    asyncio.run(pyfuncitem.obj(**kwargs))
+    return True
 
 
 async def _fake_ws_stream(self, prompt, context, attachment_path=None):

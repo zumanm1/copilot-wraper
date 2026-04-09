@@ -3,8 +3,9 @@ Unit tests for AgentManager state machine and task execution.
 CopilotBackend is mocked so no real network I/O occurs.
 """
 from __future__ import annotations
+import asyncio
+
 import pytest
-import pytest_asyncio
 from unittest.mock import AsyncMock, patch
 
 
@@ -23,12 +24,15 @@ def mock_backend():
     return b
 
 
-@pytest_asyncio.fixture
-async def manager(mock_backend):
+@pytest.fixture
+def manager(mock_backend):
     with patch("agent_manager.CopilotBackend", return_value=mock_backend):
-        from agent_manager import get_agent_manager
-        mgr = await get_agent_manager("default")
+        from agent_manager import get_agent_manager, reset_agent_registry_for_tests
+
+        reset_agent_registry_for_tests()
+        mgr = asyncio.run(get_agent_manager("default"))
         yield mgr, mock_backend
+        reset_agent_registry_for_tests()
 
 
 # ── Lifecycle state transitions ──────────────────────────────────────

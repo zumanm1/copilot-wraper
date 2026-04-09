@@ -565,7 +565,7 @@ main {
                 <div class="tld-id-card-head" style="color:var(--accent)">task_id</div>
                 <div class="tld-id-card-sub">
                   Created when you call <code>POST /api/tasks</code>.<br>
-                  Format: <code>task_xxxxxxxx</code> (8 hex chars).<br>
+                  Usually <code>task_xxxxxxxx</code> (8 hex chars); seeded reference traces can use stable IDs like <code>task_trace_200</code>.<br>
                   Permanent anchor — never changes across all runs, alerts, and steps.
                   Shown in Tasked, Piplinetask, Alerts, Completed, and Preview pages.
                 </div>
@@ -1041,9 +1041,27 @@ main {
               </a>
               <a class="tld-mon-card" href="/tasked-live-doc" target="_blank">
                 <div class="tld-mon-name">Live Docs</div>
-                <div class="tld-mon-desc">This page. Live testing, deep reference docs, and validation for all 6 traces.</div>
+                <div class="tld-mon-desc">This page. Live testing, deep reference docs, and validation for legacy traces plus DB-backed TRACE-200 template traces.</div>
                 <div class="tld-mon-url">/tasked-live-doc</div>
               </a>
+            </div>
+          </div>
+
+          <div class="tld-doc-section" id="template-traces">
+            <div class="tld-sec-h1">Editable Template Traces (TRACE-200 Series)</div>
+            <div style="font-size:0.78rem;color:var(--muted);margin-bottom:0.8rem;">
+              These six traces are DB-backed mirrors of the editable Tasked templates. They keep stable trace IDs, stable task IDs, and inherit the current builtin template prompts and workflow settings.
+            </div>
+            <div class="tld-type-grid" id="tld-template-trace-docs"></div>
+            <div class="tld-table-wrap" style="margin-top:1rem;">
+              <table class="tld-table">
+                <thead>
+                  <tr>
+                    <th>Trace</th><th>Template</th><th>task_id</th><th>Mode</th><th>Expected alert</th><th>Tabs</th><th>Target</th>
+                  </tr>
+                </thead>
+                <tbody id="tld-template-trace-table"></tbody>
+              </table>
             </div>
           </div>
 
@@ -1105,7 +1123,7 @@ main {
   'use strict';
 
   /* ── TRACES config ──────────────────────────────────────────── */
-  var TRACES = [
+  var LEGACY_TRACES = [
     {
       trace:'TRACE-001', type:'output', typeColor:'#4ade80', typeCls:'output',
       mode:'chat', target:'C1b',
@@ -1223,6 +1241,8 @@ main {
       ]
     }
   ];
+  var TEMPLATE_TRACES = {{ tasked_live_doc_template_traces|safe }};
+  var TRACES = LEGACY_TRACES.concat(TEMPLATE_TRACES);
 
   /* ── State ──────────────────────────────────────────────────── */
   var S = {};
@@ -1236,7 +1256,10 @@ main {
   });
 
   var autoTimer = null;
-  var selectedTrace = localStorage.getItem('tld_sel') || 'TRACE-001';
+  var selectedTrace = localStorage.getItem('tld_sel') || (TRACES[0] ? TRACES[0].trace : 'TRACE-001');
+  if (!TRACES.some(function(t){ return t.trace === selectedTrace; }) && TRACES[0]) {
+    selectedTrace = TRACES[0].trace;
+  }
 
   /* ── Helpers ───────────────────────────────────────────────── */
   function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -1255,6 +1278,62 @@ main {
   }
   function copyText(s) {
     try { navigator.clipboard.writeText(s); gstatus('Copied: ' + s.substring(0,30), 'var(--accent)'); } catch(e) {}
+  }
+
+  function expectAlertLabel(mode) {
+    return {
+      required: 'required',
+      none: 'none expected',
+      conditional: 'conditional'
+    }[mode] || (mode || 'required');
+  }
+
+  function renderTemplateTraceDocs() {
+    var cards = document.getElementById('tld-template-trace-docs');
+    var table = document.getElementById('tld-template-trace-table');
+    if (!cards || !table) return;
+    cards.innerHTML = TEMPLATE_TRACES.map(function(t) {
+      var targetCls = t.target === 'C12b' ? 'sandbox' : 'action';
+      return '' +
+        '<div class="tld-type-card bl-' + esc(t.typeCls || t.type) + '">' +
+          '<div class="tld-type-card-header">' +
+            '<div class="tld-type-meta">' +
+              '<div class="tld-type-name-row">' +
+                '<span class="tld-type-badge bg-' + esc(t.typeCls || t.type) + '">' + esc(t.trace) + '</span>' +
+                '<span class="tld-type-name">' + esc(t.name) + '</span>' +
+                '<span class="tld-target-badge bg-' + targetCls + '">' + esc(t.target) + '</span>' +
+              '</div>' +
+              '<div class="tld-type-tagline">' + esc(t.desc || '') + '</div>' +
+            '</div>' +
+          '</div>' +
+          '<div class="tld-type-card-body">' +
+            '<div class="tld-info-grid">' +
+              '<span class="tld-info-key">Template key</span><span class="tld-info-val mono">' + esc(t.template_key || '') + '</span>' +
+              '<span class="tld-info-key">Stable task_id</span><span class="tld-info-val mono">' + esc(t.task_id || '') + '</span>' +
+              '<span class="tld-info-key">Mode</span><span class="tld-info-val">' + esc(t.mode || '') + '</span>' +
+              '<span class="tld-info-key">Expected alert</span><span class="tld-info-val">' + esc(expectAlertLabel(t.expect_alert)) + '</span>' +
+              '<span class="tld-info-key">Tabs required</span><span class="tld-info-val">' + esc(String(t.tabs_required || 1)) + '</span>' +
+              '<span class="tld-info-key">Context handoff</span><span class="tld-info-val">' + esc(t.context_handoff || '—') + '</span>' +
+            '</div>' +
+            '<div class="tld-type-footer">' +
+              '<span class="tld-type-trace-ids">' + esc(t.trace) + ' · ' + esc(t.task_id || '') + ' · template=' + esc(t.template_key || '') + '</span>' +
+              '<button class="tld-btn run sm" onclick="switchToLive(\'' + esc(t.trace) + '\')">Test in Live</button>' +
+            '</div>' +
+          '</div>' +
+        '</div>';
+    }).join('');
+    table.innerHTML = TEMPLATE_TRACES.map(function(t) {
+      return '' +
+        '<tr>' +
+          '<td class="accent">' + esc(t.trace) + '</td>' +
+          '<td>' + esc(t.name) + '</td>' +
+          '<td class="mono">' + esc(t.task_id || '') + '</td>' +
+          '<td class="' + ((t.mode || '') === 'sandbox' ? '' : 'muted') + '">' + esc(t.mode || '') + '</td>' +
+          '<td>' + esc(expectAlertLabel(t.expect_alert)) + '</td>' +
+          '<td class="mono">' + esc(String(t.tabs_required || 1)) + '</td>' +
+          '<td>' + esc(t.target || '') + '</td>' +
+        '</tr>';
+    }).join('');
   }
 
   /* ── Tab switching ──────────────────────────────────────────── */
@@ -1491,11 +1570,18 @@ main {
     if (!t) return;
     if (S[trace].task_id) { cb(S[trace].task_id, t); return; }
     var payload = {
+      id: t.task_id || '',
       name: t.name, mode: t.mode, schedule_kind: 'manual', tasked_type: t.type,
       planner_prompt: t.planner, executor_prompt: t.executor || 'Execute the task.',
-      trigger_mode: t.trigger_mode, steps: t.steps
+      trigger_mode: t.trigger_mode, trigger_text: t.trigger_text || '', steps: t.steps,
+      template_key: t.template_key || '',
+      tabs_required: t.tabs_required || 1,
+      interval_minutes: t.interval_minutes || 0,
+      context_handoff: t.context_handoff || '',
+      active: false
     };
     if (t.executor_target)    payload.executor_target    = t.executor_target;
+    if (t.workspace_dir)      payload.workspace_dir      = t.workspace_dir;
     if (t.validation_command) payload.validation_command = t.validation_command;
     if (t.test_command)       payload.test_command       = t.test_command;
     post('/api/tasks', payload).then(function(d) {
@@ -1562,6 +1648,7 @@ main {
 
   window.doValidate = function(trace) {
     var taskId = S[trace].task_id; var runId = S[trace].run_id;
+    var t = TRACES.find(function(x){return x.trace===trace;}) || {};
     if (!taskId) { gstatus('No task_id — run first', 'var(--fail)'); return; }
     gstatus('Validating ' + trace + '\u2026', '#22d3ee');
     var checks = [
@@ -1575,7 +1662,9 @@ main {
       }),
       get('/api/alerts?limit=500').then(function(d){
         var al = (d.alerts||[]).filter(function(a){return a.task_id===taskId;});
-        return {ok: al.length>0, msg:'alerts='+al.length+(al[0]?' id='+al[0].id:'')};
+        var expect = (t.expect_alert || 'required');
+        var ok = expect === 'none' ? al.length === 0 : (expect === 'conditional' ? true : al.length > 0);
+        return {ok: ok, msg:'alerts='+al.length+' expected=' + expectAlertLabel(expect) + (al[0]?' id='+al[0].id:'')};
       }),
       get('/api/task-completed?task_id=' + taskId).then(function(d){
         var it = d.items||[];
@@ -1641,6 +1730,7 @@ main {
   };
 
   /* ── Init ───────────────────────────────────────────────────── */
+  renderTemplateTraceDocs();
   buildCards();
   renderNav();
   renderDetail(selectedTrace);
