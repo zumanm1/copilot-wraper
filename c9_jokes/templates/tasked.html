@@ -69,6 +69,14 @@
 .tasked-draft-preview{display:grid;gap:.55rem}
 .tasked-draft-kv{font-size:.8rem;color:var(--muted);line-height:1.5}
 .tasked-draft-steps{margin:0;padding-left:1rem;color:var(--muted);font-size:.78rem;line-height:1.45}
+.tasked-chain-list{display:grid;gap:.7rem}
+.tasked-chain-item{display:grid;gap:.6rem;padding:.8rem;border:1px solid var(--border,#333);border-radius:12px;background:#151515}
+.tasked-chain-item-head{display:flex;justify-content:space-between;gap:.65rem;align-items:center;flex-wrap:wrap}
+.tasked-chain-item-title{display:grid;gap:.2rem}
+.tasked-chain-item-title strong{font-size:.84rem}
+.tasked-chain-item-title span{font-size:.74rem;color:var(--muted)}
+.tasked-chain-actions{display:flex;gap:.35rem;flex-wrap:wrap}
+.tasked-chain-empty{padding:.9rem;border:1px dashed var(--border,#333);border-radius:12px;color:var(--muted);font-size:.8rem;background:#0d0d0d}
 @media (max-width: 980px){.tasked-grid{grid-template-columns:1fr}.tasked-row{grid-template-columns:1fr}}
 @media (max-width: 980px){.tasked-subgrid,.tasked-author-grid{grid-template-columns:1fr}}
 .tasked-filter-bar{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center;margin-bottom:.7rem;padding:.6rem .75rem;background:#0d0d0d;border:1px solid var(--border,#333);border-radius:12px}
@@ -205,7 +213,7 @@
     <h2 style="margin:0 0 .45rem 0;font-size:1rem;">Tasked Chat Planner</h2>
     <div class="tasked-note" style="margin-bottom:.8rem;">
       Write the task in English and Tasked will turn it into a normal Tasked draft. It will either match an existing editable template or build a template-less free-hand workflow that still flows into piplinetask, Alerts, and TaskCompleted.
-      This planner runs locally inside C9b and does not send the authoring prompt into the M365 auth tabs.
+      By default it can also ask the M365-backed authoring agent to refine the request first, then map it to the closest template or template chain.
     </div>
     <div class="tasked-author-grid">
       <label>
@@ -220,6 +228,10 @@
             <option value="existing-template">Force existing template match</option>
             <option value="freehand">Force free-hand custom template</option>
           </select>
+        </label>
+        <label style="align-content:end">
+          <span>Refine with AI agent first</span>
+          <input id="tasked-author-refine-agent" type="checkbox" checked style="width:auto">
         </label>
         <div>
           <div class="tasked-note" style="margin-bottom:.45rem;">Two lifecycle examples</div>
@@ -328,9 +340,9 @@
           </div>
           <div class="tasked-form-section-body" id="section-template-params">
             <div class="tasked-note" id="task-template-params-note">
-              Weather template parameters are editable here. Changing the town or temperature threshold rebuilds the runnable prompt and step config for this Tasked row.
+              Template parameters are editable here. Structured values are kept in sync with the runnable Tasked row so the prompt, workflow steps, Alerts, Pipeline, Completed, and Live Docs all reflect the same task definition.
             </div>
-            <div class="tasked-kv-grid" id="task-weather-params">
+            <div class="tasked-kv-grid" id="task-weather-params" hidden>
               <label>
                 Weather town / city
                 <input id="task-weather-location" placeholder="Dublin, Ireland">
@@ -339,6 +351,61 @@
                 Trigger above temperature (°C)
                 <input id="task-weather-threshold" type="number" step="0.1" placeholder="10">
               </label>
+            </div>
+            <div class="tasked-kv-grid" id="task-distance-params" hidden>
+              <label>
+                From town / city
+                <input id="task-distance-from-location" placeholder="Dublin, Ireland">
+              </label>
+              <label>
+                To town / city
+                <input id="task-distance-to-location" placeholder="Cork, Ireland">
+              </label>
+              <label>
+                Distance rule
+                <select id="task-distance-comparator">
+                  <option value="lt">Less than</option>
+                  <option value="lte">Less than or equal to</option>
+                  <option value="gt">Greater than</option>
+                  <option value="gte">Greater than or equal to</option>
+                </select>
+              </label>
+              <label>
+                Distance threshold (km)
+                <input id="task-distance-threshold" type="number" step="0.1" placeholder="100">
+              </label>
+            </div>
+            <div id="task-chain-params" hidden>
+              <div class="tasked-actions" style="margin-bottom:.5rem;">
+                <button class="tasked-btn secondary" type="button" id="task-chain-enable-btn">Use combo / multiple templates</button>
+                <button class="tasked-btn secondary" type="button" id="task-chain-clear-btn">Back to single template</button>
+              </div>
+              <div class="tasked-kv-grid" style="margin-bottom:.65rem;">
+                <label>
+                  Chain operator
+                  <select id="task-chain-operator">
+                    <option value="AND">AND</option>
+                    <option value="OR">OR</option>
+                    <option value="NOR">NOR</option>
+                  </select>
+                </label>
+                <label>
+                  Add template item
+                  <div style="display:flex;gap:.5rem;align-items:center;">
+                    <select id="task-chain-add-template"></select>
+                    <button class="tasked-btn secondary" type="button" id="task-chain-add-btn">Add</button>
+                  </div>
+                </label>
+              </div>
+              <label>
+                Source request
+                <textarea id="task-chain-source-request" placeholder="Optional original request that produced this combo task"></textarea>
+              </label>
+              <label>
+                Refined request
+                <textarea id="task-chain-refined-request" placeholder="Optional AI-refined request for the combo chain"></textarea>
+              </label>
+              <div class="tasked-chain-list" id="task-chain-items"></div>
             </div>
           </div>
         </div>
@@ -610,6 +677,16 @@ Alert config example:
 
 <script>
 (function(){
+  var TEMPLATE_CHAIN_KEY = 'template-chain';
+  var TEMPLATE_CHAIN_KIND = 'template-chain';
+  var WEATHER_TEMPLATE_KIND = 'weather-threshold';
+  var DISTANCE_TEMPLATE_KIND = 'distance-threshold';
+  var WEATHER_DEFAULT_LOCATION = 'Dublin, Ireland';
+  var WEATHER_DEFAULT_THRESHOLD = 10;
+  var DISTANCE_DEFAULT_FROM = 'Dublin, Ireland';
+  var DISTANCE_DEFAULT_TO = 'Cork, Ireland';
+  var DISTANCE_DEFAULT_THRESHOLD = 100;
+  var DISTANCE_DEFAULT_COMPARATOR = 'lt';
   var TEMPLATES = {{ task_templates|safe }};
   var EXECUTOR_TARGETS = {{ task_executor_targets|safe }};
   var STEP_KINDS = {{ task_step_kinds|safe }};
@@ -634,8 +711,14 @@ Alert config example:
   var workflowDiagramEl = document.getElementById('tasked-workflow-diagram');
   var stepsListEl = document.getElementById('task-steps-list');
   var templateParamsSectionEl = document.getElementById('task-template-params-section');
+  var templateParamsNoteEl = document.getElementById('task-template-params-note');
+  var weatherParamsEl = document.getElementById('task-weather-params');
+  var distanceParamsEl = document.getElementById('task-distance-params');
+  var chainParamsEl = document.getElementById('task-chain-params');
+  var chainItemsEl = document.getElementById('task-chain-items');
   var authorPromptEl = document.getElementById('tasked-author-prompt');
   var authorStrategyEl = document.getElementById('tasked-author-strategy');
+  var authorRefineAgentEl = document.getElementById('tasked-author-refine-agent');
   var authorResultEl = document.getElementById('tasked-author-result');
   var authorExamplesEl = document.getElementById('tasked-author-examples');
   var filterSearch = document.getElementById('task-filter-search');
@@ -676,7 +759,15 @@ Alert config example:
     completionArchive: document.getElementById('task-completion-archive'),
     taskedType: document.getElementById('task-tasked-type'),
     weatherLocation: document.getElementById('task-weather-location'),
-    weatherThreshold: document.getElementById('task-weather-threshold')
+    weatherThreshold: document.getElementById('task-weather-threshold'),
+    distanceFromLocation: document.getElementById('task-distance-from-location'),
+    distanceToLocation: document.getElementById('task-distance-to-location'),
+    distanceThreshold: document.getElementById('task-distance-threshold'),
+    distanceComparator: document.getElementById('task-distance-comparator'),
+    chainOperator: document.getElementById('task-chain-operator'),
+    chainAddTemplate: document.getElementById('task-chain-add-template'),
+    chainSourceRequest: document.getElementById('task-chain-source-request'),
+    chainRefinedRequest: document.getElementById('task-chain-refined-request')
   };
 
   // Populate output-type select from server-injected options
@@ -720,11 +811,11 @@ Alert config example:
     return Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
   }
   function weatherLocation(value) {
-    return (String(value || '').trim() || 'Dublin, Ireland');
+    return (String(value || '').trim() || WEATHER_DEFAULT_LOCATION);
   }
   function weatherThreshold(value) {
     var n = Number(value);
-    return Number.isFinite(n) ? n : 10;
+    return Number.isFinite(n) ? n : WEATHER_DEFAULT_THRESHOLD;
   }
   function weatherCityLabel(location) {
     var text = weatherLocation(location);
@@ -745,11 +836,180 @@ Alert config example:
       temperature_threshold_c: weatherThreshold(raw.temperature_threshold_c)
     };
   }
+  function distanceLocation(value, fallback) {
+    return String(value || '').trim() || String(fallback || '');
+  }
+  function distanceThreshold(value) {
+    var n = Number(value);
+    return Number.isFinite(n) ? n : DISTANCE_DEFAULT_THRESHOLD;
+  }
+  function distanceComparator(value) {
+    var valid = { lt: true, lte: true, gt: true, gte: true };
+    var text = String(value || '').trim().toLowerCase();
+    return valid[text] ? text : DISTANCE_DEFAULT_COMPARATOR;
+  }
+  function distanceComparatorLabel(value) {
+    return { lt: 'less than', lte: 'less than or equal to', gt: 'greater than', gte: 'greater than or equal to' }[distanceComparator(value)] || 'less than';
+  }
+  function distanceTemplateData(input) {
+    var raw = (input && typeof input === 'object') ? input : {};
+    return {
+      template_kind: DISTANCE_TEMPLATE_KIND,
+      from_location: distanceLocation(raw.from_location, DISTANCE_DEFAULT_FROM),
+      to_location: distanceLocation(raw.to_location, DISTANCE_DEFAULT_TO),
+      distance_threshold_km: distanceThreshold(raw.distance_threshold_km),
+      distance_comparator: distanceComparator(raw.distance_comparator)
+    };
+  }
+  function buildDistancePrompt(fromLocation, toLocation, thresholdKm, comparator) {
+    var data = distanceTemplateData({
+      from_location: fromLocation,
+      to_location: toLocation,
+      distance_threshold_km: thresholdKm,
+      distance_comparator: comparator
+    });
+    var triggerLabel = 'distance between ' + data.from_location.split(',')[0].trim() + ' and ' + data.to_location.split(',')[0].trim();
+    var thresholdLabel = numberLabel(data.distance_threshold_km, DISTANCE_DEFAULT_THRESHOLD);
+    var compareText = distanceComparatorLabel(data.distance_comparator);
+    return 'Determine the distance in kilometers between ' + data.from_location + ' and ' + data.to_location + '. Return valid JSON only with this schema: {"triggered": boolean, "trigger": "' + triggerLabel + '", "title": string, "summary": string, "details": {"from_location": string, "to_location": string, "distance_km": number|null, "comparison": string}}. Do not use markdown fences. Set triggered to true only when distance_km is a number ' + compareText + ' ' + thresholdLabel + '. Set details.comparison to a short phrase such as "less than 100 km". If the distance is unavailable, set it to null and triggered to false.';
+  }
+  function getTemplateByKey(key) {
+    return (TEMPLATES || []).find(function(item){ return item.key === key; }) || null;
+  }
+  function templateModeForKey(key) {
+    var tpl = getTemplateByKey(key);
+    return (tpl && tpl.mode) || 'chat';
+  }
+  function templateLabelForKey(key) {
+    if (key === TEMPLATE_CHAIN_KEY) return 'Combo / Multiple Templates';
+    var tpl = getTemplateByKey(key);
+    return (tpl && tpl.name) || key || 'custom';
+  }
+  function templateSummaryForData(templateKey, templateData) {
+    var data = (templateData && typeof templateData === 'object') ? templateData : {};
+    if (data.template_kind === WEATHER_TEMPLATE_KIND) {
+      return 'Weather: ' + weatherLocation(data.weather_location) + ' · above ' + numberLabel(data.temperature_threshold_c, WEATHER_DEFAULT_THRESHOLD) + '°C';
+    }
+    if (data.template_kind === DISTANCE_TEMPLATE_KIND) {
+      var cmp = { lt: '<', lte: '≤', gt: '>', gte: '≥' }[distanceComparator(data.distance_comparator)] || '<';
+      return 'Distance: ' + distanceLocation(data.from_location, DISTANCE_DEFAULT_FROM) + ' → ' + distanceLocation(data.to_location, DISTANCE_DEFAULT_TO) + ' · ' + cmp + ' ' + numberLabel(data.distance_threshold_km, DISTANCE_DEFAULT_THRESHOLD) + ' km';
+    }
+    if (data.template_kind === TEMPLATE_CHAIN_KIND) {
+      var normalized = chainTemplateData(data);
+      var labels = (normalized.chain_items || []).map(function(item){ return chainItemSummary(item); }).filter(Boolean);
+      return labels.length ? (normalized.chain_operator + ': ' + labels.join(' ' + normalized.chain_operator + ' ')) : 'Combo / Multiple Templates';
+    }
+    return templateLabelForKey(templateKey);
+  }
+  function chainItemSummary(item) {
+    if (!item || typeof item !== 'object') return '';
+    var data = (item.template_data && typeof item.template_data === 'object') ? item.template_data : {};
+    var name = String(item.name || '').trim();
+    if (name) return name;
+    return templateSummaryForData(item.template_key || '', data);
+  }
+  function defaultChainItem(templateKey) {
+    var tpl = getTemplateByKey(templateKey);
+    if (!tpl) return null;
+    var templateData = tpl.template_data || {};
+    var executorPrompt = tpl.executor_prompt || '';
+    if ((templateData.template_kind || '') === WEATHER_TEMPLATE_KIND || templateKey === 'weather-dublin') {
+      templateData = weatherTemplateData(templateData);
+      executorPrompt = buildWeatherPrompt(templateData.weather_location, templateData.temperature_threshold_c);
+    } else if ((templateData.template_kind || '') === DISTANCE_TEMPLATE_KIND || templateKey === 'distance-between-cities') {
+      templateData = distanceTemplateData(templateData);
+      executorPrompt = buildDistancePrompt(templateData.from_location, templateData.to_location, templateData.distance_threshold_km, templateData.distance_comparator);
+    }
+    return {
+      id: 'chain_item_' + Math.random().toString(16).slice(2, 8),
+      name: '',
+      template_key: templateKey,
+      template_data: templateData,
+      executor_prompt: executorPrompt
+    };
+  }
+  function normalizeChainItem(item, index) {
+    var base = (item && typeof item === 'object') ? item : {};
+    var templateKey = String(base.template_key || '').trim();
+    var resolved = defaultChainItem(templateKey) || {
+      id: 'chain_item_' + (index + 1),
+      name: '',
+      template_key: templateKey,
+      template_data: {},
+      executor_prompt: ''
+    };
+    var templateData = base.template_data || resolved.template_data || {};
+    var executorPrompt = String(base.executor_prompt || resolved.executor_prompt || '').trim();
+    if ((templateData.template_kind || '') === WEATHER_TEMPLATE_KIND || templateKey === 'weather-dublin') {
+      templateData = weatherTemplateData(templateData);
+      executorPrompt = buildWeatherPrompt(templateData.weather_location, templateData.temperature_threshold_c);
+    } else if ((templateData.template_kind || '') === DISTANCE_TEMPLATE_KIND || templateKey === 'distance-between-cities') {
+      templateData = distanceTemplateData(templateData);
+      executorPrompt = buildDistancePrompt(templateData.from_location, templateData.to_location, templateData.distance_threshold_km, templateData.distance_comparator);
+    }
+    return {
+      id: String(base.id || resolved.id || ('chain_item_' + (index + 1))).trim(),
+      name: String(base.name || '').trim(),
+      template_key: templateKey,
+      template_data: templateData,
+      executor_prompt: executorPrompt
+    };
+  }
+  function chainTemplateData(input) {
+    var raw = (input && typeof input === 'object') ? input : {};
+    var operator = String(raw.chain_operator || raw.operator || 'AND').trim().toUpperCase();
+    if (!{ AND: true, OR: true, NOR: true }[operator]) operator = 'AND';
+    var items = (raw.chain_items || raw.items || []).map(normalizeChainItem).filter(function(item){ return item && item.template_key; });
+    return {
+      template_kind: TEMPLATE_CHAIN_KIND,
+      chain_operator: operator,
+      chain_items: items,
+      source_request: String(raw.source_request || '').trim(),
+      refined_request: String(raw.refined_request || '').trim()
+    };
+  }
+  function buildChainExecutorPrompt(chainData) {
+    var normalized = chainTemplateData(chainData);
+    var lines = ['Run the following template chain with operator ' + normalized.chain_operator + ':'];
+    (normalized.chain_items || []).forEach(function(item, index) {
+      lines.push((index + 1) + '. ' + chainItemSummary(item));
+      if (item.executor_prompt) lines.push(item.executor_prompt);
+    });
+    if (normalized.refined_request) {
+      lines.push('');
+      lines.push('Refined request:');
+      lines.push(normalized.refined_request);
+    }
+    return lines.join('\n').trim();
+  }
+  function isDistanceTemplateActive() {
+    return templateEl.value === 'distance-between-cities' || ((state.templateData || {}).template_kind === DISTANCE_TEMPLATE_KIND);
+  }
+  function isChainTemplateActive() {
+    return templateEl.value === TEMPLATE_CHAIN_KEY || ((state.templateData || {}).template_kind === TEMPLATE_CHAIN_KIND);
+  }
   function isWeatherTemplateActive() {
     return templateEl.value === 'weather-dublin' || ((state.templateData || {}).template_kind === 'weather-threshold');
   }
   function refreshTemplateParamVisibility() {
-    if (templateParamsSectionEl) templateParamsSectionEl.hidden = !isWeatherTemplateActive();
+    var weatherActive = isWeatherTemplateActive();
+    var distanceActive = isDistanceTemplateActive();
+    var chainActive = isChainTemplateActive();
+    if (templateParamsSectionEl) templateParamsSectionEl.hidden = !(weatherActive || distanceActive || chainActive);
+    if (weatherParamsEl) weatherParamsEl.hidden = !weatherActive;
+    if (distanceParamsEl) distanceParamsEl.hidden = !distanceActive;
+    if (chainParamsEl) chainParamsEl.hidden = false;
+    if (templateParamsNoteEl) {
+      if (chainActive) {
+        templateParamsNoteEl.textContent = 'Combo / multiple templates keep their chained items as structured Tasked data. The operator and each item stay aligned with Alerts, Pipeline, Completed, and Live Docs.';
+      } else if (distanceActive) {
+        templateParamsNoteEl.textContent = 'Distance template parameters are editable here. Changing the towns, distance rule, or km threshold rebuilds the runnable prompt and step config for this Tasked row.';
+      } else if (weatherActive) {
+        templateParamsNoteEl.textContent = 'Weather template parameters are editable here. Changing the town or temperature threshold rebuilds the runnable prompt and step config for this Tasked row.';
+      } else {
+        templateParamsNoteEl.textContent = 'Template parameters are editable here. Structured values are kept in sync with the runnable Tasked row so the prompt, workflow steps, Alerts, Pipeline, Completed, and Live Docs all reflect the same task definition.';
+      }
+    }
   }
   function maybeAutoRenameWeatherTask(nextLocation) {
     var current = String(fields.name.value || '').trim();
@@ -773,6 +1033,24 @@ Alert config example:
       chatSteps[0].config = Object.assign({}, chatSteps[0].config || {}, { prompt: fields.executor.value });
     }
     if (options.rename !== false) maybeAutoRenameWeatherTask(nextData.weather_location);
+    refreshTemplateParamVisibility();
+  }
+  function syncDistanceTemplateFields() {
+    if (!isDistanceTemplateActive()) {
+      refreshTemplateParamVisibility();
+      return;
+    }
+    var nextData = distanceTemplateData(state.templateData || {});
+    state.templateData = nextData;
+    if (fields.distanceFromLocation) fields.distanceFromLocation.value = nextData.from_location;
+    if (fields.distanceToLocation) fields.distanceToLocation.value = nextData.to_location;
+    if (fields.distanceThreshold) fields.distanceThreshold.value = numberLabel(nextData.distance_threshold_km, DISTANCE_DEFAULT_THRESHOLD);
+    if (fields.distanceComparator) fields.distanceComparator.value = nextData.distance_comparator;
+    fields.executor.value = buildDistancePrompt(nextData.from_location, nextData.to_location, nextData.distance_threshold_km, nextData.distance_comparator);
+    var chatSteps = state.steps.filter(function(step) { return (step.kind || '') === 'chat'; });
+    if (chatSteps.length === 1) {
+      chatSteps[0].config = Object.assign({}, chatSteps[0].config || {}, { prompt: fields.executor.value });
+    }
     refreshTemplateParamVisibility();
   }
   function agentLabel(agentId) {
@@ -912,6 +1190,10 @@ Alert config example:
     renderWorkflowDiagram();
   }
   function buildDefaultStepsForMode(mode) {
+    if (isChainTemplateActive()) {
+      buildDefaultStepsForChain();
+      return;
+    }
     var taskId = currentTaskId();
     var steps = [];
     if (fields.scheduleKind.value !== 'manual') steps.push({ id: taskId + '_trigger', name: 'Trigger', kind: 'trigger', config: defaultStepConfig('trigger', 0), on_success_step_id: '', on_failure_step_id: '', active: true });
@@ -927,6 +1209,214 @@ Alert config example:
     state.steps = steps;
     renderStepCards();
     renderWorkflowDiagram();
+  }
+  function buildDefaultStepsForChain() {
+    var taskId = currentTaskId();
+    var chainData = chainTemplateData(state.templateData || {});
+    var items = chainData.chain_items || [];
+    var steps = [];
+    if (fields.scheduleKind.value !== 'manual') {
+      steps.push({ id: taskId + '_trigger', name: 'Trigger', kind: 'trigger', config: defaultStepConfig('trigger', 0), on_success_step_id: '', on_failure_step_id: '', active: true });
+    }
+    var executeStepIds = [];
+    items.forEach(function(item, idx) {
+      var tplMode = templateModeForKey(item.template_key);
+      var kind = tplMode === 'sandbox' ? 'sandbox' : (tplMode === 'agent' || tplMode === 'multi-agent' || tplMode === 'multi-agento' ? tplMode : 'chat');
+      var stepId = taskId + '_chain_' + (idx + 1);
+      var config = kind === 'sandbox'
+        ? {
+            executor_target: 'c12b',
+            workspace_dir: '/workspace',
+            command: item.executor_prompt || '',
+            validation_command: '',
+            test_command: ''
+          }
+        : {
+            prompt: item.executor_prompt || '',
+            agent_id: 'c6-kilocode'
+          };
+      steps.push({
+        id: stepId,
+        name: chainItemSummary(item),
+        kind: kind,
+        config: config,
+        on_success_step_id: '',
+        on_failure_step_id: '',
+        active: true
+      });
+      executeStepIds.push(stepId);
+    });
+    if (executeStepIds.length > 1) {
+      steps.push({
+        id: taskId + '_condition',
+        name: 'Combine template results',
+        kind: 'condition',
+        config: {
+          operator: chainData.chain_operator || 'AND',
+          rules: executeStepIds.map(function(stepId) {
+            return { source: stepId, field: 'parsed.triggered', comparator: 'eq', value: true };
+          })
+        },
+        on_success_step_id: '',
+        on_failure_step_id: '',
+        active: true
+      });
+    }
+    steps.push({
+      id: taskId + '_alert',
+      name: 'Create alert',
+      kind: 'alert',
+      config: defaultStepConfig('alert', steps.length),
+      on_success_step_id: '',
+      on_failure_step_id: '',
+      active: true
+    });
+    steps.push({
+      id: taskId + '_complete',
+      name: 'Complete',
+      kind: 'complete',
+      config: defaultStepConfig('complete', steps.length),
+      on_success_step_id: '',
+      on_failure_step_id: '',
+      active: true
+    });
+    state.steps = steps;
+    renderStepCards();
+    renderWorkflowDiagram();
+  }
+  function renderChainItems() {
+    if (!chainItemsEl) return;
+    var chainData = chainTemplateData(state.templateData || {});
+    state.templateData = chainData;
+    if (!chainData.chain_items.length) {
+      chainItemsEl.innerHTML = '<div class="tasked-chain-empty">No template items yet. Add a template item to build a combo / multiple-template task.</div>';
+      return;
+    }
+    chainItemsEl.innerHTML = chainData.chain_items.map(function(item, index) {
+      var key = item.template_key || '';
+      var data = item.template_data || {};
+      var tplSelect = '<select data-chain-field="template_key" data-chain-index="' + index + '">' +
+        (TEMPLATES || []).map(function(tpl) {
+          return '<option value="' + esc(tpl.key) + '"' + (tpl.key === key ? ' selected' : '') + '>' + esc(tpl.name) + '</option>';
+        }).join('') +
+      '</select>';
+      var promptField = '<label>Executor prompt<textarea data-chain-field="executor_prompt" data-chain-index="' + index + '">' + esc(item.executor_prompt || '') + '</textarea></label>';
+      var nameField = '<label>Label<input data-chain-field="name" data-chain-index="' + index + '" value="' + esc(item.name || '') + '" placeholder="Optional item label"></label>';
+      var templateSpecific = '';
+      if ((data.template_kind || '') === WEATHER_TEMPLATE_KIND || key === 'weather-dublin') {
+        templateSpecific = '<div class="tasked-kv-grid">' +
+          '<label>Weather town / city<input data-chain-field="weather_location" data-chain-index="' + index + '" value="' + esc(data.weather_location || WEATHER_DEFAULT_LOCATION) + '"></label>' +
+          '<label>Trigger above temperature (°C)<input data-chain-field="temperature_threshold_c" data-chain-index="' + index + '" type="number" step="0.1" value="' + esc(numberLabel(data.temperature_threshold_c, WEATHER_DEFAULT_THRESHOLD)) + '"></label>' +
+        '</div>';
+      } else if ((data.template_kind || '') === DISTANCE_TEMPLATE_KIND || key === 'distance-between-cities') {
+        templateSpecific = '<div class="tasked-kv-grid">' +
+          '<label>From town / city<input data-chain-field="from_location" data-chain-index="' + index + '" value="' + esc(data.from_location || DISTANCE_DEFAULT_FROM) + '"></label>' +
+          '<label>To town / city<input data-chain-field="to_location" data-chain-index="' + index + '" value="' + esc(data.to_location || DISTANCE_DEFAULT_TO) + '"></label>' +
+          '<label>Distance rule<select data-chain-field="distance_comparator" data-chain-index="' + index + '">' +
+            ['lt','lte','gt','gte'].map(function(value) {
+              return '<option value="' + value + '"' + (distanceComparator(data.distance_comparator) === value ? ' selected' : '') + '>' + esc(distanceComparatorLabel(value)) + '</option>';
+            }).join('') +
+          '</select></label>' +
+          '<label>Distance threshold (km)<input data-chain-field="distance_threshold_km" data-chain-index="' + index + '" type="number" step="0.1" value="' + esc(numberLabel(data.distance_threshold_km, DISTANCE_DEFAULT_THRESHOLD)) + '"></label>' +
+        '</div>';
+      }
+      return '<div class="tasked-chain-item">' +
+        '<div class="tasked-chain-item-head">' +
+          '<div class="tasked-chain-item-title"><strong>' + esc(chainItemSummary(item)) + '</strong><span>' + esc(templateLabelForKey(key)) + '</span></div>' +
+          '<div class="tasked-chain-actions"><button class="tasked-btn secondary" type="button" data-chain-action="remove" data-chain-index="' + index + '">Remove</button></div>' +
+        '</div>' +
+        '<div class="tasked-kv-grid">' +
+          '<label>Template item' + tplSelect + '</label>' +
+          nameField +
+        '</div>' +
+        templateSpecific +
+        promptField +
+      '</div>';
+    }).join('');
+    chainItemsEl.querySelectorAll('[data-chain-field]').forEach(function(el) {
+      el.addEventListener('input', updateChainField);
+      el.addEventListener('change', updateChainField);
+    });
+    chainItemsEl.querySelectorAll('[data-chain-action]').forEach(function(btn) {
+      btn.addEventListener('click', handleChainAction);
+    });
+  }
+  function syncChainTemplateFields(options) {
+    options = options || {};
+    if (!isChainTemplateActive()) {
+      refreshTemplateParamVisibility();
+      return;
+    }
+    var nextData = chainTemplateData(state.templateData || {});
+    state.templateData = nextData;
+    if (fields.chainOperator) fields.chainOperator.value = nextData.chain_operator;
+    if (fields.chainSourceRequest) fields.chainSourceRequest.value = nextData.source_request || '';
+    if (fields.chainRefinedRequest) fields.chainRefinedRequest.value = nextData.refined_request || '';
+    fields.executor.value = buildChainExecutorPrompt(nextData);
+    renderChainItems();
+    if (options.rebuildSteps !== false) buildDefaultStepsForChain();
+    refreshTemplateParamVisibility();
+  }
+  function ensureChainTemplateSelected(seedFromCurrent) {
+    var priorTemplateKey = templateEl.value || '';
+    var nextData = chainTemplateData(state.templateData || {});
+    if (!nextData.chain_items.length && seedFromCurrent && priorTemplateKey && priorTemplateKey !== TEMPLATE_CHAIN_KEY) {
+      var seedItem = defaultChainItem(priorTemplateKey);
+      if (seedItem) nextData.chain_items = [seedItem];
+    }
+    if (!nextData.chain_items.length) {
+      var fallbackItem = defaultChainItem('weather-dublin') || defaultChainItem('distance-between-cities');
+      if (fallbackItem) nextData.chain_items = [fallbackItem];
+    }
+    templateEl.value = TEMPLATE_CHAIN_KEY;
+    state.templateData = nextData;
+    if (!fields.name.value.trim()) fields.name.value = 'Combo task';
+    syncChainTemplateFields();
+    markDirty();
+  }
+  function updateChainField(e) {
+    var index = parseInt(e.target.dataset.chainIndex || '-1', 10);
+    if (index < 0) return;
+    var chainData = chainTemplateData(state.templateData || {});
+    var item = chainData.chain_items[index];
+    if (!item) return;
+    var field = e.target.dataset.chainField;
+    if (field === 'template_key') {
+      var replacement = defaultChainItem(e.target.value);
+      if (replacement) chainData.chain_items[index] = replacement;
+    } else if (field === 'name') {
+      item.name = e.target.value;
+    } else if (field === 'executor_prompt') {
+      item.executor_prompt = e.target.value;
+    } else if (field === 'weather_location') {
+      item.template_data = weatherTemplateData(Object.assign({}, item.template_data || {}, { weather_location: e.target.value }));
+      item.executor_prompt = buildWeatherPrompt(item.template_data.weather_location, item.template_data.temperature_threshold_c);
+    } else if (field === 'temperature_threshold_c') {
+      item.template_data = weatherTemplateData(Object.assign({}, item.template_data || {}, { temperature_threshold_c: e.target.value }));
+      item.executor_prompt = buildWeatherPrompt(item.template_data.weather_location, item.template_data.temperature_threshold_c);
+    } else if (field === 'from_location' || field === 'to_location' || field === 'distance_threshold_km' || field === 'distance_comparator') {
+      item.template_data = distanceTemplateData(Object.assign({}, item.template_data || {}, {
+        from_location: field === 'from_location' ? e.target.value : (item.template_data || {}).from_location,
+        to_location: field === 'to_location' ? e.target.value : (item.template_data || {}).to_location,
+        distance_threshold_km: field === 'distance_threshold_km' ? e.target.value : (item.template_data || {}).distance_threshold_km,
+        distance_comparator: field === 'distance_comparator' ? e.target.value : (item.template_data || {}).distance_comparator
+      }));
+      item.executor_prompt = buildDistancePrompt(item.template_data.from_location, item.template_data.to_location, item.template_data.distance_threshold_km, item.template_data.distance_comparator);
+    }
+    state.templateData = chainData;
+    syncChainTemplateFields();
+    markDirty();
+  }
+  function handleChainAction(e) {
+    var index = parseInt(e.target.dataset.chainIndex || '-1', 10);
+    if (index < 0) return;
+    var chainData = chainTemplateData(state.templateData || {});
+    if (e.target.dataset.chainAction === 'remove') {
+      chainData.chain_items.splice(index, 1);
+      state.templateData = chainData;
+      syncChainTemplateFields();
+      markDirty();
+    }
   }
 
   function renderWorkflowDiagram() {
@@ -993,10 +1483,13 @@ Alert config example:
     var draft = payload.draft || {};
     var matched = payload.matched_template || null;
     var steps = draft.steps || [];
+    var templateSummary = templateSummaryForData(draft.template_key || '', draft.template_data || {});
     authorResultEl.innerHTML =
       '<div><strong>Draft strategy:</strong> ' + esc(payload.strategy_used || draft.strategy || 'freehand') + '</div>' +
+      '<div><strong>Authoring engine:</strong> ' + esc(payload.authoring_engine || 'local') + '</div>' +
       '<div class="tasked-draft-kv"><strong>Explanation:</strong> ' + esc(payload.explanation || 'Draft ready.') + '</div>' +
-      '<div class="tasked-draft-kv"><strong>Template:</strong> ' + esc(matched ? matched.name : 'Free-hand custom draft') + '</div>' +
+      '<div class="tasked-draft-kv"><strong>Template:</strong> ' + esc(matched ? matched.name : (draft.template_key === TEMPLATE_CHAIN_KEY ? 'Combo / Multiple Templates' : 'Free-hand custom draft')) + '</div>' +
+      '<div class="tasked-draft-kv"><strong>Template summary:</strong> ' + esc(templateSummary || '—') + '</div>' +
       '<div class="tasked-draft-kv"><strong>Mode:</strong> ' + esc(draft.mode || 'chat') + ' · <strong>Schedule:</strong> ' + esc(draft.schedule_kind || 'manual') + (((draft.interval_minutes || 0) > 0) ? (' / ' + esc(draft.interval_minutes) + 'm') : '') + ' · <strong>Tabs:</strong> ' + esc(draft.tabs_required || 1) + '</div>' +
       '<div class="tasked-draft-kv"><strong>Planner:</strong> ' + esc(draft.planner_prompt || '—') + '</div>' +
       '<div class="tasked-draft-kv"><strong>Executor:</strong> ' + esc((draft.executor_prompt || '').slice(0, 260) || '—') + (((draft.executor_prompt || '').length > 260) ? '…' : '') + '</div>' +
@@ -1072,10 +1565,19 @@ Alert config example:
       renderTrace(task);
     }
     if (isWeatherTemplateActive()) syncWeatherTemplateFields({ rename: false });
+    else if (isDistanceTemplateActive()) syncDistanceTemplateFields();
+    else if (isChainTemplateActive()) syncChainTemplateFields({ rebuildSteps: false });
     else {
       state.templateData = task.template_data || {};
       if (fields.weatherLocation) fields.weatherLocation.value = '';
       if (fields.weatherThreshold) fields.weatherThreshold.value = '';
+      if (fields.distanceFromLocation) fields.distanceFromLocation.value = '';
+      if (fields.distanceToLocation) fields.distanceToLocation.value = '';
+      if (fields.distanceThreshold) fields.distanceThreshold.value = '';
+      if (fields.distanceComparator) fields.distanceComparator.value = DISTANCE_DEFAULT_COMPARATOR;
+      if (fields.chainSourceRequest) fields.chainSourceRequest.value = '';
+      if (fields.chainRefinedRequest) fields.chainRefinedRequest.value = '';
+      if (chainItemsEl) chainItemsEl.innerHTML = '<div class="tasked-chain-empty">No template items yet. Add a template item to build a combo / multiple-template task.</div>';
       refreshTemplateParamVisibility();
     }
     toggleSandboxFields();
@@ -1114,6 +1616,7 @@ Alert config example:
     fields.completionMark.value = 'step-complete';
     fields.completionArchive.checked = false;
     templatePickerEl.value = '';
+    templateEl.value = '';
     state.selectedId = '';
     state.formDirty = false;
     state.templateData = {};
@@ -1123,12 +1626,24 @@ Alert config example:
     state.authorDraft = null;
     if (fields.weatherLocation) fields.weatherLocation.value = '';
     if (fields.weatherThreshold) fields.weatherThreshold.value = '';
+    if (fields.distanceFromLocation) fields.distanceFromLocation.value = '';
+    if (fields.distanceToLocation) fields.distanceToLocation.value = '';
+    if (fields.distanceThreshold) fields.distanceThreshold.value = '';
+    if (fields.distanceComparator) fields.distanceComparator.value = DISTANCE_DEFAULT_COMPARATOR;
+    if (fields.chainOperator) fields.chainOperator.value = 'AND';
+    if (fields.chainSourceRequest) fields.chainSourceRequest.value = '';
+    if (fields.chainRefinedRequest) fields.chainRefinedRequest.value = '';
+    if (chainItemsEl) chainItemsEl.innerHTML = '<div class="tasked-chain-empty">No template items yet. Add a template item to build a combo / multiple-template task.</div>';
     refreshTemplateParamVisibility();
     toggleSandboxFields();
     buildDefaultStepsForMode('chat');
   }
 
   function applyTemplate(key) {
+    if (key === TEMPLATE_CHAIN_KEY) {
+      ensureChainTemplateSelected(true);
+      return;
+    }
     var tpl = TEMPLATES.find(function(t){ return t.key === key; });
     if (!tpl) return;
     templateEl.value = tpl.key;
@@ -1165,9 +1680,14 @@ Alert config example:
     toggleSandboxFields();
     state.steps = (tpl.steps || []).map(function(step){ return { id: step.id || '', name: step.name || '', kind: step.kind || 'chat', config: step.config || {}, on_success_step_id: step.on_success_step_id || '', on_failure_step_id: step.on_failure_step_id || '', active: step.active !== false }; });
     if (isWeatherTemplateActive()) syncWeatherTemplateFields({ rename: true });
+    else if (isDistanceTemplateActive()) syncDistanceTemplateFields();
     else {
       if (fields.weatherLocation) fields.weatherLocation.value = '';
       if (fields.weatherThreshold) fields.weatherThreshold.value = '';
+      if (fields.distanceFromLocation) fields.distanceFromLocation.value = '';
+      if (fields.distanceToLocation) fields.distanceToLocation.value = '';
+      if (fields.distanceThreshold) fields.distanceThreshold.value = '';
+      if (fields.distanceComparator) fields.distanceComparator.value = DISTANCE_DEFAULT_COMPARATOR;
       refreshTemplateParamVisibility();
     }
     if (!state.steps.length) buildDefaultStepsForMode(fields.mode.value);
@@ -1178,13 +1698,13 @@ Alert config example:
     var trace = task.trace || {};
     var latestRun = task.latest_run || {};
     var latestAlert = task.latest_alert || {};
-    var weatherTraceMeta = (task.template_data && task.template_data.template_kind === 'weather-threshold')
-      ? '\nWeather town: ' + (task.template_data.weather_location || '—') + '\nThreshold: above ' + numberLabel(task.template_data.temperature_threshold_c, 10) + '°C'
-      : '';
+    var templateLabel = task.template_label || task.template_key || 'custom';
+    var templateSummary = task.template_summary || templateSummaryForData(task.template_key || '', task.template_data || {});
+    var templateTraceMeta = templateSummary ? '\nTemplate: ' + templateLabel + '\nSummary: ' + templateSummary : ('\nTemplate: ' + templateLabel);
     traceBox.innerHTML =
       '<div><strong>Trace ID:</strong> ' + esc(trace.trace_id || task.id || '—') + ' <span class="tasked-pill" style="margin-left:.4rem;">' + esc(trace.execution_label || latestRun.execution_label || 'Execution pending') + '</span></div>' +
       '<div class="tasked-trace-grid">' +
-        '<div class="tasked-trace-item"><strong>Task orchestration</strong><span>Unique Task ID: ' + esc(trace.task_id || task.id || '—') + '\nMode: ' + esc(task.mode || '—') + '\nState: ' + esc(task.lifecycle_label || task.last_status || '—') + esc(weatherTraceMeta) + '</span></div>' +
+        '<div class="tasked-trace-item"><strong>Task orchestration</strong><span>Unique Task ID: ' + esc(trace.task_id || task.id || '—') + '\nMode: ' + esc(task.mode || '—') + '\nState: ' + esc(task.lifecycle_label || task.last_status || '—') + esc(templateTraceMeta) + '</span></div>' +
         '<div class="tasked-trace-item"><strong>Task planner</strong><span>' + esc((trace.planner || {}).prompt || task.planner_prompt || '—') + '</span></div>' +
         '<div class="tasked-trace-item"><strong>Task timer</strong><span>Schedule: ' + esc((trace.timer || {}).schedule_label || task.schedule_label || '—') + '\nNext run: ' + esc(fmtTs((trace.timer || {}).next_run_at || task.next_run_at)) + '</span></div>' +
         '<div class="tasked-trace-item"><strong>Task executor</strong><span>Run ID: ' + esc((trace.run_id || latestRun.id || '—')) + '\nExecution: ' + esc((trace.execution_label || latestRun.execution_label || 'Execution pending')) + '\nStatus: ' + esc((trace.executor || {}).last_status || latestRun.status || '—') + '\nCurrent step: ' + esc((trace.completion || {}).current_step_id || task.current_step_id || '—') + '\nTarget: ' + esc(executorLabel((trace.executor || {}).target || task.executor_target || '')) + '\nWorkspace: ' + esc((trace.executor || {}).workspace_dir || task.workspace_dir || '—') + '\nValidation: ' + esc((trace.executor || {}).validation_status || latestRun.validation_status || '—') + '\nTest: ' + esc((trace.executor || {}).test_status || latestRun.test_status || '—') + '\nDuration: ' + esc((trace.executor || {}).duration_label || latestRun.duration_label || '—') + '</span></div>' +
@@ -1228,7 +1748,11 @@ Alert config example:
       tabs_required: parseInt(fields.tabs.value || '1', 10) || 1,
       active: fields.active.checked,
       template_key: templateEl.value || '',
-      template_data: isWeatherTemplateActive() ? weatherTemplateData(state.templateData || {}) : (state.templateData || {}),
+      template_data: isChainTemplateActive()
+        ? chainTemplateData(state.templateData || {})
+        : (isDistanceTemplateActive()
+          ? distanceTemplateData(state.templateData || {})
+          : (isWeatherTemplateActive() ? weatherTemplateData(state.templateData || {}) : (state.templateData || {}))),
       planner_prompt: fields.planner.value.trim(),
       executor_prompt: fields.executor.value.trim(),
       executor_target: fields.executorTarget.value,
@@ -1272,9 +1796,16 @@ Alert config example:
 
   function renderTemplates(templates) {
     TEMPLATES = templates || [];
+    var hasComboTemplate = TEMPLATES.some(function(tpl){ return tpl.key === TEMPLATE_CHAIN_KEY; });
     templatePickerEl.innerHTML = '<option value="">Choose a template to load</option>';
-    templateEl.innerHTML = '<option value="">Custom</option>';
-    var cardsHtml = '';
+    templateEl.innerHTML = '<option value="">Custom</option>' + (hasComboTemplate ? '' : ('<option value="' + TEMPLATE_CHAIN_KEY + '">Combo / Multiple Templates</option>'));
+    if (fields.chainAddTemplate) {
+      fields.chainAddTemplate.innerHTML = (TEMPLATES || []).filter(function(tpl) {
+        return tpl.key !== TEMPLATE_CHAIN_KEY;
+      }).map(function(tpl) {
+        return '<option value="' + esc(tpl.key) + '">' + esc(tpl.name) + '</option>';
+      }).join('');
+    }
     TEMPLATES.forEach(function(tpl) {
       var opt = document.createElement('option');
       opt.value = tpl.key;
@@ -1284,18 +1815,15 @@ Alert config example:
       opt2.value = tpl.key;
       opt2.textContent = tpl.name;
       templateEl.appendChild(opt2);
-      
-      cardsHtml += '<div style="background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:12px;display:flex;flex-direction:column;gap:6px;cursor:pointer;transition:all 0.2s;" onmousedown="this.style.borderColor=\'var(--accent)\';" onmouseleave="this.style.borderColor=\'var(--border)\';" onclick="document.getElementById(\'tasked-template-picker\').value=\''+esc(tpl.key)+'\'; document.getElementById(\'tasked-template-picker\').dispatchEvent(new Event(\'change\'));">';
-      cardsHtml += '<h3 style="margin:0;font-size:0.9rem;font-weight:700;">' + esc(tpl.name) + '</h3>';
-      cardsHtml += '<p style="margin:0;font-size:0.75rem;color:var(--muted);">' + esc((tpl.template_data||{}).notes || 'Standard workflow template.') + '</p>';
-      cardsHtml += '</div>';
     });
     if (templateNoteEl) templateNoteEl.textContent = 'Templates are DB-backed. Active templates loaded: ' + TEMPLATES.length + '.';
     templateGrid.innerHTML = (templates || []).map(function(tpl) {
+      var summary = templateSummaryForData(tpl.key || '', tpl.template_data || {});
       return '<article class="tasked-template">' +
         '<h3>' + esc(tpl.name) + '</h3>' +
         '<p>' + esc(tpl.description || '') + '</p>' +
         '<ul>' +
+          '<li>Summary: ' + esc(summary || templateLabelForKey(tpl.key)) + '</li>' +
           '<li>Mode: ' + esc(tpl.mode || 'chat') + '</li>' +
           '<li>Schedule: ' + esc(tpl.schedule_kind || 'manual') + ((tpl.interval_minutes || 0) ? ' / ' + esc(tpl.interval_minutes) + 'm' : '') + '</li>' +
           (tpl.mode === 'sandbox' ? '<li>Executor: ' + esc((EXECUTOR_TARGETS.find(function(item){ return item.id === (tpl.executor_target || "c12b"); }) || {}).label || tpl.executor_target || 'C12b Lean Sandbox') + '</li>' : '') +
@@ -1325,9 +1853,8 @@ Alert config example:
       ? '<span data-live-start="' + esc(latestRun.started_at || latestRun.created_at || '') + '" class="pulse-live">' + esc(latestRun.duration_label || '0s') + '</span>'
       : esc(latestRun.duration_label || '—');
     var typePill = t.tasked_type_label ? '<span class="tasked-pill" title="Output type">' + esc(t.tasked_type_label) + '</span> ' : '';
-    var weatherMeta = (t.template_data && t.template_data.template_kind === 'weather-threshold')
-      ? '<div class="tasked-note">Weather: ' + esc(t.template_data.weather_location || '—') + ' · Threshold > ' + esc(numberLabel(t.template_data.temperature_threshold_c, 10)) + '°C</div>'
-      : '';
+    var templateSummary = t.template_summary || templateSummaryForData(t.template_key || '', t.template_data || {});
+    var templateMeta = templateSummary ? '<div class="tasked-note">' + esc(templateSummary) + '</div>' : '';
     var previewUrl = t.preview_url || ('/tasked-preview?task_id=' + esc(t.id || ''));
     var statusBadge = '<span class="status-badge ' + esc(status) + '">' + esc(t.lifecycle_label || t.last_status || 'idle') + '</span>';
     var rerunLabel = hasRun ? 'Run Again' : 'Run';
@@ -1347,7 +1874,7 @@ Alert config example:
       ? '<div class="tasked-progress-wrap"><div class="tasked-progress-bar" style="width:' + pct + '%"></div></div><span class="tasked-progress-lbl">' + pct + '%</span>'
       : (pct === 100 ? '<span class="tasked-progress-lbl">100%</span>' : (pct > 0 ? '<span class="tasked-progress-lbl">' + pct + '%</span>' : '—'));
     return '<tr data-id="' + esc(t.id) + '">' +
-      '<td><strong>' + esc(t.name) + '</strong>' + (sys ? '<span class="tasked-sys-badge" title="Created from a built-in template">sys</span>' : '') + '<div class="tasked-note">' + typePill + esc((t.template_label || t.template_key || 'custom')) + ' · ' + esc(t.id || '') + '</div>' + weatherMeta + '<div class="tasked-note">' + (t.sandbox_assist ? ('AIO assist: ' + esc(executorLabel(t.sandbox_assist_target || '')) + ' · ' + esc(t.sandbox_assist_workspace_dir || '—')) : 'AIO assist disabled') + '</div><div class="tasked-note">Recovery: ' + esc(((t.latest_recovery_session || {}).status) || 'steady') + (((t.latest_recovery_session || {}).retry_count || 0) ? (' · retries ' + esc((t.latest_recovery_session || {}).retry_count)) : '') + '</div></td>' +
+      '<td><strong>' + esc(t.name) + '</strong>' + (sys ? '<span class="tasked-sys-badge" title="Created from a built-in template">sys</span>' : '') + '<div class="tasked-note">' + typePill + esc((t.template_label || t.template_key || 'custom')) + ' · ' + esc(t.id || '') + '</div>' + templateMeta + '<div class="tasked-note">' + (t.sandbox_assist ? ('AIO assist: ' + esc(executorLabel(t.sandbox_assist_target || '')) + ' · ' + esc(t.sandbox_assist_workspace_dir || '—')) : 'AIO assist disabled') + '</div><div class="tasked-note">Recovery: ' + esc(((t.latest_recovery_session || {}).status) || 'steady') + (((t.latest_recovery_session || {}).retry_count || 0) ? (' · retries ' + esc((t.latest_recovery_session || {}).retry_count)) : '') + '</div></td>' +
       '<td>' + esc(t.mode_label || t.mode) + '</td>' +
       '<td>' + esc(t.schedule_label || t.schedule_kind || '—') + '</td>' +
       '<td>' + statusBadge + '</td>' +
@@ -1684,7 +2211,8 @@ Alert config example:
       body: JSON.stringify({
         prompt: prompt,
         strategy: authorStrategyEl.value || 'auto',
-        mode_hint: fields.mode.value || 'chat'
+        mode_hint: fields.mode.value || 'chat',
+        refine_with_agent: !!(authorRefineAgentEl && authorRefineAgentEl.checked)
       })
     });
     var data = await res.json();
@@ -1729,7 +2257,7 @@ Alert config example:
 
   document.getElementById('tasked-template-save-btn').addEventListener('click', async function() {
     var payload = collectPayload();
-    payload.key = templatePickerEl.value || templateEl.value || '';
+    payload.key = templatePickerEl.value || ((templateEl.value && templateEl.value !== TEMPLATE_CHAIN_KEY) ? templateEl.value : '');
     payload.description = (fields.notes.value || payload.name || '').trim();
     payload.source = 'user';
     var res = await fetch('/api/task-templates', {
@@ -1842,12 +2370,23 @@ Alert config example:
   document.getElementById('task-reset-btn').addEventListener('click', resetForm);
   templateEl.addEventListener('change', function() {
     if (templateEl.value) {
+      if (templateEl.value === TEMPLATE_CHAIN_KEY) {
+        ensureChainTemplateSelected(true);
+        return;
+      }
       applyTemplate(templateEl.value);
       return;
     }
     state.templateData = {};
     if (fields.weatherLocation) fields.weatherLocation.value = '';
     if (fields.weatherThreshold) fields.weatherThreshold.value = '';
+    if (fields.distanceFromLocation) fields.distanceFromLocation.value = '';
+    if (fields.distanceToLocation) fields.distanceToLocation.value = '';
+    if (fields.distanceThreshold) fields.distanceThreshold.value = '';
+    if (fields.distanceComparator) fields.distanceComparator.value = DISTANCE_DEFAULT_COMPARATOR;
+    if (fields.chainSourceRequest) fields.chainSourceRequest.value = '';
+    if (fields.chainRefinedRequest) fields.chainRefinedRequest.value = '';
+    if (chainItemsEl) chainItemsEl.innerHTML = '<div class="tasked-chain-empty">No template items yet. Add a template item to build a combo / multiple-template task.</div>';
     refreshTemplateParamVisibility();
   });
   fields.mode.addEventListener('change', function() {
@@ -1878,6 +2417,82 @@ Alert config example:
     el.addEventListener('input', handler);
     el.addEventListener('change', handler);
   });
+  [fields.distanceFromLocation, fields.distanceToLocation, fields.distanceThreshold, fields.distanceComparator].forEach(function(el) {
+    if (!el) return;
+    var handler = function() {
+      state.templateData = distanceTemplateData({
+        from_location: fields.distanceFromLocation ? fields.distanceFromLocation.value : '',
+        to_location: fields.distanceToLocation ? fields.distanceToLocation.value : '',
+        distance_threshold_km: fields.distanceThreshold ? fields.distanceThreshold.value : '',
+        distance_comparator: fields.distanceComparator ? fields.distanceComparator.value : DISTANCE_DEFAULT_COMPARATOR
+      });
+      syncDistanceTemplateFields();
+      renderStepCards();
+      markDirty();
+    };
+    el.addEventListener('input', handler);
+    el.addEventListener('change', handler);
+  });
+  if (fields.chainOperator) {
+    fields.chainOperator.addEventListener('change', function() {
+      state.templateData = chainTemplateData(Object.assign({}, state.templateData || {}, {
+        chain_operator: fields.chainOperator.value
+      }));
+      syncChainTemplateFields();
+      markDirty();
+    });
+  }
+  if (fields.chainSourceRequest) {
+    fields.chainSourceRequest.addEventListener('input', function() {
+      state.templateData = chainTemplateData(Object.assign({}, state.templateData || {}, {
+        source_request: fields.chainSourceRequest.value
+      }));
+      syncChainTemplateFields();
+      markDirty();
+    });
+  }
+  if (fields.chainRefinedRequest) {
+    fields.chainRefinedRequest.addEventListener('input', function() {
+      state.templateData = chainTemplateData(Object.assign({}, state.templateData || {}, {
+        refined_request: fields.chainRefinedRequest.value
+      }));
+      syncChainTemplateFields();
+      markDirty();
+    });
+  }
+  var chainEnableBtn = document.getElementById('task-chain-enable-btn');
+  var chainClearBtn = document.getElementById('task-chain-clear-btn');
+  var chainAddBtn = document.getElementById('task-chain-add-btn');
+  if (chainEnableBtn) {
+    chainEnableBtn.addEventListener('click', function() {
+      ensureChainTemplateSelected(true);
+    });
+  }
+  if (chainClearBtn) {
+    chainClearBtn.addEventListener('click', function() {
+      if (templateEl.value === TEMPLATE_CHAIN_KEY) templateEl.value = '';
+      state.templateData = {};
+      if (fields.chainSourceRequest) fields.chainSourceRequest.value = '';
+      if (fields.chainRefinedRequest) fields.chainRefinedRequest.value = '';
+      if (chainItemsEl) chainItemsEl.innerHTML = '<div class="tasked-chain-empty">No template items yet. Add a template item to build a combo / multiple-template task.</div>';
+      buildDefaultStepsForMode(fields.mode.value);
+      refreshTemplateParamVisibility();
+      markDirty();
+    });
+  }
+  if (chainAddBtn) {
+    chainAddBtn.addEventListener('click', function() {
+      var item = defaultChainItem(fields.chainAddTemplate ? fields.chainAddTemplate.value : '');
+      if (!item) {
+        resultEl.textContent = 'Choose a template item to add.';
+        return;
+      }
+      var chainData = chainTemplateData(state.templateData || {});
+      chainData.chain_items.push(item);
+      state.templateData = chainData;
+      ensureChainTemplateSelected(false);
+    });
+  }
   form.querySelectorAll('input,select,textarea').forEach(function(el) {
     el.addEventListener('input', markDirty);
     el.addEventListener('change', markDirty);

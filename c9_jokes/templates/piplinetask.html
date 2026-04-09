@@ -294,6 +294,8 @@
     var trace = item.trace || {};
     var summary = item.summary || {};
     var latestAlert = (item.alerts || [])[0] || null;
+    var templateLabel = task.template_label || task.template_key || 'custom';
+    var templateSummary = task.template_summary || templateLabel;
     var runStatus = run.status || summary.last_status || 'idle';
     var statusCls = runStatus.toLowerCase().replace(/[^a-z-]/g, '');
     var isRunning = runStatus === 'running';
@@ -321,8 +323,10 @@
         '<div class="pipeline-item-title">' +
           '<strong>' + esc(task.name || task.id || 'Tasked') + '</strong>' +
           '<div class="pipeline-item-meta">Run ID: ' + esc(run.id || '—') + ' · Trace ID: ' + esc(summary.trace_id || task.id || '—') + ' · Source: ' + esc(run.source || '—') + '</div>' +
+          '<div class="pipeline-item-meta">Template: ' + esc(templateLabel) + ' · ' + esc(templateSummary) + '</div>' +
           '<div class="pipeline-pills">' +
             '<span class="pipeline-pill">' + esc(task.mode_label || task.mode || 'Unknown') + '</span>' +
+            '<span class="pipeline-pill">' + esc(templateLabel) + '</span>' +
             (task.tasked_type_label ? '<span class="pipeline-pill">' + esc(task.tasked_type_label) + '</span>' : '') +
             '<span class="status-badge ' + esc(statusCls) + (isRunning ? ' pulse-live' : '') + '">' + esc(runStatus) + '</span>' +
             '<span class="pipeline-pill">Current step: ' + esc(summary.current_step_id || run.current_step_id || '—') + '</span>' +
@@ -348,7 +352,7 @@
       (stepFlowHtml ? '<div class="pipeline-step-flow">' + stepFlowHtml + '</div>' : '') +
       '<div class="pipeline-sections">' +
         '<section class="pipeline-section"><h3>Trace</h3><div class="pipeline-trace">' +
-          '<div class="pipeline-trace-item"><strong>Task orchestration</strong><span>Task ID: ' + esc(trace.task_id || task.id || '—') + '\nRun ID: ' + esc(trace.run_id || run.id || '—') + '\nMode: ' + esc((trace.orchestration || {}).mode || task.mode || '—') + '\nState: ' + esc(task.lifecycle_label || task.last_status || '—') + '</span></div>' +
+          '<div class="pipeline-trace-item"><strong>Task orchestration</strong><span>Task ID: ' + esc(trace.task_id || task.id || '—') + '\nRun ID: ' + esc(trace.run_id || run.id || '—') + '\nMode: ' + esc((trace.orchestration || {}).mode || task.mode || '—') + '\nTemplate: ' + esc(templateLabel) + '\nSummary: ' + esc(templateSummary) + '\nState: ' + esc(task.lifecycle_label || task.last_status || '—') + '</span></div>' +
           '<div class="pipeline-trace-item"><strong>Task planner</strong><span>' + esc((trace.planner || {}).prompt || task.planner_prompt || '—') + '\n\nContext handoff:\n' + esc((trace.planner || {}).context_handoff || task.context_handoff || '—') + '</span></div>' +
           '<div class="pipeline-trace-item"><strong>Task timer</strong><span>' + esc((trace.timer || {}).schedule_label || task.schedule_label || '—') + '\nNext run: ' + esc(fmtTs((trace.timer || {}).next_run_at || task.next_run_at)) + '</span></div>' +
           '<div class="pipeline-trace-item"><strong>Task executor</strong><span>Target: ' + esc(targetLabel((trace.executor || {}).target || task.executor_target || '')) + '\nWorkspace: ' + esc((trace.executor || {}).workspace_dir || task.workspace_dir || '—') + '\nValidation: ' + esc((trace.executor || {}).validation_status || run.validation_status || '—') + '\nTest: ' + esc((trace.executor || {}).test_status || run.test_status || '—') + '</span></div>' +

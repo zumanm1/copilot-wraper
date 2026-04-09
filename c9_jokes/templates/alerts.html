@@ -566,6 +566,8 @@
 
   function openDetail(a) {
     var sevCls = (a.severity || 'info').toLowerCase();
+    var templateLabel = a.template_label || TEMPLATE_LABELS[a.template_key] || a.template_key || 'custom';
+    var templateSummary = a.template_summary || templateLabel;
     var html = '';
     html += '<div class="alerts-detail-section"><div class="alerts-detail-section-title">Title</div><div class="alerts-detail-value">' + esc(a.title || a.task_name || 'Alert') + '</div></div>';
     html += '<div class="alerts-detail-section"><div class="alerts-detail-section-title">Badges</div><div><span class="severity-pill ' + esc(sevCls) + '">' + esc(a.severity || 'info') + '</span> <span class="alerts-badge ' + esc((a.status||'open').toLowerCase()) + '">' + esc(a.status || 'open') + '</span></div></div>';
@@ -575,7 +577,8 @@
     html += '<div>Created: ' + esc(fmtTs(a.created_at)) + '</div>';
     html += '<div>Task: ' + esc(a.task_name || a.task_id || '—') + '</div>';
     html += '<div>Mode: ' + esc(MODE_LABELS[a.task_mode] || a.task_mode || '—') + '</div>';
-    html += '<div>Template: ' + esc(TEMPLATE_LABELS[a.template_key] || a.template_key || 'custom') + '</div>';
+    html += '<div>Template: ' + esc(templateLabel) + '</div>';
+    html += '<div>Template summary: ' + esc(templateSummary) + '</div>';
     html += '<div>Run: ' + esc(a.run_id || '—') + '</div>';
     html += '<div>Run Status: ' + esc(a.run_status || '—') + '</div>';
     html += '<div>Current Step: ' + esc(a.current_step_id || '—') + '</div>';
@@ -618,7 +621,8 @@
 
   function renderAlertCard(a) {
     var modeLabel = MODE_LABELS[a.task_mode] || a.task_mode || '—';
-    var templateLabel = TEMPLATE_LABELS[a.template_key] || a.template_key || 'custom';
+    var templateLabel = a.template_label || TEMPLATE_LABELS[a.template_key] || a.template_key || 'custom';
+    var templateSummary = a.template_summary || templateLabel;
     var sevCls = (a.severity || 'info').toLowerCase();
     var statusCls = (a.status || 'open').toLowerCase();
     var isSelected = !!selectedIds[a.id];
@@ -628,6 +632,7 @@
         '<div class="alert-card-title-area">' +
           '<div class="alert-card-title">' + esc(a.title || a.task_name || 'Alert') + '</div>' +
           '<div class="alert-card-meta">' + esc(fmtTs(a.created_at)) + ' · ' + esc(modeLabel) + ' · ' + esc(templateLabel) + '</div>' +
+          '<div class="alert-card-meta">' + esc(templateSummary) + '</div>' +
         '</div>' +
         '<div class="alert-card-badges">' +
           '<span class="severity-pill ' + esc(sevCls) + '">' + esc(a.severity || 'info') + '</span>' +
@@ -658,14 +663,15 @@
 
   function renderAlertRow(a) {
     var modeLabel = MODE_LABELS[a.task_mode] || a.task_mode || '—';
-    var templateLabel = TEMPLATE_LABELS[a.template_key] || a.template_key || 'custom';
+    var templateLabel = a.template_label || TEMPLATE_LABELS[a.template_key] || a.template_key || 'custom';
+    var templateSummary = a.template_summary || templateLabel;
     var sevCls = (a.severity || 'info').toLowerCase();
     var runStatusCls = (a.run_status || '').toLowerCase().replace(/[^a-z-]/g, '');
     var isSelected = !!selectedIds[a.id];
     return '<tr data-id="' + esc(a.id) + '" class="' + (isSelected ? 'is-selected' : '') + '">' +
       '<td><input type="checkbox" class="alert-select-cb" data-id="' + esc(a.id) + '" ' + (isSelected ? 'checked' : '') + '></td>' +
       '<td>' + esc(fmtTs(a.created_at)) + '</td>' +
-      '<td><strong>' + esc(a.task_name || a.task_id || 'Tasked') + '</strong><div class="alerts-meta">' + esc(modeLabel) + ' · ' + esc(templateLabel) + '</div></td>' +
+      '<td><strong>' + esc(a.task_name || a.task_id || 'Tasked') + '</strong><div class="alerts-meta">' + esc(modeLabel) + ' · ' + esc(templateLabel) + '</div><div class="alerts-meta">' + esc(templateSummary) + '</div></td>' +
       '<td><span class="status-badge ' + esc(runStatusCls) + '">' + esc(a.run_status || '—') + '</span><div class="alerts-meta">Step: ' + esc(a.current_step_id || '—') + '</div></td>' +
       '<td><span class="severity-pill ' + esc(sevCls) + '">' + esc(a.severity || 'info') + '</span></td>' +
       '<td>' + esc(a.trigger_text || '—') + '</td>' +

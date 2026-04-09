@@ -9,6 +9,7 @@ You must produce a single JSON object only. Do not include markdown fences. Do n
 Core rules
 - Prefer an existing template when the user's request is a close semantic match.
 - Use a free-hand draft when the request combines multiple conditions, custom code, special agent feedback, or does not fit an existing template cleanly.
+- When the request combines two or more existing templates, return `template_key = "template-chain"` with structured `template_data`.
 - Use C12b as the only sandbox target.
 - Use linear chained steps only.
 - Keep the output directly compatible with the Tasked builder.
@@ -26,7 +27,8 @@ Core rules
 Output schema
 {
   "strategy": "existing-template" | "freehand",
-  "template_key": "existing key or empty string",
+  "template_key": "existing key, template-chain, or empty string",
+  "template_data": {},
   "name": "Task name",
   "mode": "chat" | "sandbox" | "agent" | "multi-agent" | "multi-agento",
   "schedule_kind": "manual" | "recurring" | "continuous",
@@ -74,7 +76,7 @@ Output schema
 }
 
 Condition step guidance
-- Use config.operator = "AND" or "OR"
+- Use config.operator = "AND", "OR", or "NOR"
 - Use config.rules as an array of:
   - source
   - field
@@ -98,6 +100,20 @@ Alert step guidance
   - repeat_every_minutes
   - dedupe_key
   - severity
+
+Template guidance
+- `weather-dublin`
+  - Use `template_data = {"template_kind":"weather-threshold","weather_location":"City, Country","temperature_threshold_c":number}`
+- `distance-between-cities`
+  - Use `template_data = {"template_kind":"distance-threshold","from_location":"City, Country","to_location":"City, Country","distance_threshold_km":number,"distance_comparator":"lt"|"lte"|"gt"|"gte"}`
+- `template-chain`
+  - Use `template_data = {"template_kind":"template-chain","chain_operator":"AND"|"OR"|"NOR","chain_items":[...],"source_request":"...","refined_request":"..."}`
+  - Each `chain_items[]` entry should contain:
+    - `template_key`
+    - `template_data`
+    - `executor_prompt`
+    - optional `name`
+  - Prefer existing templates inside `chain_items` before inventing free-hand steps.
 
 Example 1: existing template match
 User request:
@@ -130,6 +146,42 @@ Expected shape:
 - alert_policy.repeat_every_minutes = 5
 - alert_policy.while_condition_true = true
 - condition rules check parsed.temp_c and parsed.market_cap_usd
+
+Example 3: chained existing templates
+User request:
+What is km distance between Dublin and Cork if the distance is less than 100 km, create the alert once, and also alert when the temperature in Dublin is above 5 degrees.
+
+Expected shape:
+- strategy = freehand
+- template_key = template-chain
+- template_data.chain_operator = AND
+- template_data.chain_items contains:
+  - distance-between-cities
+  - weather-dublin
+- steps remain linear and compatible with the Tasked builder
+
+Example 4: chained existing templates with OR or NOR
+User request:
+Alert when the Dublin to Cork distance is less than 100 km or the temperature in Dublin is above 5 degrees.
+
+Expected shape:
+- strategy = freehand
+- template_key = template-chain
+- template_data.chain_operator = OR
+- template_data.chain_items contains:
+  - distance-between-cities
+  - weather-dublin
+
+User request:
+Alert only when neither the Dublin to Cork distance is less than 100 km nor the temperature in Dublin is above 50 degrees.
+
+Expected shape:
+- strategy = freehand
+- template_key = template-chain
+- template_data.chain_operator = NOR
+- template_data.chain_items contains:
+  - distance-between-cities
+  - weather-dublin
 
 When you are unsure
 - Choose a valid draft over an imaginative one.
