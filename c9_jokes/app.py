@@ -115,6 +115,96 @@ TASK_SANDBOX_DEFAULTS = {
     "c12b": "/workspace",
 }
 
+WEATHER_DUBLIN_LEGACY_PROMPT = (
+    "Check the current weather in Dublin, Ireland. If the temperature is above 10C, return strict JSON only: "
+    "{\"triggered\": true|false, \"trigger\": \"Dublin weather\", \"title\": \"...\", "
+    "\"summary\": \"...\", \"details\": {\"location\": \"Dublin\", \"temperature_c\": number, \"condition\": \"...\"}}. "
+    "If the temperature is not above 10C, still return the same JSON with triggered=false."
+)
+
+WEATHER_DUBLIN_PROMPT = (
+    "Check the current weather in Dublin, Ireland. Return valid JSON only with this schema: "
+    "{\"triggered\": boolean, \"trigger\": \"Dublin weather\", \"title\": string, "
+    "\"summary\": string, \"details\": {\"location\": string, \"temperature_c\": number|null, \"condition\": string}}. "
+    "Do not use markdown fences. Set triggered to true only when temperature_c is a number above 10. "
+    "If temperature_c is unavailable, set it to null and triggered to false."
+)
+
+GMAIL_SENDER_LEGACY_PROMPT = (
+    "Check Gmail or Outlook for a new email from sampelexample@example.com. Return strict JSON only: "
+    "{\"triggered\": true|false, \"trigger\": \"incoming email from sampelexample\", "
+    "\"title\": \"...\", \"summary\": \"...\", \"details\": {\"sender\": \"...\", \"subject\": \"...\", "
+    "\"received_at\": \"...\"}}. If no matching email is found, return triggered=false with a summary."
+)
+
+GMAIL_SENDER_PROMPT = (
+    "In Microsoft 365 Copilot Outlook, check mailbox search results for a new email from sampelexample@example.com. "
+    "Return valid JSON only with this schema: {\"triggered\": boolean, "
+    "\"trigger\": \"incoming email from sampelexample\", \"title\": string, \"summary\": string, "
+    "\"details\": {\"sender\": string, \"subject\": string, \"received_at\": string}}. "
+    "Use only what is visible from mailbox search results and current user permissions. "
+    "Do not infer archived, deleted, or unindexed emails. Do not use markdown fences. "
+    "If no matching email is visible, return triggered=false with the same schema and a short summary."
+)
+
+SHAREPOINT_NEW_FILE_LEGACY_PROMPT = (
+    "Check an M365 SharePoint folder for a newly added file. Return strict JSON only: "
+    "{\"triggered\": true|false, \"trigger\": \"new SharePoint file event\", \"title\": \"...\", "
+    "\"summary\": \"...\", \"details\": {\"file_name\": \"...\", \"folder\": \"...\", \"detected_at\": \"...\"}}. "
+    "If no new file is found, return triggered=false with the same schema."
+)
+
+SHAREPOINT_NEW_FILE_PROMPT = (
+    "In Microsoft 365 Copilot SharePoint, check visible SharePoint search results for a newly added file. "
+    "Return valid JSON only with this schema: {\"triggered\": boolean, "
+    "\"trigger\": \"new SharePoint file event\", \"title\": string, \"summary\": string, "
+    "\"details\": {\"file_name\": string, \"folder\": string, \"detected_at\": string}}. "
+    "Use only what is visible from SharePoint search results and current user permissions. "
+    "Do not infer hidden files, older files that are not visible, or items outside the current results. "
+    "Do not use markdown fences. If no new file is visible, return triggered=false with the same schema."
+)
+
+M365_OUTLOOK_ALERT_LEGACY_PROMPT = (
+    "Check M365 Outlook for a new email from alerts@company.com. Return strict JSON only: "
+    "{\"triggered\": true|false, \"trigger\": \"M365 Outlook email\", \"title\": \"...\", "
+    "\"summary\": \"...\", \"details\": {\"sender\": \"...\", \"subject\": \"...\", \"received_at\": \"...\"}}. "
+    "If no matching email is found, return triggered=false."
+)
+
+M365_OUTLOOK_ALERT_PROMPT = (
+    "In Microsoft 365 Copilot Outlook, check mailbox search results for a new email from alerts@company.com. "
+    "Return valid JSON only with this schema: {\"triggered\": boolean, "
+    "\"trigger\": \"M365 Outlook email\", \"title\": string, \"summary\": string, "
+    "\"details\": {\"sender\": string, \"subject\": string, \"received_at\": string}}. "
+    "Use only what is visible from mailbox search results and current user permissions. "
+    "Do not infer archived, deleted, or unindexed emails. Do not use markdown fences. "
+    "If no matching email is visible, return triggered=false with the same schema."
+)
+
+OUTLOOK_SHAREPOINT_LINKED_LEGACY_PROMPT = (
+    "Check M365 Outlook for an email from sampelexample@example.com. If it contains an attachment name or SharePoint link, "
+    "check SharePoint for the related file. Return strict JSON only: {\"triggered\": true|false, "
+    "\"trigger\": \"email and linked SharePoint document\", \"title\": \"...\", \"summary\": \"...\", "
+    "\"details\": {\"sender\": \"...\", \"subject\": \"...\", \"file_name\": \"...\", \"detected_at\": \"...\"}}. "
+    "If the full match is not found, return triggered=false with the same schema."
+)
+
+OUTLOOK_SHAREPOINT_LINKED_PROMPT = (
+    "In Microsoft 365 Copilot Outlook, check mailbox search results for an email from sampelexample@example.com. "
+    "If it contains an attachment name or SharePoint link, check SharePoint search results for the related file. "
+    "Return valid JSON only with this schema: {\"triggered\": boolean, "
+    "\"trigger\": \"email and linked SharePoint document\", \"title\": string, \"summary\": string, "
+    "\"details\": {\"sender\": string, \"subject\": string, \"file_name\": string, \"detected_at\": string}}. "
+    "Use only what is visible from mailbox and SharePoint search results and current user permissions. "
+    "Do not infer hidden files, archived emails, or older results that are not visible. Do not use markdown fences. "
+    "If the full match is not visible, return triggered=false with the same schema."
+)
+
+SANDBOX_VALIDATE_LEGACY_TRIGGER_MODE = "always"
+SANDBOX_VALIDATE_LEGACY_TRIGGER_TEXT = "sandbox execution"
+SANDBOX_VALIDATE_TRIGGER_MODE = "contains"
+SANDBOX_VALIDATE_TRIGGER_TEXT = ""
+
 TASK_TEMPLATES = [
     {
         "key": "weather-dublin",
@@ -125,12 +215,7 @@ TASK_TEMPLATES = [
         "interval_minutes": 10,
         "tabs_required": 2,
         "planner_prompt": "Planner: weather check, threshold evaluation, alert generation, and context handoff between two tabs.",
-        "executor_prompt": (
-            "Check the current weather in Dublin, Ireland. If the temperature is above 10C, return strict JSON only: "
-            "{\"triggered\": true|false, \"trigger\": \"Dublin weather\", \"title\": \"...\", "
-            "\"summary\": \"...\", \"details\": {\"location\": \"Dublin\", \"temperature_c\": number, \"condition\": \"...\"}}. "
-            "If the temperature is not above 10C, still return the same JSON with triggered=false."
-        ),
+        "executor_prompt": WEATHER_DUBLIN_PROMPT,
         "context_handoff": "Tab 1 checks the weather. Copy the temperature and condition into Tab 2 for alert generation and visibility on the alerts page.",
         "trigger_mode": "json",
         "trigger_text": "",
@@ -144,12 +229,7 @@ TASK_TEMPLATES = [
         "interval_minutes": 10,
         "tabs_required": 2,
         "planner_prompt": "Planner: detect new email, extract sender/subject/time, create visible alert, and share context across two tabs.",
-        "executor_prompt": (
-            "Check Gmail or Outlook for a new email from sampelexample@example.com. Return strict JSON only: "
-            "{\"triggered\": true|false, \"trigger\": \"incoming email from sampelexample\", "
-            "\"title\": \"...\", \"summary\": \"...\", \"details\": {\"sender\": \"...\", \"subject\": \"...\", "
-            "\"received_at\": \"...\"}}. If no matching email is found, return triggered=false with a summary."
-        ),
+        "executor_prompt": GMAIL_SENDER_PROMPT,
         "context_handoff": "Tab 1 detects the email and extracts sender, subject, and time. Tab 2 creates the alert record using the copied email details.",
         "trigger_mode": "json",
         "trigger_text": "",
@@ -163,12 +243,7 @@ TASK_TEMPLATES = [
         "interval_minutes": 10,
         "tabs_required": 2,
         "planner_prompt": "Planner: detect file, extract path/name/time, generate alert, and hand off details between tabs.",
-        "executor_prompt": (
-            "Check an M365 SharePoint folder for a newly added file. Return strict JSON only: "
-            "{\"triggered\": true|false, \"trigger\": \"new SharePoint file event\", \"title\": \"...\", "
-            "\"summary\": \"...\", \"details\": {\"file_name\": \"...\", \"folder\": \"...\", \"detected_at\": \"...\"}}. "
-            "If no new file is found, return triggered=false with the same schema."
-        ),
+        "executor_prompt": SHAREPOINT_NEW_FILE_PROMPT,
         "context_handoff": "Tab 1 gathers file metadata. Tab 2 uses the copied file name and folder path to create the visible alert.",
         "trigger_mode": "json",
         "trigger_text": "",
@@ -182,12 +257,7 @@ TASK_TEMPLATES = [
         "interval_minutes": 10,
         "tabs_required": 2,
         "planner_prompt": "Planner: detect matching Outlook email, extract core details, create alert, and share context between tabs.",
-        "executor_prompt": (
-            "Check M365 Outlook for a new email from alerts@company.com. Return strict JSON only: "
-            "{\"triggered\": true|false, \"trigger\": \"M365 Outlook email\", \"title\": \"...\", "
-            "\"summary\": \"...\", \"details\": {\"sender\": \"...\", \"subject\": \"...\", \"received_at\": \"...\"}}. "
-            "If no matching email is found, return triggered=false."
-        ),
+        "executor_prompt": M365_OUTLOOK_ALERT_PROMPT,
         "context_handoff": "Tab 1 extracts Outlook message details. Tab 2 turns those details into a visible alert and keeps the copied context.",
         "trigger_mode": "json",
         "trigger_text": "",
@@ -201,13 +271,7 @@ TASK_TEMPLATES = [
         "interval_minutes": 10,
         "tabs_required": 2,
         "planner_prompt": "Planner: detect matching email, extract attachment/link, verify SharePoint file, then create a combined alert with copied context.",
-        "executor_prompt": (
-            "Check M365 Outlook for an email from sampelexample@example.com. If it contains an attachment name or SharePoint link, "
-            "check SharePoint for the related file. Return strict JSON only: {\"triggered\": true|false, "
-            "\"trigger\": \"email and linked SharePoint document\", \"title\": \"...\", \"summary\": \"...\", "
-            "\"details\": {\"sender\": \"...\", \"subject\": \"...\", \"file_name\": \"...\", \"detected_at\": \"...\"}}. "
-            "If the full match is not found, return triggered=false with the same schema."
-        ),
+        "executor_prompt": OUTLOOK_SHAREPOINT_LINKED_PROMPT,
         "context_handoff": "Tab 1 gathers the email context. Tab 2 verifies the SharePoint match and merges both contexts into the final alert.",
         "trigger_mode": "json",
         "trigger_text": "",
@@ -227,10 +291,87 @@ TASK_TEMPLATES = [
         "validation_command": "python3 -m py_compile app.py smoke.py",
         "test_command": "python3 smoke.py",
         "context_handoff": "Tasked stores the command plan. piplinetask logs each sandbox stage. Alerts show failures or requested summaries.",
-        "trigger_mode": "always",
-        "trigger_text": "sandbox execution",
+        "trigger_mode": SANDBOX_VALIDATE_TRIGGER_MODE,
+        "trigger_text": SANDBOX_VALIDATE_TRIGGER_TEXT,
     },
 ]
+
+TASK_TEMPLATE_LIVE_DOC_SPECS = [
+    {
+        "trace": "TRACE-200",
+        "task_id": "task_trace_200",
+        "template_key": "weather-dublin",
+        "type": "alert",
+        "type_cls": "alert",
+        "type_color": "#fbbf24",
+        "target": "C1b",
+        "expect_alert": "conditional",
+        "desc": "editable template · conditional Dublin weather threshold watch",
+    },
+    {
+        "trace": "TRACE-201",
+        "task_id": "task_trace_201",
+        "template_key": "gmail-sender",
+        "type": "alert",
+        "type_cls": "alert",
+        "type_color": "#fbbf24",
+        "target": "C1b",
+        "expect_alert": "none",
+        "desc": "editable template · mailbox sender watch using visible Outlook search results",
+    },
+    {
+        "trace": "TRACE-202",
+        "task_id": "task_trace_202",
+        "template_key": "sharepoint-new-file",
+        "type": "alert",
+        "type_cls": "alert",
+        "type_color": "#fbbf24",
+        "target": "C1b",
+        "expect_alert": "none",
+        "desc": "editable template · SharePoint file watch using visible SharePoint search results",
+    },
+    {
+        "trace": "TRACE-203",
+        "task_id": "task_trace_203",
+        "template_key": "m365-outlook-alert",
+        "type": "alert",
+        "type_cls": "alert",
+        "type_color": "#fbbf24",
+        "target": "C1b",
+        "expect_alert": "none",
+        "desc": "editable template · Outlook alert mailbox watch using visible search results",
+    },
+    {
+        "trace": "TRACE-204",
+        "task_id": "task_trace_204",
+        "template_key": "outlook-sharepoint-linked",
+        "type": "combined",
+        "type_cls": "combined",
+        "type_color": "#f87171",
+        "target": "C1b",
+        "expect_alert": "none",
+        "desc": "editable template · linked Outlook plus SharePoint correlation workflow",
+    },
+    {
+        "trace": "TRACE-205",
+        "task_id": "task_trace_205",
+        "template_key": "sandbox-python-validate",
+        "type": "action",
+        "type_cls": "sandbox",
+        "type_color": "#22d3ee",
+        "target": "C12b",
+        "expect_alert": "none",
+        "desc": "editable template · C12b validate/test workflow with alert-on-failure only",
+    },
+]
+
+
+def _task_template_live_doc_spec(template_key: str) -> dict | None:
+    key = (template_key or "").strip()
+    if not key:
+        return None
+    return next((dict(item) for item in TASK_TEMPLATE_LIVE_DOC_SPECS if item["template_key"] == key), None)
+
 
 TASK_EXAMPLE_SPECS = [
     {
@@ -345,6 +486,22 @@ _COPILOT_SERVICE_PHRASES = (
     "we're experiencing",
     "high demand",
 )
+_COPILOT_REFUSAL_PHRASES = (
+    "can't chat about this",
+    "can't respond to this",
+    "let's try a different topic",
+    "i can't discuss",
+    "i cannot discuss",
+)
+
+
+def _normalize_phrase_match_text(text: str) -> str:
+    return (text or "").lower().replace("’", "'").replace("“", '"').replace("”", '"')
+
+
+def _looks_like_copilot_refusal(text: str) -> bool:
+    normalized = _normalize_phrase_match_text(text)
+    return any(phrase in normalized for phrase in _COPILOT_REFUSAL_PHRASES)
 
 
 def _get_http() -> httpx.AsyncClient:
@@ -750,6 +907,8 @@ def _ensure_db() -> None:
                     context_handoff TEXT DEFAULT '',
                     trigger_mode TEXT DEFAULT 'json',
                     trigger_text TEXT DEFAULT '',
+                    live_doc_trace TEXT DEFAULT '',
+                    live_doc_order INTEGER DEFAULT 0,
                     active INTEGER DEFAULT 1,
                     source TEXT DEFAULT 'user'
                 )
@@ -849,6 +1008,8 @@ def _ensure_db() -> None:
         "ALTER TABLE task_templates ADD COLUMN sandbox_assist_command TEXT DEFAULT ''",
         "ALTER TABLE task_templates ADD COLUMN sandbox_assist_validation_command TEXT DEFAULT ''",
         "ALTER TABLE task_templates ADD COLUMN sandbox_assist_test_command TEXT DEFAULT ''",
+        "ALTER TABLE task_templates ADD COLUMN live_doc_trace TEXT DEFAULT ''",
+        "ALTER TABLE task_templates ADD COLUMN live_doc_order INTEGER DEFAULT 0",
         "ALTER TABLE task_alerts ADD COLUMN updated_at TEXT",
         "ALTER TABLE task_alerts ADD COLUMN resolved_at TEXT",
         "ALTER TABLE task_alerts ADD COLUMN snoozed_until TEXT",
@@ -875,6 +1036,10 @@ def _ensure_db() -> None:
             pass
     try:
         _ensure_task_templates_seeded()
+    except Exception:
+        pass
+    try:
+        _ensure_tasked_live_doc_template_tasks_seeded()
     except Exception:
         pass
 
@@ -3379,6 +3544,8 @@ def _task_template_row_to_dict(row: sqlite3.Row | dict) -> dict:
     raw["active"] = bool(raw.get("active"))
     raw["interval_minutes"] = int(raw.get("interval_minutes") or 0)
     raw["tabs_required"] = int(raw.get("tabs_required") or 1)
+    raw["live_doc_trace"] = raw.get("live_doc_trace") or ""
+    raw["live_doc_order"] = int(raw.get("live_doc_order") or 0)
     raw["executor_target"] = _task_sandbox_target(raw.get("executor_target")) if (raw.get("mode") == "sandbox" or raw.get("executor_target")) else ""
     raw["workspace_dir"] = _task_sandbox_workspace(raw.get("workspace_dir"), raw["executor_target"] or "c12b") if raw["executor_target"] else ""
     raw["validation_command"] = raw.get("validation_command") or ""
@@ -3398,12 +3565,13 @@ def _ensure_task_templates_seeded() -> None:
     with _db() as conn:
         for tpl in TASK_TEMPLATES:
             assist = _task_sandbox_assist_values(tpl, mode=tpl.get("mode") or "chat")
+            live_doc = _task_template_live_doc_spec(tpl.get("key") or "") or {}
             conn.execute(
                 "INSERT OR IGNORE INTO task_templates (key, created_at, updated_at, name, description, mode, schedule_kind, interval_minutes, "
                 "tabs_required, executor_target, workspace_dir, planner_prompt, executor_prompt, validation_command, test_command, "
                 "sandbox_assist, sandbox_assist_target, sandbox_assist_workspace_dir, sandbox_assist_command, "
-                "sandbox_assist_validation_command, sandbox_assist_test_command, context_handoff, trigger_mode, trigger_text, active, source) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "sandbox_assist_validation_command, sandbox_assist_test_command, context_handoff, trigger_mode, trigger_text, live_doc_trace, live_doc_order, active, source) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     tpl["key"],
                     now,
@@ -3429,8 +3597,56 @@ def _ensure_task_templates_seeded() -> None:
                     tpl.get("context_handoff") or "",
                     tpl.get("trigger_mode") or "json",
                     tpl.get("trigger_text") or "",
+                    live_doc.get("trace") or "",
+                    int(str(live_doc.get("trace") or "0").replace("TRACE-", "") or 0) if live_doc.get("trace") else 0,
                     1,
                     "builtin",
+                ),
+            )
+        conn.execute(
+            "UPDATE task_templates SET updated_at=?, executor_prompt=? "
+            "WHERE key='weather-dublin' AND source='builtin' AND executor_prompt=?",
+            (now, WEATHER_DUBLIN_PROMPT, WEATHER_DUBLIN_LEGACY_PROMPT),
+        )
+        conn.execute(
+            "UPDATE task_templates SET updated_at=?, executor_prompt=? "
+            "WHERE key='gmail-sender' AND source='builtin' AND executor_prompt=?",
+            (now, GMAIL_SENDER_PROMPT, GMAIL_SENDER_LEGACY_PROMPT),
+        )
+        conn.execute(
+            "UPDATE task_templates SET updated_at=?, executor_prompt=? "
+            "WHERE key='sharepoint-new-file' AND source='builtin' AND executor_prompt=?",
+            (now, SHAREPOINT_NEW_FILE_PROMPT, SHAREPOINT_NEW_FILE_LEGACY_PROMPT),
+        )
+        conn.execute(
+            "UPDATE task_templates SET updated_at=?, executor_prompt=? "
+            "WHERE key='m365-outlook-alert' AND source='builtin' AND executor_prompt=?",
+            (now, M365_OUTLOOK_ALERT_PROMPT, M365_OUTLOOK_ALERT_LEGACY_PROMPT),
+        )
+        conn.execute(
+            "UPDATE task_templates SET updated_at=?, executor_prompt=? "
+            "WHERE key='outlook-sharepoint-linked' AND source='builtin' AND executor_prompt=?",
+            (now, OUTLOOK_SHAREPOINT_LINKED_PROMPT, OUTLOOK_SHAREPOINT_LINKED_LEGACY_PROMPT),
+        )
+        conn.execute(
+            "UPDATE task_templates SET updated_at=?, trigger_mode=?, trigger_text=? "
+            "WHERE key='sandbox-python-validate' AND source='builtin' AND trigger_mode=? AND COALESCE(trigger_text, '')=?",
+            (
+                now,
+                SANDBOX_VALIDATE_TRIGGER_MODE,
+                SANDBOX_VALIDATE_TRIGGER_TEXT,
+                SANDBOX_VALIDATE_LEGACY_TRIGGER_MODE,
+                SANDBOX_VALIDATE_LEGACY_TRIGGER_TEXT,
+            ),
+        )
+        for spec in TASK_TEMPLATE_LIVE_DOC_SPECS:
+            conn.execute(
+                "UPDATE task_templates SET updated_at=?, live_doc_trace=?, live_doc_order=? WHERE key=? AND source='builtin'",
+                (
+                    now,
+                    spec["trace"],
+                    int(str(spec["trace"]).replace("TRACE-", "") or 0),
+                    spec["template_key"],
                 ),
             )
 
@@ -3449,6 +3665,216 @@ def _task_templates_payload(active_only: bool = True) -> list[dict]:
         return [_task_template_row_to_dict(row) for row in rows]
     except sqlite3.Error:
         return [dict(item) | {"active": True, "source": "builtin"} for item in TASK_TEMPLATES]
+
+
+def _tasked_live_doc_seed_task_payload(template: dict, spec: dict) -> dict:
+    mode = (template.get("mode") or "chat").strip().lower()
+    executor_target = _task_sandbox_target(template.get("executor_target") or ("c12b" if mode == "sandbox" else ""))
+    workspace_dir = _task_sandbox_workspace(template.get("workspace_dir"), executor_target) if executor_target else ""
+    assist = _task_sandbox_assist_values(template, mode=mode)
+    trace = spec["trace"]
+    return {
+        "id": spec["task_id"],
+        "name": f"{trace} · {template.get('name') or spec['template_key']}",
+        "mode": mode,
+        "schedule_kind": "manual",
+        "interval_minutes": 0,
+        "active": False,
+        "tabs_required": int(template.get("tabs_required") or 1),
+        "template_key": template.get("key") or spec["template_key"],
+        "executor_target": executor_target if mode == "sandbox" else "",
+        "workspace_dir": workspace_dir,
+        "planner_prompt": template.get("planner_prompt") or "",
+        "executor_prompt": template.get("executor_prompt") or "",
+        "validation_command": template.get("validation_command") or "",
+        "test_command": template.get("test_command") or "",
+        "sandbox_assist": assist["sandbox_assist"],
+        "sandbox_assist_target": assist["sandbox_assist_target"],
+        "sandbox_assist_workspace_dir": assist["sandbox_assist_workspace_dir"],
+        "sandbox_assist_command": assist["sandbox_assist_command"],
+        "sandbox_assist_validation_command": assist["sandbox_assist_validation_command"],
+        "sandbox_assist_test_command": assist["sandbox_assist_test_command"],
+        "context_handoff": template.get("context_handoff") or "",
+        "trigger_mode": template.get("trigger_mode") or ("always" if mode == "sandbox" else "json"),
+        "trigger_text": template.get("trigger_text") or "",
+        "notes": (
+            f"Tasked Live Docs seeded template trace {trace}. "
+            f"Template key={template.get('key') or spec['template_key']}."
+        ),
+        "completion_policy": _task_default_completion_policy(),
+        "alert_policy": _task_default_alert_policy(),
+        "tasked_type": spec.get("type") or ("action" if mode == "sandbox" else "output"),
+    }
+
+
+def _ensure_tasked_live_doc_template_tasks_seeded() -> None:
+    now = _iso_now()
+    templates = {item.get("key") or "": item for item in _task_templates_payload(active_only=False)}
+    with _db() as conn:
+        for spec in TASK_TEMPLATE_LIVE_DOC_SPECS:
+            template = templates.get(spec["template_key"])
+            if not template:
+                continue
+            task_payload = _tasked_live_doc_seed_task_payload(template, spec)
+            existing = conn.execute("SELECT id FROM task_definitions WHERE id=?", (spec["task_id"],)).fetchone()
+            if existing:
+                conn.execute(
+                    "UPDATE task_definitions SET updated_at=?, name=?, mode=?, schedule_kind=?, interval_minutes=?, active=?, tabs_required=?, "
+                    "template_key=?, executor_target=?, workspace_dir=?, planner_prompt=?, executor_prompt=?, validation_command=?, test_command=?, "
+                    "sandbox_assist=?, sandbox_assist_target=?, sandbox_assist_workspace_dir=?, sandbox_assist_command=?, "
+                    "sandbox_assist_validation_command=?, sandbox_assist_test_command=?, context_handoff=?, trigger_mode=?, trigger_text=?, notes=?, "
+                    "next_run_at=NULL, completion_policy_json=?, alert_policy_json=?, workflow_version=?, archived_at=NULL, tasked_type=? WHERE id=?",
+                    (
+                        now,
+                        task_payload["name"],
+                        task_payload["mode"],
+                        task_payload["schedule_kind"],
+                        int(task_payload["interval_minutes"] or 0),
+                        1 if task_payload["active"] else 0,
+                        int(task_payload["tabs_required"] or 1),
+                        task_payload["template_key"],
+                        task_payload["executor_target"],
+                        task_payload["workspace_dir"],
+                        task_payload["planner_prompt"],
+                        task_payload["executor_prompt"],
+                        task_payload["validation_command"],
+                        task_payload["test_command"],
+                        1 if task_payload["sandbox_assist"] else 0,
+                        task_payload["sandbox_assist_target"],
+                        task_payload["sandbox_assist_workspace_dir"],
+                        task_payload["sandbox_assist_command"],
+                        task_payload["sandbox_assist_validation_command"],
+                        task_payload["sandbox_assist_test_command"],
+                        task_payload["context_handoff"],
+                        task_payload["trigger_mode"],
+                        task_payload["trigger_text"],
+                        task_payload["notes"],
+                        json.dumps(task_payload["completion_policy"], ensure_ascii=False),
+                        json.dumps(task_payload["alert_policy"], ensure_ascii=False),
+                        1,
+                        task_payload["tasked_type"],
+                        spec["task_id"],
+                    ),
+                )
+            else:
+                conn.execute(
+                    "INSERT INTO task_definitions (id, created_at, updated_at, name, mode, schedule_kind, interval_minutes, active, tabs_required, "
+                    "template_key, executor_target, workspace_dir, planner_prompt, executor_prompt, validation_command, test_command, sandbox_assist, "
+                    "sandbox_assist_target, sandbox_assist_workspace_dir, sandbox_assist_command, sandbox_assist_validation_command, sandbox_assist_test_command, "
+                    "context_handoff, trigger_mode, trigger_text, notes, next_run_at, completion_policy_json, alert_policy_json, workflow_version, tasked_type) "
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        spec["task_id"],
+                        now,
+                        now,
+                        task_payload["name"],
+                        task_payload["mode"],
+                        task_payload["schedule_kind"],
+                        int(task_payload["interval_minutes"] or 0),
+                        1 if task_payload["active"] else 0,
+                        int(task_payload["tabs_required"] or 1),
+                        task_payload["template_key"],
+                        task_payload["executor_target"],
+                        task_payload["workspace_dir"],
+                        task_payload["planner_prompt"],
+                        task_payload["executor_prompt"],
+                        task_payload["validation_command"],
+                        task_payload["test_command"],
+                        1 if task_payload["sandbox_assist"] else 0,
+                        task_payload["sandbox_assist_target"],
+                        task_payload["sandbox_assist_workspace_dir"],
+                        task_payload["sandbox_assist_command"],
+                        task_payload["sandbox_assist_validation_command"],
+                        task_payload["sandbox_assist_test_command"],
+                        task_payload["context_handoff"],
+                        task_payload["trigger_mode"],
+                        task_payload["trigger_text"],
+                        task_payload["notes"],
+                        None,
+                        json.dumps(task_payload["completion_policy"], ensure_ascii=False),
+                        json.dumps(task_payload["alert_policy"], ensure_ascii=False),
+                        1,
+                        task_payload["tasked_type"],
+                    ),
+                )
+            steps = _task_build_default_steps(task_payload)
+            _task_save_steps(conn, spec["task_id"], steps)
+
+
+def _tasked_live_doc_template_traces_payload() -> list[dict]:
+    templates = {item.get("key") or "": item for item in _task_templates_payload(active_only=False)}
+    traces: list[dict] = []
+    try:
+        with _db() as conn:
+            for spec in TASK_TEMPLATE_LIVE_DOC_SPECS:
+                template = templates.get(spec["template_key"])
+                if not template:
+                    continue
+                task_row = conn.execute("SELECT * FROM task_definitions WHERE id=?", (spec["task_id"],)).fetchone()
+                run_row = conn.execute(
+                    "SELECT * FROM task_runs WHERE task_id=? ORDER BY created_at DESC LIMIT 1",
+                    (spec["task_id"],),
+                ).fetchone()
+                alert_row = conn.execute(
+                    "SELECT * FROM task_alerts WHERE task_id=? ORDER BY created_at DESC LIMIT 1",
+                    (spec["task_id"],),
+                ).fetchone()
+                step_rows = conn.execute(
+                    "SELECT * FROM task_workflow_steps WHERE task_id=? ORDER BY position ASC",
+                    (spec["task_id"],),
+                ).fetchall()
+                task = _task_row_to_dict(task_row) if task_row else _tasked_live_doc_seed_task_payload(template, spec)
+                steps = [_task_step_to_dict(row) for row in step_rows] if step_rows else _task_build_default_steps(task)
+                run_id = (run_row["id"] if run_row else "") or ""
+                alert_id = (alert_row["id"] if alert_row else None)
+                traces.append({
+                    "trace": spec["trace"],
+                    "type": spec["type"],
+                    "typeColor": spec["type_color"],
+                    "typeCls": spec["type_cls"],
+                    "mode": task.get("mode") or template.get("mode") or "chat",
+                    "target": spec["target"],
+                    "task_id": spec["task_id"],
+                    "run_id": run_id,
+                    "alert_id": alert_id,
+                    "name": template.get("name") or spec["template_key"],
+                    "desc": spec["desc"],
+                    "planner": task.get("planner_prompt") or template.get("planner_prompt") or "",
+                    "executor": task.get("executor_prompt") or template.get("executor_prompt") or "",
+                    "trigger_mode": task.get("trigger_mode") or template.get("trigger_mode") or "json",
+                    "trigger_text": task.get("trigger_text") or template.get("trigger_text") or "",
+                    "steps": steps,
+                    "template_key": template.get("key") or spec["template_key"],
+                    "context_handoff": task.get("context_handoff") or template.get("context_handoff") or "",
+                    "validation_command": task.get("validation_command") or template.get("validation_command") or "",
+                    "test_command": task.get("test_command") or template.get("test_command") or "",
+                    "executor_target": task.get("executor_target") or template.get("executor_target") or "",
+                    "workspace_dir": task.get("workspace_dir") or template.get("workspace_dir") or "",
+                    "tabs_required": int(task.get("tabs_required") or template.get("tabs_required") or 1),
+                    "expect_alert": spec.get("expect_alert") or "required",
+                    "is_template_trace": True,
+                })
+    except sqlite3.Error:
+        return []
+    return traces
+
+
+def _task_run_execution_number(task_id: str, run_id: str, created_at: str) -> int:
+    task_id = str(task_id or "").strip()
+    run_id = str(run_id or "").strip()
+    created_at = str(created_at or "").strip()
+    if not task_id or not run_id or not created_at:
+        return 0
+    try:
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS n FROM task_runs "
+                "WHERE task_id=? AND (created_at < ? OR (created_at = ? AND id <= ?))",
+                (task_id, created_at, created_at, run_id),
+            ).fetchone()
+        return int((row["n"] if row and "n" in row.keys() else row[0]) or 0) if row else 0
+    except sqlite3.Error:
+        return 0
 
 
 def _compute_progress_pct(task_id: str, current_step_id: str, status: str) -> int:
@@ -3494,6 +3920,12 @@ def _task_run_to_dict(row: sqlite3.Row | dict) -> dict:
     raw["is_running"] = (raw.get("status") or "").lower() == "running" and not raw.get("finished_at")
     raw["duration_ms"] = _duration_ms(raw.get("started_at") or raw.get("created_at"), raw.get("finished_at"))
     raw["duration_label"] = _duration_label(raw.get("duration_ms"))
+    raw["execution_number"] = _task_run_execution_number(
+        str(raw.get("task_id") or ""),
+        str(raw.get("id") or ""),
+        str(raw.get("created_at") or ""),
+    )
+    raw["execution_label"] = f"Execution #{raw['execution_number']}" if raw.get("execution_number") else "Execution pending"
     raw["current_step_id"] = raw.get("current_step_id") or ""
     raw["terminal_reason"] = raw.get("terminal_reason") or ""
     raw["trigger_snapshot"] = _json_load_object(raw.get("trigger_snapshot_json"))
@@ -3542,6 +3974,8 @@ def _task_trace_payload(task: dict, latest_run: dict | None = None, latest_alert
         "trace_id": task.get("id") or "",
         "task_id": task.get("id") or "",
         "run_id": (latest_run or {}).get("id") or "",
+        "execution_number": (latest_run or {}).get("execution_number") or 0,
+        "execution_label": (latest_run or {}).get("execution_label") or "Execution pending",
         "alert_id": (latest_alert or {}).get("id") or "",
         "orchestration": {
             "mode": task.get("mode") or "",
@@ -3568,6 +4002,8 @@ def _task_trace_payload(task: dict, latest_run: dict | None = None, latest_alert
             "workspace_dir": task.get("workspace_dir") or "",
             "validation_command": task.get("validation_command") or "",
             "test_command": task.get("test_command") or "",
+            "execution_number": (latest_run or {}).get("execution_number") or 0,
+            "execution_label": (latest_run or {}).get("execution_label") or "Execution pending",
             "last_status": (latest_run or {}).get("status") or task.get("last_status") or "idle",
             "duration_label": (latest_run or {}).get("duration_label") or "—",
             "validation_status": (latest_run or {}).get("validation_status") or "",
@@ -3594,6 +4030,8 @@ def _task_trace_payload(task: dict, latest_run: dict | None = None, latest_alert
             "severity": (latest_alert or {}).get("severity") or task.get("alert_policy", {}).get("severity") or "info",
         },
         "completion": {
+            "execution_number": (latest_run or {}).get("execution_number") or 0,
+            "execution_label": (latest_run or {}).get("execution_label") or "Execution pending",
             "last_status": (latest_run or {}).get("status") or task.get("last_status") or "idle",
             "terminal_reason": (latest_run or {}).get("terminal_reason") or "",
             "completed_at": (latest_run or {}).get("completed_at") or "",
@@ -5019,6 +5457,8 @@ async def _tasked_author_draft_from_text(prompt: str, *, strategy: str = "auto",
 
 
 def _task_alert_from_result(task_row: dict, response_text: str) -> dict | None:
+    if _looks_like_copilot_refusal(response_text):
+        return None
     parsed = _task_parse_json_payload(response_text)
     if parsed is not None:
         triggered = parsed.get("triggered")
@@ -5086,6 +5526,21 @@ def _insert_task_alert(task_id: str, run_id: str, alert: dict) -> int | None:
             return cur.lastrowid
     except sqlite3.Error:
         return None
+
+
+def _task_should_create_alert(task_row: dict, context: dict) -> bool:
+    if context.get("condition_passed") is False:
+        return False
+    if context.get("condition_passed") is True:
+        return True
+    if context.get("alert_candidate"):
+        return True
+    trigger_mode = (task_row.get("trigger_mode") or "json").strip().lower()
+    if trigger_mode == "always":
+        return True
+    if trigger_mode in {"json", "contains"}:
+        return False
+    return bool((context.get("last_text") or "").strip())
 
 
 def _record_task_event(task_id: str, event_type: str, detail: str, *, status: str = "", run_id: str = "", alert_id: int | None = None) -> None:
@@ -5825,11 +6280,21 @@ async def _task_resume_workflow(
             )
             text = (chat_result.get("text") or "").strip()
             parsed = _task_parse_json_payload(text)
+            trigger_mode = (task_row.get("trigger_mode") or "json").strip().lower()
+            refusal = _looks_like_copilot_refusal(text)
+            requires_json = trigger_mode == "json"
+            structured_ok = parsed is not None if requires_json else True
+            step_error = (chat_result.get("error") or "").strip()
+            if refusal and not step_error:
+                step_error = "Copilot refused the task prompt"
+            elif requires_json and text and not structured_ok and not step_error:
+                step_error = "Chat step did not return valid JSON"
             out = {
                 "text": text,
                 "parsed": parsed or {},
-                "ok": bool(chat_result.get("ok") and text),
+                "ok": bool(chat_result.get("ok") and text and not refusal and structured_ok),
                 "session_manager_id": chat_result.get("session_manager_id") or "",
+                "refusal": refusal,
             }
             context["steps"][current_step_id] = out
             context["last_text"] = text
@@ -5845,10 +6310,10 @@ async def _task_resume_workflow(
                     error_text=chat_result.get("error") or "Waiting for Copilot recovery",
                     session_manager_id=chat_result.get("session_manager_id") or "",
                 )
-            _task_finish_step_result(result_id, status="completed" if out["ok"] else "failed", output=out, error_text=(chat_result.get("error") or ""))
+            _task_finish_step_result(result_id, status="completed" if out["ok"] else "failed", output=out, error_text=step_error)
             _task_update_run_tracking(run_id, output_excerpt=text[:2000], trigger_snapshot_json=json.dumps(context, ensure_ascii=False))
             if not out["ok"]:
-                return _task_mark_terminal(task_row, run_id, status="failed", text=text, error_text=chat_result.get("error") or "Chat step failed", current_step_id=current_step_id, terminal_reason="chat-failed", next_run_at=next_run_at)
+                return _task_mark_terminal(task_row, run_id, status="failed", text=text, error_text=step_error or "Chat step failed", current_step_id=current_step_id, terminal_reason="chat-failed", next_run_at=next_run_at)
             idx += 1
             continue
         if kind in {"agent", "multi-agent", "multi-agento"}:
@@ -5886,6 +6351,19 @@ async def _task_resume_workflow(
                 "current_step_id": current_step_id,
             }
         if kind == "alert":
+            if not _task_should_create_alert(task_row, context):
+                out = {"skipped": True, "reason": "trigger-not-matched"}
+                context["steps"][current_step_id] = out
+                _task_finish_step_result(result_id, status="skipped", output=out)
+                _record_task_event(
+                    str(task_row.get("id") or ""),
+                    "alert-skipped",
+                    "Alert step skipped because the trigger condition was not met.",
+                    status="skipped",
+                    run_id=run_id,
+                )
+                idx += 1
+                continue
             alert = _task_step_alert_payload(task_row, step, context)
             if context.get("condition_passed") is False and not alert.get("summary"):
                 _task_finish_step_result(result_id, status="skipped", output={"skipped": True})
@@ -5949,6 +6427,7 @@ def _task_template_upsert(payload: dict, *, template_key: str = "") -> dict:
     mode = (payload.get("mode") or "chat").strip().lower()
     executor_target = _task_sandbox_target(payload.get("executor_target") or ("c12b" if mode == "sandbox" else ""))
     sandbox_assist = _task_sandbox_assist_values(payload, mode=mode)
+    live_doc = _task_template_live_doc_spec(key) or {}
     row_payload = {
         "key": key,
         "name": (payload.get("name") or "").strip(),
@@ -5967,6 +6446,8 @@ def _task_template_upsert(payload: dict, *, template_key: str = "") -> dict:
         "context_handoff": (payload.get("context_handoff") or "").strip(),
         "trigger_mode": (payload.get("trigger_mode") or "json").strip().lower(),
         "trigger_text": (payload.get("trigger_text") or "").strip(),
+        "live_doc_trace": (payload.get("live_doc_trace") or live_doc.get("trace") or "").strip(),
+        "live_doc_order": max(0, int(payload.get("live_doc_order") or int(str(live_doc.get("trace") or "0").replace("TRACE-", "") or 0))),
         "active": 1 if payload.get("active", True) else 0,
         "source": (payload.get("source") or "user").strip().lower() or "user",
     }
@@ -5982,15 +6463,16 @@ def _task_template_upsert(payload: dict, *, template_key: str = "") -> dict:
                 "UPDATE task_templates SET updated_at=?, name=?, description=?, mode=?, schedule_kind=?, interval_minutes=?, tabs_required=?, "
                 "executor_target=?, workspace_dir=?, planner_prompt=?, executor_prompt=?, validation_command=?, test_command=?, "
                 "sandbox_assist=?, sandbox_assist_target=?, sandbox_assist_workspace_dir=?, sandbox_assist_command=?, "
-                "sandbox_assist_validation_command=?, sandbox_assist_test_command=?, context_handoff=?, trigger_mode=?, trigger_text=?, active=?, source=? WHERE key=?",
+                "sandbox_assist_validation_command=?, sandbox_assist_test_command=?, context_handoff=?, trigger_mode=?, trigger_text=?, "
+                "live_doc_trace=?, live_doc_order=?, active=?, source=? WHERE key=?",
                 (
                     now, row_payload["name"], row_payload["description"], row_payload["mode"], row_payload["schedule_kind"],
                     row_payload["interval_minutes"], row_payload["tabs_required"], row_payload["executor_target"], row_payload["workspace_dir"],
                     row_payload["planner_prompt"], row_payload["executor_prompt"], row_payload["validation_command"], row_payload["test_command"],
                     1 if row_payload["sandbox_assist"] else 0, row_payload["sandbox_assist_target"], row_payload["sandbox_assist_workspace_dir"],
                     row_payload["sandbox_assist_command"], row_payload["sandbox_assist_validation_command"], row_payload["sandbox_assist_test_command"],
-                    row_payload["context_handoff"], row_payload["trigger_mode"], row_payload["trigger_text"], row_payload["active"],
-                    row_payload["source"], key,
+                    row_payload["context_handoff"], row_payload["trigger_mode"], row_payload["trigger_text"], row_payload["live_doc_trace"],
+                    row_payload["live_doc_order"], row_payload["active"], row_payload["source"], key,
                 ),
             )
         else:
@@ -5998,7 +6480,7 @@ def _task_template_upsert(payload: dict, *, template_key: str = "") -> dict:
                 "INSERT INTO task_templates (key, created_at, updated_at, name, description, mode, schedule_kind, interval_minutes, tabs_required, "
                 "executor_target, workspace_dir, planner_prompt, executor_prompt, validation_command, test_command, sandbox_assist, "
                 "sandbox_assist_target, sandbox_assist_workspace_dir, sandbox_assist_command, sandbox_assist_validation_command, "
-                "sandbox_assist_test_command, context_handoff, trigger_mode, trigger_text, active, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "sandbox_assist_test_command, context_handoff, trigger_mode, trigger_text, live_doc_trace, live_doc_order, active, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     key, created_at, now, row_payload["name"], row_payload["description"], row_payload["mode"],
                     row_payload["schedule_kind"], row_payload["interval_minutes"], row_payload["tabs_required"], row_payload["executor_target"],
@@ -6006,10 +6488,15 @@ def _task_template_upsert(payload: dict, *, template_key: str = "") -> dict:
                     row_payload["validation_command"], row_payload["test_command"], 1 if row_payload["sandbox_assist"] else 0,
                     row_payload["sandbox_assist_target"], row_payload["sandbox_assist_workspace_dir"], row_payload["sandbox_assist_command"],
                     row_payload["sandbox_assist_validation_command"], row_payload["sandbox_assist_test_command"], row_payload["context_handoff"],
-                    row_payload["trigger_mode"], row_payload["trigger_text"], row_payload["active"], row_payload["source"],
+                    row_payload["trigger_mode"], row_payload["trigger_text"], row_payload["live_doc_trace"], row_payload["live_doc_order"],
+                    row_payload["active"], row_payload["source"],
                 ),
             )
         row = conn.execute("SELECT * FROM task_templates WHERE key=?", (key,)).fetchone()
+    try:
+        _ensure_tasked_live_doc_template_tasks_seeded()
+    except Exception:
+        pass
     return {"ok": True, "template": _task_template_row_to_dict(row)}
 
 
@@ -6346,11 +6833,16 @@ async def page_tasked_preview(request: Request):
 
 @app.get("/tasked-live-doc", response_class=HTMLResponse, name="page_tasked_live_doc")
 async def page_tasked_live_doc(request: Request):
+    try:
+        _ensure_tasked_live_doc_template_tasks_seeded()
+    except Exception:
+        pass
     return templates.TemplateResponse(request, "tasked_live_doc.html", {
         "tasked_type_options": json.dumps(TASKED_TYPE_OPTIONS, ensure_ascii=False),
         "task_modes": json.dumps(TASK_MODE_OPTIONS, ensure_ascii=False),
         "task_executor_targets": json.dumps(TASK_EXECUTOR_TARGET_OPTIONS, ensure_ascii=False),
         "task_step_kinds": json.dumps(TASK_WORKFLOW_STEP_KINDS, ensure_ascii=False),
+        "tasked_live_doc_template_traces": json.dumps(_tasked_live_doc_template_traces_payload(), ensure_ascii=False),
     })
 
 
@@ -6685,6 +7177,15 @@ async def api_tasks(include_archived: bool = False):
 async def api_task_templates(include_archived: bool = False):
     templates = _task_templates_payload(active_only=not include_archived)
     return JSONResponse({"ok": True, "templates": templates})
+
+
+@app.get("/api/tasked-live-doc/traces", name="api_tasked_live_doc_traces")
+async def api_tasked_live_doc_traces():
+    try:
+        _ensure_tasked_live_doc_template_tasks_seeded()
+    except Exception:
+        pass
+    return JSONResponse({"ok": True, "traces": _tasked_live_doc_template_traces_payload()})
 
 
 @app.post("/api/task-templates", name="api_task_templates_upsert")

@@ -491,14 +491,15 @@ Alert config example:
           <button class="tasked-btn secondary" type="button" id="task-reset-btn">New Tasked</button>
         </div>
         <div class="tasked-actions">
-          <button class="tasked-btn secondary" type="button" id="task-repeat-btn">Repeat</button>
-          <button class="tasked-btn secondary" type="button" id="task-clone-btn">Clone</button>
+          <button class="tasked-btn secondary" type="button" id="task-repeat-btn">Run Again</button>
+          <button class="tasked-btn secondary" type="button" id="task-clone-btn">Clone / Edit</button>
           <button class="tasked-btn secondary" type="button" id="task-pause-btn">Pause</button>
           <button class="tasked-btn secondary" type="button" id="task-resume-btn">Resume</button>
           <button class="tasked-btn secondary" type="button" id="task-restart-btn">Restart</button>
           <button class="tasked-btn secondary" type="button" id="task-archive-btn">Archive</button>
         </div>
         <div class="tasked-note">Saved rows are editable. The saved task definition is the source of truth, not the original template.</div>
+        <div class="tasked-note">Run Again keeps the same Trace ID and creates a new execution number. Clone / Edit creates a new Tasked row with a new Trace ID so you can change it safely.</div>
       </form>
       <div style="margin-top:1rem">
         <h2 style="margin-bottom:.45rem;font-size:1rem;">Traceability</h2>
@@ -1073,16 +1074,16 @@ Alert config example:
     var latestRun = task.latest_run || {};
     var latestAlert = task.latest_alert || {};
     traceBox.innerHTML =
-      '<div><strong>Trace ID:</strong> ' + esc(trace.trace_id || task.id || '—') + '</div>' +
+      '<div><strong>Trace ID:</strong> ' + esc(trace.trace_id || task.id || '—') + ' <span class="tasked-pill" style="margin-left:.4rem;">' + esc(trace.execution_label || latestRun.execution_label || 'Execution pending') + '</span></div>' +
       '<div class="tasked-trace-grid">' +
         '<div class="tasked-trace-item"><strong>Task orchestration</strong><span>Unique Task ID: ' + esc(trace.task_id || task.id || '—') + '\nMode: ' + esc(task.mode || '—') + '\nState: ' + esc(task.lifecycle_label || task.last_status || '—') + '</span></div>' +
         '<div class="tasked-trace-item"><strong>Task planner</strong><span>' + esc((trace.planner || {}).prompt || task.planner_prompt || '—') + '</span></div>' +
         '<div class="tasked-trace-item"><strong>Task timer</strong><span>Schedule: ' + esc((trace.timer || {}).schedule_label || task.schedule_label || '—') + '\nNext run: ' + esc(fmtTs((trace.timer || {}).next_run_at || task.next_run_at)) + '</span></div>' +
-        '<div class="tasked-trace-item"><strong>Task executor</strong><span>Run ID: ' + esc((trace.run_id || latestRun.id || '—')) + '\nStatus: ' + esc((trace.executor || {}).last_status || latestRun.status || '—') + '\nCurrent step: ' + esc((trace.completion || {}).current_step_id || task.current_step_id || '—') + '\nTarget: ' + esc(executorLabel((trace.executor || {}).target || task.executor_target || '')) + '\nWorkspace: ' + esc((trace.executor || {}).workspace_dir || task.workspace_dir || '—') + '\nValidation: ' + esc((trace.executor || {}).validation_status || latestRun.validation_status || '—') + '\nTest: ' + esc((trace.executor || {}).test_status || latestRun.test_status || '—') + '\nDuration: ' + esc((trace.executor || {}).duration_label || latestRun.duration_label || '—') + '</span></div>' +
+        '<div class="tasked-trace-item"><strong>Task executor</strong><span>Run ID: ' + esc((trace.run_id || latestRun.id || '—')) + '\nExecution: ' + esc((trace.execution_label || latestRun.execution_label || 'Execution pending')) + '\nStatus: ' + esc((trace.executor || {}).last_status || latestRun.status || '—') + '\nCurrent step: ' + esc((trace.completion || {}).current_step_id || task.current_step_id || '—') + '\nTarget: ' + esc(executorLabel((trace.executor || {}).target || task.executor_target || '')) + '\nWorkspace: ' + esc((trace.executor || {}).workspace_dir || task.workspace_dir || '—') + '\nValidation: ' + esc((trace.executor || {}).validation_status || latestRun.validation_status || '—') + '\nTest: ' + esc((trace.executor || {}).test_status || latestRun.test_status || '—') + '\nDuration: ' + esc((trace.executor || {}).duration_label || latestRun.duration_label || '—') + '</span></div>' +
         '<div class="tasked-trace-item"><strong>AIO sandbox assist</strong><span>Enabled: ' + esc((trace.sandbox_assist || {}).enabled ? 'yes' : 'no') + '\nTarget: ' + esc(executorLabel((trace.sandbox_assist || {}).target || task.sandbox_assist_target || '')) + '\nWorkspace: ' + esc((trace.sandbox_assist || {}).workspace_dir || task.sandbox_assist_workspace_dir || '—') + '\nStatus: ' + esc((trace.sandbox_assist || {}).last_status || latestRun.status || '—') + '\nValidation: ' + esc((trace.sandbox_assist || {}).validation_status || latestRun.validation_status || '—') + '\nTest: ' + esc((trace.sandbox_assist || {}).test_status || latestRun.test_status || '—') + '</span></div>' +
         '<div class="tasked-trace-item"><strong>Task alert generator</strong><span>Alert ID: ' + esc((trace.alert_id || latestAlert.id || '—')) + '\nStatus: ' + esc((trace.alert_generator || {}).latest_alert_status || latestAlert.status || '—') + '\nSeverity: ' + esc((trace.alert_generator || {}).severity || latestAlert.severity || '—') + '\nTitle: ' + esc((trace.alert_generator || {}).latest_alert_title || latestAlert.title || '—') + '</span></div>' +
         '<div class="tasked-trace-item"><strong>Context handoff</strong><span>' + esc((trace.planner || {}).context_handoff || task.context_handoff || '—') + '</span></div>' +
-        '<div class="tasked-trace-item"><strong>Task completion</strong><span>Status: ' + esc((trace.completion || {}).last_status || latestRun.status || '—') + '\nReason: ' + esc((trace.completion || {}).terminal_reason || latestRun.terminal_reason || '—') + '\nCompleted: ' + esc(fmtTs((trace.completion || {}).completed_at || latestRun.completed_at)) + '</span></div>' +
+        '<div class="tasked-trace-item"><strong>Task completion</strong><span>Execution: ' + esc((trace.completion || {}).execution_label || latestRun.execution_label || 'Execution pending') + '\nStatus: ' + esc((trace.completion || {}).last_status || latestRun.status || '—') + '\nReason: ' + esc((trace.completion || {}).terminal_reason || latestRun.terminal_reason || '—') + '\nCompleted: ' + esc(fmtTs((trace.completion || {}).completed_at || latestRun.completed_at)) + '</span></div>' +
         '<div class="tasked-trace-item"><strong>Session manager</strong><span>Status: ' + esc((trace.recovery || {}).status || ((task.latest_recovery_session || {}).status) || 'steady') + '\nOperation: ' + esc((trace.recovery || {}).operation || ((task.latest_recovery_session || {}).operation) || '—') + '\nUpstream: ' + esc((trace.recovery || {}).upstream || ((task.latest_recovery_session || {}).upstream) || '—') + '\nRetries: ' + esc((trace.recovery || {}).retry_count || ((task.latest_recovery_session || {}).retry_count) || 0) + '\nNext retry: ' + esc(fmtTs((trace.recovery || {}).next_retry_at || ((task.latest_recovery_session || {}).next_retry_at))) + '\nError: ' + esc((trace.recovery || {}).last_error || ((task.latest_recovery_session || {}).last_error) || '—') + '</span></div>' +
       '</div>' +
       '<div class="tasked-actions">' +
@@ -1209,6 +1210,7 @@ Alert config example:
     var status = (t.lifecycle_state || t.last_status || 'idle').toLowerCase();
     var isRunning = status === 'running' || !!latestRun.is_running;
     var isTerminal = status === 'completed' || status === 'failed' || status === 'cancelled';
+    var hasRun = !!latestRun.id;
     var sys = isSystemTask(t);
     var durationHtml = latestRun.is_running
       ? '<span data-live-start="' + esc(latestRun.started_at || latestRun.created_at || '') + '" class="pulse-live">' + esc(latestRun.duration_label || '0s') + '</span>'
@@ -1216,8 +1218,11 @@ Alert config example:
     var typePill = t.tasked_type_label ? '<span class="tasked-pill" title="Output type">' + esc(t.tasked_type_label) + '</span> ' : '';
     var previewUrl = t.preview_url || ('/tasked-preview?task_id=' + esc(t.id || ''));
     var statusBadge = '<span class="status-badge ' + esc(status) + '">' + esc(t.lifecycle_label || t.last_status || 'idle') + '</span>';
+    var rerunLabel = hasRun ? 'Run Again' : 'Run';
     var actions =
       '<div class="tasked-row-actions">' +
+      (!isRunning ? '<button class="tasked-row-btn" type="button" data-row-action="rerun" data-task-id="' + esc(t.id) + '" data-task-name="' + esc(t.name) + '" title="' + esc(hasRun ? 'Run again with the same Trace ID and a new execution number' : 'Run this task without cloning') + '">' + rerunLabel + '</button>' : '') +
+      '<button class="tasked-row-btn" type="button" data-row-action="clone-edit" data-task-id="' + esc(t.id) + '" data-task-name="' + esc(t.name) + '" title="Clone this task into a new editable Tasked row">Clone/Edit</button>' +
       (isRunning ? '<button class="tasked-row-btn stop-btn" type="button" data-row-action="stop" data-task-id="' + esc(t.id) + '" data-task-name="' + esc(t.name) + '" title="Stop this task">Stop</button>' : '') +
       (!isTerminal ? '<button class="tasked-row-btn done-btn" type="button" data-row-action="complete" data-task-id="' + esc(t.id) + '" data-task-name="' + esc(t.name) + '" title="Mark as completed">Done</button>' : '') +
       '<a class="tasked-row-btn" href="' + previewUrl + '" title="Preview output" style="text-decoration:none">Preview</a>' +
@@ -1234,7 +1239,7 @@ Alert config example:
       '<td>' + esc(t.mode_label || t.mode) + '</td>' +
       '<td>' + esc(t.schedule_label || t.schedule_kind || '—') + '</td>' +
       '<td>' + statusBadge + '</td>' +
-      '<td><span class="tasked-row-meta">' + esc(t.current_step_id || latestRun.current_step_id || '—') + '</span><div class="tasked-row-meta">Trace: ' + esc((t.trace && t.trace.trace_id) || t.id || '—') + '</div></td>' +
+      '<td><span class="tasked-row-meta">' + esc(t.current_step_id || latestRun.current_step_id || '—') + '</span><div class="tasked-row-meta">Trace: ' + esc((t.trace && t.trace.trace_id) || t.id || '—') + '</div><div class="tasked-row-meta">' + esc((latestRun.execution_label || ((t.trace || {}).execution_label) || 'Execution pending')) + '</div></td>' +
       '<td>' + durationHtml + '</td>' +
       '<td>' + startTimeHtml + '</td>' +
       '<td>' + progressHtml + '</td>' +
@@ -1314,7 +1319,7 @@ Alert config example:
       });
     });
 
-    // Per-row action buttons: stop / complete / delete
+    // Per-row action buttons: rerun / clone-edit / stop / complete / delete
     tasksBody.querySelectorAll('[data-row-action]').forEach(function(btn) {
       btn.addEventListener('click', async function(e) {
         e.stopPropagation();
@@ -1329,6 +1334,12 @@ Alert config example:
           var data = await res.json();
           resultEl.textContent = data.ok ? ('Deleted task "' + (data.name || tid) + '".') : (data.error || 'Delete failed');
           if (data.ok && state.selectedId === tid) resetForm();
+        } else if (action === 'rerun') {
+          await runTaskAgain(tid, tname);
+          return;
+        } else if (action === 'clone-edit') {
+          await cloneTaskForEdit(tid, tname);
+          return;
         } else if (action === 'stop') {
           resultEl.textContent = 'Stopping "' + tname + '"…';
           var res = await fetch('/api/tasks/' + encodeURIComponent(tid) + '/stop', { method: 'POST' });
@@ -1378,6 +1389,55 @@ Alert config example:
         '<td>' + esc(String(detail).slice(0, 180)) + actionBtn + '</td>' +
       '</tr>';
     }).join('');
+  }
+
+  async function runTaskAgain(taskId, taskName) {
+    if (!taskId) {
+      resultEl.textContent = 'Save or select a Tasked row first.';
+      return;
+    }
+    var selected = state.tasks.find(function(item){ return item.id === taskId; }) || {};
+    var latestRun = selected.latest_run || {};
+    var action = latestRun.id ? 'redo' : 'start';
+    resultEl.textContent = (latestRun.id ? 'Running "' + taskName + '" again with the same trace…' : 'Starting "' + taskName + '"…');
+    var res = await fetch('/api/tasks/' + encodeURIComponent(taskId) + '/' + action, { method: 'POST' });
+    var data = await res.json();
+    if (!data.ok) {
+      resultEl.textContent = data.error || 'Run failed';
+      return;
+    }
+    var traceId = taskId;
+    var runLabel = data.execution_label || '';
+    resultEl.textContent = (data.text || 'Task run complete.') +
+      '\n\nTrace ID: ' + traceId +
+      '\nRun ID: ' + (data.run_id || '—') +
+      (runLabel ? ('\n' + runLabel) : '');
+    if (data.launch_url) {
+      window.open(data.launch_url, '_blank');
+    }
+    await loadTasks();
+    await loadRuns();
+  }
+
+  async function cloneTaskForEdit(taskId, taskName) {
+    if (!taskId) {
+      resultEl.textContent = 'Save or select a Tasked row first.';
+      return;
+    }
+    resultEl.textContent = 'Cloning "' + taskName + '" into a new editable Tasked row…';
+    var res = await fetch('/api/tasks/' + encodeURIComponent(taskId) + '/clone', { method: 'POST' });
+    var data = await res.json();
+    if (!data.ok || !data.task) {
+      resultEl.textContent = data.error || 'Clone failed';
+      return;
+    }
+    hydrateForm(data.task, {
+      asDraft: false,
+      resultText: 'Cloned from ' + taskId + '. New Trace ID: ' + (data.task.id || '—') + '. Edit it if you want, or run it as-is.'
+    });
+    resultEl.textContent = 'Cloned "' + taskName + '" into "' + (data.task.name || data.task.id || '') + '".\n\nOriginal Trace ID: ' + taskId + '\nNew Trace ID: ' + (data.task.id || '—') + '\nYou can edit before running.';
+    await loadTasks();
+    await loadRuns();
   }
 
   function tickDurations() {
@@ -1459,19 +1519,7 @@ Alert config example:
       resultEl.textContent = 'Save the Tasked row first.';
       return;
     }
-    resultEl.textContent = 'Running…';
-    var res = await fetch('/api/tasks/' + encodeURIComponent(fields.id.value.trim()) + '/start', { method: 'POST' });
-    var data = await res.json();
-    if (data.launch_url) {
-      resultEl.textContent = (data.text ? (data.text + '\n\n') : '') + 'Launch required:\n' + data.launch_url;
-      window.open(data.launch_url, '_blank');
-    } else if (data.ok) {
-      resultEl.textContent = (data.text || 'Tasked run complete.') + (data.alert_id ? '\n\nAlert #' + data.alert_id + ' created.' : '');
-    } else {
-      resultEl.textContent = data.error || 'Run failed';
-    }
-    await loadTasks();
-    await loadRuns();
+    await runTaskAgain(fields.id.value.trim(), fields.name.value.trim() || fields.id.value.trim());
   });
 
   async function taskAction(action, successLabel) {
@@ -1668,8 +1716,8 @@ Alert config example:
     bulkAction('delete_all', 'Permanently delete ALL tasks?\n\nEvery task, run, alert and step record will be removed. Cannot be undone.');
   });
 
-  document.getElementById('task-repeat-btn').addEventListener('click', function() { taskAction('repeat', 'Repeating task'); });
-  document.getElementById('task-clone-btn').addEventListener('click', function() { taskAction('clone', 'Cloning task'); });
+  document.getElementById('task-repeat-btn').addEventListener('click', function() { runTaskAgain(fields.id.value.trim(), fields.name.value.trim() || fields.id.value.trim()); });
+  document.getElementById('task-clone-btn').addEventListener('click', function() { cloneTaskForEdit(fields.id.value.trim(), fields.name.value.trim() || fields.id.value.trim()); });
   document.getElementById('task-pause-btn').addEventListener('click', function() { taskAction('pause', 'Pausing task'); });
   document.getElementById('task-resume-btn').addEventListener('click', function() { taskAction('resume', 'Resuming task'); });
   document.getElementById('task-restart-btn').addEventListener('click', function() { taskAction('restart', 'Restarting task'); });

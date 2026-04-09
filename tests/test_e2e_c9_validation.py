@@ -313,9 +313,10 @@ class TestC9ParallelValidation:
         with urllib.request.urlopen(req, timeout=10) as resp:
             assert resp.status == 200
             html = resp.read().decode("utf-8", errors="replace")
-        # Dashboard shows target labels
-        assert "C1 copilot-api" in html, "C1 label missing from dashboard"
-        assert "C9" in html
+        # Dashboard shows the health-card grid and at least one stable target label.
+        assert "card-grid" in html, "Dashboard card grid missing"
+        assert "copilot-api" in html, "copilot-api label missing from dashboard"
+        assert "browser-auth" in html, "browser-auth label missing from dashboard"
 
     def test_c9_api_chat_sends_chat_mode(self):
         """POST /api/chat with chat_mode=deep must accept request (no error)."""

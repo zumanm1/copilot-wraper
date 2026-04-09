@@ -5,6 +5,46 @@
 ================================================================================
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🆕  REVALIDATED STATUS (this workspace)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[P-1] HIGH — Async _get_c3_session mock mismatch
+  Status : ✅ FIXED
+  Detail : Test coverage now uses async session getters compatible with the
+           BUG-4 refactor.
+
+[P-2] HIGH — X-Chat-Mode allegedly not reaching _c3_proxy_call
+  Status : ✅ CLOSED AS STALE TEST ASSUMPTION
+  Detail : Current contract is:
+             X-Chat-Mode → thinking depth on C1
+             X-Work-Mode → M365 work/web mode forwarded to C3
+           Runtime behavior already matched this; the old regression test did not.
+
+[P-3] MEDIUM — concurrent agent mode KeyError
+  Status : ✅ FIXED
+  Detail : Root cause was the test spy signature, not agent routing.
+           /api/validate passes extra kwargs to _chat_one; the old spy rejected them
+           before recording per-agent results.
+
+[P-4] MEDIUM — dashboard page-load assertion
+  Status : ✅ FIXED
+  Detail : The E2E assertion used an outdated exact label string. It now checks
+           stable dashboard markers instead of a renamed container label variant.
+
+[P-5] LOW — test_unit_agent_manager event loop / pytest-asyncio issue
+  Status : ✅ FIXED
+  Detail : Tests are now self-contained without local pytest-asyncio dependency.
+
+[P-7] LOW — C10/C11 service-name mismatch
+  Status : ✅ ALREADY FIXED IN CURRENT c3test TREE
+  Detail : C9 target URLs and docker-compose already point at c10b/c11b.
+
+[P-6] LOW — playwright install chromium
+  Status : ⏸ ENVIRONMENT STEP
+  Detail : Still optional and still requires a local browser install on the dev
+           machine. Not needed for the unit/regression fixes above.
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ✅  COMPLETED
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 

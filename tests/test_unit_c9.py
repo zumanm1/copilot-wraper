@@ -157,6 +157,26 @@ def _parse_c9_sse(raw_sse: str) -> list[dict]:
     return events
 
 
+def _create_tasked_task(c9_app, *, name: str, executor_prompt: str, trigger_mode: str = "json"):
+    payload = {
+        "name": name,
+        "mode": "chat",
+        "schedule_kind": "manual",
+        "interval_minutes": 0,
+        "tabs_required": 1,
+        "active": False,
+        "planner_prompt": "Run the task once and record the result.",
+        "executor_prompt": executor_prompt,
+        "trigger_mode": trigger_mode,
+        "trigger_text": "",
+    }
+    r = c9_app.post("/api/tasks", json=payload)
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ok"] is True
+    return body["task"]
+
+
 # ── TestClient fixture ────────────────────────────────────────────────────────
 
 @pytest.fixture
@@ -321,6 +341,10 @@ class TestC9PageRoutes:
         assert r.status_code == 200
         assert 'id="tasked-workflow-diagram"' in r.text
         assert "renderWorkflowDiagram" in r.text
+        assert "Run Again keeps the same Trace ID and creates a new execution number." in r.text
+        assert "Clone / Edit" in r.text
+        assert 'data-row-action="rerun"' in r.text
+        assert 'data-row-action="clone-edit"' in r.text
 
     def test_pipeline_page_returns_200(self, c9_app):
         r = c9_app.get("/piplinetask")
@@ -338,6 +362,43 @@ class TestC9PageRoutes:
         assert "Tasked Live Documentation" in r.text
         assert "Run All" in r.text
         assert "Validate All" in r.text
+        assert "TRACE-200" in r.text
+        assert "Editable Template Traces (TRACE-200 Series)" in r.text
+
+    def test_live_docs_api_returns_template_trace_series(self, c9_app):
+        r = c9_app.get("/api/tasked-live-doc/traces")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        traces = body["traces"]
+        assert [item["trace"] for item in traces] == [
+            "TRACE-200",
+            "TRACE-201",
+            "TRACE-202",
+            "TRACE-203",
+            "TRACE-204",
+            "TRACE-205",
+        ]
+        assert traces[0]["task_id"] == "task_trace_200"
+        assert traces[-1]["task_id"] == "task_trace_205"
+
+    def test_task_templates_expose_live_doc_trace_metadata(self, c9_app):
+        r = c9_app.get("/api/task-templates?include_archived=true")
+        assert r.status_code == 200
+        templates = r.json()["templates"]
+        weather = next(item for item in templates if item["key"] == "weather-dublin")
+        sandbox = next(item for item in templates if item["key"] == "sandbox-python-validate")
+        assert weather["live_doc_trace"] == "TRACE-200"
+        assert weather["live_doc_order"] == 200
+        assert sandbox["live_doc_trace"] == "TRACE-205"
+        assert sandbox["live_doc_order"] == 205
+
+    def test_live_doc_seeded_template_tasks_exist(self, c9_app):
+        r = c9_app.get("/api/tasks?include_archived=false")
+        assert r.status_code == 200
+        task_ids = {item["id"] for item in r.json()["tasks"]}
+        assert "task_trace_200" in task_ids
+        assert "task_trace_205" in task_ids
 
     def test_pairs_multi_agent_launcher_uses_main_prompt_input(self, c9_app):
         r = c9_app.get("/pairs")
@@ -723,6 +784,66 @@ class TestC9ApiValidate:
         assert "Upstream timeout" in (latest["response_excerpt"] or "")
 
 
+class TestC9TaskExecutionIdentity:
+    def test_rerun_keeps_trace_id_and_increments_execution_number(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        task = _create_tasked_task(
+            c9_app,
+            name="Execution identity task",
+            executor_prompt='{"triggered": false, "summary": "ok"}',
+        )
+
+        chat_result = {
+            "ok": True,
+            "http_status": 200,
+            "text": json.dumps({
+                "triggered": False,
+                "trigger": "Execution identity",
+                "title": "Execution identity",
+                "summary": "Stable trace, new execution",
+                "details": {"trace": task["id"]},
+            }),
+            "error": None,
+        }
+        with patch.object(c9_mod, "_chat_one", AsyncMock(return_value=chat_result)):
+            first = c9_app.post(f"/api/tasks/{task['id']}/run")
+            assert first.status_code == 200
+            assert first.json()["ok"] is True
+
+            second = c9_app.post(f"/api/tasks/{task['id']}/redo")
+            assert second.status_code == 200
+            second_body = second.json()
+            assert second_body["ok"] is True
+            assert second_body["task_id"] == task["id"]
+            assert second_body["run_id"] != first.json()["run_id"]
+
+        task_rows = c9_app.get("/api/tasks?include_archived=false").json()["tasks"]
+        latest = next(item for item in task_rows if item["id"] == task["id"])
+        assert latest["trace"]["trace_id"] == task["id"]
+        assert latest["latest_run"]["execution_number"] == 2
+        assert latest["latest_run"]["execution_label"] == "Execution #2"
+
+        runs = c9_app.get(f"/api/task-runs?task_id={task['id']}&limit=10").json()["runs"]
+        assert [item["execution_number"] for item in runs] == [2, 1]
+        assert runs[0]["trace_id"] == task["id"]
+
+    def test_clone_creates_new_trace_id_for_editing(self, c9_app):
+        task = _create_tasked_task(
+            c9_app,
+            name="Clone identity task",
+            executor_prompt='{"triggered": false, "summary": "ok"}',
+        )
+
+        r = c9_app.post(f"/api/tasks/{task['id']}/clone")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        cloned = body["task"]
+        assert cloned["id"] != task["id"]
+        assert cloned["trace"]["trace_id"] == cloned["id"]
+
+
 class TestC9AgentAndAgento:
     def test_agent_stop_endpoint_updates_session_status(self, c9_app):
         import c9_jokes.app as c9_mod
@@ -820,6 +941,189 @@ class TestC9AgentAndAgento:
 
         rows = c9_app.get("/api/ma/sessions").json()
         assert any(row["status"] == "completed" for row in rows)
+
+
+class TestC9TaskedWorkflow:
+    def test_tasked_chat_refusal_fails_run_and_does_not_create_alert(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        task = _create_tasked_task(
+            c9_app,
+            name="Weather refusal regression",
+            executor_prompt="Check weather and return JSON",
+        )
+
+        refusal = "Sorry, it looks like I can’t respond to this. Let’s try a different topic"
+        with patch.object(
+            c9_mod,
+            "_chat_one",
+            AsyncMock(return_value={"ok": True, "http_status": 200, "text": refusal, "error": None}),
+        ):
+            r_run = c9_app.post(f"/api/tasks/{task['id']}/run")
+
+        assert r_run.status_code == 400
+        assert r_run.json()["status"] == "failed"
+
+        r_runs = c9_app.get(f"/api/task-runs?task_id={task['id']}")
+        latest_run = r_runs.json()["runs"][0]
+        assert latest_run["status"] == "failed"
+        assert latest_run["terminal_reason"] == "chat-failed"
+
+        r_alerts = c9_app.get("/api/alerts?limit=200")
+        alerts = [a for a in r_alerts.json()["alerts"] if a["task_id"] == task["id"]]
+        assert alerts == []
+
+        r_completed = c9_app.get(f"/api/task-completed?task_id={task['id']}")
+        items = r_completed.json()["items"]
+        assert len(items) == 1
+        assert items[0]["run"]["status"] == "failed"
+        assert items[0]["latest_alert"] is None
+
+    def test_tasked_json_trigger_false_skips_alert_and_still_completes(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        task = _create_tasked_task(
+            c9_app,
+            name="Weather below threshold",
+            executor_prompt="Check weather and return JSON",
+        )
+
+        with patch.object(
+            c9_mod,
+            "_chat_one",
+            AsyncMock(return_value={
+                "ok": True,
+                "http_status": 200,
+                "text": json.dumps({
+                    "triggered": False,
+                    "trigger": "Dublin weather",
+                    "title": "Weather below threshold",
+                    "summary": "Temperature is 8C",
+                    "details": {"location": "Dublin", "temperature_c": 8.0, "condition": "Cloudy"},
+                }),
+                "error": None,
+            }),
+        ):
+            r_run = c9_app.post(f"/api/tasks/{task['id']}/run")
+
+        assert r_run.status_code == 200
+        assert r_run.json()["status"] == "completed"
+
+        r_alerts = c9_app.get("/api/alerts?limit=200")
+        alerts = [a for a in r_alerts.json()["alerts"] if a["task_id"] == task["id"]]
+        assert alerts == []
+
+        r_pipe = c9_app.get(f"/api/task-pipelines?task_id={task['id']}")
+        pipe = r_pipe.json()["pipelines"][0]
+        step_status = {step["step_kind"]: step["status"] for step in pipe["steps"]}
+        assert step_status["chat"] == "completed"
+        assert step_status["alert"] == "skipped"
+        assert pipe["run"]["status"] == "completed"
+
+        r_completed = c9_app.get(f"/api/task-completed?task_id={task['id']}")
+        items = r_completed.json()["items"]
+        assert len(items) == 1
+        assert items[0]["run"]["status"] == "completed"
+        assert items[0]["latest_alert"] is None
+
+    def test_tasked_sandbox_success_skips_alert_with_failure_only_trigger(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        payload = {
+            "name": "Sandbox success regression",
+            "mode": "sandbox",
+            "schedule_kind": "manual",
+            "interval_minutes": 0,
+            "tabs_required": 1,
+            "active": False,
+            "executor_target": "c12b",
+            "workspace_dir": "/workspace",
+            "planner_prompt": "Run the sandbox flow once and record the result.",
+            "executor_prompt": "python3 smoke.py",
+            "validation_command": "python3 -m py_compile smoke.py",
+            "test_command": "python3 smoke.py",
+            "trigger_mode": "contains",
+            "trigger_text": "",
+        }
+        r_task = c9_app.post("/api/tasks", json=payload)
+        assert r_task.status_code == 200
+        task = r_task.json()["task"]
+
+        stage_results = [
+            {"stdout": "5\n", "stderr": "", "exit_code": 0, "session_id": "sess_1"},
+            {"stdout": "", "stderr": "", "exit_code": 0, "session_id": "sess_1"},
+            {"stdout": "5\n", "stderr": "", "exit_code": 0, "session_id": "sess_1"},
+        ]
+        with patch.object(c9_mod, "_c12b_exec", AsyncMock(side_effect=stage_results)):
+            r_run = c9_app.post(f"/api/tasks/{task['id']}/run")
+
+        assert r_run.status_code == 200
+        assert r_run.json()["status"] == "completed"
+
+        r_alerts = c9_app.get("/api/alerts?limit=200")
+        alerts = [a for a in r_alerts.json()["alerts"] if a["task_id"] == task["id"]]
+        assert alerts == []
+
+        r_completed = c9_app.get(f"/api/task-completed?task_id={task['id']}")
+        items = r_completed.json()["items"]
+        assert len(items) == 1
+        assert items[0]["run"]["status"] == "completed"
+        assert items[0]["latest_alert"] is None
+
+    def test_builtin_weather_template_migrates_legacy_prompt(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        c9_mod._ensure_db()
+        with sqlite3.connect(c9_mod.DEFAULT_DB) as conn:
+            conn.execute(
+                "UPDATE task_templates SET executor_prompt=? WHERE key='weather-dublin' AND source='builtin'",
+                (c9_mod.WEATHER_DUBLIN_LEGACY_PROMPT,),
+            )
+
+        c9_mod._ensure_task_templates_seeded()
+
+        r = c9_app.get("/api/task-templates")
+        assert r.status_code == 200
+        weather = next(t for t in r.json()["templates"] if t["key"] == "weather-dublin")
+        assert weather["executor_prompt"] == c9_mod.WEATHER_DUBLIN_PROMPT
+
+    def test_builtin_portal_templates_migrate_legacy_prompts(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        c9_mod._ensure_db()
+        with sqlite3.connect(c9_mod.DEFAULT_DB) as conn:
+            conn.execute(
+                "UPDATE task_templates SET executor_prompt=? WHERE key='gmail-sender' AND source='builtin'",
+                (c9_mod.GMAIL_SENDER_LEGACY_PROMPT,),
+            )
+            conn.execute(
+                "UPDATE task_templates SET executor_prompt=? WHERE key='sharepoint-new-file' AND source='builtin'",
+                (c9_mod.SHAREPOINT_NEW_FILE_LEGACY_PROMPT,),
+            )
+            conn.execute(
+                "UPDATE task_templates SET executor_prompt=? WHERE key='m365-outlook-alert' AND source='builtin'",
+                (c9_mod.M365_OUTLOOK_ALERT_LEGACY_PROMPT,),
+            )
+            conn.execute(
+                "UPDATE task_templates SET executor_prompt=? WHERE key='outlook-sharepoint-linked' AND source='builtin'",
+                (c9_mod.OUTLOOK_SHAREPOINT_LINKED_LEGACY_PROMPT,),
+            )
+            conn.execute(
+                "UPDATE task_templates SET trigger_mode=?, trigger_text=? WHERE key='sandbox-python-validate' AND source='builtin'",
+                (c9_mod.SANDBOX_VALIDATE_LEGACY_TRIGGER_MODE, c9_mod.SANDBOX_VALIDATE_LEGACY_TRIGGER_TEXT),
+            )
+
+        c9_mod._ensure_task_templates_seeded()
+
+        r = c9_app.get("/api/task-templates")
+        assert r.status_code == 200
+        templates = {t["key"]: t for t in r.json()["templates"]}
+        assert templates["gmail-sender"]["executor_prompt"] == c9_mod.GMAIL_SENDER_PROMPT
+        assert templates["sharepoint-new-file"]["executor_prompt"] == c9_mod.SHAREPOINT_NEW_FILE_PROMPT
+        assert templates["m365-outlook-alert"]["executor_prompt"] == c9_mod.M365_OUTLOOK_ALERT_PROMPT
+        assert templates["outlook-sharepoint-linked"]["executor_prompt"] == c9_mod.OUTLOOK_SHAREPOINT_LINKED_PROMPT
+        assert templates["sandbox-python-validate"]["trigger_mode"] == c9_mod.SANDBOX_VALIDATE_TRIGGER_MODE
+        assert templates["sandbox-python-validate"]["trigger_text"] == c9_mod.SANDBOX_VALIDATE_TRIGGER_TEXT
 
 
 # ── /pairs page: header correctness tests ────────────────────────────────────
