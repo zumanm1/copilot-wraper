@@ -295,14 +295,28 @@ class TestC9PageRoutes:
     def test_agent_page_stop_button_calls_backend_stop(self, c9_app):
         r = c9_app.get("/agent")
         assert r.status_code == 200
+        assert 'body class="workspace-page"' in r.text
+        assert '<main class="workspace-main">' in r.text
         assert "/api/agent/stop" in r.text
         assert "refreshHistory()" in r.text
+        assert "margin: -1.25rem;" not in r.text
+
+    def test_multi_agent_page_uses_full_bleed_workspace_shell(self, c9_app):
+        r = c9_app.get("/multi-agent")
+        assert r.status_code == 200
+        assert 'body class="workspace-page"' in r.text
+        assert '<main class="workspace-main">' in r.text
+        assert "margin: -1.25rem;" not in r.text
+        assert "background: linear-gradient(180deg, var(--bg) 0%, #0a0a0a 100%);" in r.text
 
     def test_multi_agento_page_stop_button_calls_backend_stop(self, c9_app):
         r = c9_app.get("/multi-Agento")
         assert r.status_code == 200
+        assert 'body class="workspace-page"' in r.text
+        assert '<main class="workspace-main">' in r.text
         assert "/api/ma/stop/" in r.text
         assert "multi-Agento session cancelled by user." in r.text
+        assert "margin: -1.25rem;" not in r.text
 
     def test_logs_page_returns_200(self, c9_app):
         r = c9_app.get("/logs")

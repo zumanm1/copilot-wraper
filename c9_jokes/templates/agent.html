@@ -1,5 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Agent Workspace{% endblock %}
+{% block body_class %}workspace-page{% endblock %}
+{% block main_class %}workspace-main{% endblock %}
 {% block content %}
 
 <style>
@@ -13,9 +15,10 @@
   grid-template-columns: 220px 260px 1fr;
   grid-template-rows: auto 1fr;
   gap: 0;
+  width: 100%;
   height: calc(100vh - 100px);
   min-height: 600px;
-  margin: -1.25rem;
+  min-width: 0;
   overflow: hidden;
   background: linear-gradient(180deg, var(--bg) 0%, #0a0a0a 100%);
 }
@@ -125,6 +128,7 @@
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
+  min-width: 0;
   padding: 0.5rem 1rem;
   border-bottom: 1px solid rgba(255,255,255,0.06);
   background: linear-gradient(180deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%);
@@ -205,6 +209,7 @@
 .agent-filetree {
   grid-column: 2;
   grid-row: 2;
+  min-width: 0;
   border-right: 1px solid rgba(255,255,255,0.06);
   background: linear-gradient(180deg, rgba(255,255,255,0.02) 0%, rgba(255,255,255,0.01) 100%);
   overflow-y: auto;
@@ -435,6 +440,7 @@
   grid-row: 2;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   overflow: hidden;
   background: var(--bg);
 }

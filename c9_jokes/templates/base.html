@@ -6,7 +6,7 @@
   <title>{% block title %}APP C9{% endblock %} — Stack validation</title>
   <link rel="stylesheet" href="{{ url_for('static', path='style.css') }}"/>
 </head>
-<body>
+<body class="{% block body_class %}{% endblock %}">
   <style>
   /* ── Nav groups ── */
   nav { display:flex; align-items:center; gap:0; flex-wrap:wrap; }
@@ -238,7 +238,7 @@
     setInterval(refreshGlobalTokens, 60000);
   })();
   </script>
-  <main>
+  <main class="{% block main_class %}{% endblock %}">
     {% block content %}{% endblock %}
   </main>
   <footer>Read-only observer — does not modify C1–C8 stack config or C3 cookies; C10/C11 sandboxes are exercised only via documented Agent / multi-Agent APIs.</footer>
