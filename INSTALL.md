@@ -1,6 +1,6 @@
 # Installation Guide — Copilot OpenAI-Compatible API Wrapper
 
-> **Fresh-machine setup for Linux and macOS — from GitHub clone to all 13 runtime containers running.**
+> **Fresh-machine setup for Linux and macOS — from GitHub clone to the full runtime stack running.**
 
 ---
 
@@ -10,7 +10,7 @@
 
 ```bash
 git clone https://github.com/zumanm1/copilot-wraper.git
-cd copilot-wraper
+cd copilot-wraper/copilot-openai-wrapper
 cp .env.example .env
 ```
 
@@ -84,7 +84,7 @@ docker compose --profile optional up c12b-sandbox -d                   # C12b
 
 ## 1. Overview
 
-This project wraps Microsoft Copilot behind a standard OpenAI- and Anthropic-compatible REST API. Thirteen runtime containers handle the full stack:
+This project wraps Microsoft Copilot behind a standard OpenAI- and Anthropic-compatible REST API. The full compose file defines twelve primary runtime containers plus one separate test container:
 
 | # | Container | Port(s) | What it does |
 |---|---|---|---|
@@ -102,6 +102,27 @@ This project wraps Microsoft Copilot behind a standard OpenAI- and Anthropic-com
 | C12b | `c12b-sandbox` | **8210** (host) | Lean coding/test sandbox for Tasked pipeline `/api/sandbox/exec` |
 
 All containers share the `copilot-net` Docker bridge network. Only the ports listed above are exposed to the host.
+
+### Compose project and runtime naming
+
+- Docker Compose project name: `c3btest-feed`
+- `docker compose build` and `docker compose up` use **service names** such as `app`, `browser-auth`, and `c9-jokes`
+- Running containers appear with the explicit `container_name` values from [`docker-compose.yml`](docker-compose.yml), such as `C1b_copilot-api` and `C9b_jokes`
+
+| Service | Image | Running container |
+|---|---|---|
+| `app` | `copilot-api:latest` | `C1b_copilot-api` |
+| `agent-terminal` | `copilot-agent-terminal:latest` | `C2b_agent-terminal` |
+| `browser-auth` | `copilot-browser-auth:latest` | `C3b_browser-auth` |
+| `claude-code-terminal` | `copilot-claude-code-terminal:latest` | `C5b_claude-code` |
+| `kilocode-terminal` | `copilot-kilocode-terminal:latest` | `C6b_kilocode` |
+| `openclaw-gateway` | `copilot-openclaw-gateway:latest` | `C7ab_openclaw-gateway` |
+| `openclaw-cli` | `copilot-openclaw-cli:latest` | `C7bb_openclaw-cli` |
+| `hermes-agent` | `copilot-hermes-agent:latest` | `C8b_hermes-agent` |
+| `c9-jokes` | `copilot-c9-jokes:latest` | `C9b_jokes` |
+| `c10-sandbox` | `copilot-c10-sandbox:latest` | `C10b_sandbox` |
+| `c11-sandbox` | `copilot-c11-sandbox:latest` | `C11b_sandbox` |
+| `c12b-sandbox` | `copilot-c12b-sandbox:latest` | `C12b_sandbox` |
 
 ---
 
@@ -370,24 +391,26 @@ If the noVNC flow doesn't work (corporate proxy, VPN, etc.):
 
 ## 8. Start the Full Stack
 
-After authentication, start **all 13 containers** with a single command:
+After authentication, start the runtime using the compose **service names** below. The compose project is `c3btest-feed`, and the running container names will be the `C*b_*` names shown above.
+
+Because several services are under `profiles: ["optional"]`, `docker compose up -d` by itself does **not** start the full runtime.
 
 ```bash
-docker compose up -d
+docker compose up app browser-auth kilocode-terminal c9-jokes c10-sandbox c11-sandbox -d
+docker compose --profile optional up agent-terminal claude-code-terminal openclaw-gateway openclaw-cli hermes-agent c12b-sandbox -d
 docker compose ps
 ```
 
-This starts **all three groups simultaneously** — CORE, AI Agents, and Sandboxes. The first full start takes ~30–60 seconds for all health checks to pass.
+This starts the full runtime in two groups: non-profile services first, then optional-profile services. The first full start still takes ~30–60 seconds for all health checks to pass.
 
 ### Container groups started by default
 
-| Group | Containers | What starts |
+| Group | Compose service names | Running containers |
 |---|---|---|
-| 🔷 **CORE** | C1b · C3b · C6b · C9b | API, Auth browser, KiloCode, Console — **always on** |
-| 🤖 **AI AGENTS** | C2b · C5b · C7ab · C7bb · C8b | Aider, Claude Code, OpenClaw, Hermes — started with full stack |
-| 📦 **SANDBOX** | C10b · C11b · C12b | Agent/multi-agent/pipeline sandboxes — started with full stack |
+| 🔷 **CORE + built-in sandboxes** | `app` `browser-auth` `kilocode-terminal` `c9-jokes` `c10-sandbox` `c11-sandbox` | `C1b_copilot-api` `C3b_browser-auth` `C6b_kilocode` `C9b_jokes` `C10b_sandbox` `C11b_sandbox` |
+| 🤖 **AI AGENTS + lean sandbox** | `agent-terminal` `claude-code-terminal` `openclaw-gateway` `openclaw-cli` `hermes-agent` `c12b-sandbox` | `C2b_agent-terminal` `C5b_claude-code` `C7ab_openclaw-gateway` `C7bb_openclaw-cli` `C8b_hermes-agent` `C12b_sandbox` |
 
-> **No extra steps needed.** `docker compose up -d` starts everything. Use the **Container Manager** at `http://localhost:6090/` to stop, restart, rebuild, or view logs for any individual container — no CLI required.
+> Use the **Container Manager** at `http://localhost:6090/` to stop, restart, rebuild, or view logs for any individual container after the runtime is up.
 
 ### Full health check
 
@@ -396,7 +419,7 @@ This starts **all three groups simultaneously** — CORE, AI Agents, and Sandbox
 curl http://localhost:8000/health      # C1b — API
 curl http://localhost:8001/health      # C3b — Auth
 curl http://localhost:6090/api/status  # C9b — Console
-docker compose ps                      # See all 13 containers
+docker compose ps                      # See the c3btest-feed project containers
 ```
 
 ### 8.1 Lean startup (low-memory machines only)
@@ -435,7 +458,7 @@ docker stop C10b_sandbox C11b_sandbox C12b_sandbox
 ```bash
 # 1. Clone
 git clone https://github.com/zumanm1/copilot-wraper.git
-cd copilot-wraper
+cd copilot-wraper/copilot-openai-wrapper
 cp .env.example .env
 
 # 2. Build CORE images first (~8 min)
@@ -629,8 +652,11 @@ git pull
 # Rebuild any changed images
 docker compose build
 
-# Restart with new images (zero downtime for unchanged containers)
-docker compose up -d
+# Restart the non-profile runtime
+docker compose up app browser-auth kilocode-terminal c9-jokes c10-sandbox c11-sandbox -d
+
+# Restart optional-profile services if you use them
+docker compose --profile optional up agent-terminal claude-code-terminal openclaw-gateway openclaw-cli hermes-agent c12b-sandbox -d
 
 # Check all containers came up healthy
 docker compose ps
@@ -900,7 +926,8 @@ docker system prune -f
 
 # Rebuild from scratch
 docker compose build --no-cache
-docker compose up -d
+docker compose up app browser-auth kilocode-terminal c9-jokes c10-sandbox c11-sandbox -d
+docker compose --profile optional up agent-terminal claude-code-terminal openclaw-gateway openclaw-cli hermes-agent c12b-sandbox -d
 ```
 
 ---

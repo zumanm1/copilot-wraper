@@ -30,7 +30,7 @@ Microsoft Copilot is a powerful AI assistant with no official public API. This p
 - **OpenAI-compatible** — `/v1/chat/completions` works with any OpenAI SDK, LangChain, AutoGen, Open WebUI, Aider, OpenCode, KiloCode, and more
 - **Anthropic-compatible** — `/v1/messages` works with Claude Code, the Anthropic SDK, and any client that targets Claude's API
 
-Thirteen Docker containers make up the full stack:
+The compose file defines twelve primary runtime containers plus one separate test container:
 
 ```
 Your App / OpenAI SDK / Claude Code / Hermes / ...
@@ -165,6 +165,8 @@ Host Machine
 
 > See **[INSTALL.md](INSTALL.md)** for a complete step-by-step guide with Linux and macOS platform notes, build-time estimates, and a full troubleshooting section.
 
+Docker Compose uses the project name `c3btest-feed` from [`docker-compose.yml`](docker-compose.yml). `docker compose build` and `docker compose up` use **service names** such as `app` and `c9-jokes`, while the running containers appear as `C1b_copilot-api`, `C9b_jokes`, and the other explicit `container_name` values.
+
 ### Prerequisites
 
 | Requirement | macOS | Linux (Ubuntu/Debian) |
@@ -288,6 +290,23 @@ docker compose --profile optional up agent-terminal claude-code-terminal opencla
 docker compose ps
 ```
 
+**Service name → image → running container**
+
+| Compose service | Image | Running container |
+|---|---|---|
+| `app` | `copilot-api:latest` | `C1b_copilot-api` |
+| `agent-terminal` | `copilot-agent-terminal:latest` | `C2b_agent-terminal` |
+| `browser-auth` | `copilot-browser-auth:latest` | `C3b_browser-auth` |
+| `claude-code-terminal` | `copilot-claude-code-terminal:latest` | `C5b_claude-code` |
+| `kilocode-terminal` | `copilot-kilocode-terminal:latest` | `C6b_kilocode` |
+| `openclaw-gateway` | `copilot-openclaw-gateway:latest` | `C7ab_openclaw-gateway` |
+| `openclaw-cli` | `copilot-openclaw-cli:latest` | `C7bb_openclaw-cli` |
+| `hermes-agent` | `copilot-hermes-agent:latest` | `C8b_hermes-agent` |
+| `c9-jokes` | `copilot-c9-jokes:latest` | `C9b_jokes` |
+| `c10-sandbox` | `copilot-c10-sandbox:latest` | `C10b_sandbox` |
+| `c11-sandbox` | `copilot-c11-sandbox:latest` | `C11b_sandbox` |
+| `c12b-sandbox` | `copilot-c12b-sandbox:latest` | `C12b_sandbox` |
+
 > **Low-memory machine?** Start CORE only, add groups on demand:
 >
 > ```bash
@@ -307,7 +326,7 @@ docker compose ps
 
 ### Step 7 — Verify all containers
 
-Run these checks after `docker compose up -d`:
+Run these checks after the Step 6 startup commands:
 
 ```bash
 # C1 — FastAPI API server
@@ -920,7 +939,7 @@ HERMES_HOME=/root/.hermes   (persisted via Docker volume)
 
 ## 9. Terminal Commands Reference
 
-All commands are run from the project root directory on your **host machine**. All containers must be running (`docker compose up -d`).
+All commands are run from the project root directory on your **host machine**. Start the needed services first using the Step 6 commands for the `c3btest-feed` compose project.
 
 ### Health checks
 
