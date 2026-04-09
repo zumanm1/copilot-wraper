@@ -253,13 +253,15 @@
     var run = item.run || {};
     var feedbackSummary = (item.feedback || []).map(function(entry){ return (entry.agent_id || 'agent') + ': ' + (entry.summary || entry.status || 'feedback'); }).join('\n');
     var latestAlert = item.latest_alert || {};
+    var templateLabel = item.task_template_label || item.task_template_key || 'custom';
+    var templateSummary = item.task_template_summary || templateLabel;
     var runStatus = run.status || '—';
     var statusCls = runStatus.toLowerCase().replace(/[^a-z-]/g, '');
     var alertStatus = latestAlert.status || '—';
     var alertCls = alertStatus.toLowerCase().replace(/[^a-z-]/g, '');
     return '<article class="tc-item">' +
       '<div class="tc-item-header">' +
-        '<div class="tc-item-title"><strong>' + esc(item.task_name || run.task_id || 'Tasked') + '</strong><div class="tc-item-meta">Task ID: ' + esc(run.task_id || '—') + ' · Run ID: ' + esc(run.id || '—') + ' · Trace: ' + esc(run.trace_id || run.task_id || '—') + '</div></div>' +
+        '<div class="tc-item-title"><strong>' + esc(item.task_name || run.task_id || 'Tasked') + '</strong><div class="tc-item-meta">Task ID: ' + esc(run.task_id || '—') + ' · Run ID: ' + esc(run.id || '—') + ' · Trace: ' + esc(run.trace_id || run.task_id || '—') + '</div><div class="tc-item-meta">Template: ' + esc(templateLabel) + ' · ' + esc(templateSummary) + '</div></div>' +
         '<div class="tc-actions">' +
           '<button class="tc-btn" data-task-action="redo" data-task-id="' + esc(run.task_id || '') + '">Redo</button>' +
           '<button class="tc-btn" data-task-action="clone" data-task-id="' + esc(run.task_id || '') + '">Clone Task</button>' +
@@ -278,7 +280,7 @@
         '<div class="tc-stat"><strong><span class="alerts-badge ' + esc(alertCls) + '">' + esc(alertStatus) + '</span></strong><span>Latest alert</span></div>' +
         '<div class="tc-stat"><strong>' + esc(item.task_archived ? 'yes' : 'no') + '</strong><span>Definition archived</span></div>' +
       '</div>' +
-      '<div class="tc-detail"><h3>Completion trace</h3><div class="tc-pre">Finished: ' + esc(fmtTs(run.completed_at || run.finished_at)) + '\nReason: ' + esc(run.terminal_reason || '—') + '\nAlert ID: ' + esc(latestAlert.id || '—') + '\nAlert status: ' + esc(latestAlert.status || '—') + '\nRecovery: ' + esc(((item.latest_recovery_session || {}).status) || 'steady') + '\nRecovery error: ' + esc(((item.latest_recovery_session || {}).last_error) || '—') + '\n\nFeedback summary:\n' + esc(feedbackSummary || 'No agent feedback on this run.') + '</div></div>' +
+      '<div class="tc-detail"><h3>Completion trace</h3><div class="tc-pre">Finished: ' + esc(fmtTs(run.completed_at || run.finished_at)) + '\nReason: ' + esc(run.terminal_reason || '—') + '\nTemplate: ' + esc(templateLabel) + '\nTemplate summary: ' + esc(templateSummary) + '\nAlert ID: ' + esc(latestAlert.id || '—') + '\nAlert status: ' + esc(latestAlert.status || '—') + '\nRecovery: ' + esc(((item.latest_recovery_session || {}).status) || 'steady') + '\nRecovery error: ' + esc(((item.latest_recovery_session || {}).last_error) || '—') + '\n\nFeedback summary:\n' + esc(feedbackSummary || 'No agent feedback on this run.') + '</div></div>' +
     '</article>';
   }
   async function loadCompleted() {

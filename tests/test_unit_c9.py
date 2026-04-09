@@ -361,6 +361,19 @@ class TestC9PageRoutes:
         assert 'data-row-action="rerun"' in r.text
         assert 'data-row-action="clone-edit"' in r.text
 
+    def test_tasked_page_exposes_distance_and_combo_template_controls(self, c9_app):
+        r = c9_app.get("/tasked")
+        assert r.status_code == 200
+        html = r.text
+        assert "Refine with AI agent first" in html
+        assert 'id="task-distance-from-location"' in html
+        assert 'id="task-distance-to-location"' in html
+        assert 'id="task-distance-comparator"' in html
+        assert 'id="task-distance-threshold"' in html
+        assert "Use combo / multiple templates" in html
+        assert 'id="task-chain-operator"' in html
+        assert 'id="task-chain-add-template"' in html
+
     def test_pipeline_page_returns_200(self, c9_app):
         r = c9_app.get("/piplinetask")
         assert r.status_code == 200
@@ -379,10 +392,23 @@ class TestC9PageRoutes:
         assert "Validate All" in r.text
         assert "TRACE-200" in r.text
         assert "TRACE-206" in r.text
-        assert "Editable Template Traces (TRACE-200 Series)" in r.text
-        assert "Dublin weather template is mirrored twice" in r.text
+        assert "TRACE-300" in r.text
+        assert "TRACE-301" in r.text
+        assert "TRACE-400" in r.text
+        assert "TRACE-401" in r.text
+        assert "TRACE-500" in r.text
+        assert "TRACE-501" in r.text
+        assert "Editable Template Traces (TRACE-200 / TRACE-300 / TRACE-400 / TRACE-500 Series)" in r.text
+        assert "These thirteen traces are DB-backed mirrors" in r.text
+        assert "Dublin weather template, the Dublin-to-Cork distance template, the Dublin combo AND template, and the Dublin combo NOR template are each mirrored twice" in r.text
         assert "Dublin, Ireland" in r.text
         assert "above 50C" in r.text
+        assert "below 1000 km" in r.text
+        assert "above 100 km" in r.text
+        assert "positive AND chain" in r.text
+        assert "negative AND chain" in r.text
+        assert "positive NOR chain" in r.text
+        assert "negative NOR chain" in r.text
 
     def test_live_docs_api_returns_template_trace_series(self, c9_app):
         r = c9_app.get("/api/tasked-live-doc/traces")
@@ -398,23 +424,56 @@ class TestC9PageRoutes:
             "TRACE-204",
             "TRACE-205",
             "TRACE-206",
+            "TRACE-300",
+            "TRACE-301",
+            "TRACE-400",
+            "TRACE-401",
+            "TRACE-500",
+            "TRACE-501",
         ]
-        assert traces[0]["task_id"] == "task_trace_200"
-        assert traces[-1]["task_id"] == "task_trace_206"
-        assert traces[0]["expect_alert"] == "required"
-        assert traces[0]["template_data"]["weather_location"] == "Dublin, Ireland"
-        assert traces[0]["template_data"]["temperature_threshold_c"] == 0.0
-        assert traces[-1]["expect_alert"] == "none"
-        assert traces[-1]["template_data"]["temperature_threshold_c"] == 50.0
+        by_trace = {item["trace"]: item for item in traces}
+        assert by_trace["TRACE-200"]["task_id"] == "task_trace_200"
+        assert by_trace["TRACE-200"]["expect_alert"] == "required"
+        assert by_trace["TRACE-200"]["template_data"]["weather_location"] == "Dublin, Ireland"
+        assert by_trace["TRACE-200"]["template_data"]["temperature_threshold_c"] == 0.0
+        assert by_trace["TRACE-301"]["task_id"] == "task_trace_301"
+        assert by_trace["TRACE-301"]["template_key"] == "distance-between-cities"
+        assert by_trace["TRACE-301"]["template_data"]["distance_threshold_km"] == 100.0
+        assert by_trace["TRACE-301"]["template_data"]["distance_comparator"] == "lt"
+        assert by_trace["TRACE-400"]["template_key"] == "template-chain"
+        assert by_trace["TRACE-400"]["expect_alert"] == "required"
+        assert by_trace["TRACE-400"]["template_data"]["chain_operator"] == "AND"
+        assert [item["template_key"] for item in by_trace["TRACE-400"]["template_data"]["chain_items"]] == [
+            "distance-between-cities",
+            "weather-dublin",
+        ]
+        assert by_trace["TRACE-401"]["template_key"] == "template-chain"
+        assert by_trace["TRACE-401"]["template_data"]["chain_operator"] == "AND"
+        assert by_trace["TRACE-500"]["template_key"] == "template-chain"
+        assert by_trace["TRACE-500"]["expect_alert"] == "required"
+        assert by_trace["TRACE-500"]["template_data"]["chain_operator"] == "NOR"
+        assert [item["template_key"] for item in by_trace["TRACE-500"]["template_data"]["chain_items"]] == [
+            "distance-between-cities",
+            "weather-dublin",
+        ]
+        assert by_trace["TRACE-501"]["template_key"] == "template-chain"
+        assert by_trace["TRACE-501"]["expect_alert"] == "none"
+        assert by_trace["TRACE-501"]["template_data"]["chain_operator"] == "NOR"
 
     def test_task_templates_expose_live_doc_trace_metadata(self, c9_app):
         r = c9_app.get("/api/task-templates?include_archived=true")
         assert r.status_code == 200
         templates = r.json()["templates"]
         weather = next(item for item in templates if item["key"] == "weather-dublin")
+        distance = next(item for item in templates if item["key"] == "distance-between-cities")
+        combo = next(item for item in templates if item["key"] == "template-chain")
         sandbox = next(item for item in templates if item["key"] == "sandbox-python-validate")
         assert weather["live_doc_trace"] == "TRACE-200"
         assert weather["live_doc_order"] == 200
+        assert distance["live_doc_trace"] == "TRACE-300"
+        assert distance["live_doc_order"] == 300
+        assert combo["live_doc_trace"] == "TRACE-400"
+        assert combo["live_doc_order"] == 400
         assert sandbox["live_doc_trace"] == "TRACE-205"
         assert sandbox["live_doc_order"] == 205
 
@@ -426,12 +485,42 @@ class TestC9PageRoutes:
         assert "task_trace_200" in task_ids
         assert "task_trace_205" in task_ids
         assert "task_trace_206" in task_ids
+        assert "task_trace_300" in task_ids
+        assert "task_trace_301" in task_ids
+        assert "task_trace_400" in task_ids
+        assert "task_trace_401" in task_ids
+        assert "task_trace_500" in task_ids
+        assert "task_trace_501" in task_ids
         positive = next(item for item in tasks if item["id"] == "task_trace_200")
         negative = next(item for item in tasks if item["id"] == "task_trace_206")
+        distance_positive = next(item for item in tasks if item["id"] == "task_trace_300")
+        distance_negative = next(item for item in tasks if item["id"] == "task_trace_301")
+        combo_positive = next(item for item in tasks if item["id"] == "task_trace_400")
+        combo_negative = next(item for item in tasks if item["id"] == "task_trace_401")
+        combo_nor_positive = next(item for item in tasks if item["id"] == "task_trace_500")
+        combo_nor_negative = next(item for item in tasks if item["id"] == "task_trace_501")
         assert positive["template_data"]["temperature_threshold_c"] == 0.0
         assert negative["template_data"]["temperature_threshold_c"] == 50.0
         assert "above 0" in positive["executor_prompt"]
         assert "above 50" in negative["executor_prompt"]
+        assert distance_positive["template_data"]["distance_threshold_km"] == 1000.0
+        assert distance_negative["template_data"]["distance_threshold_km"] == 100.0
+        assert "less than 1000" in distance_positive["executor_prompt"]
+        assert "less than 100" in distance_negative["executor_prompt"]
+        assert combo_positive["template_data"]["chain_operator"] == "AND"
+        assert combo_negative["template_data"]["chain_operator"] == "AND"
+        assert [item["template_key"] for item in combo_positive["template_data"]["chain_items"]] == [
+            "distance-between-cities",
+            "weather-dublin",
+        ]
+        assert "operator AND" in combo_positive["executor_prompt"]
+        assert combo_nor_positive["template_data"]["chain_operator"] == "NOR"
+        assert combo_nor_negative["template_data"]["chain_operator"] == "NOR"
+        assert [item["template_key"] for item in combo_nor_positive["template_data"]["chain_items"]] == [
+            "distance-between-cities",
+            "weather-dublin",
+        ]
+        assert "operator NOR" in combo_nor_positive["executor_prompt"]
 
     def test_pairs_multi_agent_launcher_uses_main_prompt_input(self, c9_app):
         r = c9_app.get("/pairs")
@@ -451,6 +540,185 @@ class TestC9PageRoutes:
         assert r.status_code == 200
         assert "runtime-badge" in r.text
         assert "/api/runtime-status" in r.text
+
+
+# ── Tasked authoring tests ────────────────────────────────────────────────────
+
+class TestTaskedAuthoring:
+    def test_draft_from_text_matches_distance_template(self, c9_app):
+        prompt = "what is km distance between Dublin and Cork if the distance is less than 100 km, create the alert, run once."
+        r = c9_app.post("/api/tasks/draft-from-text", json={
+            "prompt": prompt,
+            "strategy": "auto",
+            "mode_hint": "chat",
+        })
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body["strategy_used"] == "existing-template"
+        assert body["source"] == "heuristic-template"
+        assert body["authoring_engine"] == "local"
+        assert body["draft"]["template_key"] == "distance-between-cities"
+        assert body["draft"]["template_data"]["template_kind"] == "distance-threshold"
+        assert body["draft"]["template_data"]["from_location"] == "Dublin, Ireland"
+        assert body["draft"]["template_data"]["to_location"] == "Cork, Ireland"
+        assert body["draft"]["template_data"]["distance_threshold_km"] == 100.0
+        assert body["draft"]["template_data"]["distance_comparator"] == "lt"
+
+    def test_draft_from_text_can_use_agent_refinement_for_distance_template(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        prompt = "what is km distance between Dublin and Cork if the distance is less than 100 km, create the alert, run once."
+        llm_payload = {
+            "strategy": "existing-template",
+            "template_key": "distance-between-cities",
+            "template_data": {
+                "template_kind": "distance-threshold",
+                "from_location": "Dublin, Ireland",
+                "to_location": "Cork, Ireland",
+                "distance_threshold_km": 100.0,
+                "distance_comparator": "lt",
+            },
+            "explanation": "Matched the request to the closest editable distance template.",
+        }
+        with patch.object(
+            c9_mod,
+            "_chat_one",
+            AsyncMock(return_value={
+                "ok": True,
+                "http_status": 200,
+                "text": json.dumps(llm_payload),
+                "error": None,
+            }),
+        ):
+            r = c9_app.post("/api/tasks/draft-from-text", json={
+                "prompt": prompt,
+                "strategy": "auto",
+                "mode_hint": "chat",
+                "refine_with_agent": True,
+            })
+
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body["source"] == "llm"
+        assert body["authoring_engine"] == "m365-agent"
+        assert body["draft"]["template_key"] == "distance-between-cities"
+        assert body["draft"]["template_data"]["from_location"] == "Dublin, Ireland"
+        assert body["draft"]["template_data"]["to_location"] == "Cork, Ireland"
+        assert body["draft"]["template_data"]["distance_threshold_km"] == 100.0
+
+    def test_draft_from_text_builds_combo_chain_for_distance_and_weather(self, c9_app):
+        prompt = (
+            "what is km distance between Dublin and Cork if the distance is less than 100 km, create the alert, run once. "
+            "and also the temperature in dublin is above 5 degrees"
+        )
+        r = c9_app.post("/api/tasks/draft-from-text", json={
+            "prompt": prompt,
+            "strategy": "auto",
+            "mode_hint": "chat",
+        })
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body["source"] == "heuristic-chain"
+        assert body["draft"]["template_key"] == "template-chain"
+        assert body["draft"]["template_data"]["template_kind"] == "template-chain"
+        assert body["draft"]["template_data"]["chain_operator"] == "AND"
+        assert [item["template_key"] for item in body["draft"]["template_data"]["chain_items"]] == [
+            "distance-between-cities",
+            "weather-dublin",
+        ]
+        assert body["draft"]["template_data"]["chain_items"][0]["template_data"]["distance_threshold_km"] == 100.0
+        assert body["draft"]["template_data"]["chain_items"][1]["template_data"]["temperature_threshold_c"] == 5.0
+        assert "operator AND" in body["draft"]["executor_prompt"]
+
+    def test_draft_from_text_builds_or_combo_chain_for_distance_or_weather(self, c9_app):
+        prompt = (
+            "what is km distance between Dublin and Cork if the distance is less than 100 km, create the alert, run once, "
+            "or the temperature in dublin is above 5 degrees"
+        )
+        r = c9_app.post("/api/tasks/draft-from-text", json={
+            "prompt": prompt,
+            "strategy": "auto",
+            "mode_hint": "chat",
+        })
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body["source"] == "heuristic-chain"
+        assert body["draft"]["template_key"] == "template-chain"
+        assert body["draft"]["template_data"]["chain_operator"] == "OR"
+        assert [item["template_key"] for item in body["draft"]["template_data"]["chain_items"]] == [
+            "distance-between-cities",
+            "weather-dublin",
+        ]
+        assert "operator OR" in body["draft"]["executor_prompt"]
+
+    def test_draft_from_text_can_use_agent_refinement_for_combo_nor_chain(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        prompt = "Alert only when neither the Dublin to Cork distance is less than 100 km nor the temperature in Dublin is above 50 degrees."
+        llm_payload = {
+            "strategy": "freehand",
+            "template_key": "template-chain",
+            "template_data": {
+                "template_kind": "template-chain",
+                "chain_operator": "NOR",
+                "chain_items": [
+                    {
+                        "template_key": "distance-between-cities",
+                        "template_data": {
+                            "template_kind": "distance-threshold",
+                            "from_location": "Dublin, Ireland",
+                            "to_location": "Cork, Ireland",
+                            "distance_threshold_km": 100.0,
+                            "distance_comparator": "lt",
+                        },
+                    },
+                    {
+                        "template_key": "weather-dublin",
+                        "template_data": {
+                            "template_kind": "weather-threshold",
+                            "weather_location": "Dublin, Ireland",
+                            "temperature_threshold_c": 50.0,
+                        },
+                    },
+                ],
+                "source_request": prompt,
+                "refined_request": "Run the Dublin-to-Cork distance template, run the Dublin weather template, then apply NOR so the alert fires only when both component conditions are false.",
+            },
+            "explanation": "Expanded the request into a NOR chain built from two existing editable templates.",
+        }
+        with patch.object(
+            c9_mod,
+            "_chat_one",
+            AsyncMock(return_value={
+                "ok": True,
+                "http_status": 200,
+                "text": json.dumps(llm_payload),
+                "error": None,
+            }),
+        ):
+            r = c9_app.post("/api/tasks/draft-from-text", json={
+                "prompt": prompt,
+                "strategy": "auto",
+                "mode_hint": "chat",
+                "refine_with_agent": True,
+            })
+
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body["source"] == "llm"
+        assert body["authoring_engine"] == "m365-agent"
+        assert body["draft"]["template_key"] == "template-chain"
+        assert body["draft"]["template_data"]["chain_operator"] == "NOR"
+        assert [item["template_key"] for item in body["draft"]["template_data"]["chain_items"]] == [
+            "distance-between-cities",
+            "weather-dublin",
+        ]
+        assert "operator NOR" in body["draft"]["executor_prompt"]
 
 
 # ── /api/chat tests ───────────────────────────────────────────────────────────

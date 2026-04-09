@@ -118,6 +118,14 @@ TASK_SANDBOX_DEFAULTS = {
 WEATHER_TEMPLATE_KIND = "weather-threshold"
 WEATHER_DEFAULT_LOCATION = "Dublin, Ireland"
 WEATHER_DEFAULT_THRESHOLD_C = 10.0
+DISTANCE_TEMPLATE_KIND = "distance-threshold"
+DISTANCE_DEFAULT_FROM_LOCATION = "Dublin, Ireland"
+DISTANCE_DEFAULT_TO_LOCATION = "Cork, Ireland"
+DISTANCE_DEFAULT_THRESHOLD_KM = 100.0
+DISTANCE_DEFAULT_COMPARATOR = "lt"
+TEMPLATE_CHAIN_KIND = "template-chain"
+TEMPLATE_CHAIN_KEY = "template-chain"
+TASK_CHAIN_OPERATORS = {"AND", "OR", "NOR"}
 
 
 def _task_number_label(value: float | int | str | None, fallback: float = 0.0) -> str:
@@ -196,6 +204,179 @@ def _task_weather_prompt(location: str, threshold_c: float | int | str | None) -
     )
 
 
+def _task_distance_location_label(location: str) -> str:
+    text = str(location or "").strip()
+    if not text:
+        return ""
+    return (text.split(",", 1)[0] or text).strip() or text
+
+
+def _task_distance_trigger_label(from_location: str, to_location: str) -> str:
+    from_label = _task_distance_location_label(from_location) or "Origin"
+    to_label = _task_distance_location_label(to_location) or "Destination"
+    return f"distance between {from_label} and {to_label}"
+
+
+def _task_distance_template_data(template_data: dict | str | None = None, *, executor_prompt: str = "") -> dict:
+    raw = _task_inline_object(template_data)
+    from_location = str(raw.get("from_location") or raw.get("source_location") or "").strip()
+    to_location = str(raw.get("to_location") or raw.get("destination_location") or "").strip()
+    comparator = str(raw.get("distance_comparator") or "").strip().lower()
+    threshold_value = raw.get("distance_threshold_km")
+    prompt_text = str(executor_prompt or "")
+
+    if not from_location or not to_location:
+        match = re.search(
+            r"distance\s+(?:between|from)\s+(.+?)\s+and\s+(.+?)(?:,|\.|\s+if\b|\s+return\b)",
+            prompt_text,
+            re.IGNORECASE,
+        )
+        if match:
+            from_location = from_location or match.group(1).strip()
+            to_location = to_location or match.group(2).strip()
+    if not from_location:
+        from_location = DISTANCE_DEFAULT_FROM_LOCATION
+    if not to_location:
+        to_location = DISTANCE_DEFAULT_TO_LOCATION
+
+    if threshold_value in {None, ""}:
+        match = re.search(
+            r"(?:less than|below|under|greater than|over|above|more than)\s+(\d+(?:\.\d+)?)\s*(?:km|kilometers?)?",
+            prompt_text,
+            re.IGNORECASE,
+        )
+        if match:
+            threshold_value = match.group(1)
+    try:
+        threshold_km = float(threshold_value)
+    except Exception:
+        threshold_km = DISTANCE_DEFAULT_THRESHOLD_KM
+
+    if comparator not in {"lt", "lte", "gt", "gte"}:
+        lower_prompt = prompt_text.lower()
+        if any(token in lower_prompt for token in ("greater than", "over ", "above ", "more than")):
+            comparator = "gt"
+        else:
+            comparator = DISTANCE_DEFAULT_COMPARATOR
+
+    return {
+        "template_kind": DISTANCE_TEMPLATE_KIND,
+        "from_location": from_location,
+        "to_location": to_location,
+        "distance_threshold_km": threshold_km,
+        "distance_comparator": comparator,
+    }
+
+
+def _task_distance_prompt(
+    from_location: str,
+    to_location: str,
+    threshold_km: float | int | str | None,
+    comparator: str | None = None,
+) -> str:
+    distance_data = _task_distance_template_data(
+        {
+            "from_location": from_location,
+            "to_location": to_location,
+            "distance_threshold_km": threshold_km,
+            "distance_comparator": comparator or DISTANCE_DEFAULT_COMPARATOR,
+        }
+    )
+    threshold_label = _task_number_label(distance_data.get("distance_threshold_km"), DISTANCE_DEFAULT_THRESHOLD_KM)
+    compare_key = str(distance_data.get("distance_comparator") or DISTANCE_DEFAULT_COMPARATOR).lower()
+    compare_text = {
+        "lt": "less than",
+        "lte": "less than or equal to",
+        "gt": "greater than",
+        "gte": "greater than or equal to",
+    }.get(compare_key, "less than")
+    trigger_label = _task_distance_trigger_label(
+        str(distance_data.get("from_location") or DISTANCE_DEFAULT_FROM_LOCATION),
+        str(distance_data.get("to_location") or DISTANCE_DEFAULT_TO_LOCATION),
+    )
+    return (
+        f"Determine the distance in kilometers between {distance_data['from_location']} and {distance_data['to_location']}. "
+        "Return valid JSON only with this schema: "
+        f'{{"triggered": boolean, "trigger": "{trigger_label}", "title": string, "summary": string, '
+        '"details": {"from_location": string, "to_location": string, "distance_km": number|null, "comparison": string}}. '
+        "Do not use markdown fences. "
+        f"Set triggered to true only when distance_km is a number {compare_text} {threshold_label}. "
+        'Set details.comparison to a short phrase such as "less than 100 km". '
+        "If the distance is unavailable, set it to null and triggered to false."
+    )
+
+
+def _task_template_chain_data(template_data: dict | str | None = None) -> dict:
+    raw = _task_inline_object(template_data)
+    operator = str(raw.get("chain_operator") or raw.get("operator") or "AND").strip().upper() or "AND"
+    if operator not in TASK_CHAIN_OPERATORS:
+        operator = "AND"
+    normalized_items: list[dict] = []
+    for idx, item in enumerate(raw.get("chain_items") or raw.get("items") or []):
+        if not isinstance(item, dict):
+            continue
+        item_key = str(item.get("template_key") or "").strip()
+        item_data = _task_inline_object(item.get("template_data"))
+        item_prompt = str(item.get("executor_prompt") or "").strip()
+        item_payload = _task_apply_template_data({
+            "template_key": item_key,
+            "template_data": item_data,
+            "executor_prompt": item_prompt,
+        }) if item_key != TEMPLATE_CHAIN_KEY else {
+            "template_key": item_key,
+            "template_data": item_data,
+            "executor_prompt": item_prompt,
+        }
+        normalized_items.append({
+            "id": str(item.get("id") or f"chain_item_{idx + 1}").strip(),
+            "name": str(item.get("name") or "").strip(),
+            "template_key": item_key,
+            "template_data": item_payload.get("template_data") or item_data,
+            "executor_prompt": str(item_payload.get("executor_prompt") or item_prompt).strip(),
+        })
+    return {
+        "template_kind": TEMPLATE_CHAIN_KIND,
+        "chain_operator": operator,
+        "chain_items": normalized_items,
+        "source_request": str(raw.get("source_request") or "").strip(),
+        "refined_request": str(raw.get("refined_request") or "").strip(),
+    }
+
+
+def _task_chain_item_label(item: dict) -> str:
+    item_key = str(item.get("template_key") or "").strip()
+    item_data = _task_inline_object(item.get("template_data"))
+    if item_data.get("template_kind") == WEATHER_TEMPLATE_KIND:
+        return f"Weather: {_task_weather_city_label(str(item_data.get('weather_location') or WEATHER_DEFAULT_LOCATION))}"
+    if item_data.get("template_kind") == DISTANCE_TEMPLATE_KIND:
+        return (
+            "Distance: "
+            + _task_distance_location_label(str(item_data.get("from_location") or DISTANCE_DEFAULT_FROM_LOCATION))
+            + " → "
+            + _task_distance_location_label(str(item_data.get("to_location") or DISTANCE_DEFAULT_TO_LOCATION))
+        )
+    return _task_template_label(item_key)
+
+
+def _task_chain_executor_prompt(chain_data: dict) -> str:
+    items = chain_data.get("chain_items") if isinstance(chain_data.get("chain_items"), list) else []
+    if not items:
+        return "Run the configured template chain and return structured output."
+    operator = str(chain_data.get("chain_operator") or "AND").upper()
+    lines = [
+        f"Run the following template chain with operator {operator}:",
+    ]
+    for idx, item in enumerate(items, start=1):
+        lines.append(f"{idx}. {_task_chain_item_label(item)}")
+        if item.get("executor_prompt"):
+            lines.append(str(item.get("executor_prompt")))
+    if chain_data.get("refined_request"):
+        lines.append("")
+        lines.append("Refined request:")
+        lines.append(str(chain_data.get("refined_request") or ""))
+    return "\n".join(lines).strip()
+
+
 def _task_apply_template_data(payload: dict | sqlite3.Row) -> dict:
     raw = dict(payload)
     template_key = str(raw.get("template_key") or raw.get("key") or "").strip()
@@ -208,6 +389,21 @@ def _task_apply_template_data(payload: dict | sqlite3.Row) -> dict:
             str(weather_data.get("weather_location") or WEATHER_DEFAULT_LOCATION),
             weather_data.get("temperature_threshold_c"),
         )
+    elif template_key == "distance-between-cities" or template_data.get("template_kind") == DISTANCE_TEMPLATE_KIND:
+        distance_data = _task_distance_template_data(template_data, executor_prompt=str(raw.get("executor_prompt") or ""))
+        raw["template_data"] = distance_data
+        raw["template_data_json"] = json.dumps(distance_data, ensure_ascii=False)
+        raw["executor_prompt"] = _task_distance_prompt(
+            str(distance_data.get("from_location") or DISTANCE_DEFAULT_FROM_LOCATION),
+            str(distance_data.get("to_location") or DISTANCE_DEFAULT_TO_LOCATION),
+            distance_data.get("distance_threshold_km"),
+            str(distance_data.get("distance_comparator") or DISTANCE_DEFAULT_COMPARATOR),
+        )
+    elif template_key == TEMPLATE_CHAIN_KEY or template_data.get("template_kind") == TEMPLATE_CHAIN_KIND:
+        chain_data = _task_template_chain_data(template_data)
+        raw["template_data"] = chain_data
+        raw["template_data_json"] = json.dumps(chain_data, ensure_ascii=False)
+        raw["executor_prompt"] = _task_chain_executor_prompt(chain_data)
     else:
         raw["template_data"] = template_data
         raw["template_data_json"] = json.dumps(template_data, ensure_ascii=False)
@@ -221,6 +417,12 @@ WEATHER_DUBLIN_LEGACY_PROMPT = (
 )
 
 WEATHER_DUBLIN_PROMPT = _task_weather_prompt(WEATHER_DEFAULT_LOCATION, WEATHER_DEFAULT_THRESHOLD_C)
+DISTANCE_BETWEEN_CITIES_PROMPT = _task_distance_prompt(
+    DISTANCE_DEFAULT_FROM_LOCATION,
+    DISTANCE_DEFAULT_TO_LOCATION,
+    DISTANCE_DEFAULT_THRESHOLD_KM,
+    DISTANCE_DEFAULT_COMPARATOR,
+)
 
 GMAIL_SENDER_LEGACY_PROMPT = (
     "Check Gmail or Outlook for a new email from sampelexample@example.com. Return strict JSON only: "
@@ -316,6 +518,69 @@ TASK_TEMPLATES = [
         "context_handoff": "Tab 1 checks the weather. Copy the temperature and condition into Tab 2 for alert generation and visibility on the alerts page.",
         "trigger_mode": "json",
         "trigger_text": "",
+    },
+    {
+        "key": "distance-between-cities",
+        "name": "Distance between cities",
+        "description": "Check the km distance between two locations and raise an alert when the distance rule matches. Locations and threshold stay editable in Tasked.",
+        "mode": "chat",
+        "schedule_kind": "manual",
+        "interval_minutes": 0,
+        "tabs_required": 1,
+        "planner_prompt": "Planner: calculate the distance between two locations, evaluate the threshold rule, and create an alert when the rule matches.",
+        "executor_prompt": DISTANCE_BETWEEN_CITIES_PROMPT,
+        "template_data": {
+            "template_kind": DISTANCE_TEMPLATE_KIND,
+            "from_location": DISTANCE_DEFAULT_FROM_LOCATION,
+            "to_location": DISTANCE_DEFAULT_TO_LOCATION,
+            "distance_threshold_km": DISTANCE_DEFAULT_THRESHOLD_KM,
+            "distance_comparator": DISTANCE_DEFAULT_COMPARATOR,
+        },
+        "context_handoff": "Use the first lane to gather the distance result, then carry the km value into the alert decision and final trace.",
+        "trigger_mode": "json",
+        "trigger_text": "",
+    },
+    {
+        "key": TEMPLATE_CHAIN_KEY,
+        "name": "Combo / Multiple Templates",
+        "description": "Chain multiple editable templates with AND, OR, or NOR logic. Start from the Dublin weather and Dublin-to-Cork distance example, then edit or add template items.",
+        "mode": "chat",
+        "schedule_kind": "manual",
+        "interval_minutes": 0,
+        "tabs_required": 2,
+        "planner_prompt": "Planner: run each selected template item, keep the structured outputs visible, evaluate the chosen chain operator, then create one final alert only when the combined rule matches.",
+        "executor_prompt": "",
+        "template_data": {
+            "template_kind": TEMPLATE_CHAIN_KIND,
+            "chain_operator": "AND",
+            "chain_items": [
+                {
+                    "id": "chain_item_1",
+                    "template_key": "distance-between-cities",
+                    "template_data": {
+                        "template_kind": DISTANCE_TEMPLATE_KIND,
+                        "from_location": "Dublin, Ireland",
+                        "to_location": "Cork, Ireland",
+                        "distance_threshold_km": 100.0,
+                        "distance_comparator": "lt",
+                    },
+                },
+                {
+                    "id": "chain_item_2",
+                    "template_key": "weather-dublin",
+                    "template_data": {
+                        "template_kind": WEATHER_TEMPLATE_KIND,
+                        "weather_location": "Dublin, Ireland",
+                        "temperature_threshold_c": 5.0,
+                    },
+                },
+            ],
+            "source_request": "What is km distance between Dublin and Cork if the distance is less than 100 km, and also the temperature in Dublin is above 5 degrees?",
+            "refined_request": "Run a distance check for Dublin to Cork, run a Dublin weather check, then apply AND logic before creating the final alert.",
+        },
+        "context_handoff": "Run the first template item, keep the structured result, then pass the distilled values into the next template item before evaluating the final AND, OR, or NOR rule.",
+        "trigger_mode": "json",
+        "trigger_text": "combined template chain",
     },
     {
         "key": "gmail-sender",
@@ -482,6 +747,204 @@ TASK_TEMPLATE_LIVE_DOC_SPECS = [
         "target": "C1b",
         "expect_alert": "none",
         "desc": "editable template · negative Dublin weather path that should complete without alert because the threshold is above 50C",
+    },
+    {
+        "trace": "TRACE-300",
+        "task_id": "task_trace_300",
+        "template_key": "distance-between-cities",
+        "name": "TRACE-300 · Dublin to Cork Distance Trigger",
+        "template_data": {
+            "template_kind": DISTANCE_TEMPLATE_KIND,
+            "from_location": "Dublin, Ireland",
+            "to_location": "Cork, Ireland",
+            "distance_threshold_km": 1000.0,
+            "distance_comparator": "lt",
+        },
+        "type": "alert",
+        "type_cls": "alert",
+        "type_color": "#fbbf24",
+        "target": "C1b",
+        "expect_alert": "required",
+        "desc": "editable template · positive Dublin-to-Cork distance path that should alert when the returned distance is below 1000 km",
+    },
+    {
+        "trace": "TRACE-301",
+        "task_id": "task_trace_301",
+        "template_key": "distance-between-cities",
+        "name": "TRACE-301 · Dublin to Cork No Trigger",
+        "template_data": {
+            "template_kind": DISTANCE_TEMPLATE_KIND,
+            "from_location": "Dublin, Ireland",
+            "to_location": "Cork, Ireland",
+            "distance_threshold_km": 100.0,
+            "distance_comparator": "lt",
+        },
+        "type": "alert",
+        "type_cls": "alert",
+        "type_color": "#fbbf24",
+        "target": "C1b",
+        "expect_alert": "none",
+        "desc": "editable template · negative Dublin-to-Cork distance path that should complete without alert when the returned distance is above 100 km",
+    },
+    {
+        "trace": "TRACE-400",
+        "task_id": "task_trace_400",
+        "template_key": TEMPLATE_CHAIN_KEY,
+        "name": "TRACE-400 · Dublin Combo Trigger",
+        "template_data": {
+            "template_kind": TEMPLATE_CHAIN_KIND,
+            "chain_operator": "AND",
+            "chain_items": [
+                {
+                    "id": "chain_item_1",
+                    "template_key": "distance-between-cities",
+                    "template_data": {
+                        "template_kind": DISTANCE_TEMPLATE_KIND,
+                        "from_location": "Dublin, Ireland",
+                        "to_location": "Cork, Ireland",
+                        "distance_threshold_km": 1000.0,
+                        "distance_comparator": "lt",
+                    },
+                },
+                {
+                    "id": "chain_item_2",
+                    "template_key": "weather-dublin",
+                    "template_data": {
+                        "template_kind": WEATHER_TEMPLATE_KIND,
+                        "weather_location": "Dublin, Ireland",
+                        "temperature_threshold_c": 5.0,
+                    },
+                },
+            ],
+            "source_request": "What is km distance between Dublin and Cork if the distance is less than 1000 km, and also the temperature in Dublin is above 5 degrees?",
+            "refined_request": "Run the Dublin-to-Cork distance template, run the Dublin weather template, then alert only when both conditions are true.",
+        },
+        "type": "combined",
+        "type_cls": "combined",
+        "type_color": "#f87171",
+        "target": "C1b",
+        "expect_alert": "required",
+        "desc": "combo template · positive AND chain using the Dublin-to-Cork distance template plus the Dublin weather template",
+    },
+    {
+        "trace": "TRACE-401",
+        "task_id": "task_trace_401",
+        "template_key": TEMPLATE_CHAIN_KEY,
+        "name": "TRACE-401 · Dublin Combo No Trigger",
+        "template_data": {
+            "template_kind": TEMPLATE_CHAIN_KIND,
+            "chain_operator": "AND",
+            "chain_items": [
+                {
+                    "id": "chain_item_1",
+                    "template_key": "distance-between-cities",
+                    "template_data": {
+                        "template_kind": DISTANCE_TEMPLATE_KIND,
+                        "from_location": "Dublin, Ireland",
+                        "to_location": "Cork, Ireland",
+                        "distance_threshold_km": 100.0,
+                        "distance_comparator": "lt",
+                    },
+                },
+                {
+                    "id": "chain_item_2",
+                    "template_key": "weather-dublin",
+                    "template_data": {
+                        "template_kind": WEATHER_TEMPLATE_KIND,
+                        "weather_location": "Dublin, Ireland",
+                        "temperature_threshold_c": 5.0,
+                    },
+                },
+            ],
+            "source_request": "What is km distance between Dublin and Cork if the distance is less than 100 km, and also the temperature in Dublin is above 5 degrees?",
+            "refined_request": "Run the Dublin-to-Cork distance template, run the Dublin weather template, then alert only when both conditions are true.",
+        },
+        "type": "combined",
+        "type_cls": "combined",
+        "type_color": "#f87171",
+        "target": "C1b",
+        "expect_alert": "none",
+        "desc": "combo template · negative AND chain where the Dublin-to-Cork distance condition should fail before the combined alert is created",
+    },
+    {
+        "trace": "TRACE-500",
+        "task_id": "task_trace_500",
+        "template_key": TEMPLATE_CHAIN_KEY,
+        "name": "TRACE-500 · Dublin Combo NOR Trigger",
+        "template_data": {
+            "template_kind": TEMPLATE_CHAIN_KIND,
+            "chain_operator": "NOR",
+            "chain_items": [
+                {
+                    "id": "chain_item_1",
+                    "template_key": "distance-between-cities",
+                    "template_data": {
+                        "template_kind": DISTANCE_TEMPLATE_KIND,
+                        "from_location": "Dublin, Ireland",
+                        "to_location": "Cork, Ireland",
+                        "distance_threshold_km": 100.0,
+                        "distance_comparator": "lt",
+                    },
+                },
+                {
+                    "id": "chain_item_2",
+                    "template_key": "weather-dublin",
+                    "template_data": {
+                        "template_kind": WEATHER_TEMPLATE_KIND,
+                        "weather_location": "Dublin, Ireland",
+                        "temperature_threshold_c": 50.0,
+                    },
+                },
+            ],
+            "source_request": "Alert only when neither the Dublin to Cork distance is less than 100 km nor the temperature in Dublin is above 50 degrees.",
+            "refined_request": "Run the Dublin-to-Cork distance template, run the Dublin weather template, then alert only when both component conditions are false by applying NOR.",
+        },
+        "type": "combined",
+        "type_cls": "combined",
+        "type_color": "#f87171",
+        "target": "C1b",
+        "expect_alert": "required",
+        "desc": "combo template · positive NOR chain where both component conditions should be false, so the combined NOR alert should fire",
+    },
+    {
+        "trace": "TRACE-501",
+        "task_id": "task_trace_501",
+        "template_key": TEMPLATE_CHAIN_KEY,
+        "name": "TRACE-501 · Dublin Combo NOR No Trigger",
+        "template_data": {
+            "template_kind": TEMPLATE_CHAIN_KIND,
+            "chain_operator": "NOR",
+            "chain_items": [
+                {
+                    "id": "chain_item_1",
+                    "template_key": "distance-between-cities",
+                    "template_data": {
+                        "template_kind": DISTANCE_TEMPLATE_KIND,
+                        "from_location": "Dublin, Ireland",
+                        "to_location": "Cork, Ireland",
+                        "distance_threshold_km": 1000.0,
+                        "distance_comparator": "lt",
+                    },
+                },
+                {
+                    "id": "chain_item_2",
+                    "template_key": "weather-dublin",
+                    "template_data": {
+                        "template_kind": WEATHER_TEMPLATE_KIND,
+                        "weather_location": "Dublin, Ireland",
+                        "temperature_threshold_c": 0.0,
+                    },
+                },
+            ],
+            "source_request": "Alert only when neither the Dublin to Cork distance is less than 1000 km nor the temperature in Dublin is above 0 degrees.",
+            "refined_request": "Run the Dublin-to-Cork distance template, run the Dublin weather template, then skip the alert when at least one component condition is true because the chain uses NOR.",
+        },
+        "type": "combined",
+        "type_cls": "combined",
+        "type_color": "#f87171",
+        "target": "C1b",
+        "expect_alert": "none",
+        "desc": "combo template · negative NOR chain where at least one component condition should be true, so the combined NOR alert should not fire",
     },
 ]
 
@@ -3443,7 +3906,83 @@ def _task_build_default_steps(task: dict) -> list[dict]:
             "on_success_step_id": "",
             "on_failure_step_id": "",
         })
-    if mode == "sandbox":
+    template_data = _task_inline_object(task.get("template_data")) or _task_inline_object(task.get("template_data_json"))
+    if template_data.get("template_kind") == TEMPLATE_CHAIN_KIND:
+        chain_data = _task_template_chain_data(template_data)
+        chain_items = chain_data.get("chain_items") if isinstance(chain_data.get("chain_items"), list) else []
+        chain_step_ids: list[str] = []
+        template_catalog = {item.get("key") or "": item for item in _task_templates_payload(active_only=False)}
+        for idx, item in enumerate(chain_items, start=1):
+            item_key = str(item.get("template_key") or "").strip()
+            template_row = template_catalog.get(item_key) or {}
+            item_mode = str(template_row.get("mode") or "chat").strip().lower() or "chat"
+            item_id = f"{task_id}_chain_{idx}"
+            chain_step_ids.append(item_id)
+            item_name = str(item.get("name") or "").strip() or _task_chain_item_label(item)
+            item_prompt = str(item.get("executor_prompt") or template_row.get("executor_prompt") or "").strip()
+            if item_mode == "sandbox":
+                steps.append({
+                    "id": item_id,
+                    "task_id": task_id,
+                    "position": len(steps) + 1,
+                    "name": item_name,
+                    "kind": "sandbox",
+                    "config": {
+                        "executor_target": template_row.get("executor_target") or "c12b",
+                        "workspace_dir": template_row.get("workspace_dir") or "/workspace",
+                        "command": item_prompt,
+                        "validation_command": template_row.get("validation_command") or "",
+                        "test_command": template_row.get("test_command") or "",
+                    },
+                    "active": True,
+                    "on_success_step_id": "",
+                    "on_failure_step_id": "",
+                })
+            else:
+                steps.append({
+                    "id": item_id,
+                    "task_id": task_id,
+                    "position": len(steps) + 1,
+                    "name": item_name,
+                    "kind": item_mode if item_mode in {"chat", "agent", "multi-agent", "multi-agento"} else "chat",
+                    "config": {
+                        "prompt": item_prompt,
+                        "agent_id": "c6-kilocode",
+                        "sandbox_assist": False,
+                        "sandbox_assist_target": "c12b",
+                        "sandbox_assist_workspace_dir": "/workspace",
+                        "sandbox_assist_command": "",
+                        "sandbox_assist_validation_command": "",
+                        "sandbox_assist_test_command": "",
+                    },
+                    "active": True,
+                    "on_success_step_id": "",
+                    "on_failure_step_id": "",
+                })
+        if len(chain_step_ids) > 1:
+            steps.append({
+                "id": f"{task_id}_condition",
+                "task_id": task_id,
+                "position": len(steps) + 1,
+                "name": f"Chain {str(chain_data.get('chain_operator') or 'AND').upper()}",
+                "kind": "condition",
+                "config": {
+                    "operator": str(chain_data.get("chain_operator") or "AND").upper(),
+                    "rules": [
+                        {
+                            "source": step_id,
+                            "field": "parsed.triggered",
+                            "comparator": "eq",
+                            "value": True,
+                        }
+                        for step_id in chain_step_ids
+                    ],
+                },
+                "active": True,
+                "on_success_step_id": "",
+                "on_failure_step_id": "",
+            })
+    elif mode == "sandbox":
         steps.append({
             "id": f"{task_id}_sandbox",
             "task_id": task_id,
@@ -3835,6 +4374,27 @@ def _ensure_task_templates_seeded() -> None:
                 SANDBOX_VALIDATE_LEGACY_TRIGGER_TEXT,
             ),
         )
+        chain_template = next((item for item in TASK_TEMPLATES if item.get("key") == TEMPLATE_CHAIN_KEY), None)
+        if chain_template:
+            chain_payload = _task_apply_template_data({
+                "template_key": TEMPLATE_CHAIN_KEY,
+                "template_data": chain_template.get("template_data") or {},
+                "executor_prompt": chain_template.get("executor_prompt") or "",
+            })
+            conn.execute(
+                "UPDATE task_templates SET updated_at=?, template_data_json=?, executor_prompt=?, planner_prompt=?, context_handoff=?, trigger_mode=?, trigger_text=? "
+                "WHERE key=? AND source='builtin'",
+                (
+                    now,
+                    json.dumps(chain_payload.get("template_data") or {}, ensure_ascii=False),
+                    chain_payload.get("executor_prompt") or "",
+                    chain_template.get("planner_prompt") or "",
+                    chain_template.get("context_handoff") or "",
+                    chain_template.get("trigger_mode") or "json",
+                    chain_template.get("trigger_text") or "",
+                    TEMPLATE_CHAIN_KEY,
+                ),
+            )
         seen_template_keys: set[str] = set()
         for spec in TASK_TEMPLATE_LIVE_DOC_SPECS:
             template_key = str(spec.get("template_key") or "").strip()
@@ -4177,6 +4737,9 @@ def _task_alert_to_dict(row: sqlite3.Row | dict) -> dict:
     raw["run_started_at"] = raw.get("run_started_at") or ""
     raw["run_duration_ms"] = _duration_ms(raw.get("run_started_at"), raw.get("run_finished_at"))
     raw["run_duration_label"] = _duration_label(raw.get("run_duration_ms"))
+    raw["template_data"] = _task_inline_object(raw.get("template_data")) or _task_inline_object(raw.get("template_data_json"))
+    raw["template_label"] = _task_template_label(raw.get("template_key") or "")
+    raw["template_summary"] = _task_template_summary(raw.get("template_key") or "", raw.get("template_data"))
     return raw
 
 
@@ -4317,6 +4880,8 @@ def _task_row_to_dict(row: sqlite3.Row | dict) -> dict:
     raw["lifecycle_label"] = raw["lifecycle_state"].replace("-", " ").title()
     raw["mode_label"] = _task_mode_label(raw.get("mode") or "")
     raw["template_label"] = _task_template_label(raw.get("template_key") or "")
+    raw["template_summary"] = _task_template_summary(raw.get("template_key") or "", raw.get("template_data"))
+    raw["is_template_chain"] = _task_inline_object(raw.get("template_data")).get("template_kind") == TEMPLATE_CHAIN_KIND
     raw["tasked_type"] = raw.get("tasked_type") or "output"
     raw["tasked_type_label"] = _task_output_type_label(raw["tasked_type"])
     raw["preview_url"] = f"/tasked-preview?task_id={quote(str(raw.get('id') or ''))}" if raw.get("id") else "/tasked-preview"
@@ -4332,11 +4897,46 @@ def _task_executor_target_label(target: str) -> str:
 
 
 def _task_template_label(template_key: str) -> str:
+    if (template_key or "") == TEMPLATE_CHAIN_KEY:
+        return "Combo / Multiple Templates"
     return next((item["name"] for item in _task_templates_payload(active_only=False) if item["key"] == template_key), template_key or "custom")
 
 
 def _task_output_type_label(tasked_type: str) -> str:
     return next((item["label"] for item in TASKED_TYPE_OPTIONS if item["id"] == (tasked_type or "output")), "Output")
+
+
+def _task_template_summary(template_key: str, template_data: dict | None = None) -> str:
+    data = _task_inline_object(template_data)
+    kind = str(data.get("template_kind") or "").strip()
+    if kind == WEATHER_TEMPLATE_KIND:
+        return (
+            f"Weather: {data.get('weather_location') or WEATHER_DEFAULT_LOCATION}"
+            f" · above {_task_number_label(data.get('temperature_threshold_c'), WEATHER_DEFAULT_THRESHOLD_C)}°C"
+        )
+    if kind == DISTANCE_TEMPLATE_KIND:
+        comparator = str(data.get("distance_comparator") or DISTANCE_DEFAULT_COMPARATOR).lower()
+        comparator_label = {
+            "lt": "<",
+            "lte": "≤",
+            "gt": ">",
+            "gte": "≥",
+        }.get(comparator, "<")
+        return (
+            "Distance: "
+            + str(data.get("from_location") or DISTANCE_DEFAULT_FROM_LOCATION)
+            + " → "
+            + str(data.get("to_location") or DISTANCE_DEFAULT_TO_LOCATION)
+            + f" · {comparator_label} {_task_number_label(data.get('distance_threshold_km'), DISTANCE_DEFAULT_THRESHOLD_KM)} km"
+        )
+    if kind == TEMPLATE_CHAIN_KIND:
+        chain_data = _task_template_chain_data(data)
+        operator = str(chain_data.get("chain_operator") or "AND").upper()
+        labels = [_task_chain_item_label(item) for item in chain_data.get("chain_items") or []]
+        if labels:
+            return f"{operator}: " + f" {operator} ".join(labels)
+        return f"{operator}: Combo"
+    return _task_template_label(template_key)
 
 
 def _compile_task_output_text(steps: list[dict], run: dict | None = None) -> str:
@@ -5119,6 +5719,112 @@ def _tasked_author_guess_market_cap_threshold(prompt: str) -> float | None:
     return value * multiplier
 
 
+def _tasked_author_normalize_city(value: str) -> str:
+    text = str(value or "").strip(" .,:;")
+    if not text:
+        return ""
+    if "," not in text and "ireland" not in text.lower():
+        return text + ", Ireland"
+    return text
+
+
+def _tasked_author_guess_weather_location(prompt: str) -> str:
+    text = re.sub(r"\s+", " ", str(prompt or "").strip())
+    match = re.search(
+        r"(?:weather|temperature)(?:\s+(?:in|for))\s+(.+?)(?:\s+(?:is|above|below|over|under)|[,.]| and | or | nor |$)",
+        text,
+        re.IGNORECASE,
+    )
+    if match:
+        return _tasked_author_normalize_city(match.group(1))
+    if re.search(r"\bdublin\b", text, re.IGNORECASE):
+        return WEATHER_DEFAULT_LOCATION
+    return ""
+
+
+def _tasked_author_guess_distance_item(prompt: str) -> dict | None:
+    text = str(prompt or "").strip()
+    if "distance" not in text.lower() or "between" not in text.lower():
+        return None
+    data = _task_distance_template_data({}, executor_prompt=text)
+    return {
+        "template_key": "distance-between-cities",
+        "template_data": data,
+        "executor_prompt": _task_distance_prompt(
+            str(data.get("from_location") or DISTANCE_DEFAULT_FROM_LOCATION),
+            str(data.get("to_location") or DISTANCE_DEFAULT_TO_LOCATION),
+            data.get("distance_threshold_km"),
+            str(data.get("distance_comparator") or DISTANCE_DEFAULT_COMPARATOR),
+        ),
+    }
+
+
+def _tasked_author_guess_weather_item(prompt: str) -> dict | None:
+    text = str(prompt or "")
+    if "weather" not in text.lower() and "temperature" not in text.lower():
+        return None
+    location = _tasked_author_guess_weather_location(text) or WEATHER_DEFAULT_LOCATION
+    threshold = _tasked_author_guess_temperature_threshold(text)
+    data = _task_weather_template_data({
+        "weather_location": location,
+        "temperature_threshold_c": threshold if threshold is not None else WEATHER_DEFAULT_THRESHOLD_C,
+    })
+    return {
+        "template_key": "weather-dublin",
+        "template_data": data,
+        "executor_prompt": _task_weather_prompt(
+            str(data.get("weather_location") or WEATHER_DEFAULT_LOCATION),
+            data.get("temperature_threshold_c"),
+        ),
+    }
+
+
+def _tasked_author_guess_chain_operator(prompt: str, item_count: int) -> str:
+    lowered = f" {str(prompt or '').lower()} "
+    if " nor " in lowered:
+        return "NOR"
+    if " or " in lowered:
+        return "OR"
+    if item_count > 1:
+        return "AND"
+    return "AND"
+
+
+def _tasked_author_guess_combo_items(prompt: str) -> list[dict]:
+    text = str(prompt or "")
+    lowered = text.lower()
+    items: list[dict] = []
+    seen: set[str] = set()
+
+    distance_item = _tasked_author_guess_distance_item(text)
+    if distance_item:
+        items.append(distance_item)
+        seen.add("distance-between-cities")
+
+    weather_item = _tasked_author_guess_weather_item(text)
+    if weather_item:
+        items.append(weather_item)
+        seen.add("weather-dublin")
+
+    if "sharepoint" in lowered and any(term in lowered for term in ("email", "outlook", "attachment", "document link", "linked file")):
+        if "outlook-sharepoint-linked" not in seen:
+            items.append({"template_key": "outlook-sharepoint-linked", "template_data": {}, "executor_prompt": ""})
+            seen.add("outlook-sharepoint-linked")
+    elif "alerts@company.com" in lowered or ("m365 outlook" in lowered and "email" in lowered):
+        if "m365-outlook-alert" not in seen:
+            items.append({"template_key": "m365-outlook-alert", "template_data": {}, "executor_prompt": ""})
+            seen.add("m365-outlook-alert")
+    elif "sampelexample@example.com" in lowered and any(term in lowered for term in ("gmail", "outlook", "email")):
+        if "gmail-sender" not in seen:
+            items.append({"template_key": "gmail-sender", "template_data": {}, "executor_prompt": ""})
+            seen.add("gmail-sender")
+    elif "sharepoint" in lowered and "file" in lowered:
+        if "sharepoint-new-file" not in seen:
+            items.append({"template_key": "sharepoint-new-file", "template_data": {}, "executor_prompt": ""})
+            seen.add("sharepoint-new-file")
+    return items
+
+
 def _tasked_author_match_template(prompt: str, templates: list[dict] | None = None, preferred_key: str = "") -> dict | None:
     templates = templates or _task_templates_payload()
     preferred = _tasked_author_find_template_by_key(preferred_key, templates)
@@ -5129,6 +5835,8 @@ def _tasked_author_match_template(prompt: str, templates: list[dict] | None = No
         return None
     if "johannesburg" in text or "nvidia" in text or "market cap" in text:
         return None
+    if "distance" in text and "between" in text:
+        return _tasked_author_find_template_by_key("distance-between-cities", templates)
     if "dublin" in text and ("weather" in text or "temperature" in text):
         return _tasked_author_find_template_by_key("weather-dublin", templates)
     if "sharepoint" in text and any(term in text for term in ("email", "outlook", "attachment", "document link", "linked file")):
@@ -5149,6 +5857,7 @@ def _tasked_author_template_seed_draft(template: dict) -> dict:
     draft = {
         "id": "",
         "template_key": template.get("key") or "",
+        "template_data": _task_inline_object(template.get("template_data")),
         "name": template.get("name") or "Generated Tasked",
         "mode": mode,
         "schedule_kind": template.get("schedule_kind") or "manual",
@@ -5171,6 +5880,73 @@ def _tasked_author_template_seed_draft(template: dict) -> dict:
         "trigger_mode": template.get("trigger_mode") or "json",
         "trigger_text": template.get("trigger_text") or "",
         "notes": template.get("description") or "",
+        "alert_policy": _task_default_alert_policy(),
+        "completion_policy": _task_default_completion_policy(),
+    }
+    draft["steps"] = _task_build_default_steps({**draft, "id": "task_draft"})
+    return draft
+
+
+def _tasked_author_combo_draft(prompt: str, items: list[dict], *, mode_hint: str = "") -> dict:
+    chain_data = _task_template_chain_data({
+        "chain_operator": _tasked_author_guess_chain_operator(prompt, len(items)),
+        "chain_items": items,
+        "source_request": prompt,
+        "refined_request": prompt,
+    })
+    normalized_items = chain_data.get("chain_items") or []
+    if len(normalized_items) == 1:
+        single = normalized_items[0]
+        template = _tasked_author_find_template_by_key(single.get("template_key") or "")
+        if template:
+            draft = _tasked_author_template_seed_draft(template)
+            draft["name"] = _tasked_author_guess_name(prompt)
+            draft["template_key"] = template.get("key") or ""
+            applied = _task_apply_template_data({
+                "template_key": draft["template_key"],
+                "template_data": single.get("template_data") or {},
+                "executor_prompt": single.get("executor_prompt") or draft.get("executor_prompt") or "",
+            })
+            draft["template_data"] = applied.get("template_data") or {}
+            draft["executor_prompt"] = applied.get("executor_prompt") or draft.get("executor_prompt") or ""
+            draft["schedule_kind"] = _tasked_author_guess_schedule_kind(prompt, _tasked_author_guess_interval_minutes(prompt))
+            draft["interval_minutes"] = _tasked_author_guess_interval_minutes(prompt)
+            draft["tabs_required"] = max(draft.get("tabs_required") or 1, _tasked_author_guess_tabs_required(prompt))
+            draft["notes"] = "Generated from a custom request and matched to the closest editable template."
+            draft["steps"] = _task_build_default_steps({**draft, "id": "task_draft"})
+            return draft
+
+    interval_minutes = _tasked_author_guess_interval_minutes(prompt)
+    tabs_required = max(
+        _tasked_author_guess_tabs_required(prompt),
+        max((int((_tasked_author_find_template_by_key(item.get("template_key") or "") or {}).get("tabs_required") or 1) for item in normalized_items), default=1),
+    )
+    draft = {
+        "id": "",
+        "template_key": TEMPLATE_CHAIN_KEY,
+        "template_data": chain_data,
+        "name": _tasked_author_guess_name(prompt),
+        "mode": _tasked_author_guess_mode(prompt, mode_hint=mode_hint),
+        "schedule_kind": _tasked_author_guess_schedule_kind(prompt, interval_minutes),
+        "interval_minutes": interval_minutes,
+        "tabs_required": tabs_required,
+        "active": True,
+        "planner_prompt": f"Planner: run {len(normalized_items)} template checks, apply {chain_data.get('chain_operator')}, then create the alert only when the combined condition matches.",
+        "executor_prompt": _task_chain_executor_prompt(chain_data),
+        "executor_target": "",
+        "workspace_dir": "",
+        "validation_command": "",
+        "test_command": "",
+        "sandbox_assist": False,
+        "sandbox_assist_target": "",
+        "sandbox_assist_workspace_dir": "",
+        "sandbox_assist_command": "",
+        "sandbox_assist_validation_command": "",
+        "sandbox_assist_test_command": "",
+        "context_handoff": "Run each template item in order, pass forward the structured result when needed, then evaluate the combined operator before creating the alert.",
+        "trigger_mode": "json",
+        "trigger_text": "combined template chain",
+        "notes": "Generated from a custom request and expanded into a chained Tasked workflow.",
         "alert_policy": _task_default_alert_policy(),
         "completion_policy": _task_default_completion_policy(),
     }
@@ -5464,6 +6240,8 @@ def _tasked_author_normalize_draft(raw: dict | None, *, prompt: str, requested_s
         if maybe_template:
             matched_template = maybe_template
             draft = _tasked_author_template_seed_draft(maybe_template)
+        elif raw_template_key == TEMPLATE_CHAIN_KEY:
+            draft["template_key"] = TEMPLATE_CHAIN_KEY
     if strategy == "existing-template" and matched_template:
         draft["template_key"] = matched_template.get("key") or ""
     elif strategy == "freehand":
@@ -5481,6 +6259,24 @@ def _tasked_author_normalize_draft(raw: dict | None, *, prompt: str, requested_s
         draft["trigger_text"] = str(raw.get("trigger_text") or "").strip()
     if (raw.get("notes") or "").strip():
         draft["notes"] = str(raw.get("notes") or "").strip()
+    raw_template_data = _task_inline_object(raw.get("template_data")) or _task_inline_object(raw.get("template_data_json"))
+    if raw_template_key == TEMPLATE_CHAIN_KEY or raw_template_data.get("template_kind") == TEMPLATE_CHAIN_KIND:
+        applied = _task_apply_template_data({
+            "template_key": TEMPLATE_CHAIN_KEY,
+            "template_data": raw_template_data,
+            "executor_prompt": draft.get("executor_prompt") or "",
+        })
+        draft["template_key"] = TEMPLATE_CHAIN_KEY
+        draft["template_data"] = applied.get("template_data") or {}
+        draft["executor_prompt"] = applied.get("executor_prompt") or draft.get("executor_prompt") or ""
+    elif raw_template_data:
+        applied = _task_apply_template_data({
+            "template_key": raw_template_key or draft.get("template_key") or "",
+            "template_data": raw_template_data,
+            "executor_prompt": draft.get("executor_prompt") or "",
+        })
+        draft["template_data"] = applied.get("template_data") or {}
+        draft["executor_prompt"] = applied.get("executor_prompt") or draft.get("executor_prompt") or ""
 
     mode = (raw.get("mode") or draft.get("mode") or _tasked_author_guess_mode(prompt, mode_hint=mode_hint)).strip().lower()
     if mode not in {item["id"] for item in TASK_MODE_OPTIONS}:
@@ -5542,10 +6338,11 @@ def _tasked_author_normalize_draft(raw: dict | None, *, prompt: str, requested_s
         draft["template_key"] = matched_template.get("key") or ""
         strategy = "existing-template"
     elif requested_strategy == "freehand":
-        draft["template_key"] = ""
+        if draft.get("template_key") != TEMPLATE_CHAIN_KEY:
+            draft["template_key"] = ""
         strategy = "freehand"
     elif draft.get("template_key"):
-        strategy = "existing-template"
+        strategy = "freehand" if draft.get("template_key") == TEMPLATE_CHAIN_KEY else "existing-template"
     else:
         strategy = "freehand"
     draft["strategy"] = strategy
@@ -5562,7 +6359,7 @@ def _tasked_author_fallback_draft(prompt: str, *, requested_strategy: str, mode_
     return draft, "Built a free-hand Tasked draft because no existing template fit the request cleanly."
 
 
-async def _tasked_author_draft_from_text(prompt: str, *, strategy: str = "auto", mode_hint: str = "", template_key: str = "") -> dict:
+async def _tasked_author_draft_from_text(prompt: str, *, strategy: str = "auto", mode_hint: str = "", template_key: str = "", refine_with_agent: bool = False) -> dict:
     cleaned_prompt = re.sub(r"\s+", " ", (prompt or "").strip())
     if not cleaned_prompt:
         return {"ok": False, "error": "prompt required"}
@@ -5570,8 +6367,15 @@ async def _tasked_author_draft_from_text(prompt: str, *, strategy: str = "auto",
     if requested_strategy not in {"auto", "existing-template", "freehand"}:
         requested_strategy = "auto"
     templates = _task_templates_payload()
+    combo_items = _tasked_author_guess_combo_items(cleaned_prompt)
+    has_combo = len(combo_items) > 1
     matched_template = _tasked_author_match_template(cleaned_prompt, templates, preferred_key=template_key)
-    if matched_template and requested_strategy in {"auto", "existing-template"}:
+    if (
+        matched_template
+        and requested_strategy in {"auto", "existing-template"}
+        and not has_combo
+        and not (TASKED_AUTHOR_ENABLE_LLM or refine_with_agent)
+    ):
         draft, explanation = _tasked_author_fallback_draft(
             cleaned_prompt,
             requested_strategy="existing-template",
@@ -5596,7 +6400,7 @@ async def _tasked_author_draft_from_text(prompt: str, *, strategy: str = "auto",
     llm_error = ""
     llm_response = ""
     source = "heuristic"
-    if TASKED_AUTHOR_ENABLE_LLM:
+    if TASKED_AUTHOR_ENABLE_LLM or refine_with_agent:
         preferred_template_key = matched_template.get("key") if matched_template else ""
         prompt_text = (
             _tasked_authoring_prompt_markdown()
@@ -5638,16 +6442,25 @@ async def _tasked_author_draft_from_text(prompt: str, *, strategy: str = "auto",
             )
         source = "llm"
     else:
-        draft, explanation = _tasked_author_fallback_draft(
-            cleaned_prompt,
-            requested_strategy=requested_strategy,
-            mode_hint=mode_hint,
-            matched_template=matched_template,
-        )
-        if requested_strategy == "existing-template" and matched_template:
-            source = "heuristic-template"
+        if combo_items:
+            draft = _tasked_author_combo_draft(cleaned_prompt, combo_items, mode_hint=mode_hint)
+            explanation = (
+                "Expanded the custom request into a chained Tasked workflow using the closest editable templates."
+                if len(combo_items) > 1
+                else "Matched the custom request to the closest editable template."
+            )
+            source = "heuristic-chain" if len(combo_items) > 1 else "heuristic-template"
         else:
-            source = "heuristic-freehand"
+            draft, explanation = _tasked_author_fallback_draft(
+                cleaned_prompt,
+                requested_strategy=requested_strategy,
+                mode_hint=mode_hint,
+                matched_template=matched_template,
+            )
+            if requested_strategy == "existing-template" and matched_template:
+                source = "heuristic-template"
+            else:
+                source = "heuristic-freehand"
 
     resolved_template = _tasked_author_find_template_by_key(draft.get("template_key") or "", templates)
     response: dict = {
@@ -5667,8 +6480,10 @@ async def _tasked_author_draft_from_text(prompt: str, *, strategy: str = "auto",
         response["llm_error"] = llm_error
     if llm_response and source.startswith("heuristic"):
         response["llm_response_excerpt"] = llm_response[:500]
-    if not TASKED_AUTHOR_ENABLE_LLM:
+    if not (TASKED_AUTHOR_ENABLE_LLM or refine_with_agent):
         response["authoring_engine"] = "local"
+    elif source == "llm":
+        response["authoring_engine"] = "m365-agent"
     return response
 
 
@@ -6194,7 +7009,12 @@ def _task_evaluate_condition_step(context: dict, step: dict) -> dict:
             "actual": actual,
             "passed": passed,
         })
-    matched = all(matches) if operator != "OR" else any(matches)
+    if operator == "OR":
+        matched = any(matches)
+    elif operator == "NOR":
+        matched = not any(matches)
+    else:
+        matched = all(matches)
     return {"matched": matched, "details": details, "operator": operator}
 
 
@@ -7394,7 +8214,7 @@ async def api_tasks(include_archived: bool = False):
                     (task["id"],),
                 ).fetchone()
                 latest_alert_row = conn.execute(
-                    "SELECT a.*, t.mode AS task_mode, t.template_key AS template_key, t.schedule_kind AS schedule_kind, "
+                    "SELECT a.*, t.mode AS task_mode, t.template_key AS template_key, t.template_data_json AS template_data_json, t.schedule_kind AS schedule_kind, "
                     "t.interval_minutes AS interval_minutes, t.tabs_required AS tabs_required, t.active AS active, "
                     "t.executor_target AS executor_target, t.workspace_dir AS workspace_dir, "
                     "t.sandbox_assist AS sandbox_assist, t.sandbox_assist_target AS sandbox_assist_target, "
@@ -7600,6 +8420,7 @@ async def api_tasks_draft_from_text(request: Request):
     strategy = (body.get("strategy") or "auto").strip().lower()
     mode_hint = (body.get("mode_hint") or "").strip().lower()
     template_key = (body.get("template_key") or "").strip()
+    refine_with_agent = bool(body.get("refine_with_agent", False))
     if not prompt:
         return JSONResponse({"ok": False, "error": "prompt required"}, status_code=400)
     result = await _tasked_author_draft_from_text(
@@ -7607,6 +8428,7 @@ async def api_tasks_draft_from_text(request: Request):
         strategy=strategy,
         mode_hint=mode_hint,
         template_key=template_key,
+        refine_with_agent=refine_with_agent,
     )
     return JSONResponse(result, status_code=200 if result.get("ok") else 400)
 
@@ -7670,7 +8492,7 @@ async def api_tasks_upsert(request: Request):
     if sandbox_assist["sandbox_assist"] and not sandbox_assist["sandbox_assist_command"]:
         return JSONResponse({"ok": False, "error": "sandbox_assist_command required when AIO sandbox assist is enabled"}, status_code=400)
     try:
-        steps_to_save = steps_payload or _task_build_default_steps({
+        builder_task = {
             "id": task_id,
             "name": name,
             "mode": mode,
@@ -7687,7 +8509,11 @@ async def api_tasks_upsert(request: Request):
             "trigger_mode": trigger_mode,
             "trigger_text": trigger_text,
             **sandbox_assist,
-        })
+        }
+        if _task_inline_object(template_data).get("template_kind") == TEMPLATE_CHAIN_KIND:
+            steps_to_save = _task_build_default_steps(builder_task)
+        else:
+            steps_to_save = steps_payload or _task_build_default_steps(builder_task)
         needs_rebase = any(
             isinstance(item, dict) and (
                 str(item.get("id") or "").startswith("task_draft")
@@ -7697,24 +8523,7 @@ async def api_tasks_upsert(request: Request):
         )
         normalized_steps = _task_clone_steps(task_id, steps_to_save) if needs_rebase else [_task_normalize_step(task_id, item, idx + 1) for idx, item in enumerate(steps_to_save)]
         normalized_steps, _ = _task_sync_builder_steps({
-            "id": task_id,
-            "mode": mode,
-            "schedule_kind": schedule_kind,
-            "interval_minutes": interval_minutes,
-            "executor_prompt": executor_prompt,
-            "planner_prompt": planner_prompt,
-            "executor_target": executor_target,
-            "workspace_dir": workspace_dir,
-            "validation_command": validation_command,
-            "test_command": test_command,
-            "sandbox_assist": sandbox_assist["sandbox_assist"],
-            "sandbox_assist_target": sandbox_assist["sandbox_assist_target"],
-            "sandbox_assist_workspace_dir": sandbox_assist["sandbox_assist_workspace_dir"],
-            "sandbox_assist_command": sandbox_assist["sandbox_assist_command"],
-            "sandbox_assist_validation_command": sandbox_assist["sandbox_assist_validation_command"],
-            "sandbox_assist_test_command": sandbox_assist["sandbox_assist_test_command"],
-            "trigger_mode": trigger_mode,
-            "trigger_text": trigger_text,
+            **builder_task,
             "alert_policy": alert_policy,
         }, normalized_steps)
     except ValueError as exc:
@@ -8187,7 +8996,8 @@ async def api_task_completed(task_id: str = "", status: str = "completed,failed,
                 where.append("r.task_id=?")
                 params.append(task_id)
             rows = conn.execute(
-                "SELECT r.*, t.name AS task_name, t.mode AS task_mode, t.executor_target AS task_executor_target, "
+                "SELECT r.*, t.name AS task_name, t.mode AS task_mode, t.template_key AS task_template_key, "
+                "t.template_data_json AS task_template_data_json, t.executor_target AS task_executor_target, "
                 "t.archived_at AS task_archived_at, t.alert_policy_json AS task_alert_policy_json "
                 "FROM task_runs r LEFT JOIN task_definitions t ON t.id=r.task_id "
                 f"WHERE {' AND '.join(where)} ORDER BY COALESCE(r.completed_at, r.finished_at, r.created_at) DESC LIMIT ?",
@@ -8197,7 +9007,7 @@ async def api_task_completed(task_id: str = "", status: str = "completed,failed,
             for row in rows:
                 run = _task_run_to_dict(row)
                 latest_alert_row = conn.execute(
-                    "SELECT a.*, t.mode AS task_mode, t.template_key AS template_key, t.schedule_kind AS schedule_kind, "
+                    "SELECT a.*, t.mode AS task_mode, t.template_key AS template_key, t.template_data_json AS template_data_json, t.schedule_kind AS schedule_kind, "
                     "t.interval_minutes AS interval_minutes, t.tabs_required AS tabs_required, t.active AS active, "
                     "t.executor_target AS executor_target, t.workspace_dir AS workspace_dir, "
                     "t.sandbox_assist AS sandbox_assist, t.sandbox_assist_target AS sandbox_assist_target, "
@@ -8218,6 +9028,10 @@ async def api_task_completed(task_id: str = "", status: str = "completed,failed,
                     "run": run,
                     "task_name": row["task_name"] or run.get("task_id") or "Tasked",
                     "task_mode": row["task_mode"] or run.get("mode") or "chat",
+                    "task_template_key": row["task_template_key"] or "",
+                    "task_template_data": _task_inline_object(row["task_template_data_json"]),
+                    "task_template_label": _task_template_label(row["task_template_key"] or ""),
+                    "task_template_summary": _task_template_summary(row["task_template_key"] or "", _task_inline_object(row["task_template_data_json"])),
                     "task_executor_target": _task_sandbox_target(row["task_executor_target"]) if row["task_executor_target"] else "",
                     "task_archived": bool(row["task_archived_at"]),
                     "latest_alert": _task_alert_to_dict(latest_alert_row) if latest_alert_row else None,
@@ -8242,6 +9056,7 @@ async def api_alerts(limit: int = 100):
                 "t.name AS task_name, "
                 "t.mode AS task_mode, "
                 "t.template_key AS template_key, "
+                "t.template_data_json AS template_data_json, "
                 "t.schedule_kind AS schedule_kind, "
                 "t.interval_minutes AS interval_minutes, "
                 "t.tabs_required AS tabs_required, "
