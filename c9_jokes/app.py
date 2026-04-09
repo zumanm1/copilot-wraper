@@ -115,6 +115,104 @@ TASK_SANDBOX_DEFAULTS = {
     "c12b": "/workspace",
 }
 
+WEATHER_TEMPLATE_KIND = "weather-threshold"
+WEATHER_DEFAULT_LOCATION = "Dublin, Ireland"
+WEATHER_DEFAULT_THRESHOLD_C = 10.0
+
+
+def _task_number_label(value: float | int | str | None, fallback: float = 0.0) -> str:
+    try:
+        number = float(value)
+    except Exception:
+        number = float(fallback)
+    if number == int(number):
+        return str(int(number))
+    return f"{number:.2f}".rstrip("0").rstrip(".")
+
+
+def _task_weather_city_label(location: str) -> str:
+    text = str(location or "").strip()
+    if not text:
+        return "Dublin"
+    return (text.split(",", 1)[0] or text).strip() or text
+
+
+def _task_inline_object(raw: dict | str | None) -> dict:
+    if isinstance(raw, dict):
+        return dict(raw)
+    if isinstance(raw, str):
+        try:
+            parsed = json.loads(raw)
+            return dict(parsed) if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _task_weather_template_data(template_data: dict | str | None = None, *, executor_prompt: str = "") -> dict:
+    raw = _task_inline_object(template_data)
+    location = str(raw.get("weather_location") or raw.get("location") or "").strip()
+    if not location:
+        match = re.search(
+            r"Check the current weather in\s+(.+?)(?:\. Return valid JSON only|\. If the temperature is above)",
+            str(executor_prompt or ""),
+            re.IGNORECASE,
+        )
+        if match:
+            location = match.group(1).strip()
+    if not location:
+        location = WEATHER_DEFAULT_LOCATION
+
+    threshold_value = raw.get("temperature_threshold_c")
+    if threshold_value in {None, ""}:
+        match = re.search(r"above\s+(-?\d+(?:\.\d+)?)\s*(?:C|°C)?", str(executor_prompt or ""), re.IGNORECASE)
+        if match:
+            threshold_value = match.group(1)
+    try:
+        threshold_c = float(threshold_value)
+    except Exception:
+        threshold_c = WEATHER_DEFAULT_THRESHOLD_C
+
+    return {
+        "template_kind": WEATHER_TEMPLATE_KIND,
+        "weather_location": location,
+        "temperature_threshold_c": threshold_c,
+    }
+
+
+def _task_weather_prompt(location: str, threshold_c: float | int | str | None) -> str:
+    cleaned_location = str(location or "").strip() or WEATHER_DEFAULT_LOCATION
+    numeric_threshold = _task_weather_template_data(
+        {"weather_location": cleaned_location, "temperature_threshold_c": threshold_c}
+    )["temperature_threshold_c"]
+    threshold_label = _task_number_label(numeric_threshold, WEATHER_DEFAULT_THRESHOLD_C)
+    city_label = _task_weather_city_label(cleaned_location)
+    return (
+        f"Check the current weather in {cleaned_location}. Return valid JSON only with this schema: "
+        f'{{"triggered": boolean, "trigger": "{city_label} weather", "title": string, '
+        '"summary": string, "details": {"location": string, "temperature_c": number|null, "condition": string}}. '
+        f"Do not use markdown fences. Set triggered to true only when temperature_c is a number above {threshold_label}. "
+        "If temperature_c is unavailable, set it to null and triggered to false."
+    )
+
+
+def _task_apply_template_data(payload: dict | sqlite3.Row) -> dict:
+    raw = dict(payload)
+    template_key = str(raw.get("template_key") or raw.get("key") or "").strip()
+    template_data = _task_inline_object(raw.get("template_data")) or _task_inline_object(raw.get("template_data_json"))
+    if template_key == "weather-dublin" or template_data.get("template_kind") == WEATHER_TEMPLATE_KIND:
+        weather_data = _task_weather_template_data(template_data, executor_prompt=str(raw.get("executor_prompt") or ""))
+        raw["template_data"] = weather_data
+        raw["template_data_json"] = json.dumps(weather_data, ensure_ascii=False)
+        raw["executor_prompt"] = _task_weather_prompt(
+            str(weather_data.get("weather_location") or WEATHER_DEFAULT_LOCATION),
+            weather_data.get("temperature_threshold_c"),
+        )
+    else:
+        raw["template_data"] = template_data
+        raw["template_data_json"] = json.dumps(template_data, ensure_ascii=False)
+    return raw
+
 WEATHER_DUBLIN_LEGACY_PROMPT = (
     "Check the current weather in Dublin, Ireland. If the temperature is above 10C, return strict JSON only: "
     "{\"triggered\": true|false, \"trigger\": \"Dublin weather\", \"title\": \"...\", "
@@ -122,13 +220,7 @@ WEATHER_DUBLIN_LEGACY_PROMPT = (
     "If the temperature is not above 10C, still return the same JSON with triggered=false."
 )
 
-WEATHER_DUBLIN_PROMPT = (
-    "Check the current weather in Dublin, Ireland. Return valid JSON only with this schema: "
-    "{\"triggered\": boolean, \"trigger\": \"Dublin weather\", \"title\": string, "
-    "\"summary\": string, \"details\": {\"location\": string, \"temperature_c\": number|null, \"condition\": string}}. "
-    "Do not use markdown fences. Set triggered to true only when temperature_c is a number above 10. "
-    "If temperature_c is unavailable, set it to null and triggered to false."
-)
+WEATHER_DUBLIN_PROMPT = _task_weather_prompt(WEATHER_DEFAULT_LOCATION, WEATHER_DEFAULT_THRESHOLD_C)
 
 GMAIL_SENDER_LEGACY_PROMPT = (
     "Check Gmail or Outlook for a new email from sampelexample@example.com. Return strict JSON only: "
@@ -209,13 +301,18 @@ TASK_TEMPLATES = [
     {
         "key": "weather-dublin",
         "name": "Weather in Dublin",
-        "description": "Every 10 minutes, check Dublin weather and raise an alert if temperature is above 10C.",
+        "description": "Every 10 minutes, check Dublin weather and raise an alert if temperature is above 10C. Town and threshold stay editable in Tasked.",
         "mode": "chat",
         "schedule_kind": "recurring",
         "interval_minutes": 10,
         "tabs_required": 2,
         "planner_prompt": "Planner: weather check, threshold evaluation, alert generation, and context handoff between two tabs.",
         "executor_prompt": WEATHER_DUBLIN_PROMPT,
+        "template_data": {
+            "template_kind": WEATHER_TEMPLATE_KIND,
+            "weather_location": WEATHER_DEFAULT_LOCATION,
+            "temperature_threshold_c": WEATHER_DEFAULT_THRESHOLD_C,
+        },
         "context_handoff": "Tab 1 checks the weather. Copy the temperature and condition into Tab 2 for alert generation and visibility on the alerts page.",
         "trigger_mode": "json",
         "trigger_text": "",
@@ -301,12 +398,18 @@ TASK_TEMPLATE_LIVE_DOC_SPECS = [
         "trace": "TRACE-200",
         "task_id": "task_trace_200",
         "template_key": "weather-dublin",
+        "name": "TRACE-200 · Dublin Weather Trigger",
+        "template_data": {
+            "template_kind": WEATHER_TEMPLATE_KIND,
+            "weather_location": "Dublin, Ireland",
+            "temperature_threshold_c": 0.0,
+        },
         "type": "alert",
         "type_cls": "alert",
         "type_color": "#fbbf24",
         "target": "C1b",
-        "expect_alert": "conditional",
-        "desc": "editable template · conditional Dublin weather threshold watch",
+        "expect_alert": "required",
+        "desc": "editable template · positive Dublin weather path that should alert when the current temperature is above 0C",
     },
     {
         "trace": "TRACE-201",
@@ -362,6 +465,23 @@ TASK_TEMPLATE_LIVE_DOC_SPECS = [
         "target": "C12b",
         "expect_alert": "none",
         "desc": "editable template · C12b validate/test workflow with alert-on-failure only",
+    },
+    {
+        "trace": "TRACE-206",
+        "task_id": "task_trace_206",
+        "template_key": "weather-dublin",
+        "name": "TRACE-206 · Dublin Weather No Trigger",
+        "template_data": {
+            "template_kind": WEATHER_TEMPLATE_KIND,
+            "weather_location": "Dublin, Ireland",
+            "temperature_threshold_c": 50.0,
+        },
+        "type": "alert",
+        "type_cls": "alert",
+        "type_color": "#fbbf24",
+        "target": "C1b",
+        "expect_alert": "none",
+        "desc": "editable template · negative Dublin weather path that should complete without alert because the threshold is above 50C",
     },
 ]
 
@@ -744,6 +864,7 @@ def _ensure_db() -> None:
                     active INTEGER DEFAULT 1,
                     tabs_required INTEGER DEFAULT 1,
                     template_key TEXT DEFAULT '',
+                    template_data_json TEXT DEFAULT '{}',
                     executor_target TEXT DEFAULT '',
                     workspace_dir TEXT DEFAULT '',
                     planner_prompt TEXT DEFAULT '',
@@ -892,6 +1013,7 @@ def _ensure_db() -> None:
                     schedule_kind TEXT NOT NULL DEFAULT 'manual',
                     interval_minutes INTEGER DEFAULT 0,
                     tabs_required INTEGER DEFAULT 1,
+                    template_data_json TEXT DEFAULT '{}',
                     executor_target TEXT DEFAULT '',
                     workspace_dir TEXT DEFAULT '',
                     planner_prompt TEXT DEFAULT '',
@@ -984,6 +1106,7 @@ def _ensure_db() -> None:
     for statement in (
         "ALTER TABLE task_definitions ADD COLUMN executor_target TEXT DEFAULT ''",
         "ALTER TABLE task_definitions ADD COLUMN workspace_dir TEXT DEFAULT ''",
+        "ALTER TABLE task_definitions ADD COLUMN template_data_json TEXT DEFAULT '{}'",
         "ALTER TABLE task_definitions ADD COLUMN validation_command TEXT DEFAULT ''",
         "ALTER TABLE task_definitions ADD COLUMN test_command TEXT DEFAULT ''",
         "ALTER TABLE task_definitions ADD COLUMN sandbox_assist INTEGER DEFAULT 0",
@@ -1000,6 +1123,7 @@ def _ensure_db() -> None:
         "ALTER TABLE task_runs ADD COLUMN test_excerpt TEXT DEFAULT ''",
         "ALTER TABLE task_templates ADD COLUMN executor_target TEXT DEFAULT ''",
         "ALTER TABLE task_templates ADD COLUMN workspace_dir TEXT DEFAULT ''",
+        "ALTER TABLE task_templates ADD COLUMN template_data_json TEXT DEFAULT '{}'",
         "ALTER TABLE task_templates ADD COLUMN validation_command TEXT DEFAULT ''",
         "ALTER TABLE task_templates ADD COLUMN test_command TEXT DEFAULT ''",
         "ALTER TABLE task_templates ADD COLUMN sandbox_assist INTEGER DEFAULT 0",
@@ -3386,6 +3510,64 @@ def _task_build_default_steps(task: dict) -> list[dict]:
     return steps
 
 
+def _task_sync_builder_steps(task: dict, steps: list[dict]) -> tuple[list[dict], bool]:
+    if not steps:
+        return [], False
+
+    mode = (task.get("mode") or "chat").strip().lower()
+    exec_kind = "sandbox" if mode == "sandbox" else (mode if mode in {"chat", "agent", "multi-agent", "multi-agento"} else "chat")
+    kind_counts: dict[str, int] = {}
+    for step in steps:
+        kind = (step.get("kind") or "chat").strip().lower()
+        kind_counts[kind] = kind_counts.get(kind, 0) + 1
+
+    policy = _json_load_object(task.get("alert_policy"), _task_default_alert_policy())
+    synced: list[dict] = []
+    changed = False
+
+    for step in steps:
+        item = dict(step)
+        kind = (item.get("kind") or "chat").strip().lower()
+        cfg = _json_load_object(item.get("config"), _json_load_object(item.get("config_json")))
+        new_cfg = dict(cfg)
+
+        if kind == "trigger" and kind_counts.get("trigger", 0) == 1:
+            new_cfg["schedule_kind"] = task.get("schedule_kind") or new_cfg.get("schedule_kind") or "manual"
+            new_cfg["interval_minutes"] = int(task.get("interval_minutes") or 0)
+
+        elif kind == exec_kind and kind_counts.get(exec_kind, 0) == 1:
+            if exec_kind == "sandbox":
+                new_cfg["executor_target"] = task.get("executor_target") or new_cfg.get("executor_target") or "c12b"
+                new_cfg["workspace_dir"] = task.get("workspace_dir") or new_cfg.get("workspace_dir") or "/workspace"
+                new_cfg["command"] = task.get("executor_prompt") or ""
+                new_cfg["validation_command"] = task.get("validation_command") or ""
+                new_cfg["test_command"] = task.get("test_command") or ""
+            else:
+                new_cfg["prompt"] = task.get("executor_prompt") or task.get("planner_prompt") or ""
+                if exec_kind == "chat":
+                    new_cfg["sandbox_assist"] = bool(task.get("sandbox_assist"))
+                    new_cfg["sandbox_assist_target"] = task.get("sandbox_assist_target") or new_cfg.get("sandbox_assist_target") or "c12b"
+                    new_cfg["sandbox_assist_workspace_dir"] = task.get("sandbox_assist_workspace_dir") or new_cfg.get("sandbox_assist_workspace_dir") or "/workspace"
+                    new_cfg["sandbox_assist_command"] = task.get("sandbox_assist_command") or ""
+                    new_cfg["sandbox_assist_validation_command"] = task.get("sandbox_assist_validation_command") or ""
+                    new_cfg["sandbox_assist_test_command"] = task.get("sandbox_assist_test_command") or ""
+
+        elif kind == "alert" and kind_counts.get("alert", 0) == 1:
+            new_cfg["trigger_mode"] = task.get("trigger_mode") or "json"
+            new_cfg["trigger_text"] = task.get("trigger_text") or ""
+            new_cfg["repeat_every_minutes"] = int(policy.get("repeat_every_minutes") or 0)
+            new_cfg["dedupe_key"] = str(policy.get("dedupe_key_template") or "")
+            new_cfg["severity"] = str(policy.get("severity") or "info")
+
+        if new_cfg != cfg:
+            changed = True
+        item["config"] = new_cfg
+        item["config_json"] = json.dumps(new_cfg, ensure_ascii=False)
+        synced.append(item)
+
+    return synced, changed
+
+
 def _task_normalize_step(task_id: str, step: dict, position: int) -> dict:
     kind = (step.get("kind") or "chat").strip().lower()
     if kind not in _task_step_kinds():
@@ -3540,7 +3722,7 @@ def _task_lifecycle_state(task: dict) -> str:
 
 
 def _task_template_row_to_dict(row: sqlite3.Row | dict) -> dict:
-    raw = dict(row)
+    raw = _task_apply_template_data(row)
     raw["active"] = bool(raw.get("active"))
     raw["interval_minutes"] = int(raw.get("interval_minutes") or 0)
     raw["tabs_required"] = int(raw.get("tabs_required") or 1)
@@ -3568,10 +3750,10 @@ def _ensure_task_templates_seeded() -> None:
             live_doc = _task_template_live_doc_spec(tpl.get("key") or "") or {}
             conn.execute(
                 "INSERT OR IGNORE INTO task_templates (key, created_at, updated_at, name, description, mode, schedule_kind, interval_minutes, "
-                "tabs_required, executor_target, workspace_dir, planner_prompt, executor_prompt, validation_command, test_command, "
+                "tabs_required, template_data_json, executor_target, workspace_dir, planner_prompt, executor_prompt, validation_command, test_command, "
                 "sandbox_assist, sandbox_assist_target, sandbox_assist_workspace_dir, sandbox_assist_command, "
                 "sandbox_assist_validation_command, sandbox_assist_test_command, context_handoff, trigger_mode, trigger_text, live_doc_trace, live_doc_order, active, source) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     tpl["key"],
                     now,
@@ -3582,6 +3764,7 @@ def _ensure_task_templates_seeded() -> None:
                     tpl.get("schedule_kind") or "manual",
                     int(tpl.get("interval_minutes") or 0),
                     int(tpl.get("tabs_required") or 1),
+                    json.dumps(tpl.get("template_data") or {}, ensure_ascii=False),
                     _task_sandbox_target(tpl.get("executor_target") or "c12b"),
                     _task_sandbox_workspace(tpl.get("workspace_dir"), _task_sandbox_target(tpl.get("executor_target") or "c12b")),
                     tpl.get("planner_prompt") or "",
@@ -3604,9 +3787,22 @@ def _ensure_task_templates_seeded() -> None:
                 ),
             )
         conn.execute(
-            "UPDATE task_templates SET updated_at=?, executor_prompt=? "
+            "UPDATE task_templates SET updated_at=?, executor_prompt=?, template_data_json=? "
             "WHERE key='weather-dublin' AND source='builtin' AND executor_prompt=?",
-            (now, WEATHER_DUBLIN_PROMPT, WEATHER_DUBLIN_LEGACY_PROMPT),
+            (
+                now,
+                WEATHER_DUBLIN_PROMPT,
+                json.dumps(_task_weather_template_data(executor_prompt=WEATHER_DUBLIN_PROMPT), ensure_ascii=False),
+                WEATHER_DUBLIN_LEGACY_PROMPT,
+            ),
+        )
+        conn.execute(
+            "UPDATE task_templates SET updated_at=?, template_data_json=? "
+            "WHERE key='weather-dublin' AND source='builtin' AND COALESCE(template_data_json, '') IN ('', '{}')",
+            (
+                now,
+                json.dumps(_task_weather_template_data(executor_prompt=WEATHER_DUBLIN_PROMPT), ensure_ascii=False),
+            ),
         )
         conn.execute(
             "UPDATE task_templates SET updated_at=?, executor_prompt=? "
@@ -3639,14 +3835,19 @@ def _ensure_task_templates_seeded() -> None:
                 SANDBOX_VALIDATE_LEGACY_TRIGGER_TEXT,
             ),
         )
+        seen_template_keys: set[str] = set()
         for spec in TASK_TEMPLATE_LIVE_DOC_SPECS:
+            template_key = str(spec.get("template_key") or "").strip()
+            if not template_key or template_key in seen_template_keys:
+                continue
+            seen_template_keys.add(template_key)
             conn.execute(
                 "UPDATE task_templates SET updated_at=?, live_doc_trace=?, live_doc_order=? WHERE key=? AND source='builtin'",
                 (
                     now,
                     spec["trace"],
                     int(str(spec["trace"]).replace("TRACE-", "") or 0),
-                    spec["template_key"],
+                    template_key,
                 ),
             )
 
@@ -3673,19 +3874,22 @@ def _tasked_live_doc_seed_task_payload(template: dict, spec: dict) -> dict:
     workspace_dir = _task_sandbox_workspace(template.get("workspace_dir"), executor_target) if executor_target else ""
     assist = _task_sandbox_assist_values(template, mode=mode)
     trace = spec["trace"]
-    return {
+    template_data = dict(template.get("template_data") or {})
+    template_data.update(_task_inline_object(spec.get("template_data")))
+    payload = {
         "id": spec["task_id"],
-        "name": f"{trace} · {template.get('name') or spec['template_key']}",
+        "name": str(spec.get("name") or f"{trace} · {template.get('name') or spec['template_key']}").strip(),
         "mode": mode,
         "schedule_kind": "manual",
         "interval_minutes": 0,
         "active": False,
         "tabs_required": int(template.get("tabs_required") or 1),
         "template_key": template.get("key") or spec["template_key"],
+        "template_data": template_data,
         "executor_target": executor_target if mode == "sandbox" else "",
         "workspace_dir": workspace_dir,
-        "planner_prompt": template.get("planner_prompt") or "",
-        "executor_prompt": template.get("executor_prompt") or "",
+        "planner_prompt": str(spec.get("planner_prompt") or template.get("planner_prompt") or "").strip(),
+        "executor_prompt": str(spec.get("executor_prompt") or template.get("executor_prompt") or "").strip(),
         "validation_command": template.get("validation_command") or "",
         "test_command": template.get("test_command") or "",
         "sandbox_assist": assist["sandbox_assist"],
@@ -3705,6 +3909,10 @@ def _tasked_live_doc_seed_task_payload(template: dict, spec: dict) -> dict:
         "alert_policy": _task_default_alert_policy(),
         "tasked_type": spec.get("type") or ("action" if mode == "sandbox" else "output"),
     }
+    notes_suffix = str(spec.get("notes_suffix") or "").strip()
+    if notes_suffix:
+        payload["notes"] = f"{payload['notes']} {notes_suffix}"
+    return _task_apply_template_data(payload)
 
 
 def _ensure_tasked_live_doc_template_tasks_seeded() -> None:
@@ -3720,7 +3928,7 @@ def _ensure_tasked_live_doc_template_tasks_seeded() -> None:
             if existing:
                 conn.execute(
                     "UPDATE task_definitions SET updated_at=?, name=?, mode=?, schedule_kind=?, interval_minutes=?, active=?, tabs_required=?, "
-                    "template_key=?, executor_target=?, workspace_dir=?, planner_prompt=?, executor_prompt=?, validation_command=?, test_command=?, "
+                    "template_key=?, template_data_json=?, executor_target=?, workspace_dir=?, planner_prompt=?, executor_prompt=?, validation_command=?, test_command=?, "
                     "sandbox_assist=?, sandbox_assist_target=?, sandbox_assist_workspace_dir=?, sandbox_assist_command=?, "
                     "sandbox_assist_validation_command=?, sandbox_assist_test_command=?, context_handoff=?, trigger_mode=?, trigger_text=?, notes=?, "
                     "next_run_at=NULL, completion_policy_json=?, alert_policy_json=?, workflow_version=?, archived_at=NULL, tasked_type=? WHERE id=?",
@@ -3733,6 +3941,7 @@ def _ensure_tasked_live_doc_template_tasks_seeded() -> None:
                         1 if task_payload["active"] else 0,
                         int(task_payload["tabs_required"] or 1),
                         task_payload["template_key"],
+                        json.dumps(task_payload.get("template_data") or {}, ensure_ascii=False),
                         task_payload["executor_target"],
                         task_payload["workspace_dir"],
                         task_payload["planner_prompt"],
@@ -3759,10 +3968,10 @@ def _ensure_tasked_live_doc_template_tasks_seeded() -> None:
             else:
                 conn.execute(
                     "INSERT INTO task_definitions (id, created_at, updated_at, name, mode, schedule_kind, interval_minutes, active, tabs_required, "
-                    "template_key, executor_target, workspace_dir, planner_prompt, executor_prompt, validation_command, test_command, sandbox_assist, "
+                    "template_key, template_data_json, executor_target, workspace_dir, planner_prompt, executor_prompt, validation_command, test_command, sandbox_assist, "
                     "sandbox_assist_target, sandbox_assist_workspace_dir, sandbox_assist_command, sandbox_assist_validation_command, sandbox_assist_test_command, "
                     "context_handoff, trigger_mode, trigger_text, notes, next_run_at, completion_policy_json, alert_policy_json, workflow_version, tasked_type) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
                         spec["task_id"],
                         now,
@@ -3774,6 +3983,7 @@ def _ensure_tasked_live_doc_template_tasks_seeded() -> None:
                         1 if task_payload["active"] else 0,
                         int(task_payload["tabs_required"] or 1),
                         task_payload["template_key"],
+                        json.dumps(task_payload.get("template_data") or {}, ensure_ascii=False),
                         task_payload["executor_target"],
                         task_payload["workspace_dir"],
                         task_payload["planner_prompt"],
@@ -3837,7 +4047,7 @@ def _tasked_live_doc_template_traces_payload() -> list[dict]:
                     "task_id": spec["task_id"],
                     "run_id": run_id,
                     "alert_id": alert_id,
-                    "name": template.get("name") or spec["template_key"],
+                    "name": task.get("name") or spec.get("name") or template.get("name") or spec["template_key"],
                     "desc": spec["desc"],
                     "planner": task.get("planner_prompt") or template.get("planner_prompt") or "",
                     "executor": task.get("executor_prompt") or template.get("executor_prompt") or "",
@@ -3845,6 +4055,7 @@ def _tasked_live_doc_template_traces_payload() -> list[dict]:
                     "trigger_text": task.get("trigger_text") or template.get("trigger_text") or "",
                     "steps": steps,
                     "template_key": template.get("key") or spec["template_key"],
+                    "template_data": task.get("template_data") or template.get("template_data") or {},
                     "context_handoff": task.get("context_handoff") or template.get("context_handoff") or "",
                     "validation_command": task.get("validation_command") or template.get("validation_command") or "",
                     "test_command": task.get("test_command") or template.get("test_command") or "",
@@ -4072,7 +4283,7 @@ def _task_launch_url(mode: str, prompt: str, *, task_id: str = "", run_id: str =
 
 
 def _task_row_to_dict(row: sqlite3.Row | dict) -> dict:
-    raw = dict(row)
+    raw = _task_apply_template_data(row)
     raw["active"] = bool(raw.get("active"))
     raw["interval_minutes"] = int(raw.get("interval_minutes") or 0)
     raw["tabs_required"] = int(raw.get("tabs_required") or 1)
@@ -4592,11 +4803,15 @@ def _seed_tasked_examples() -> dict:
             conn.execute("DELETE FROM task_events WHERE task_id=?", (task_id,))
             conn.execute("DELETE FROM task_runs WHERE task_id=?", (task_id,))
             conn.execute("DELETE FROM task_definitions WHERE id=?", (task_id,))
+            template_data_json = _task_apply_template_data({
+                "template_key": spec["template_key"],
+                "executor_prompt": executor_prompt,
+            }).get("template_data_json")
 
             conn.execute(
                 "INSERT INTO task_definitions (id, created_at, updated_at, name, mode, schedule_kind, interval_minutes, active, tabs_required, "
-                "template_key, planner_prompt, executor_prompt, context_handoff, trigger_mode, trigger_text, notes, last_run_at, next_run_at, "
-                "last_status, last_result_excerpt, completion_policy_json, alert_policy_json, workflow_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "template_key, template_data_json, planner_prompt, executor_prompt, context_handoff, trigger_mode, trigger_text, notes, last_run_at, next_run_at, "
+                "last_status, last_result_excerpt, completion_policy_json, alert_policy_json, workflow_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     task_id,
                     created_at,
@@ -4608,6 +4823,7 @@ def _seed_tasked_examples() -> dict:
                     active,
                     tabs_required,
                     spec["template_key"],
+                    template_data_json,
                     planner_prompt,
                     executor_prompt,
                     context_handoff,
@@ -5866,10 +6082,17 @@ def _task_steps_for_task(task_row: dict) -> list[dict]:
     steps = _task_steps_fetch(str(task_row.get("id") or ""))
     if not steps:
         steps = _task_build_default_steps(task_row)
+    steps, changed = _task_sync_builder_steps(task_row, steps)
     normalized = []
     for idx, step in enumerate(steps, start=1):
         item = _task_normalize_step(str(task_row.get("id") or ""), step, idx)
         normalized.append(item)
+    if changed and task_row.get("id"):
+        try:
+            with _db() as conn:
+                _task_save_steps(conn, str(task_row.get("id") or ""), normalized)
+        except sqlite3.Error:
+            pass
     return normalized
 
 
@@ -6170,12 +6393,26 @@ async def _task_resume_workflow(
     if not steps:
         return _task_mark_terminal(task_row, run_id, status="failed", error_text="No workflow steps configured", terminal_reason="no-steps", next_run_at=next_run_at)
     context = context or _task_context_from_history(task_row, run_id)
+
+    def _cancelled_result(step_id: str = "") -> dict:
+        return _task_mark_terminal(
+            task_row,
+            run_id,
+            status="cancelled",
+            text="Task stopped by user.",
+            current_step_id=step_id,
+            terminal_reason="stopped-by-user",
+            next_run_at=next_run_at,
+        )
+
     idx = 0
     if start_step_id and start_step_id in step_index:
         idx = step_index[start_step_id]
     while idx < len(steps):
         step = steps[idx]
         current_step_id = step.get("id") or ""
+        if _task_run_status(run_id) == "cancelled":
+            return _cancelled_result(current_step_id)
         _task_update_run_tracking(run_id, status="running", current_step_id=current_step_id)
         _record_task_event(str(task_row.get("id") or ""), "step-started", f"{step.get('name') or current_step_id} ({step.get('kind')}) started.", status="running", run_id=run_id)
         result_id = _task_insert_step_result(str(task_row.get("id") or ""), run_id, step, status="running")
@@ -6278,6 +6515,9 @@ async def _task_resume_workflow(
                 run_id=run_id,
                 recovery_session_id=recovery_session_id if current_step_id == recovery_step_id else "",
             )
+            if _task_run_status(run_id) == "cancelled":
+                _task_finish_step_result(result_id, status="cancelled", output={"cancelled": True}, error_text="Task stopped by user.")
+                return _cancelled_result(current_step_id)
             text = (chat_result.get("text") or "").strip()
             parsed = _task_parse_json_payload(text)
             trigger_mode = (task_row.get("trigger_mode") or "json").strip().lower()
@@ -6421,6 +6661,18 @@ def _task_release_claim(task_id: str, run_id: str = "") -> None:
         return
 
 
+def _task_run_status(run_id: str) -> str:
+    run_id = str(run_id or "").strip()
+    if not run_id:
+        return ""
+    try:
+        with _db() as conn:
+            row = conn.execute("SELECT status FROM task_runs WHERE id=?", (run_id,)).fetchone()
+        return str((row["status"] if row and "status" in row.keys() else row[0]) or "").strip() if row else ""
+    except sqlite3.Error:
+        return ""
+
+
 def _task_template_upsert(payload: dict, *, template_key: str = "") -> dict:
     now = _iso_now()
     key = (template_key or payload.get("key") or "").strip() or _slugify(payload.get("name") or "template", prefix="template")
@@ -6436,6 +6688,7 @@ def _task_template_upsert(payload: dict, *, template_key: str = "") -> dict:
         "schedule_kind": (payload.get("schedule_kind") or "manual").strip().lower(),
         "interval_minutes": max(0, int(payload.get("interval_minutes") or 0)),
         "tabs_required": max(1, min(12, int(payload.get("tabs_required") or 1))),
+        "template_data": _task_inline_object(payload.get("template_data")),
         "executor_target": executor_target if mode == "sandbox" else "",
         "workspace_dir": _task_sandbox_workspace(payload.get("workspace_dir"), executor_target) if mode == "sandbox" else "",
         "planner_prompt": (payload.get("planner_prompt") or "").strip(),
@@ -6451,6 +6704,7 @@ def _task_template_upsert(payload: dict, *, template_key: str = "") -> dict:
         "active": 1 if payload.get("active", True) else 0,
         "source": (payload.get("source") or "user").strip().lower() or "user",
     }
+    row_payload = _task_apply_template_data(row_payload)
     if not row_payload["name"]:
         return {"ok": False, "error": "template name required"}
     if row_payload["sandbox_assist"] and not row_payload["sandbox_assist_command"]:
@@ -6461,13 +6715,13 @@ def _task_template_upsert(payload: dict, *, template_key: str = "") -> dict:
         if existing:
             conn.execute(
                 "UPDATE task_templates SET updated_at=?, name=?, description=?, mode=?, schedule_kind=?, interval_minutes=?, tabs_required=?, "
-                "executor_target=?, workspace_dir=?, planner_prompt=?, executor_prompt=?, validation_command=?, test_command=?, "
+                "template_data_json=?, executor_target=?, workspace_dir=?, planner_prompt=?, executor_prompt=?, validation_command=?, test_command=?, "
                 "sandbox_assist=?, sandbox_assist_target=?, sandbox_assist_workspace_dir=?, sandbox_assist_command=?, "
                 "sandbox_assist_validation_command=?, sandbox_assist_test_command=?, context_handoff=?, trigger_mode=?, trigger_text=?, "
                 "live_doc_trace=?, live_doc_order=?, active=?, source=? WHERE key=?",
                 (
                     now, row_payload["name"], row_payload["description"], row_payload["mode"], row_payload["schedule_kind"],
-                    row_payload["interval_minutes"], row_payload["tabs_required"], row_payload["executor_target"], row_payload["workspace_dir"],
+                    row_payload["interval_minutes"], row_payload["tabs_required"], row_payload["template_data_json"], row_payload["executor_target"], row_payload["workspace_dir"],
                     row_payload["planner_prompt"], row_payload["executor_prompt"], row_payload["validation_command"], row_payload["test_command"],
                     1 if row_payload["sandbox_assist"] else 0, row_payload["sandbox_assist_target"], row_payload["sandbox_assist_workspace_dir"],
                     row_payload["sandbox_assist_command"], row_payload["sandbox_assist_validation_command"], row_payload["sandbox_assist_test_command"],
@@ -6478,12 +6732,12 @@ def _task_template_upsert(payload: dict, *, template_key: str = "") -> dict:
         else:
             conn.execute(
                 "INSERT INTO task_templates (key, created_at, updated_at, name, description, mode, schedule_kind, interval_minutes, tabs_required, "
-                "executor_target, workspace_dir, planner_prompt, executor_prompt, validation_command, test_command, sandbox_assist, "
+                "template_data_json, executor_target, workspace_dir, planner_prompt, executor_prompt, validation_command, test_command, sandbox_assist, "
                 "sandbox_assist_target, sandbox_assist_workspace_dir, sandbox_assist_command, sandbox_assist_validation_command, "
                 "sandbox_assist_test_command, context_handoff, trigger_mode, trigger_text, live_doc_trace, live_doc_order, active, source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     key, created_at, now, row_payload["name"], row_payload["description"], row_payload["mode"],
-                    row_payload["schedule_kind"], row_payload["interval_minutes"], row_payload["tabs_required"], row_payload["executor_target"],
+                    row_payload["schedule_kind"], row_payload["interval_minutes"], row_payload["tabs_required"], row_payload["template_data_json"], row_payload["executor_target"],
                     row_payload["workspace_dir"], row_payload["planner_prompt"], row_payload["executor_prompt"],
                     row_payload["validation_command"], row_payload["test_command"], 1 if row_payload["sandbox_assist"] else 0,
                     row_payload["sandbox_assist_target"], row_payload["sandbox_assist_workspace_dir"], row_payload["sandbox_assist_command"],
@@ -7369,11 +7623,20 @@ async def api_tasks_upsert(request: Request):
     mode = (body.get("mode") or "chat").strip().lower()
     schedule_kind = (body.get("schedule_kind") or "manual").strip().lower()
     template_key = (body.get("template_key") or "").strip()
+    template_data = _task_inline_object(body.get("template_data"))
     executor_target = _task_sandbox_target(body.get("executor_target") or ("c12b" if mode == "sandbox" else ""))
     workspace_dir = _task_sandbox_workspace(body.get("workspace_dir"), executor_target) if mode == "sandbox" else ""
     sandbox_assist = _task_sandbox_assist_values(body, mode=mode)
     planner_prompt = (body.get("planner_prompt") or "").strip()
     executor_prompt = (body.get("executor_prompt") or "").strip()
+    task_template_payload = _task_apply_template_data({
+        "id": task_id,
+        "template_key": template_key,
+        "template_data": template_data,
+        "executor_prompt": executor_prompt,
+    })
+    template_data = task_template_payload.get("template_data") or {}
+    executor_prompt = (task_template_payload.get("executor_prompt") or executor_prompt).strip()
     validation_command = (body.get("validation_command") or "").strip() if mode == "sandbox" else ""
     test_command = (body.get("test_command") or "").strip() if mode == "sandbox" else ""
     context_handoff = (body.get("context_handoff") or "").strip()
@@ -7411,6 +7674,8 @@ async def api_tasks_upsert(request: Request):
             "id": task_id,
             "name": name,
             "mode": mode,
+            "template_key": template_key,
+            "template_data": template_data,
             "schedule_kind": schedule_kind,
             "interval_minutes": interval_minutes,
             "executor_target": executor_target,
@@ -7431,6 +7696,27 @@ async def api_tasks_upsert(request: Request):
             for item in steps_to_save
         )
         normalized_steps = _task_clone_steps(task_id, steps_to_save) if needs_rebase else [_task_normalize_step(task_id, item, idx + 1) for idx, item in enumerate(steps_to_save)]
+        normalized_steps, _ = _task_sync_builder_steps({
+            "id": task_id,
+            "mode": mode,
+            "schedule_kind": schedule_kind,
+            "interval_minutes": interval_minutes,
+            "executor_prompt": executor_prompt,
+            "planner_prompt": planner_prompt,
+            "executor_target": executor_target,
+            "workspace_dir": workspace_dir,
+            "validation_command": validation_command,
+            "test_command": test_command,
+            "sandbox_assist": sandbox_assist["sandbox_assist"],
+            "sandbox_assist_target": sandbox_assist["sandbox_assist_target"],
+            "sandbox_assist_workspace_dir": sandbox_assist["sandbox_assist_workspace_dir"],
+            "sandbox_assist_command": sandbox_assist["sandbox_assist_command"],
+            "sandbox_assist_validation_command": sandbox_assist["sandbox_assist_validation_command"],
+            "sandbox_assist_test_command": sandbox_assist["sandbox_assist_test_command"],
+            "trigger_mode": trigger_mode,
+            "trigger_text": trigger_text,
+            "alert_policy": alert_policy,
+        }, normalized_steps)
     except ValueError as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
 
@@ -7441,13 +7727,13 @@ async def api_tasks_upsert(request: Request):
             if existing:
                 conn.execute(
                     "UPDATE task_definitions SET updated_at=?, name=?, mode=?, schedule_kind=?, interval_minutes=?, active=?, tabs_required=?, "
-                    "template_key=?, executor_target=?, workspace_dir=?, planner_prompt=?, executor_prompt=?, validation_command=?, test_command=?, "
+                    "template_key=?, template_data_json=?, executor_target=?, workspace_dir=?, planner_prompt=?, executor_prompt=?, validation_command=?, test_command=?, "
                     "sandbox_assist=?, sandbox_assist_target=?, sandbox_assist_workspace_dir=?, sandbox_assist_command=?, "
                     "sandbox_assist_validation_command=?, sandbox_assist_test_command=?, context_handoff=?, trigger_mode=?, trigger_text=?, notes=?, "
                     "next_run_at=CASE WHEN ?=1 THEN ? ELSE NULL END, completion_policy_json=?, alert_policy_json=?, workflow_version=?, archived_at=NULL WHERE id=?",
                     (
                         now, name, mode, schedule_kind, interval_minutes, active, tabs_required,
-                        template_key, executor_target if mode == "sandbox" else "", workspace_dir, planner_prompt, executor_prompt,
+                        template_key, json.dumps(template_data, ensure_ascii=False), executor_target if mode == "sandbox" else "", workspace_dir, planner_prompt, executor_prompt,
                         validation_command, test_command, 1 if sandbox_assist["sandbox_assist"] else 0, sandbox_assist["sandbox_assist_target"],
                         sandbox_assist["sandbox_assist_workspace_dir"], sandbox_assist["sandbox_assist_command"],
                         sandbox_assist["sandbox_assist_validation_command"], sandbox_assist["sandbox_assist_test_command"],
@@ -7458,13 +7744,13 @@ async def api_tasks_upsert(request: Request):
             else:
                 conn.execute(
                     "INSERT INTO task_definitions (id, created_at, updated_at, name, mode, schedule_kind, interval_minutes, active, tabs_required, "
-                    "template_key, executor_target, workspace_dir, planner_prompt, executor_prompt, validation_command, test_command, "
+                    "template_key, template_data_json, executor_target, workspace_dir, planner_prompt, executor_prompt, validation_command, test_command, "
                     "sandbox_assist, sandbox_assist_target, sandbox_assist_workspace_dir, sandbox_assist_command, sandbox_assist_validation_command, "
                     "sandbox_assist_test_command, context_handoff, trigger_mode, trigger_text, notes, next_run_at, completion_policy_json, alert_policy_json, workflow_version) "
-                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                     (
                         task_id, now, now, name, mode, schedule_kind, interval_minutes, active, tabs_required,
-                        template_key, executor_target if mode == "sandbox" else "", workspace_dir, planner_prompt, executor_prompt,
+                        template_key, json.dumps(template_data, ensure_ascii=False), executor_target if mode == "sandbox" else "", workspace_dir, planner_prompt, executor_prompt,
                         validation_command, test_command, 1 if sandbox_assist["sandbox_assist"] else 0, sandbox_assist["sandbox_assist_target"],
                         sandbox_assist["sandbox_assist_workspace_dir"], sandbox_assist["sandbox_assist_command"],
                         sandbox_assist["sandbox_assist_validation_command"], sandbox_assist["sandbox_assist_test_command"],
@@ -7582,15 +7868,15 @@ def _task_clone_definition(task_id: str) -> dict:
     with _db() as conn:
         conn.execute(
             "INSERT INTO task_definitions (id, created_at, updated_at, name, mode, schedule_kind, interval_minutes, active, tabs_required, "
-            "template_key, executor_target, workspace_dir, planner_prompt, executor_prompt, validation_command, test_command, "
+            "template_key, template_data_json, executor_target, workspace_dir, planner_prompt, executor_prompt, validation_command, test_command, "
             "sandbox_assist, sandbox_assist_target, sandbox_assist_workspace_dir, sandbox_assist_command, sandbox_assist_validation_command, "
             "sandbox_assist_test_command, context_handoff, trigger_mode, trigger_text, notes, next_run_at, last_status, last_result_excerpt, "
             "completion_policy_json, alert_policy_json, workflow_version) "
-            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 cloned_id, now, now, clone_name, source.get("mode") or "chat", source.get("schedule_kind") or "manual",
                 source.get("interval_minutes") or 0, 1 if source.get("active") else 0, source.get("tabs_required") or 1,
-                source.get("template_key") or "", source.get("executor_target") or "", source.get("workspace_dir") or "",
+                source.get("template_key") or "", json.dumps(source.get("template_data") or {}, ensure_ascii=False), source.get("executor_target") or "", source.get("workspace_dir") or "",
                 source.get("planner_prompt") or "", source.get("executor_prompt") or "", source.get("validation_command") or "",
                 source.get("test_command") or "", 1 if source.get("sandbox_assist") else 0, source.get("sandbox_assist_target") or "",
                 source.get("sandbox_assist_workspace_dir") or "", source.get("sandbox_assist_command") or "",
@@ -7601,7 +7887,9 @@ def _task_clone_definition(task_id: str) -> dict:
                 json.dumps(source.get("alert_policy") or _task_default_alert_policy(), ensure_ascii=False), int(source.get("workflow_version") or 1),
             ),
         )
-        _task_save_steps(conn, cloned_id, _task_clone_steps(cloned_id, source.get("steps") or _task_steps_fetch(task_id) or _task_build_default_steps(source)))
+        clone_steps = _task_clone_steps(cloned_id, source.get("steps") or _task_steps_fetch(task_id) or _task_build_default_steps(source))
+        clone_steps, _ = _task_sync_builder_steps({**source, "id": cloned_id}, clone_steps)
+        _task_save_steps(conn, cloned_id, clone_steps)
     _record_task_event(cloned_id, "task-cloned", f"Task cloned from {task_id}.", status="idle")
     cloned = _task_state_response(cloned_id)
     return {"ok": True, "task": cloned, "source_task_id": task_id}
@@ -7814,6 +8102,9 @@ async def api_task_stop(task_id: str):
                 "UPDATE task_definitions SET last_status='cancelled', updated_at=? WHERE id=?",
                 (now, task_id),
             )
+        _task_release_claim(task_id)
+        async with _get_task_runner_lock():
+            _task_runner_ids.discard(task_id)
         _record_task_event(task_id, "task-stopped", "Task stopped by user.", status="cancelled")
         return JSONResponse({"ok": True, "task_id": task_id, "status": "cancelled"})
     except sqlite3.Error as exc:

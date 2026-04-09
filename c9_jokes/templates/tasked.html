@@ -321,6 +321,28 @@
           </div>
         </div>
 
+        <div class="tasked-form-section" id="task-template-params-section" hidden>
+          <div class="tasked-form-section-header" data-section="template-params">
+            <h3>Template Parameters</h3>
+            <span class="tasked-form-section-toggle">▼</span>
+          </div>
+          <div class="tasked-form-section-body" id="section-template-params">
+            <div class="tasked-note" id="task-template-params-note">
+              Weather template parameters are editable here. Changing the town or temperature threshold rebuilds the runnable prompt and step config for this Tasked row.
+            </div>
+            <div class="tasked-kv-grid" id="task-weather-params">
+              <label>
+                Weather town / city
+                <input id="task-weather-location" placeholder="Dublin, Ireland">
+              </label>
+              <label>
+                Trigger above temperature (°C)
+                <input id="task-weather-threshold" type="number" step="0.1" placeholder="10">
+              </label>
+            </div>
+          </div>
+        </div>
+
         <div class="tasked-form-section">
           <div class="tasked-form-section-header" data-section="sandbox">
             <h3>Sandbox Configuration</h3>
@@ -594,7 +616,7 @@ Alert config example:
   var AGENT_TARGETS = {{ task_agent_targets|safe }};
   var TASKED_TYPE_OPTIONS = {{ tasked_type_options|safe }};
   var TASKED_AUTHOR_EXAMPLES = {{ tasked_author_examples|safe }};
-  var state = { tasks: [], selectedId: '', formDirty: false, lastLoadedAt: '', steps: [], authorDraft: null, collapsedGroups: {} };
+  var state = { tasks: [], selectedId: '', formDirty: false, lastLoadedAt: '', steps: [], authorDraft: null, collapsedGroups: {}, templateData: {} };
   var initialTaskId = new URLSearchParams(window.location.search).get('task_id') || '';
   var form = document.getElementById('task-form');
   var templateEl = document.getElementById('task-template');
@@ -611,6 +633,7 @@ Alert config example:
   var runtimeGridEl = document.getElementById('tasked-runtime-grid');
   var workflowDiagramEl = document.getElementById('tasked-workflow-diagram');
   var stepsListEl = document.getElementById('task-steps-list');
+  var templateParamsSectionEl = document.getElementById('task-template-params-section');
   var authorPromptEl = document.getElementById('tasked-author-prompt');
   var authorStrategyEl = document.getElementById('tasked-author-strategy');
   var authorResultEl = document.getElementById('tasked-author-result');
@@ -651,7 +674,9 @@ Alert config example:
     alertWhileTrue: document.getElementById('task-alert-while-true'),
     completionMark: document.getElementById('task-completion-mark'),
     completionArchive: document.getElementById('task-completion-archive'),
-    taskedType: document.getElementById('task-tasked-type')
+    taskedType: document.getElementById('task-tasked-type'),
+    weatherLocation: document.getElementById('task-weather-location'),
+    weatherThreshold: document.getElementById('task-weather-threshold')
   };
 
   // Populate output-type select from server-injected options
@@ -688,6 +713,67 @@ Alert config example:
   function executorLabel(target) {
     var hit = EXECUTOR_TARGETS.find(function(item){ return item.id === target; });
     return (hit && hit.label) || target || '—';
+  }
+  function numberLabel(value, fallback) {
+    var n = Number(value);
+    if (!Number.isFinite(n)) n = Number(fallback || 0);
+    return Number.isInteger(n) ? String(n) : String(Math.round(n * 100) / 100).replace(/\.0+$/, '').replace(/(\.\d*?)0+$/, '$1');
+  }
+  function weatherLocation(value) {
+    return (String(value || '').trim() || 'Dublin, Ireland');
+  }
+  function weatherThreshold(value) {
+    var n = Number(value);
+    return Number.isFinite(n) ? n : 10;
+  }
+  function weatherCityLabel(location) {
+    var text = weatherLocation(location);
+    return text.split(',')[0].trim() || text;
+  }
+  function buildWeatherPrompt(location, threshold) {
+    var resolvedLocation = weatherLocation(location);
+    var resolvedThreshold = weatherThreshold(threshold);
+    var thresholdLabel = numberLabel(resolvedThreshold, 10);
+    var cityLabel = weatherCityLabel(resolvedLocation);
+    return 'Check the current weather in ' + resolvedLocation + '. Return valid JSON only with this schema: {"triggered": boolean, "trigger": "' + cityLabel + ' weather", "title": string, "summary": string, "details": {"location": string, "temperature_c": number|null, "condition": string}}. Do not use markdown fences. Set triggered to true only when temperature_c is a number above ' + thresholdLabel + '. If temperature_c is unavailable, set it to null and triggered to false.';
+  }
+  function weatherTemplateData(input) {
+    var raw = (input && typeof input === 'object') ? input : {};
+    return {
+      template_kind: 'weather-threshold',
+      weather_location: weatherLocation(raw.weather_location || raw.location),
+      temperature_threshold_c: weatherThreshold(raw.temperature_threshold_c)
+    };
+  }
+  function isWeatherTemplateActive() {
+    return templateEl.value === 'weather-dublin' || ((state.templateData || {}).template_kind === 'weather-threshold');
+  }
+  function refreshTemplateParamVisibility() {
+    if (templateParamsSectionEl) templateParamsSectionEl.hidden = !isWeatherTemplateActive();
+  }
+  function maybeAutoRenameWeatherTask(nextLocation) {
+    var current = String(fields.name.value || '').trim();
+    if (!current || current === 'Weather in Dublin' || current.startsWith('Weather in ')) {
+      fields.name.value = 'Weather in ' + weatherCityLabel(nextLocation);
+    }
+  }
+  function syncWeatherTemplateFields(options) {
+    options = options || {};
+    if (!isWeatherTemplateActive()) {
+      refreshTemplateParamVisibility();
+      return;
+    }
+    var nextData = weatherTemplateData(state.templateData || {});
+    state.templateData = nextData;
+    if (fields.weatherLocation) fields.weatherLocation.value = nextData.weather_location;
+    if (fields.weatherThreshold) fields.weatherThreshold.value = numberLabel(nextData.temperature_threshold_c, 10);
+    fields.executor.value = buildWeatherPrompt(nextData.weather_location, nextData.temperature_threshold_c);
+    var chatSteps = state.steps.filter(function(step) { return (step.kind || '') === 'chat'; });
+    if (chatSteps.length === 1) {
+      chatSteps[0].config = Object.assign({}, chatSteps[0].config || {}, { prompt: fields.executor.value });
+    }
+    if (options.rename !== false) maybeAutoRenameWeatherTask(nextData.weather_location);
+    refreshTemplateParamVisibility();
   }
   function agentLabel(agentId) {
     var hit = AGENT_TARGETS.find(function(item){ return item.id === agentId; });
@@ -956,6 +1042,7 @@ Alert config example:
     fields.completionArchive.checked = !!((task.completion_policy || {}).archive_on_complete);
     templateEl.value = task.template_key || '';
     templatePickerEl.value = task.template_key || '';
+    state.templateData = task.template_data || {};
     state.selectedId = asDraft ? '' : (task.id || '');
     state.formDirty = !!asDraft;
     state.steps = (task.steps || []).map(function(step) {
@@ -983,6 +1070,13 @@ Alert config example:
         '</div>';
     } else {
       renderTrace(task);
+    }
+    if (isWeatherTemplateActive()) syncWeatherTemplateFields({ rename: false });
+    else {
+      state.templateData = task.template_data || {};
+      if (fields.weatherLocation) fields.weatherLocation.value = '';
+      if (fields.weatherThreshold) fields.weatherThreshold.value = '';
+      refreshTemplateParamVisibility();
     }
     toggleSandboxFields();
     renderStepCards();
@@ -1022,10 +1116,14 @@ Alert config example:
     templatePickerEl.value = '';
     state.selectedId = '';
     state.formDirty = false;
+    state.templateData = {};
     state.steps = [];
     resultEl.textContent = 'No run yet.';
     traceBox.textContent = 'Select or save a Tasked row to inspect its unique trace ID, latest run, latest alert, and role-by-role visibility from orchestration through alerts.';
     state.authorDraft = null;
+    if (fields.weatherLocation) fields.weatherLocation.value = '';
+    if (fields.weatherThreshold) fields.weatherThreshold.value = '';
+    refreshTemplateParamVisibility();
     toggleSandboxFields();
     buildDefaultStepsForMode('chat');
   }
@@ -1062,9 +1160,16 @@ Alert config example:
     fields.completionMark.value = (tpl.completion_policy && tpl.completion_policy.mark_completed_on) || 'step-complete';
     fields.completionArchive.checked = !!(tpl.completion_policy && tpl.completion_policy.archive_on_complete);
     templatePickerEl.value = tpl.key;
+    state.templateData = tpl.template_data || {};
     state.formDirty = true;
     toggleSandboxFields();
     state.steps = (tpl.steps || []).map(function(step){ return { id: step.id || '', name: step.name || '', kind: step.kind || 'chat', config: step.config || {}, on_success_step_id: step.on_success_step_id || '', on_failure_step_id: step.on_failure_step_id || '', active: step.active !== false }; });
+    if (isWeatherTemplateActive()) syncWeatherTemplateFields({ rename: true });
+    else {
+      if (fields.weatherLocation) fields.weatherLocation.value = '';
+      if (fields.weatherThreshold) fields.weatherThreshold.value = '';
+      refreshTemplateParamVisibility();
+    }
     if (!state.steps.length) buildDefaultStepsForMode(fields.mode.value);
     else renderStepCards();
   }
@@ -1073,10 +1178,13 @@ Alert config example:
     var trace = task.trace || {};
     var latestRun = task.latest_run || {};
     var latestAlert = task.latest_alert || {};
+    var weatherTraceMeta = (task.template_data && task.template_data.template_kind === 'weather-threshold')
+      ? '\nWeather town: ' + (task.template_data.weather_location || '—') + '\nThreshold: above ' + numberLabel(task.template_data.temperature_threshold_c, 10) + '°C'
+      : '';
     traceBox.innerHTML =
       '<div><strong>Trace ID:</strong> ' + esc(trace.trace_id || task.id || '—') + ' <span class="tasked-pill" style="margin-left:.4rem;">' + esc(trace.execution_label || latestRun.execution_label || 'Execution pending') + '</span></div>' +
       '<div class="tasked-trace-grid">' +
-        '<div class="tasked-trace-item"><strong>Task orchestration</strong><span>Unique Task ID: ' + esc(trace.task_id || task.id || '—') + '\nMode: ' + esc(task.mode || '—') + '\nState: ' + esc(task.lifecycle_label || task.last_status || '—') + '</span></div>' +
+        '<div class="tasked-trace-item"><strong>Task orchestration</strong><span>Unique Task ID: ' + esc(trace.task_id || task.id || '—') + '\nMode: ' + esc(task.mode || '—') + '\nState: ' + esc(task.lifecycle_label || task.last_status || '—') + esc(weatherTraceMeta) + '</span></div>' +
         '<div class="tasked-trace-item"><strong>Task planner</strong><span>' + esc((trace.planner || {}).prompt || task.planner_prompt || '—') + '</span></div>' +
         '<div class="tasked-trace-item"><strong>Task timer</strong><span>Schedule: ' + esc((trace.timer || {}).schedule_label || task.schedule_label || '—') + '\nNext run: ' + esc(fmtTs((trace.timer || {}).next_run_at || task.next_run_at)) + '</span></div>' +
         '<div class="tasked-trace-item"><strong>Task executor</strong><span>Run ID: ' + esc((trace.run_id || latestRun.id || '—')) + '\nExecution: ' + esc((trace.execution_label || latestRun.execution_label || 'Execution pending')) + '\nStatus: ' + esc((trace.executor || {}).last_status || latestRun.status || '—') + '\nCurrent step: ' + esc((trace.completion || {}).current_step_id || task.current_step_id || '—') + '\nTarget: ' + esc(executorLabel((trace.executor || {}).target || task.executor_target || '')) + '\nWorkspace: ' + esc((trace.executor || {}).workspace_dir || task.workspace_dir || '—') + '\nValidation: ' + esc((trace.executor || {}).validation_status || latestRun.validation_status || '—') + '\nTest: ' + esc((trace.executor || {}).test_status || latestRun.test_status || '—') + '\nDuration: ' + esc((trace.executor || {}).duration_label || latestRun.duration_label || '—') + '</span></div>' +
@@ -1120,6 +1228,7 @@ Alert config example:
       tabs_required: parseInt(fields.tabs.value || '1', 10) || 1,
       active: fields.active.checked,
       template_key: templateEl.value || '',
+      template_data: isWeatherTemplateActive() ? weatherTemplateData(state.templateData || {}) : (state.templateData || {}),
       planner_prompt: fields.planner.value.trim(),
       executor_prompt: fields.executor.value.trim(),
       executor_target: fields.executorTarget.value,
@@ -1216,6 +1325,9 @@ Alert config example:
       ? '<span data-live-start="' + esc(latestRun.started_at || latestRun.created_at || '') + '" class="pulse-live">' + esc(latestRun.duration_label || '0s') + '</span>'
       : esc(latestRun.duration_label || '—');
     var typePill = t.tasked_type_label ? '<span class="tasked-pill" title="Output type">' + esc(t.tasked_type_label) + '</span> ' : '';
+    var weatherMeta = (t.template_data && t.template_data.template_kind === 'weather-threshold')
+      ? '<div class="tasked-note">Weather: ' + esc(t.template_data.weather_location || '—') + ' · Threshold > ' + esc(numberLabel(t.template_data.temperature_threshold_c, 10)) + '°C</div>'
+      : '';
     var previewUrl = t.preview_url || ('/tasked-preview?task_id=' + esc(t.id || ''));
     var statusBadge = '<span class="status-badge ' + esc(status) + '">' + esc(t.lifecycle_label || t.last_status || 'idle') + '</span>';
     var rerunLabel = hasRun ? 'Run Again' : 'Run';
@@ -1235,7 +1347,7 @@ Alert config example:
       ? '<div class="tasked-progress-wrap"><div class="tasked-progress-bar" style="width:' + pct + '%"></div></div><span class="tasked-progress-lbl">' + pct + '%</span>'
       : (pct === 100 ? '<span class="tasked-progress-lbl">100%</span>' : (pct > 0 ? '<span class="tasked-progress-lbl">' + pct + '%</span>' : '—'));
     return '<tr data-id="' + esc(t.id) + '">' +
-      '<td><strong>' + esc(t.name) + '</strong>' + (sys ? '<span class="tasked-sys-badge" title="Created from a built-in template">sys</span>' : '') + '<div class="tasked-note">' + typePill + esc((t.template_label || t.template_key || 'custom')) + ' · ' + esc(t.id || '') + '</div><div class="tasked-note">' + (t.sandbox_assist ? ('AIO assist: ' + esc(executorLabel(t.sandbox_assist_target || '')) + ' · ' + esc(t.sandbox_assist_workspace_dir || '—')) : 'AIO assist disabled') + '</div><div class="tasked-note">Recovery: ' + esc(((t.latest_recovery_session || {}).status) || 'steady') + (((t.latest_recovery_session || {}).retry_count || 0) ? (' · retries ' + esc((t.latest_recovery_session || {}).retry_count)) : '') + '</div></td>' +
+      '<td><strong>' + esc(t.name) + '</strong>' + (sys ? '<span class="tasked-sys-badge" title="Created from a built-in template">sys</span>' : '') + '<div class="tasked-note">' + typePill + esc((t.template_label || t.template_key || 'custom')) + ' · ' + esc(t.id || '') + '</div>' + weatherMeta + '<div class="tasked-note">' + (t.sandbox_assist ? ('AIO assist: ' + esc(executorLabel(t.sandbox_assist_target || '')) + ' · ' + esc(t.sandbox_assist_workspace_dir || '—')) : 'AIO assist disabled') + '</div><div class="tasked-note">Recovery: ' + esc(((t.latest_recovery_session || {}).status) || 'steady') + (((t.latest_recovery_session || {}).retry_count || 0) ? (' · retries ' + esc((t.latest_recovery_session || {}).retry_count)) : '') + '</div></td>' +
       '<td>' + esc(t.mode_label || t.mode) + '</td>' +
       '<td>' + esc(t.schedule_label || t.schedule_kind || '—') + '</td>' +
       '<td>' + statusBadge + '</td>' +
@@ -1728,7 +1840,16 @@ Alert config example:
     markDirty();
   });
   document.getElementById('task-reset-btn').addEventListener('click', resetForm);
-  templateEl.addEventListener('change', function() { applyTemplate(templateEl.value); });
+  templateEl.addEventListener('change', function() {
+    if (templateEl.value) {
+      applyTemplate(templateEl.value);
+      return;
+    }
+    state.templateData = {};
+    if (fields.weatherLocation) fields.weatherLocation.value = '';
+    if (fields.weatherThreshold) fields.weatherThreshold.value = '';
+    refreshTemplateParamVisibility();
+  });
   fields.mode.addEventListener('change', function() {
     toggleSandboxFields();
     if (!state.formDirty || !state.steps.length) buildDefaultStepsForMode(fields.mode.value);
@@ -1742,6 +1863,20 @@ Alert config example:
     if (fields.mode.value !== 'sandbox' && !fields.sandboxAssistWorkspaceDir.value.trim()) {
       fields.sandboxAssistWorkspaceDir.value = sandboxDefaultWorkspace(fields.sandboxAssistTarget.value);
     }
+  });
+  [fields.weatherLocation, fields.weatherThreshold].forEach(function(el) {
+    if (!el) return;
+    var handler = function() {
+      state.templateData = weatherTemplateData({
+        weather_location: fields.weatherLocation ? fields.weatherLocation.value : '',
+        temperature_threshold_c: fields.weatherThreshold ? fields.weatherThreshold.value : ''
+      });
+      syncWeatherTemplateFields({ rename: true });
+      renderStepCards();
+      markDirty();
+    };
+    el.addEventListener('input', handler);
+    el.addEventListener('change', handler);
   });
   form.querySelectorAll('input,select,textarea').forEach(function(el) {
     el.addEventListener('input', markDirty);

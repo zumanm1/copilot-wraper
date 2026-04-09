@@ -1050,14 +1050,14 @@ main {
           <div class="tld-doc-section" id="template-traces">
             <div class="tld-sec-h1">Editable Template Traces (TRACE-200 Series)</div>
             <div style="font-size:0.78rem;color:var(--muted);margin-bottom:0.8rem;">
-              These six traces are DB-backed mirrors of the editable Tasked templates. They keep stable trace IDs, stable task IDs, and inherit the current builtin template prompts and workflow settings.
+              These seven traces are DB-backed mirrors of the editable Tasked templates. They keep stable trace IDs, stable task IDs, and inherit the current builtin template prompts and workflow settings. The Dublin weather template is mirrored twice so Live Docs always shows one positive alert path and one negative no-alert path.
             </div>
             <div class="tld-type-grid" id="tld-template-trace-docs"></div>
             <div class="tld-table-wrap" style="margin-top:1rem;">
               <table class="tld-table">
                 <thead>
                   <tr>
-                    <th>Trace</th><th>Template</th><th>task_id</th><th>Mode</th><th>Expected alert</th><th>Tabs</th><th>Target</th>
+                    <th>Trace</th><th>Template</th><th>task_id</th><th>Mode</th><th>Expected alert</th><th>Template params</th><th>Tabs</th><th>Target</th>
                   </tr>
                 </thead>
                 <tbody id="tld-template-trace-table"></tbody>
@@ -1288,6 +1288,17 @@ main {
     }[mode] || (mode || 'required');
   }
 
+  function templateParamSummary(t) {
+    var data = t && t.template_data || {};
+    if (data.template_kind === 'weather-threshold') {
+      var location = data.weather_location || 'Dublin, Ireland';
+      var threshold = data.temperature_threshold_c;
+      var label = threshold === null || threshold === undefined || threshold === '' ? '—' : String(threshold) + 'C';
+      return location + ' · above ' + label;
+    }
+    return '—';
+  }
+
   function renderTemplateTraceDocs() {
     var cards = document.getElementById('tld-template-trace-docs');
     var table = document.getElementById('tld-template-trace-table');
@@ -1312,6 +1323,7 @@ main {
               '<span class="tld-info-key">Stable task_id</span><span class="tld-info-val mono">' + esc(t.task_id || '') + '</span>' +
               '<span class="tld-info-key">Mode</span><span class="tld-info-val">' + esc(t.mode || '') + '</span>' +
               '<span class="tld-info-key">Expected alert</span><span class="tld-info-val">' + esc(expectAlertLabel(t.expect_alert)) + '</span>' +
+              '<span class="tld-info-key">Template params</span><span class="tld-info-val">' + esc(templateParamSummary(t)) + '</span>' +
               '<span class="tld-info-key">Tabs required</span><span class="tld-info-val">' + esc(String(t.tabs_required || 1)) + '</span>' +
               '<span class="tld-info-key">Context handoff</span><span class="tld-info-val">' + esc(t.context_handoff || '—') + '</span>' +
             '</div>' +
@@ -1330,6 +1342,7 @@ main {
           '<td class="mono">' + esc(t.task_id || '') + '</td>' +
           '<td class="' + ((t.mode || '') === 'sandbox' ? '' : 'muted') + '">' + esc(t.mode || '') + '</td>' +
           '<td>' + esc(expectAlertLabel(t.expect_alert)) + '</td>' +
+          '<td>' + esc(templateParamSummary(t)) + '</td>' +
           '<td class="mono">' + esc(String(t.tabs_required || 1)) + '</td>' +
           '<td>' + esc(t.target || '') + '</td>' +
         '</tr>';

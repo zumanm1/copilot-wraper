@@ -157,7 +157,7 @@ def _parse_c9_sse(raw_sse: str) -> list[dict]:
     return events
 
 
-def _create_tasked_task(c9_app, *, name: str, executor_prompt: str, trigger_mode: str = "json"):
+def _create_tasked_task(c9_app, *, name: str, executor_prompt: str, trigger_mode: str = "json", **extra):
     payload = {
         "name": name,
         "mode": "chat",
@@ -170,6 +170,7 @@ def _create_tasked_task(c9_app, *, name: str, executor_prompt: str, trigger_mode
         "trigger_mode": trigger_mode,
         "trigger_text": "",
     }
+    payload.update(extra)
     r = c9_app.post("/api/tasks", json=payload)
     assert r.status_code == 200
     body = r.json()
@@ -377,7 +378,11 @@ class TestC9PageRoutes:
         assert "Run All" in r.text
         assert "Validate All" in r.text
         assert "TRACE-200" in r.text
+        assert "TRACE-206" in r.text
         assert "Editable Template Traces (TRACE-200 Series)" in r.text
+        assert "Dublin weather template is mirrored twice" in r.text
+        assert "Dublin, Ireland" in r.text
+        assert "above 50C" in r.text
 
     def test_live_docs_api_returns_template_trace_series(self, c9_app):
         r = c9_app.get("/api/tasked-live-doc/traces")
@@ -392,9 +397,15 @@ class TestC9PageRoutes:
             "TRACE-203",
             "TRACE-204",
             "TRACE-205",
+            "TRACE-206",
         ]
         assert traces[0]["task_id"] == "task_trace_200"
-        assert traces[-1]["task_id"] == "task_trace_205"
+        assert traces[-1]["task_id"] == "task_trace_206"
+        assert traces[0]["expect_alert"] == "required"
+        assert traces[0]["template_data"]["weather_location"] == "Dublin, Ireland"
+        assert traces[0]["template_data"]["temperature_threshold_c"] == 0.0
+        assert traces[-1]["expect_alert"] == "none"
+        assert traces[-1]["template_data"]["temperature_threshold_c"] == 50.0
 
     def test_task_templates_expose_live_doc_trace_metadata(self, c9_app):
         r = c9_app.get("/api/task-templates?include_archived=true")
@@ -410,9 +421,17 @@ class TestC9PageRoutes:
     def test_live_doc_seeded_template_tasks_exist(self, c9_app):
         r = c9_app.get("/api/tasks?include_archived=false")
         assert r.status_code == 200
-        task_ids = {item["id"] for item in r.json()["tasks"]}
+        tasks = r.json()["tasks"]
+        task_ids = {item["id"] for item in tasks}
         assert "task_trace_200" in task_ids
         assert "task_trace_205" in task_ids
+        assert "task_trace_206" in task_ids
+        positive = next(item for item in tasks if item["id"] == "task_trace_200")
+        negative = next(item for item in tasks if item["id"] == "task_trace_206")
+        assert positive["template_data"]["temperature_threshold_c"] == 0.0
+        assert negative["template_data"]["temperature_threshold_c"] == 50.0
+        assert "above 0" in positive["executor_prompt"]
+        assert "above 50" in negative["executor_prompt"]
 
     def test_pairs_multi_agent_launcher_uses_main_prompt_input(self, c9_app):
         r = c9_app.get("/pairs")
@@ -958,6 +977,181 @@ class TestC9AgentAndAgento:
 
 
 class TestC9TaskedWorkflow:
+    def test_tasked_save_syncs_builder_prompt_into_chat_step(self, c9_app):
+        payload = {
+            "name": "Weather sync save",
+            "mode": "chat",
+            "schedule_kind": "manual",
+            "interval_minutes": 0,
+            "tabs_required": 1,
+            "active": False,
+            "planner_prompt": "Check weather",
+            "executor_prompt": "Weather threshold above 7",
+            "trigger_mode": "json",
+            "trigger_text": "",
+            "steps": [
+                {
+                    "id": "task_draft_step_1",
+                    "name": "Execute prompt",
+                    "kind": "chat",
+                    "config": {"prompt": "Weather threshold above 10", "agent_id": "c6-kilocode"},
+                    "active": True,
+                },
+                {
+                    "id": "task_draft_step_2",
+                    "name": "Create alert",
+                    "kind": "alert",
+                    "config": {"trigger_text": "old-trigger", "severity": "warning", "repeat_every_minutes": 5},
+                    "active": True,
+                },
+                {
+                    "id": "task_draft_step_3",
+                    "name": "Complete",
+                    "kind": "complete",
+                    "config": {},
+                    "active": True,
+                },
+            ],
+            "alert_policy": {"repeat_every_minutes": 0, "dedupe_key_template": "", "severity": "info", "while_condition_true": False},
+        }
+
+        r = c9_app.post("/api/tasks", json=payload)
+        assert r.status_code == 200
+        task = r.json()["task"]
+        chat_step = next(step for step in task["steps"] if step["kind"] == "chat")
+        alert_step = next(step for step in task["steps"] if step["kind"] == "alert")
+
+        assert chat_step["config"]["prompt"] == "Weather threshold above 7"
+        assert alert_step["config"]["trigger_text"] == ""
+        assert alert_step["config"]["severity"] == "info"
+
+    def test_task_run_repairs_drifted_chat_step_before_execution(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        task = _create_tasked_task(
+            c9_app,
+            name="Weather drift repair",
+            executor_prompt="Weather threshold above 7",
+        )
+
+        with c9_mod._db() as conn:
+            row = conn.execute(
+                "SELECT id, config_json FROM task_workflow_steps WHERE task_id=? AND kind='chat' ORDER BY position ASC LIMIT 1",
+                (task["id"],),
+            ).fetchone()
+            cfg = json.loads(row["config_json"])
+            cfg["prompt"] = "Weather threshold above 10"
+            conn.execute(
+                "UPDATE task_workflow_steps SET config_json=? WHERE id=?",
+                (json.dumps(cfg), row["id"]),
+            )
+
+        async def fake_chat_one(agent_id, prompt, *args, **kwargs):
+            assert prompt == "Weather threshold above 7"
+            return {
+                "ok": True,
+                "http_status": 200,
+                "text": json.dumps({
+                    "triggered": True,
+                    "trigger": "Dublin weather",
+                    "title": "Current weather in Dublin",
+                    "summary": "Threshold passed",
+                    "details": {"location": "Dublin", "temperature_c": 8.0, "condition": "Cloudy"},
+                }),
+                "error": None,
+            }
+
+        with patch.object(c9_mod, "_chat_one", AsyncMock(side_effect=fake_chat_one)):
+            r_run = c9_app.post(f"/api/tasks/{task['id']}/run")
+
+        assert r_run.status_code == 200
+        assert r_run.json()["status"] == "completed"
+
+        r_tasks = c9_app.get("/api/tasks?include_archived=false")
+        repaired = next(item for item in r_tasks.json()["tasks"] if item["id"] == task["id"])
+        repaired_chat_step = next(step for step in repaired["steps"] if step["kind"] == "chat")
+        assert repaired_chat_step["config"]["prompt"] == "Weather threshold above 7"
+
+    def test_weather_template_exposes_editable_location_and_threshold(self, c9_app):
+        r = c9_app.get("/api/task-templates")
+        assert r.status_code == 200
+        weather = next(item for item in r.json()["templates"] if item["key"] == "weather-dublin")
+        assert weather["template_data"]["template_kind"] == "weather-threshold"
+        assert weather["template_data"]["weather_location"] == "Dublin, Ireland"
+        assert weather["template_data"]["temperature_threshold_c"] == 10.0
+        assert "Dublin, Ireland" in weather["executor_prompt"]
+        assert "above 10" in weather["executor_prompt"]
+
+        page = c9_app.get("/tasked")
+        assert page.status_code == 200
+        assert "Weather town / city" in page.text
+        assert "Trigger above temperature" in page.text
+
+    def test_weather_task_save_syncs_location_and_threshold_into_prompt(self, c9_app):
+        r = c9_app.post("/api/tasks", json={
+            "name": "Weather in Cork",
+            "mode": "chat",
+            "schedule_kind": "manual",
+            "interval_minutes": 0,
+            "tabs_required": 1,
+            "active": False,
+            "template_key": "weather-dublin",
+            "template_data": {
+                "weather_location": "Cork, Ireland",
+                "temperature_threshold_c": 12,
+            },
+            "planner_prompt": "Run the weather task once.",
+            "executor_prompt": "stale prompt that should be replaced",
+            "trigger_mode": "json",
+            "trigger_text": "",
+        })
+        assert r.status_code == 200
+        task = r.json()["task"]
+        chat_step = next(step for step in task["steps"] if step["kind"] == "chat")
+
+        assert task["template_data"]["weather_location"] == "Cork, Ireland"
+        assert task["template_data"]["temperature_threshold_c"] == 12.0
+        assert "Cork, Ireland" in task["executor_prompt"]
+        assert "above 12" in task["executor_prompt"]
+        assert "Cork, Ireland" in chat_step["config"]["prompt"]
+        assert "above 12" in chat_step["config"]["prompt"]
+
+    def test_weather_task_runtime_uses_saved_location_and_threshold(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        task = _create_tasked_task(
+            c9_app,
+            name="Weather in Galway",
+            executor_prompt="stale weather prompt",
+            template_key="weather-dublin",
+            template_data={
+                "weather_location": "Galway, Ireland",
+                "temperature_threshold_c": 9,
+            },
+        )
+
+        async def fake_chat_one(agent_id, prompt, *args, **kwargs):
+            assert "Galway, Ireland" in prompt
+            assert "above 9" in prompt
+            return {
+                "ok": True,
+                "http_status": 200,
+                "text": json.dumps({
+                    "triggered": True,
+                    "trigger": "Galway weather",
+                    "title": "Current weather in Galway",
+                    "summary": "Threshold passed",
+                    "details": {"location": "Galway, Ireland", "temperature_c": 10.0, "condition": "Cloudy"},
+                }),
+                "error": None,
+            }
+
+        with patch.object(c9_mod, "_chat_one", AsyncMock(side_effect=fake_chat_one)):
+            r_run = c9_app.post(f"/api/tasks/{task['id']}/run")
+
+        assert r_run.status_code == 200
+        assert r_run.json()["status"] == "completed"
+
     def test_tasked_chat_refusal_fails_run_and_does_not_create_alert(self, c9_app):
         import c9_jokes.app as c9_mod
 
@@ -1039,6 +1233,75 @@ class TestC9TaskedWorkflow:
         assert len(items) == 1
         assert items[0]["run"]["status"] == "completed"
         assert items[0]["latest_alert"] is None
+
+    def test_task_stop_releases_claim_and_allows_rerun(self, c9_app):
+        import c9_jokes.app as c9_mod
+
+        task = _create_tasked_task(
+            c9_app,
+            name="Weather stop and rerun",
+            executor_prompt="Check weather and return JSON",
+        )
+
+        running_run_id = "trun_busy123"
+        now = "2026-04-09T18:00:00Z"
+        with c9_mod._db() as conn:
+            conn.execute(
+                "INSERT INTO task_runs (id, task_id, created_at, started_at, source, status, mode, trigger_snapshot_json) "
+                "VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    running_run_id,
+                    task["id"],
+                    now,
+                    now,
+                    "manual",
+                    "running",
+                    "chat",
+                    json.dumps({"source": "manual"}),
+                ),
+            )
+            conn.execute(
+                "INSERT INTO task_run_claims (task_id, run_id, owner_id, source, claimed_at, expires_at) VALUES (?,?,?,?,?,?)",
+                (
+                    task["id"],
+                    running_run_id,
+                    "pytest",
+                    "manual",
+                    now,
+                    "2026-04-09T18:15:00Z",
+                ),
+            )
+        c9_mod._task_runner_ids.add(task["id"])
+
+        r_stop = c9_app.post(f"/api/tasks/{task['id']}/stop")
+        assert r_stop.status_code == 200
+        assert r_stop.json()["status"] == "cancelled"
+        assert task["id"] not in c9_mod._task_runner_ids
+
+        with c9_mod._db() as conn:
+            claim_rows = conn.execute("SELECT * FROM task_run_claims WHERE task_id=?", (task["id"],)).fetchall()
+        assert claim_rows == []
+
+        with patch.object(
+            c9_mod,
+            "_chat_one",
+            AsyncMock(return_value={
+                "ok": True,
+                "http_status": 200,
+                "text": json.dumps({
+                    "triggered": False,
+                    "trigger": "Dublin weather",
+                    "title": "Weather below threshold",
+                    "summary": "Temperature is 8C",
+                    "details": {"location": "Dublin", "temperature_c": 8.0, "condition": "Cloudy"},
+                }),
+                "error": None,
+            }),
+        ):
+            r_run = c9_app.post(f"/api/tasks/{task['id']}/run")
+
+        assert r_run.status_code == 200
+        assert r_run.json()["status"] == "completed"
 
     def test_tasked_sandbox_success_skips_alert_with_failure_only_trigger(self, c9_app):
         import c9_jokes.app as c9_mod
