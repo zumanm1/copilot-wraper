@@ -508,6 +508,57 @@ class TestC9PageRoutes:
         assert by_trace["TRACE-802"]["expect_alert"] == "none"
         assert "average_distance_km is less than 100" in by_trace["TRACE-802"]["template_data"]["chain_items"][-1]["executor_prompt"]
 
+    def test_trace8xx_reference_runs_seed_completed_pipeline_alerts_and_completed(self, c9_app):
+        traces = c9_app.get("/api/tasked-live-doc/traces").json()["traces"]
+        by_trace = {item["trace"]: item for item in traces}
+        assert by_trace["TRACE-801"]["run_id"] == "trun_trace_801_ref"
+        assert by_trace["TRACE-801"]["alert_id"]
+        assert by_trace["TRACE-802"]["run_id"] == "trun_trace_802_ref"
+        assert by_trace["TRACE-802"]["alert_id"] is None
+
+        for task_id, expect_alert in (("task_trace_801", True), ("task_trace_802", False)):
+            pipe_resp = c9_app.get(f"/api/task-pipelines?task_id={task_id}")
+            assert pipe_resp.status_code == 200
+            pipeline = pipe_resp.json()["pipelines"][0]
+            assert pipeline["run"]["status"] == "completed"
+            assert pipeline["summary"]["steps_total"] == 8
+            assert len(pipeline["steps"]) == 8
+
+            chain_steps = [step for step in pipeline["steps"] if step["step_id"].startswith(f"{task_id}_chain_")]
+            assert len(chain_steps) == 5
+            assert all(step["status"] == "completed" for step in chain_steps)
+
+            aggregate_step = next(step for step in pipeline["steps"] if step["step_id"] == f"{task_id}_chain_5")
+            aggregate = aggregate_step["output"]["parsed"]
+            assert aggregate["details"]["average_temperature_c"] == 13.8
+            assert aggregate["details"]["average_distance_km"] == 2252.0
+            assert aggregate["details"]["min_temperature_c"] == 11.4
+            assert aggregate["details"]["max_temperature_c"] == 16.2
+
+            complete_step = next(step for step in pipeline["steps"] if step["step_id"] == f"{task_id}_complete")
+            assert complete_step["status"] == "completed"
+            assert complete_step["output"]["result"]["details"]["average_distance_km"] == 2252.0
+
+            alert_step = next(step for step in pipeline["steps"] if step["step_id"] == f"{task_id}_alert")
+            if expect_alert:
+                assert pipeline["summary"]["alerts_total"] == 1
+                assert alert_step["status"] == "completed"
+                assert alert_step["output"]["alert_id"]
+            else:
+                assert pipeline["summary"]["alerts_total"] == 0
+                assert alert_step["status"] == "skipped"
+                assert alert_step["output"]["result"]["triggered"] is False
+
+            completed_resp = c9_app.get(f"/api/task-completed?task_id={task_id}")
+            assert completed_resp.status_code == 200
+            completed_item = completed_resp.json()["items"][0]
+            assert completed_item["run"]["status"] == "completed"
+            assert len(completed_item["steps"]) == 8
+
+        alerts = c9_app.get("/api/alerts?limit=500").json()["alerts"]
+        assert any(alert["task_id"] == "task_trace_801" for alert in alerts)
+        assert all(alert["task_id"] != "task_trace_802" for alert in alerts)
+
     def test_task_templates_expose_live_doc_trace_metadata(self, c9_app):
         r = c9_app.get("/api/task-templates?include_archived=true")
         assert r.status_code == 200

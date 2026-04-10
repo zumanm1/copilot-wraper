@@ -301,7 +301,8 @@
     var isRunning = runStatus === 'running';
     var steps = item.steps || [];
     var stepsTotal = steps.length || summary.steps_total || 0;
-    var stepsDone  = steps.filter(function(s){ return s.status === 'completed' || s.status === 'failed'; }).length;
+    var terminalStepStatuses = { completed: true, failed: true, skipped: true, cancelled: true };
+    var stepsDone  = steps.filter(function(s){ return terminalStepStatuses[s.status] === true; }).length;
     var progressPct = stepsTotal > 0 ? Math.round(stepsDone / stepsTotal * 100) : (isRunning ? 0 : 100);
     var startIso    = run.started_at || '';
     var startFmt    = fmtTsShort(startIso);

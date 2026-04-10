@@ -4207,7 +4207,7 @@ def _task_build_default_steps(task: dict) -> list[dict]:
                 },
                 "active": True,
                 "on_success_step_id": "",
-                "on_failure_step_id": "",
+                "on_failure_step_id": f"{task_id}_alert" if chain_data.get("condition_strategy") == "aggregate-only" else "",
             })
     elif mode == "sandbox":
         steps.append({
@@ -4702,6 +4702,299 @@ def _tasked_live_doc_seed_task_payload(template: dict, spec: dict) -> dict:
     return _task_apply_template_data(payload)
 
 
+def _tasked_live_doc_trace8xx_reference_payload(task_id: str) -> dict | None:
+    positive = task_id == "task_trace_801"
+    if task_id not in {"task_trace_801", "task_trace_802"}:
+        return None
+
+    source_request = (
+        "check current weather in New York, current weather in London, distance between LA to San Francisco, "
+        "and distance LA to Manhattan. Provide average distance and average temperature, plus min and max temperature."
+    )
+    weather_new_york = {
+        "triggered": True,
+        "trigger": "New York weather",
+        "title": "Current Weather in New York",
+        "summary": "New York is clear and mild, above the 10C reference threshold.",
+        "details": {
+            "location": "New York, United States",
+            "temperature_c": 16.2,
+            "condition": "Clear",
+        },
+    }
+    weather_london = {
+        "triggered": True,
+        "trigger": "London weather",
+        "title": "Current Weather in London",
+        "summary": "London is cloudy and mild, above the 10C reference threshold.",
+        "details": {
+            "location": "London, United Kingdom",
+            "temperature_c": 11.4,
+            "condition": "Cloudy",
+        },
+    }
+    distance_sf = {
+        "triggered": False,
+        "trigger": "Los Angeles to San Francisco distance",
+        "title": "Distance from Los Angeles to San Francisco",
+        "summary": "Los Angeles to San Francisco is about 559 km, which is not less than 100 km.",
+        "details": {
+            "from_location": "Los Angeles, United States",
+            "to_location": "San Francisco, United States",
+            "distance_km": 559.0,
+            "comparison": "greater-than-100-km",
+        },
+    }
+    distance_manhattan = {
+        "triggered": False,
+        "trigger": "Los Angeles to Manhattan distance",
+        "title": "Distance from Los Angeles to Manhattan",
+        "summary": "Los Angeles to Manhattan is about 3945 km, which is not less than 100 km.",
+        "details": {
+            "from_location": "Los Angeles, United States",
+            "to_location": "Manhattan, New York, United States",
+            "distance_km": 3945.0,
+            "comparison": "greater-than-100-km",
+        },
+    }
+    aggregate = {
+        "triggered": positive,
+        "trigger": "custom multi-scenario aggregate",
+        "title": (
+            "TRACE-801 Custom Weather Distance Aggregate Trigger"
+            if positive
+            else "TRACE-802 Custom Weather Distance Aggregate No Trigger"
+        ),
+        "summary": (
+            "Aggregate collected two temperatures and two distances: average temperature 13.8C, "
+            "temperature range 11.4C to 16.2C, and average distance 2252.0 km. "
+            + (
+                "The aggregate has both temperature and distance values, so TRACE-801 creates one alert."
+                if positive
+                else "The average distance is not less than 100 km, so TRACE-802 completes without creating an alert."
+            )
+        ),
+        "details": {
+            "temperatures_c": [16.2, 11.4],
+            "distances_km": [559.0, 3945.0],
+            "average_temperature_c": 13.8,
+            "min_temperature_c": 11.4,
+            "max_temperature_c": 16.2,
+            "average_distance_km": 2252.0,
+            "source_request": source_request,
+        },
+    }
+    condition = {
+        "matched": positive,
+        "details": [
+            {
+                "source": f"{task_id}_chain_5",
+                "field": "parsed.triggered",
+                "comparator": "eq",
+                "expected": True,
+                "actual": positive,
+                "passed": positive,
+            },
+        ],
+        "operator": "AND",
+        "execution_mode": "parallel",
+        "condition_strategy": "aggregate-only",
+        "final_result": aggregate,
+    }
+
+    def chat_output(parsed: dict, session_id: str) -> dict:
+        return {
+            "text": json.dumps(parsed, ensure_ascii=False),
+            "parsed": parsed,
+            "ok": True,
+            "session_manager_id": session_id,
+            "refusal": False,
+        }
+
+    return {
+        "trace": "TRACE-801" if positive else "TRACE-802",
+        "run_id": "trun_trace_801_ref" if positive else "trun_trace_802_ref",
+        "alert_expected": positive,
+        "aggregate": aggregate,
+        "condition": condition,
+        "step_outputs": {
+            f"{task_id}_chain_1": chat_output(weather_new_york, "sm_trace_8xx_weather_ny"),
+            f"{task_id}_chain_2": chat_output(weather_london, "sm_trace_8xx_weather_london"),
+            f"{task_id}_chain_3": chat_output(distance_sf, "sm_trace_8xx_distance_sf"),
+            f"{task_id}_chain_4": chat_output(distance_manhattan, "sm_trace_8xx_distance_manhattan"),
+            f"{task_id}_chain_5": chat_output(aggregate, "sm_trace_8xx_aggregate"),
+            f"{task_id}_condition": condition,
+            f"{task_id}_alert": {},
+            f"{task_id}_complete": {
+                "completed": True,
+                "summary": aggregate["summary"],
+                "result": aggregate,
+                "condition_passed": positive,
+                "alert_expected": positive,
+            },
+        },
+    }
+
+
+def _ensure_tasked_live_doc_trace8xx_reference_runs_seeded(conn: sqlite3.Connection) -> None:
+    now = datetime.now(timezone.utc)
+    for offset, task_id in enumerate(("task_trace_801", "task_trace_802")):
+        payload = _tasked_live_doc_trace8xx_reference_payload(task_id)
+        if not payload:
+            continue
+        run_id = payload["run_id"]
+        completed = conn.execute(
+            "SELECT id FROM task_runs WHERE task_id=? AND status='completed' ORDER BY COALESCE(completed_at, finished_at, created_at) DESC LIMIT 1",
+            (task_id,),
+        ).fetchone()
+        seed_row = conn.execute("SELECT id FROM task_runs WHERE id=?", (run_id,)).fetchone()
+        step_count = 0
+        if seed_row:
+            step_count = int(conn.execute("SELECT COUNT(*) AS n FROM task_step_results WHERE run_id=?", (run_id,)).fetchone()["n"] or 0)
+        if completed and (completed["id"] != run_id or step_count >= 8):
+            continue
+
+        task_row = conn.execute("SELECT * FROM task_definitions WHERE id=?", (task_id,)).fetchone()
+        if not task_row:
+            continue
+        step_rows = conn.execute(
+            "SELECT * FROM task_workflow_steps WHERE task_id=? ORDER BY position ASC",
+            (task_id,),
+        ).fetchall()
+        if len(step_rows) < 8:
+            continue
+
+        conn.execute("DELETE FROM task_alerts WHERE run_id=?", (run_id,))
+        conn.execute("DELETE FROM task_feedback_events WHERE run_id=?", (run_id,))
+        conn.execute("DELETE FROM task_step_results WHERE run_id=?", (run_id,))
+        conn.execute("DELETE FROM task_events WHERE run_id=?", (run_id,))
+        conn.execute("DELETE FROM task_runs WHERE id=?", (run_id,))
+
+        created_at = (now - timedelta(minutes=8 - offset)).isoformat()
+        started_at = (now - timedelta(minutes=7, seconds=50 - (offset * 10))).isoformat()
+        finished_at = (now - timedelta(minutes=7, seconds=10 - (offset * 10))).isoformat()
+        aggregate = payload["aggregate"]
+        condition = payload["condition"]
+        output_excerpt = json.dumps({
+            "trace": payload["trace"],
+            "completed": True,
+            "alert_expected": payload["alert_expected"],
+            "result": aggregate,
+            "condition": condition,
+        }, ensure_ascii=False)
+
+        conn.execute(
+            "INSERT INTO task_runs (id, task_id, created_at, started_at, finished_at, completed_at, source, status, mode, output_excerpt, error_text, alert_id, launch_url, current_step_id, terminal_reason, trigger_snapshot_json) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            (
+                run_id,
+                task_id,
+                created_at,
+                started_at,
+                finished_at,
+                finished_at,
+                "live-doc-seed",
+                "completed",
+                "chat",
+                output_excerpt[:2000],
+                "",
+                None,
+                "",
+                f"{task_id}_complete",
+                "workflow-complete" if payload["alert_expected"] else "condition-false",
+                json.dumps({"seeded": True, "trace": payload["trace"], "result": aggregate}, ensure_ascii=False),
+            ),
+        )
+
+        alert_id = None
+        if payload["alert_expected"]:
+            cur = conn.execute(
+                "INSERT INTO task_alerts (task_id, run_id, created_at, updated_at, status, title, trigger_text, summary, payload_json, severity, repeat_key, closed_by_run_id) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    task_id,
+                    run_id,
+                    finished_at,
+                    finished_at,
+                    "open",
+                    aggregate["title"][:160],
+                    "custom workflow aggregate",
+                    aggregate["summary"][:1500],
+                    json.dumps({"trace": payload["trace"], "result": aggregate, "condition": condition}, ensure_ascii=False),
+                    "info",
+                    f"live-doc-{task_id}",
+                    "",
+                ),
+            )
+            alert_id = cur.lastrowid
+            conn.execute("UPDATE task_runs SET alert_id=? WHERE id=?", (alert_id, run_id))
+
+        payload["step_outputs"][f"{task_id}_alert"] = (
+            {
+                "alert_id": alert_id,
+                "title": aggregate["title"],
+                "severity": "info",
+                "result": aggregate,
+            }
+            if alert_id
+            else {
+                "skipped": True,
+                "reason": "trigger-not-matched",
+                "summary": aggregate["summary"],
+                "result": aggregate,
+                "condition_passed": False,
+            }
+        )
+        payload["step_outputs"][f"{task_id}_complete"]["alert_id"] = alert_id
+        payload["step_outputs"][f"{task_id}_complete"]["alert_created"] = bool(alert_id)
+
+        for idx, step in enumerate(step_rows):
+            step_id = step["id"]
+            step_started = (now - timedelta(minutes=7, seconds=44 - (offset * 10) - (idx * 4))).isoformat()
+            step_finished = (now - timedelta(minutes=7, seconds=42 - (offset * 10) - (idx * 4))).isoformat()
+            status = "completed"
+            if step_id == f"{task_id}_alert" and not alert_id:
+                status = "skipped"
+            conn.execute(
+                "INSERT INTO task_step_results (id, run_id, task_id, step_id, step_name, step_kind, started_at, finished_at, status, output_json, duration_ms, error_text) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    f"tsr_{task_id.replace('task_', '')}_{idx + 1}",
+                    run_id,
+                    task_id,
+                    step_id,
+                    step["name"],
+                    step["kind"],
+                    step_started,
+                    step_finished,
+                    status,
+                    json.dumps(payload["step_outputs"].get(step_id) or {}, ensure_ascii=False),
+                    _duration_ms(step_started, step_finished) or 0,
+                    "",
+                ),
+            )
+
+        event_rows = [
+            (created_at, "task-reference-seeded", "completed", f"{payload['trace']} reference run seeded for Live Docs, Pipeline, Completed, and Alerts.", None),
+            (started_at, "task-run-started", "running", f"{payload['trace']} started as a live-doc reference run.", None),
+            (finished_at, "task-run-finished", "completed", aggregate["summary"], alert_id),
+        ]
+        if alert_id:
+            event_rows.insert(2, (finished_at, "alert-created", "alert-open", aggregate["summary"], alert_id))
+        else:
+            event_rows.insert(2, (finished_at, "alert-skipped", "skipped", "Aggregate condition was false, so no alert was created.", None))
+        for event_at, event_type, status, detail, event_alert_id in event_rows:
+            conn.execute(
+                "INSERT INTO task_events (task_id, created_at, event_type, status, detail, run_id, alert_id) VALUES (?,?,?,?,?,?,?)",
+                (task_id, event_at, event_type, status, detail[:1500], run_id, event_alert_id),
+            )
+
+        conn.execute(
+            "UPDATE task_definitions SET updated_at=?, last_run_at=?, last_status='completed', last_result_excerpt=? WHERE id=?",
+            (finished_at, finished_at, aggregate["summary"][:500], task_id),
+        )
+
+
 def _ensure_tasked_live_doc_template_tasks_seeded() -> None:
     now = _iso_now()
     templates = {item.get("key") or "": item for item in _task_templates_payload(active_only=False)}
@@ -4796,6 +5089,7 @@ def _ensure_tasked_live_doc_template_tasks_seeded() -> None:
                 )
             steps = _task_build_default_steps(task_payload)
             _task_save_steps(conn, spec["task_id"], steps)
+        _ensure_tasked_live_doc_trace8xx_reference_runs_seeded(conn)
 
 
 def _tasked_live_doc_template_traces_payload() -> list[dict]:
@@ -7960,7 +8254,14 @@ async def _task_resume_workflow(
             }
         if kind == "alert":
             if not _task_should_create_alert(task_row, context):
-                out = {"skipped": True, "reason": "trigger-not-matched"}
+                parsed_result = _task_parse_json_payload(context.get("last_text") or "") or {}
+                out = {
+                    "skipped": True,
+                    "reason": "trigger-not-matched",
+                    "summary": context.get("last_text") or "",
+                    "result": parsed_result,
+                    "condition_passed": context.get("condition_passed"),
+                }
                 context["steps"][current_step_id] = out
                 _task_finish_step_result(result_id, status="skipped", output=out)
                 _record_task_event(
@@ -7985,7 +8286,12 @@ async def _task_resume_workflow(
             idx += 1
             continue
         if kind == "complete":
+            parsed_result = _task_parse_json_payload(context.get("last_text") or "") or {}
             out = {"completed": True, "summary": context.get("last_text") or "Workflow completed"}
+            if parsed_result:
+                out["result"] = parsed_result
+            if context.get("condition_passed") is not None:
+                out["condition_passed"] = context.get("condition_passed")
             context["steps"][current_step_id] = out
             _task_finish_step_result(result_id, status="completed", output=out)
             latest_alerts = []

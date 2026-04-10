@@ -249,6 +249,19 @@
     if (!res.ok || data.ok === false) throw new Error(data.error || ('Task action failed (' + res.status + ')'));
     return data;
   }
+  function finalResultText(item) {
+    var steps = item.steps || [];
+    var complete = steps.find(function(step){ return step.step_kind === 'complete'; }) || {};
+    var aggregate = steps.slice().reverse().find(function(step){
+      var out = step.output || {};
+      return out.parsed && out.parsed.details && (out.parsed.details.average_distance_km !== undefined || out.parsed.details.average_temperature_c !== undefined);
+    }) || {};
+    var output = complete.output || {};
+    var result = output.result || ((aggregate.output || {}).parsed) || {};
+    if (result && Object.keys(result).length) return JSON.stringify(result, null, 2);
+    if (output.summary) return output.summary;
+    return '';
+  }
   function renderItem(item) {
     var run = item.run || {};
     var feedbackSummary = (item.feedback || []).map(function(entry){ return (entry.agent_id || 'agent') + ': ' + (entry.summary || entry.status || 'feedback'); }).join('\n');
@@ -259,6 +272,7 @@
     var statusCls = runStatus.toLowerCase().replace(/[^a-z-]/g, '');
     var alertStatus = latestAlert.status || '—';
     var alertCls = alertStatus.toLowerCase().replace(/[^a-z-]/g, '');
+    var finalResult = finalResultText(item);
     return '<article class="tc-item">' +
       '<div class="tc-item-header">' +
         '<div class="tc-item-title"><strong>' + esc(item.task_name || run.task_id || 'Tasked') + '</strong><div class="tc-item-meta">Task ID: ' + esc(run.task_id || '—') + ' · Run ID: ' + esc(run.id || '—') + ' · Trace: ' + esc(run.trace_id || run.task_id || '—') + '</div><div class="tc-item-meta">Template: ' + esc(templateLabel) + ' · ' + esc(templateSummary) + '</div></div>' +
@@ -281,6 +295,7 @@
         '<div class="tc-stat"><strong>' + esc(item.task_archived ? 'yes' : 'no') + '</strong><span>Definition archived</span></div>' +
       '</div>' +
       '<div class="tc-detail"><h3>Completion trace</h3><div class="tc-pre">Finished: ' + esc(fmtTs(run.completed_at || run.finished_at)) + '\nReason: ' + esc(run.terminal_reason || '—') + '\nTemplate: ' + esc(templateLabel) + '\nTemplate summary: ' + esc(templateSummary) + '\nAlert ID: ' + esc(latestAlert.id || '—') + '\nAlert status: ' + esc(latestAlert.status || '—') + '\nRecovery: ' + esc(((item.latest_recovery_session || {}).status) || 'steady') + '\nRecovery error: ' + esc(((item.latest_recovery_session || {}).last_error) || '—') + '\n\nFeedback summary:\n' + esc(feedbackSummary || 'No agent feedback on this run.') + '</div></div>' +
+      (finalResult ? '<div class="tc-detail"><h3>Final result</h3><div class="tc-pre">' + esc(finalResult) + '</div></div>' : '') +
     '</article>';
   }
   async function loadCompleted() {
