@@ -9,12 +9,12 @@
 <body class="{% block body_class %}{% endblock %}">
   <style>
   /* ── Nav groups ── */
-  nav { display:flex; align-items:center; gap:0; flex-wrap:wrap; }
+  nav { display:flex; align-items:center; gap:0; flex-wrap:nowrap; min-width:0; }
   .nav-group { display:flex; align-items:center; gap:0; position:relative; }
   .nav-group-label {
-    font-size:0.62rem; color:var(--muted,#666); text-transform:uppercase;
-    letter-spacing:.06em; padding:0 4px 0 10px; white-space:nowrap;
-    border-left:1px solid rgba(255,255,255,0.08); margin-left:4px;
+    font-size:0.5rem; color:var(--muted,#666); text-transform:uppercase;
+    letter-spacing:.04em; padding:0 2px 0 6px; white-space:nowrap;
+    border-left:1px solid rgba(255,255,255,0.08); margin-left:2px;
     pointer-events:none; user-select:none;
   }
   nav a { white-space:nowrap; }
@@ -84,6 +84,7 @@
         <a href="{{ url_for('page_tasked_live_doc') }}" data-path="/tasked-live-doc">Live Docs</a>
         <a href="{{ url_for('page_token_counter') }}" data-path="/token-counter">Tokens</a>
         <a href="{{ url_for('page_api_reference') }}" data-path="/api">API</a>
+        <a href="{{ url_for('page_docuz_tasked') }}" data-path="/docuz-tasked">Docuz-tasked</a>
       </div>
     </nav>
     <div id="nav-shortcut-hint"></div>
@@ -129,7 +130,7 @@
       'd': '/', 'h': '/health', 'c': '/chat', 'l': '/logs',
       's': '/sessions', 't': '/tasked', 'p': '/piplinetask',
       'a': '/alerts', 'g': '/agent', 'm': '/multi-agent',
-      'k': '/token-counter', 'r': '/api'
+      'k': '/token-counter', 'r': '/api', 'u': '/docuz-tasked'
     };
     var hint = document.getElementById('nav-shortcut-hint');
     var gPressed = false, gTimer = null;
@@ -137,7 +138,7 @@
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
       if (e.key === 'g' && !e.ctrlKey && !e.metaKey) {
         gPressed = true;
-        if (hint) { hint.textContent = 'g + d=Dashboard h=Health c=Chat l=Logs s=Sessions t=Tasked a=Alerts g=Agent m=Multi k=Tokens r=API'; hint.style.opacity = '1'; }
+        if (hint) { hint.textContent = 'g + d=Dashboard h=Health c=Chat l=Logs s=Sessions t=Tasked a=Alerts g=Agent m=Multi k=Tokens r=API u=Docuz'; hint.style.opacity = '1'; }
         clearTimeout(gTimer);
         gTimer = setTimeout(function() { gPressed = false; if (hint) hint.style.opacity = '0'; }, 2000);
         return;

@@ -8070,6 +8070,11 @@ async def api_docs_alias():
     return RedirectResponse(url="/api", status_code=307)
 
 
+@app.get("/docuz-tasked", response_class=HTMLResponse, name="page_docuz_tasked")
+async def page_docuz_tasked(request: Request):
+    return templates.TemplateResponse(request, "docuz_tasked.html", {})
+
+
 @app.get("/agent", response_class=HTMLResponse, name="page_agent")
 async def page_agent(
     request: Request,

@@ -293,6 +293,34 @@ class TestC9PageRoutes:
         assert "/api/ma/run" in html
         assert "/api/ma/stop/{session_id}" in html
 
+    def test_docuz_tasked_page_returns_200_and_documents_tasked_surfaces(self, c9_app):
+        r = c9_app.get("/docuz-tasked")
+        assert r.status_code == 200
+        html = r.text
+        assert "Docuz-tasked" in html
+        assert "Tasked operations manual" in html
+        assert "Tasked - Builder and Orchestrator" in html
+        assert "Alerts - Operational Signal Board" in html
+        assert "Pipeline - Run Trace Monitor" in html
+        assert "Completed - Terminal Run Review" in html
+        assert "Live Docs - Seeded Regression Lab" in html
+        assert "/api/tasks/draft-from-text" in html
+        assert "/api/task-pipelines" in html
+        assert "/api/task-completed" in html
+        assert "/api/tasked-live-doc/traces" in html
+        assert "task_definitions" in html
+        assert "task_alerts" in html
+        assert "task_step_results" in html
+        assert "http://localhost:6080" in html
+
+    def test_base_nav_links_docuz_tasked_next_to_api(self, c9_app):
+        r = c9_app.get("/api")
+        assert r.status_code == 200
+        html = r.text
+        api_idx = html.index('data-path="/api">API</a>')
+        docuz_idx = html.index('data-path="/docuz-tasked">Docuz-tasked</a>')
+        assert api_idx < docuz_idx
+
     def test_agent_page_stop_button_calls_backend_stop(self, c9_app):
         r = c9_app.get("/agent")
         assert r.status_code == 200
