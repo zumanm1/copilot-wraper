@@ -7629,7 +7629,8 @@ def _task_alert_from_result(task_row: dict, response_text: str) -> dict | None:
 def _insert_task_alert(task_id: str, run_id: str, alert: dict) -> int | None:
     try:
         now = _iso_now()
-        severity = (alert.get("severity") or "info").strip().lower() or "info"
+        _sev_raw = (alert.get("severity") or "info").strip().lower()
+        severity = _sev_raw if _sev_raw in ("info", "warning", "error", "critical") else "info"
         repeat_key = (alert.get("repeat_key") or "").strip()
         repeat_minutes = max(0, int(alert.get("repeat_every_minutes") or 0))
         with _db() as conn:
@@ -9237,6 +9238,12 @@ async def api_docs_alias():
 @app.get("/docuz-tasked", response_class=HTMLResponse, name="page_docuz_tasked")
 async def page_docuz_tasked(request: Request):
     return templates.TemplateResponse(request, "docuz_tasked.html", {})
+
+
+@app.get("/session-manager", response_class=HTMLResponse, name="page_session_manager")
+async def page_session_manager(request: Request):
+    """Session Manager — view and resume upstream recovery sessions."""
+    return templates.TemplateResponse(request, "session_manager.html", {})
 
 
 @app.get("/agent", response_class=HTMLResponse, name="page_agent")

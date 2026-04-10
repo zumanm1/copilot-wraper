@@ -119,6 +119,92 @@
   </tbody>
 </table>
 
+<h3>Task Management Endpoints</h3>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td>GET</td><td><code>/api/tasks</code></td><td>List all task definitions. Query: <code>?active=1&amp;template_key=X&amp;limit=100</code></td></tr>
+    <tr><td>POST</td><td><code>/api/tasks</code></td><td>Create or update a task definition (id, name, mode, schedule_kind, executor_prompt, workflow_steps, etc.).</td></tr>
+    <tr><td>DELETE</td><td><code>/api/tasks/{task_id}</code></td><td>Delete a task definition permanently.</td></tr>
+    <tr><td>POST</td><td><code>/api/tasks/{task_id}/run</code></td><td>Execute a task immediately.</td></tr>
+    <tr><td>POST</td><td><code>/api/tasks/{task_id}/start|pause|resume|stop|complete</code></td><td>Lifecycle controls for a running task.</td></tr>
+    <tr><td>POST</td><td><code>/api/tasks/{task_id}/repeat|restart|redo</code></td><td>Re-execution controls — repeat (same params), restart (from step 1), redo (new run same trace).</td></tr>
+    <tr><td>POST</td><td><code>/api/tasks/{task_id}/clone</code></td><td>Duplicate a task definition to a new ID.</td></tr>
+    <tr><td>POST</td><td><code>/api/tasks/{task_id}/archive</code></td><td>Soft-delete (archive) a task definition.</td></tr>
+    <tr><td>POST</td><td><code>/api/tasks/bulk</code></td><td>Bulk create or update multiple task definitions.</td></tr>
+    <tr><td>POST</td><td><code>/api/tasks/draft-from-text</code></td><td>AI-draft a task definition from plain-English. Body: <code>{"text":"…"}</code></td></tr>
+  </tbody>
+</table>
+
+<h3>Task Run &amp; Pipeline Endpoints</h3>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td>GET</td><td><code>/api/task-runs</code></td><td>List run history. Query: <code>?task_id=X&amp;status=running&amp;limit=20</code></td></tr>
+    <tr><td>GET</td><td><code>/api/task-completed</code></td><td>Terminal runs (completed/failed/cancelled) enriched with steps, alerts, feedback, and recovery context.</td></tr>
+    <tr><td>GET</td><td><code>/api/task-pipelines</code></td><td>Full pipeline trace. Query: <code>?task_id=X&amp;run_id=Y&amp;status=running</code></td></tr>
+    <tr><td>GET</td><td><code>/api/task-preview</code></td><td>Preview output for a run. Query: <code>?task_id=X&amp;run_id=Y</code></td></tr>
+    <tr><td>POST</td><td><code>/api/task-feedback</code></td><td>Submit agent feedback. Body: <code>{"task_id":"…","run_id":"…","agent_id":"…","status":"…","summary":"…"}</code></td></tr>
+  </tbody>
+</table>
+
+<h3>Task Template Endpoints</h3>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td>GET</td><td><code>/api/task-templates</code></td><td>List all templates. Query: <code>?source=user&amp;active=1</code></td></tr>
+    <tr><td>POST</td><td><code>/api/task-templates</code></td><td>Create or update a template.</td></tr>
+    <tr><td>POST</td><td><code>/api/task-templates/{key}/clone</code></td><td>Clone a template into a new task definition.</td></tr>
+    <tr><td>POST</td><td><code>/api/task-templates/{key}/archive</code></td><td>Archive a task template.</td></tr>
+  </tbody>
+</table>
+
+<h3>Alerts Endpoints</h3>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td>GET</td><td><code>/api/alerts</code></td><td>List alerts with task/run context. Query: <code>?limit=250</code> (max 500). LEFT JOIN task_alerts ↔ task_definitions ↔ task_runs.</td></tr>
+    <tr><td>POST</td><td><code>/api/alerts/{alert_id}/status</code></td><td>Update status. Body: <code>{"status":"acknowledged|resolved|snoozed|open","snooze_minutes":30}</code></td></tr>
+    <tr><td>POST</td><td><code>/api/alerts/{alert_id}/ack</code></td><td>Acknowledge shortcut.</td></tr>
+  </tbody>
+</table>
+<p style="font-size:.8rem;color:var(--muted);">Severities: <code>info</code> · <code>warning</code> · <code>error</code> · <code>critical</code> — Statuses: <code>open</code> · <code>acknowledged</code> · <code>resolved</code> · <code>snoozed</code></p>
+
+<h3>Token Usage Endpoints</h3>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td>POST</td><td><code>/api/token-usage/record</code></td><td>Log a token event. Body: <code>{"agent_id":"…","page":"chat","tokens":450,"model":"copilot","session_id":"…","status":"ok"}</code></td></tr>
+    <tr><td>GET</td><td><code>/api/token-usage/summary</code></td><td>Today's total tokens. Returns <code>{"today_total":N}</code>. Feeds global header badge.</td></tr>
+    <tr><td>GET</td><td><code>/api/token-usage/agents</code></td><td>Per-agent breakdown + sparklines. Query: <code>?days=7</code></td></tr>
+    <tr><td>GET</td><td><code>/api/token-usage/history</code></td><td>Raw event log. Query: <code>?days=7&amp;agent_id=X&amp;page=Y&amp;limit=200</code></td></tr>
+  </tbody>
+</table>
+
+<h3>Session Manager Endpoints</h3>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td>GET</td><td><code>/api/session-manager</code></td><td>List recovery sessions. Query: <code>?scope=task&amp;status=waiting-retry&amp;task_id=X&amp;limit=50</code></td></tr>
+    <tr><td>POST</td><td><code>/api/session-manager/report</code></td><td>Report session state. Body: <code>{"scope":"task","task_id":"…","run_id":"…","status":"running","upstream":"c1","operation":"chat"}</code></td></tr>
+    <tr><td>POST</td><td><code>/api/session-manager/{session_id}/resume</code></td><td>Manually resume a stalled or waiting-retry session.</td></tr>
+  </tbody>
+</table>
+<p style="font-size:.8rem;color:var(--muted);">Statuses: <code>running</code> · <code>waiting-retry</code> · <code>recovered</code> · <code>failed</code> · <code>completed</code> · <code>cancelled</code></p>
+
+<h3>Runtime &amp; Health Endpoints</h3>
+<table>
+  <thead><tr><th>Method</th><th>Path</th><th>Description</th></tr></thead>
+  <tbody>
+    <tr><td>GET</td><td><code>/api/runtime-status</code></td><td>Aggregate C1/C3/sandbox health badge. Returns <code>{"level":"ok|warn|error","badge_label":"…","components":{…}}</code></td></tr>
+    <tr><td>GET</td><td><code>/api/session-health</code></td><td>M365 browser session LED from C3. Returns <code>{"session":"active|expired|unknown","chat_mode":"…"}</code></td></tr>
+    <tr><td>GET</td><td><code>/api/health-history</code></td><td>Last N health snapshots. Query: <code>?target=c1&amp;limit=10</code></td></tr>
+    <tr><td>GET</td><td><code>/api/status</code></td><td>Full JSON health for all TARGETS + c3-status. Persists to <code>health_snapshots</code>.</td></tr>
+    <tr><td>GET</td><td><code>/api/c3-auth-progress</code></td><td>Check C3 auth flow status.</td></tr>
+    <tr><td>POST</td><td><code>/api/c3-auth-progress/run</code></td><td>Trigger C3 auth flow.</td></tr>
+  </tbody>
+</table>
+
 <h3>Container Health Endpoints</h3>
 <table>
   <thead><tr><th>Container</th><th>Internal URL</th><th>Health path</th></tr></thead>
