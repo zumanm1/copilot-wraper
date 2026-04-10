@@ -1,5 +1,8 @@
 # C9_JOKES — Product Requirements: UI
 
+> **⚠️ Docs behind code (2026-04-10):** This PRD was written before the 6 UI/UX gap-fixes were implemented. New pages (`/session-manager`, `/docuz-tasked`), grouped nav, expanded API surface (Tasks/Alerts/Tokens/Session Manager), dynamic agent filter, and severity fix are live but not reflected here. See `/docuz-tasked` in-app for the current reference.
+
+
 ## Purpose
 
 Define the visual layout, navigation, and page structure for the C9 validation webapp (port 6090) so operators can monitor stack health without touching C1–C8 runtime behavior.

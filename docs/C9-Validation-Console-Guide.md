@@ -3,6 +3,16 @@
 > **Last updated: 2026-03-31**
 > Complete reference for APP2: the C9 validation console — UI, UX, backend, database, and API.
 
+> **⚠️ Docs behind code (as of 2026-04-10):** Six UI/UX gaps have been closed since this guide was written. The following features are **live** but not documented here yet:
+> - **Nav** upgraded to grouped sections (Monitor / Tasks / Chat / Agents / Tools), hamburger mobile menu, active-link highlighting, `g+key` keyboard shortcuts
+> - **New page `/session-manager`** — bulk view and resume of recovery sessions
+> - **New page `/docuz-tasked`** — full Tasked family operations manual (canonical live reference)
+> - **API reference** expanded with 7 new sections (Tasks, Runs, Templates, Alerts, Token Usage, Session Manager, Runtime Status)
+> - **Token Counter** agent filter now dynamically populated from the API (was hardcoded to 6 agents)
+> - **Alert severity** `critical` now accepted in `_insert_task_alert()` (was silently dropped)
+>
+> Until this guide is updated, use the in-app **`/docuz-tasked`** and **`/api`** pages as the authoritative reference.
+
 ---
 
 ## Table of Contents

@@ -4,6 +4,8 @@
 > **Purpose:** Step-by-step guide to creating a task and tracing its unique IDs
 > across all 4 monitoring pages. Every action, every ID, every API call explained.
 
+> **⚠️ Docs behind code (2026-04-10):** A 5th monitoring page (`/tasked-preview`) and two new pages (`/session-manager`, `/docuz-tasked`) have been added since this guide was written. The nav also now includes a **Sessions Mgr** and **Docuz-tasked** link. The flow described here remains valid; use `/docuz-tasked` in-app for the complete updated reference.
+
 ---
 
 ## 1. The Four IDs You Need to Know

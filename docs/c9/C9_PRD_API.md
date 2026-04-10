@@ -1,5 +1,8 @@
 # C9_JOKES — Product Requirements: API
 
+> **⚠️ Docs behind code (2026-04-10):** This PRD was written before the 6 UI/UX gap-fixes were implemented. New pages (`/session-manager`, `/docuz-tasked`), grouped nav, expanded API surface (Tasks/Alerts/Tokens/Session Manager), dynamic agent filter, and severity fix are live but not reflected here. See `/docuz-tasked` in-app for the current reference.
+
+
 ## Purpose
 
 Document REST endpoints exposed by C9 and the upstream APIs used for validation (C1, C3).

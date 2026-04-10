@@ -2,6 +2,8 @@
 
 > **Fresh-machine setup for Linux and macOS — from GitHub clone to the full runtime stack running.**
 
+> **⚠️ Docs behind code (2026-04-10):** Container names and ports in this guide are current. The C9 console (`port 6090`) has received significant UI upgrades (grouped nav, new pages, expanded API docs) not reflected here. After installing, visit `http://localhost:6090/docuz-tasked` for the up-to-date in-app reference.
+
 ---
 
 ## ⚡ Quick Start — Clone → CORE → (optional) Agents & Sandboxes

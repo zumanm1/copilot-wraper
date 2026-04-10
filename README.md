@@ -2,6 +2,8 @@
 
 > **Use Microsoft Copilot with any OpenAI or Anthropic client — nine containerised services, zero configuration conflicts.**
 
+> **⚠️ Documentation Status (2026-04-10):** The codebase is ahead of this documentation. Recent additions — grouped nav with keyboard shortcuts, `/session-manager` page, `/docuz-tasked` ops manual, expanded API reference (Tasks/Alerts/Tokens/Session Manager sections), dynamic agent filter in Token Counter, and severity allowlist fix — are **live in the running container but not yet reflected in this README or the `docs/` files**. Use the in-app `/api` and `/docuz-tasked` pages as the authoritative live reference until docs are updated.
+
 ---
 
 ## Table of Contents
