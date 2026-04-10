@@ -10,6 +10,10 @@ Core rules
 - Prefer an existing template when the user's request is a close semantic match.
 - Use a free-hand draft when the request combines multiple conditions, custom code, special agent feedback, or does not fit an existing template cleanly.
 - When the request combines two or more existing templates, return `template_key = "template-chain"` with structured `template_data`.
+- When the request combines multiple custom subtasks, also use `template_key = "template-chain"` and mix existing template items with custom items.
+- Custom chain items can use `mode = "chat" | "sandbox" | "agent" | "multi-agent" | "multi-agento"`.
+- Use `execution_mode = "serial"` when later steps depend on earlier outputs, and `execution_mode = "parallel"` when independent data-gathering subtasks can be run as separate lanes before aggregation.
+- Use `condition_strategy = "aggregate-only"` when a final aggregate item calculates the final result and decides if the alert should fire.
 - Use C12b as the only sandbox target.
 - Use linear chained steps only.
 - Keep the output directly compatible with the Tasked builder.
@@ -107,13 +111,23 @@ Template guidance
 - `distance-between-cities`
   - Use `template_data = {"template_kind":"distance-threshold","from_location":"City, Country","to_location":"City, Country","distance_threshold_km":number,"distance_comparator":"lt"|"lte"|"gt"|"gte"}`
 - `template-chain`
-  - Use `template_data = {"template_kind":"template-chain","chain_operator":"AND"|"OR"|"NOR","chain_items":[...],"source_request":"...","refined_request":"..."}`
+  - Use `template_data = {"template_kind":"template-chain","chain_operator":"AND"|"OR"|"NOR","execution_mode":"serial"|"parallel","condition_strategy":"all"|"aggregate-only","chain_items":[...],"source_request":"...","refined_request":"..."}`
   - Each `chain_items[]` entry should contain:
     - `template_key`
     - `template_data`
     - `executor_prompt`
     - optional `name`
+    - optional `mode`
+    - optional `agent_id`
+    - optional `condition_role` = "signal" | "support" | "aggregate"
+    - optional `include_context` = true when the item must read previous step outputs
   - Prefer existing templates inside `chain_items` before inventing free-hand steps.
+
+Custom aggregate guidance
+- If the user asks for averages, min, max, or a final combined result, add a final custom aggregate chain item.
+- Set previous weather/distance data-gathering items to `condition_role = "support"`.
+- Set the aggregate item to `template_key = "custom-step"`, `mode = "chat"` or `"sandbox"`, `condition_role = "aggregate"`, and `include_context = true`.
+- The aggregate item should return strict JSON with `triggered`, `summary`, and `details` containing the computed average/min/max values.
 
 Example 1: existing template match
 User request:
@@ -171,6 +185,23 @@ Expected shape:
 - template_data.chain_items contains:
   - distance-between-cities
   - weather-dublin
+
+Example 5: multi-scenario custom aggregate
+User request:
+check current weather in New York, current weather in London, distance between LA to San Francisco, and distance LA to Manhattan. Provide average distance and average temperature, plus min and max temperature.
+
+Expected shape:
+- strategy = freehand
+- template_key = template-chain
+- template_data.execution_mode = parallel
+- template_data.condition_strategy = aggregate-only
+- chain_items contains:
+  - weather-dublin for New York, United States with condition_role=support
+  - weather-dublin for London, United Kingdom with condition_role=support
+  - distance-between-cities for Los Angeles, United States -> San Francisco, United States with condition_role=support
+  - distance-between-cities for Los Angeles, United States -> Manhattan, New York, United States with condition_role=support
+  - custom-step aggregate item with include_context=true and condition_role=aggregate
+- The aggregate item returns JSON with average_temperature_c, min_temperature_c, max_temperature_c, and average_distance_km.
 
 User request:
 Alert only when neither the Dublin to Cork distance is less than 100 km nor the temperature in Dublin is above 50 degrees.

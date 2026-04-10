@@ -400,6 +400,8 @@ class TestC9PageRoutes:
         assert 'id="task-distance-threshold"' in html
         assert "Use combo / multiple templates" in html
         assert 'id="task-chain-operator"' in html
+        assert 'id="task-chain-execution-mode"' in html
+        assert 'id="task-chain-condition-strategy"' in html
         assert 'id="task-chain-add-template"' in html
 
     def test_pipeline_page_returns_200(self, c9_app):
@@ -426,9 +428,11 @@ class TestC9PageRoutes:
         assert "TRACE-401" in r.text
         assert "TRACE-500" in r.text
         assert "TRACE-501" in r.text
-        assert "Editable Template Traces (TRACE-200 / TRACE-300 / TRACE-400 / TRACE-500 Series)" in r.text
-        assert "These thirteen traces are DB-backed mirrors" in r.text
-        assert "Dublin weather template, the Dublin-to-Cork distance template, the Dublin combo AND template, and the Dublin combo NOR template are each mirrored twice" in r.text
+        assert "TRACE-801" in r.text
+        assert "TRACE-802" in r.text
+        assert "Editable Template Traces (TRACE-200 / TRACE-300 / TRACE-400 / TRACE-500 / TRACE-800 Series)" in r.text
+        assert "These fifteen traces are DB-backed mirrors" in r.text
+        assert "custom TRACE-8xx aggregate workflow" in r.text
         assert "Dublin, Ireland" in r.text
         assert "above 50C" in r.text
         assert "below 1000 km" in r.text
@@ -458,6 +462,8 @@ class TestC9PageRoutes:
             "TRACE-401",
             "TRACE-500",
             "TRACE-501",
+            "TRACE-801",
+            "TRACE-802",
         ]
         by_trace = {item["trace"]: item for item in traces}
         assert by_trace["TRACE-200"]["task_id"] == "task_trace_200"
@@ -487,6 +493,20 @@ class TestC9PageRoutes:
         assert by_trace["TRACE-501"]["template_key"] == "template-chain"
         assert by_trace["TRACE-501"]["expect_alert"] == "none"
         assert by_trace["TRACE-501"]["template_data"]["chain_operator"] == "NOR"
+        assert by_trace["TRACE-801"]["template_key"] == "template-chain"
+        assert by_trace["TRACE-801"]["expect_alert"] == "required"
+        assert by_trace["TRACE-801"]["template_data"]["execution_mode"] == "parallel"
+        assert by_trace["TRACE-801"]["template_data"]["condition_strategy"] == "aggregate-only"
+        assert [item["template_key"] for item in by_trace["TRACE-801"]["template_data"]["chain_items"]] == [
+            "weather-dublin",
+            "weather-dublin",
+            "distance-between-cities",
+            "distance-between-cities",
+            "custom-step",
+        ]
+        assert by_trace["TRACE-801"]["template_data"]["chain_items"][-1]["condition_role"] == "aggregate"
+        assert by_trace["TRACE-802"]["expect_alert"] == "none"
+        assert "average_distance_km is less than 100" in by_trace["TRACE-802"]["template_data"]["chain_items"][-1]["executor_prompt"]
 
     def test_task_templates_expose_live_doc_trace_metadata(self, c9_app):
         r = c9_app.get("/api/task-templates?include_archived=true")
@@ -519,6 +539,8 @@ class TestC9PageRoutes:
         assert "task_trace_401" in task_ids
         assert "task_trace_500" in task_ids
         assert "task_trace_501" in task_ids
+        assert "task_trace_801" in task_ids
+        assert "task_trace_802" in task_ids
         positive = next(item for item in tasks if item["id"] == "task_trace_200")
         negative = next(item for item in tasks if item["id"] == "task_trace_206")
         distance_positive = next(item for item in tasks if item["id"] == "task_trace_300")
@@ -527,6 +549,8 @@ class TestC9PageRoutes:
         combo_negative = next(item for item in tasks if item["id"] == "task_trace_401")
         combo_nor_positive = next(item for item in tasks if item["id"] == "task_trace_500")
         combo_nor_negative = next(item for item in tasks if item["id"] == "task_trace_501")
+        custom_aggregate_positive = next(item for item in tasks if item["id"] == "task_trace_801")
+        custom_aggregate_negative = next(item for item in tasks if item["id"] == "task_trace_802")
         assert positive["template_data"]["temperature_threshold_c"] == 0.0
         assert negative["template_data"]["temperature_threshold_c"] == 50.0
         assert "above 0" in positive["executor_prompt"]
@@ -549,6 +573,12 @@ class TestC9PageRoutes:
             "weather-dublin",
         ]
         assert "operator NOR" in combo_nor_positive["executor_prompt"]
+        assert custom_aggregate_positive["template_data"]["execution_mode"] == "parallel"
+        assert custom_aggregate_positive["template_data"]["condition_strategy"] == "aggregate-only"
+        assert custom_aggregate_positive["template_data"]["chain_items"][-1]["template_key"] == "custom-step"
+        assert custom_aggregate_positive["template_data"]["chain_items"][-1]["include_context"] is True
+        assert "average_temperature_c" in custom_aggregate_positive["executor_prompt"]
+        assert "average_distance_km is less than 100" in custom_aggregate_negative["executor_prompt"]
 
     def test_pairs_multi_agent_launcher_uses_main_prompt_input(self, c9_app):
         r = c9_app.get("/pairs")
@@ -609,16 +639,13 @@ class TestTaskedAuthoring:
             },
             "explanation": "Matched the request to the closest editable distance template.",
         }
-        with patch.object(
-            c9_mod,
-            "_chat_one",
-            AsyncMock(return_value={
-                "ok": True,
-                "http_status": 200,
-                "text": json.dumps(llm_payload),
-                "error": None,
-            }),
-        ):
+        mock_chat = AsyncMock(return_value={
+            "ok": True,
+            "http_status": 200,
+            "text": json.dumps(llm_payload),
+            "error": None,
+        })
+        with patch.object(c9_mod, "_chat_one", mock_chat):
             r = c9_app.post("/api/tasks/draft-from-text", json={
                 "prompt": prompt,
                 "strategy": "auto",
@@ -635,6 +662,11 @@ class TestTaskedAuthoring:
         assert body["draft"]["template_data"]["from_location"] == "Dublin, Ireland"
         assert body["draft"]["template_data"]["to_location"] == "Cork, Ireland"
         assert body["draft"]["template_data"]["distance_threshold_km"] == 100.0
+        sent_prompt = mock_chat.call_args.args[1]
+        assert "DOCUZ-TASKED FULL PAGE TEMPLATE" in sent_prompt
+        assert "Tasked app reference material" in sent_prompt
+        assert "prompt1 is the user's raw request" in sent_prompt
+        assert prompt in sent_prompt
 
     def test_draft_from_text_builds_combo_chain_for_distance_and_weather(self, c9_app):
         prompt = (
@@ -682,6 +714,52 @@ class TestTaskedAuthoring:
             "weather-dublin",
         ]
         assert "operator OR" in body["draft"]["executor_prompt"]
+
+    def test_draft_from_text_builds_custom_aggregate_chain_in_prompt_order(self, c9_app):
+        prompt = (
+            "check current weather in newyork, current weather in London, "
+            "distance between LA to Sanfrancisco. and distance LA to Manhattan. "
+            "provide average distance and average temperature, also min average and max average temperature."
+        )
+        r = c9_app.post("/api/tasks/draft-from-text", json={
+            "prompt": prompt,
+            "strategy": "auto",
+            "mode_hint": "chat",
+        })
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert body["source"] == "heuristic-chain"
+        draft = body["draft"]
+        chain_data = draft["template_data"]
+        assert draft["template_key"] == "template-chain"
+        assert chain_data["execution_mode"] == "parallel"
+        assert chain_data["condition_strategy"] == "aggregate-only"
+        assert [item["template_key"] for item in chain_data["chain_items"]] == [
+            "weather-dublin",
+            "weather-dublin",
+            "distance-between-cities",
+            "distance-between-cities",
+            "custom-step",
+        ]
+        assert chain_data["chain_items"][0]["template_data"]["weather_location"] == "New York, United States"
+        assert chain_data["chain_items"][1]["template_data"]["weather_location"] == "London, United Kingdom"
+        assert chain_data["chain_items"][2]["template_data"]["from_location"] == "Los Angeles, United States"
+        assert chain_data["chain_items"][2]["template_data"]["to_location"] == "San Francisco, United States"
+        assert chain_data["chain_items"][3]["template_data"]["to_location"] == "Manhattan, New York, United States"
+        aggregate = chain_data["chain_items"][-1]
+        assert aggregate["condition_role"] == "aggregate"
+        assert aggregate["include_context"] is True
+        assert "average_temperature_c" in aggregate["executor_prompt"]
+        assert "average_distance_km" in aggregate["executor_prompt"]
+        condition_step = next(step for step in draft["steps"] if step["kind"] == "condition")
+        assert condition_step["config"]["condition_strategy"] == "aggregate-only"
+        assert condition_step["config"]["rules"] == [{
+            "source": "task_draft_chain_5",
+            "field": "parsed.triggered",
+            "comparator": "eq",
+            "value": True,
+        }]
 
     def test_draft_from_text_can_use_agent_refinement_for_combo_nor_chain(self, c9_app):
         import c9_jokes.app as c9_mod

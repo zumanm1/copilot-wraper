@@ -390,6 +390,20 @@
                   </select>
                 </label>
                 <label>
+                  Execution mode
+                  <select id="task-chain-execution-mode">
+                    <option value="serial">Serial</option>
+                    <option value="parallel">Parallel lanes</option>
+                  </select>
+                </label>
+                <label>
+                  Alert condition strategy
+                  <select id="task-chain-condition-strategy">
+                    <option value="all">All signal items</option>
+                    <option value="aggregate-only">Aggregate item only</option>
+                  </select>
+                </label>
+                <label>
                   Add template item
                   <div style="display:flex;gap:.5rem;align-items:center;">
                     <select id="task-chain-add-template"></select>
@@ -765,6 +779,8 @@ Alert config example:
     distanceThreshold: document.getElementById('task-distance-threshold'),
     distanceComparator: document.getElementById('task-distance-comparator'),
     chainOperator: document.getElementById('task-chain-operator'),
+    chainExecutionMode: document.getElementById('task-chain-execution-mode'),
+    chainConditionStrategy: document.getElementById('task-chain-condition-strategy'),
     chainAddTemplate: document.getElementById('task-chain-add-template'),
     chainSourceRequest: document.getElementById('task-chain-source-request'),
     chainRefinedRequest: document.getElementById('task-chain-refined-request')
@@ -882,6 +898,7 @@ Alert config example:
   }
   function templateLabelForKey(key) {
     if (key === TEMPLATE_CHAIN_KEY) return 'Combo / Multiple Templates';
+    if (key === 'custom-step') return 'Custom workflow step';
     var tpl = getTemplateByKey(key);
     return (tpl && tpl.name) || key || 'custom';
   }
@@ -910,6 +927,23 @@ Alert config example:
   }
   function defaultChainItem(templateKey) {
     var tpl = getTemplateByKey(templateKey);
+    if (!tpl && templateKey === 'custom-step') {
+      return {
+        id: 'chain_item_' + Math.random().toString(16).slice(2, 8),
+        name: 'Custom workflow step',
+        template_key: 'custom-step',
+        mode: 'chat',
+        agent_id: 'c6-kilocode',
+        condition_role: 'aggregate',
+        include_context: true,
+        executor_target: 'c12b',
+        workspace_dir: '/workspace',
+        validation_command: '',
+        test_command: '',
+        template_data: { template_kind: 'custom-aggregate' },
+        executor_prompt: 'Use the prior Tasked step context JSON if available. Return valid JSON only with {"triggered": boolean, "title": string, "summary": string, "details": object}. Do not use markdown fences.'
+      };
+    }
     if (!tpl) return null;
     var templateData = tpl.template_data || {};
     var executorPrompt = tpl.executor_prompt || '';
@@ -924,6 +958,10 @@ Alert config example:
       id: 'chain_item_' + Math.random().toString(16).slice(2, 8),
       name: '',
       template_key: templateKey,
+      mode: tpl.mode || 'chat',
+      agent_id: 'c6-kilocode',
+      condition_role: 'signal',
+      include_context: false,
       template_data: templateData,
       executor_prompt: executorPrompt
     };
@@ -934,7 +972,11 @@ Alert config example:
     var resolved = defaultChainItem(templateKey) || {
       id: 'chain_item_' + (index + 1),
       name: '',
-      template_key: templateKey,
+      template_key: templateKey || 'custom-step',
+      mode: 'chat',
+      agent_id: 'c6-kilocode',
+      condition_role: 'signal',
+      include_context: false,
       template_data: {},
       executor_prompt: ''
     };
@@ -947,10 +989,22 @@ Alert config example:
       templateData = distanceTemplateData(templateData);
       executorPrompt = buildDistancePrompt(templateData.from_location, templateData.to_location, templateData.distance_threshold_km, templateData.distance_comparator);
     }
+    var itemMode = String(base.mode || resolved.mode || '').trim().toLowerCase();
+    if (!{ chat: true, sandbox: true, agent: true, 'multi-agent': true, 'multi-agento': true }[itemMode]) itemMode = 'chat';
+    var itemRole = String(base.condition_role || resolved.condition_role || 'signal').trim().toLowerCase();
+    if (!{ signal: true, support: true, aggregate: true }[itemRole]) itemRole = 'signal';
     return {
       id: String(base.id || resolved.id || ('chain_item_' + (index + 1))).trim(),
       name: String(base.name || '').trim(),
-      template_key: templateKey,
+      template_key: templateKey || resolved.template_key || 'custom-step',
+      mode: itemMode,
+      agent_id: String(base.agent_id || resolved.agent_id || 'c6-kilocode').trim(),
+      condition_role: itemRole,
+      include_context: Object.prototype.hasOwnProperty.call(base, 'include_context') ? !!base.include_context : !!resolved.include_context,
+      executor_target: String(base.executor_target || resolved.executor_target || 'c12b').trim(),
+      workspace_dir: String(base.workspace_dir || resolved.workspace_dir || '/workspace').trim(),
+      validation_command: String(base.validation_command || '').trim(),
+      test_command: String(base.test_command || '').trim(),
       template_data: templateData,
       executor_prompt: executorPrompt
     };
@@ -959,10 +1013,16 @@ Alert config example:
     var raw = (input && typeof input === 'object') ? input : {};
     var operator = String(raw.chain_operator || raw.operator || 'AND').trim().toUpperCase();
     if (!{ AND: true, OR: true, NOR: true }[operator]) operator = 'AND';
+    var executionMode = String(raw.execution_mode || 'serial').trim().toLowerCase();
+    if (!{ serial: true, parallel: true }[executionMode]) executionMode = 'serial';
+    var conditionStrategy = String(raw.condition_strategy || 'all').trim().toLowerCase();
+    if (!{ all: true, 'aggregate-only': true }[conditionStrategy]) conditionStrategy = 'all';
     var items = (raw.chain_items || raw.items || []).map(normalizeChainItem).filter(function(item){ return item && item.template_key; });
     return {
       template_kind: TEMPLATE_CHAIN_KIND,
       chain_operator: operator,
+      execution_mode: executionMode,
+      condition_strategy: conditionStrategy,
       chain_items: items,
       source_request: String(raw.source_request || '').trim(),
       refined_request: String(raw.refined_request || '').trim()
@@ -970,7 +1030,7 @@ Alert config example:
   }
   function buildChainExecutorPrompt(chainData) {
     var normalized = chainTemplateData(chainData);
-    var lines = ['Run the following template chain with operator ' + normalized.chain_operator + ':'];
+    var lines = ['Run the following template chain with operator ' + normalized.chain_operator + ' in ' + normalized.execution_mode + ' execution mode:'];
     (normalized.chain_items || []).forEach(function(item, index) {
       lines.push((index + 1) + '. ' + chainItemSummary(item));
       if (item.executor_prompt) lines.push(item.executor_prompt);
@@ -1001,7 +1061,7 @@ Alert config example:
     if (chainParamsEl) chainParamsEl.hidden = false;
     if (templateParamsNoteEl) {
       if (chainActive) {
-        templateParamsNoteEl.textContent = 'Combo / multiple templates keep their chained items as structured Tasked data. The operator and each item stay aligned with Alerts, Pipeline, Completed, and Live Docs.';
+        templateParamsNoteEl.textContent = 'Combo / multiple templates keep chained items as structured Tasked data. Each item can use chat, sandbox, agent, multi-agent, or multi-Agento surfaces; serial/parallel mode, condition role, and aggregate-only gating stay aligned with Alerts, Pipeline, Completed, and Live Docs.';
       } else if (distanceActive) {
         templateParamsNoteEl.textContent = 'Distance template parameters are editable here. Changing the towns, distance rule, or km threshold rebuilds the runnable prompt and step config for this Tasked row.';
       } else if (weatherActive) {
@@ -1219,21 +1279,24 @@ Alert config example:
       steps.push({ id: taskId + '_trigger', name: 'Trigger', kind: 'trigger', config: defaultStepConfig('trigger', 0), on_success_step_id: '', on_failure_step_id: '', active: true });
     }
     var executeStepIds = [];
+    var aggregateStepIds = [];
     items.forEach(function(item, idx) {
-      var tplMode = templateModeForKey(item.template_key);
+      var tplMode = item.mode || templateModeForKey(item.template_key);
       var kind = tplMode === 'sandbox' ? 'sandbox' : (tplMode === 'agent' || tplMode === 'multi-agent' || tplMode === 'multi-agento' ? tplMode : 'chat');
       var stepId = taskId + '_chain_' + (idx + 1);
       var config = kind === 'sandbox'
         ? {
-            executor_target: 'c12b',
-            workspace_dir: '/workspace',
+            executor_target: item.executor_target || 'c12b',
+            workspace_dir: item.workspace_dir || '/workspace',
             command: item.executor_prompt || '',
-            validation_command: '',
-            test_command: ''
+            validation_command: item.validation_command || '',
+            test_command: item.test_command || '',
+            include_context: !!item.include_context
           }
         : {
             prompt: item.executor_prompt || '',
-            agent_id: 'c6-kilocode'
+            agent_id: item.agent_id || 'c6-kilocode',
+            include_context: !!item.include_context
           };
       steps.push({
         id: stepId,
@@ -1245,15 +1308,19 @@ Alert config example:
         active: true
       });
       executeStepIds.push(stepId);
+      if (String(item.condition_role || '').toLowerCase() === 'aggregate') aggregateStepIds.push(stepId);
     });
     if (executeStepIds.length > 1) {
+      var ruleStepIds = (chainData.condition_strategy === 'aggregate-only' && aggregateStepIds.length) ? aggregateStepIds : executeStepIds;
       steps.push({
         id: taskId + '_condition',
         name: 'Combine template results',
         kind: 'condition',
         config: {
           operator: chainData.chain_operator || 'AND',
-          rules: executeStepIds.map(function(stepId) {
+          execution_mode: chainData.execution_mode || 'serial',
+          condition_strategy: chainData.condition_strategy || 'all',
+          rules: ruleStepIds.map(function(stepId) {
             return { source: stepId, field: 'parsed.triggered', comparator: 'eq', value: true };
           })
         },
@@ -1296,12 +1363,31 @@ Alert config example:
       var key = item.template_key || '';
       var data = item.template_data || {};
       var tplSelect = '<select data-chain-field="template_key" data-chain-index="' + index + '">' +
-        (TEMPLATES || []).map(function(tpl) {
+        '<option value="custom-step"' + (key === 'custom-step' ? ' selected' : '') + '>Custom workflow step</option>' +
+        (TEMPLATES || []).filter(function(tpl) { return tpl.key !== TEMPLATE_CHAIN_KEY; }).map(function(tpl) {
           return '<option value="' + esc(tpl.key) + '"' + (tpl.key === key ? ' selected' : '') + '>' + esc(tpl.name) + '</option>';
         }).join('') +
       '</select>';
       var promptField = '<label>Executor prompt<textarea data-chain-field="executor_prompt" data-chain-index="' + index + '">' + esc(item.executor_prompt || '') + '</textarea></label>';
       var nameField = '<label>Label<input data-chain-field="name" data-chain-index="' + index + '" value="' + esc(item.name || '') + '" placeholder="Optional item label"></label>';
+      var modeField = '<label>Execution surface<select data-chain-field="mode" data-chain-index="' + index + '">' +
+        ['chat','sandbox','agent','multi-agent','multi-agento'].map(function(value) {
+          return '<option value="' + value + '"' + ((item.mode || 'chat') === value ? ' selected' : '') + '>' + esc(value) + '</option>';
+        }).join('') +
+      '</select></label>';
+      var roleField = '<label>Condition role<select data-chain-field="condition_role" data-chain-index="' + index + '">' +
+        ['signal','support','aggregate'].map(function(value) {
+          return '<option value="' + value + '"' + ((item.condition_role || 'signal') === value ? ' selected' : '') + '>' + esc(value) + '</option>';
+        }).join('') +
+      '</select></label>';
+      var contextField = '<label style="align-content:end"><span>Use prior context</span><input data-chain-field="include_context" data-chain-index="' + index + '" type="checkbox" style="width:auto" ' + (item.include_context ? 'checked' : '') + '></label>';
+      var agentField = '<label>Agent ID<input data-chain-field="agent_id" data-chain-index="' + index + '" value="' + esc(item.agent_id || 'c6-kilocode') + '" placeholder="c6-kilocode"></label>';
+      var sandboxFields = '<div class="tasked-kv-grid">' +
+        '<label>Sandbox target<input data-chain-field="executor_target" data-chain-index="' + index + '" value="' + esc(item.executor_target || 'c12b') + '" placeholder="c12b"></label>' +
+        '<label>Workspace dir<input data-chain-field="workspace_dir" data-chain-index="' + index + '" value="' + esc(item.workspace_dir || '/workspace') + '" placeholder="/workspace"></label>' +
+        '<label>Validation command<textarea data-chain-field="validation_command" data-chain-index="' + index + '" placeholder="Optional sandbox validation">' + esc(item.validation_command || '') + '</textarea></label>' +
+        '<label>Test command<textarea data-chain-field="test_command" data-chain-index="' + index + '" placeholder="Optional sandbox tests">' + esc(item.test_command || '') + '</textarea></label>' +
+      '</div>';
       var templateSpecific = '';
       if ((data.template_kind || '') === WEATHER_TEMPLATE_KIND || key === 'weather-dublin') {
         templateSpecific = '<div class="tasked-kv-grid">' +
@@ -1328,8 +1414,13 @@ Alert config example:
         '<div class="tasked-kv-grid">' +
           '<label>Template item' + tplSelect + '</label>' +
           nameField +
+          modeField +
+          roleField +
+          agentField +
+          contextField +
         '</div>' +
         templateSpecific +
+        sandboxFields +
         promptField +
       '</div>';
     }).join('');
@@ -1350,6 +1441,8 @@ Alert config example:
     var nextData = chainTemplateData(state.templateData || {});
     state.templateData = nextData;
     if (fields.chainOperator) fields.chainOperator.value = nextData.chain_operator;
+    if (fields.chainExecutionMode) fields.chainExecutionMode.value = nextData.execution_mode;
+    if (fields.chainConditionStrategy) fields.chainConditionStrategy.value = nextData.condition_strategy;
     if (fields.chainSourceRequest) fields.chainSourceRequest.value = nextData.source_request || '';
     if (fields.chainRefinedRequest) fields.chainRefinedRequest.value = nextData.refined_request || '';
     fields.executor.value = buildChainExecutorPrompt(nextData);
@@ -1386,6 +1479,25 @@ Alert config example:
       if (replacement) chainData.chain_items[index] = replacement;
     } else if (field === 'name') {
       item.name = e.target.value;
+    } else if (field === 'mode') {
+      item.mode = e.target.value;
+      if (!item.executor_target) item.executor_target = 'c12b';
+      if (!item.workspace_dir) item.workspace_dir = '/workspace';
+    } else if (field === 'agent_id') {
+      item.agent_id = e.target.value;
+    } else if (field === 'condition_role') {
+      item.condition_role = e.target.value;
+      if (item.condition_role === 'aggregate') item.include_context = true;
+    } else if (field === 'include_context') {
+      item.include_context = !!e.target.checked;
+    } else if (field === 'executor_target') {
+      item.executor_target = e.target.value;
+    } else if (field === 'workspace_dir') {
+      item.workspace_dir = e.target.value;
+    } else if (field === 'validation_command') {
+      item.validation_command = e.target.value;
+    } else if (field === 'test_command') {
+      item.test_command = e.target.value;
     } else if (field === 'executor_prompt') {
       item.executor_prompt = e.target.value;
     } else if (field === 'weather_location') {
@@ -1575,6 +1687,9 @@ Alert config example:
       if (fields.distanceToLocation) fields.distanceToLocation.value = '';
       if (fields.distanceThreshold) fields.distanceThreshold.value = '';
       if (fields.distanceComparator) fields.distanceComparator.value = DISTANCE_DEFAULT_COMPARATOR;
+      if (fields.chainOperator) fields.chainOperator.value = 'AND';
+      if (fields.chainExecutionMode) fields.chainExecutionMode.value = 'serial';
+      if (fields.chainConditionStrategy) fields.chainConditionStrategy.value = 'all';
       if (fields.chainSourceRequest) fields.chainSourceRequest.value = '';
       if (fields.chainRefinedRequest) fields.chainRefinedRequest.value = '';
       if (chainItemsEl) chainItemsEl.innerHTML = '<div class="tasked-chain-empty">No template items yet. Add a template item to build a combo / multiple-template task.</div>';
@@ -1631,6 +1746,8 @@ Alert config example:
     if (fields.distanceThreshold) fields.distanceThreshold.value = '';
     if (fields.distanceComparator) fields.distanceComparator.value = DISTANCE_DEFAULT_COMPARATOR;
     if (fields.chainOperator) fields.chainOperator.value = 'AND';
+    if (fields.chainExecutionMode) fields.chainExecutionMode.value = 'serial';
+    if (fields.chainConditionStrategy) fields.chainConditionStrategy.value = 'all';
     if (fields.chainSourceRequest) fields.chainSourceRequest.value = '';
     if (fields.chainRefinedRequest) fields.chainRefinedRequest.value = '';
     if (chainItemsEl) chainItemsEl.innerHTML = '<div class="tasked-chain-empty">No template items yet. Add a template item to build a combo / multiple-template task.</div>';
@@ -1800,7 +1917,7 @@ Alert config example:
     templatePickerEl.innerHTML = '<option value="">Choose a template to load</option>';
     templateEl.innerHTML = '<option value="">Custom</option>' + (hasComboTemplate ? '' : ('<option value="' + TEMPLATE_CHAIN_KEY + '">Combo / Multiple Templates</option>'));
     if (fields.chainAddTemplate) {
-      fields.chainAddTemplate.innerHTML = (TEMPLATES || []).filter(function(tpl) {
+      fields.chainAddTemplate.innerHTML = '<option value="custom-step">Custom workflow step</option>' + (TEMPLATES || []).filter(function(tpl) {
         return tpl.key !== TEMPLATE_CHAIN_KEY;
       }).map(function(tpl) {
         return '<option value="' + esc(tpl.key) + '">' + esc(tpl.name) + '</option>';
@@ -2384,6 +2501,9 @@ Alert config example:
     if (fields.distanceToLocation) fields.distanceToLocation.value = '';
     if (fields.distanceThreshold) fields.distanceThreshold.value = '';
     if (fields.distanceComparator) fields.distanceComparator.value = DISTANCE_DEFAULT_COMPARATOR;
+    if (fields.chainOperator) fields.chainOperator.value = 'AND';
+    if (fields.chainExecutionMode) fields.chainExecutionMode.value = 'serial';
+    if (fields.chainConditionStrategy) fields.chainConditionStrategy.value = 'all';
     if (fields.chainSourceRequest) fields.chainSourceRequest.value = '';
     if (fields.chainRefinedRequest) fields.chainRefinedRequest.value = '';
     if (chainItemsEl) chainItemsEl.innerHTML = '<div class="tasked-chain-empty">No template items yet. Add a template item to build a combo / multiple-template task.</div>';
@@ -2437,6 +2557,24 @@ Alert config example:
     fields.chainOperator.addEventListener('change', function() {
       state.templateData = chainTemplateData(Object.assign({}, state.templateData || {}, {
         chain_operator: fields.chainOperator.value
+      }));
+      syncChainTemplateFields();
+      markDirty();
+    });
+  }
+  if (fields.chainExecutionMode) {
+    fields.chainExecutionMode.addEventListener('change', function() {
+      state.templateData = chainTemplateData(Object.assign({}, state.templateData || {}, {
+        execution_mode: fields.chainExecutionMode.value
+      }));
+      syncChainTemplateFields();
+      markDirty();
+    });
+  }
+  if (fields.chainConditionStrategy) {
+    fields.chainConditionStrategy.addEventListener('change', function() {
+      state.templateData = chainTemplateData(Object.assign({}, state.templateData || {}, {
+        condition_strategy: fields.chainConditionStrategy.value
       }));
       syncChainTemplateFields();
       markDirty();

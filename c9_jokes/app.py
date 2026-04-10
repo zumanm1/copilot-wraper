@@ -126,6 +126,9 @@ DISTANCE_DEFAULT_COMPARATOR = "lt"
 TEMPLATE_CHAIN_KIND = "template-chain"
 TEMPLATE_CHAIN_KEY = "template-chain"
 TASK_CHAIN_OPERATORS = {"AND", "OR", "NOR"}
+TASK_CHAIN_EXECUTION_MODES = {"serial", "parallel"}
+TASK_CHAIN_ITEM_MODES = {"chat", "sandbox", "agent", "multi-agent", "multi-agento"}
+TASK_CHAIN_CUSTOM_KEY = "custom-step"
 
 
 def _task_number_label(value: float | int | str | None, fallback: float = 0.0) -> str:
@@ -311,11 +314,17 @@ def _task_template_chain_data(template_data: dict | str | None = None) -> dict:
     operator = str(raw.get("chain_operator") or raw.get("operator") or "AND").strip().upper() or "AND"
     if operator not in TASK_CHAIN_OPERATORS:
         operator = "AND"
+    execution_mode = str(raw.get("execution_mode") or raw.get("run_mode") or "serial").strip().lower() or "serial"
+    if execution_mode not in TASK_CHAIN_EXECUTION_MODES:
+        execution_mode = "serial"
+    condition_strategy = str(raw.get("condition_strategy") or "all").strip().lower() or "all"
+    if condition_strategy not in {"all", "aggregate-only"}:
+        condition_strategy = "all"
     normalized_items: list[dict] = []
     for idx, item in enumerate(raw.get("chain_items") or raw.get("items") or []):
         if not isinstance(item, dict):
             continue
-        item_key = str(item.get("template_key") or "").strip()
+        item_key = str(item.get("template_key") or "").strip() or TASK_CHAIN_CUSTOM_KEY
         item_data = _task_inline_object(item.get("template_data"))
         item_prompt = str(item.get("executor_prompt") or "").strip()
         item_payload = _task_apply_template_data({
@@ -331,12 +340,26 @@ def _task_template_chain_data(template_data: dict | str | None = None) -> dict:
             "id": str(item.get("id") or f"chain_item_{idx + 1}").strip(),
             "name": str(item.get("name") or "").strip(),
             "template_key": item_key,
+            "mode": str(item.get("mode") or item.get("kind") or "").strip().lower(),
+            "agent_id": str(item.get("agent_id") or "c6-kilocode").strip(),
+            "condition_role": str(item.get("condition_role") or "signal").strip().lower(),
+            "include_context": bool(item.get("include_context")),
+            "executor_target": _task_sandbox_target(item.get("executor_target") or "c12b"),
+            "workspace_dir": _task_sandbox_workspace(item.get("workspace_dir"), "c12b"),
+            "validation_command": str(item.get("validation_command") or "").strip(),
+            "test_command": str(item.get("test_command") or "").strip(),
             "template_data": item_payload.get("template_data") or item_data,
             "executor_prompt": str(item_payload.get("executor_prompt") or item_prompt).strip(),
         })
+        if normalized_items[-1]["mode"] not in TASK_CHAIN_ITEM_MODES:
+            normalized_items[-1]["mode"] = "chat"
+        if normalized_items[-1]["condition_role"] not in {"signal", "support", "aggregate"}:
+            normalized_items[-1]["condition_role"] = "signal"
     return {
         "template_kind": TEMPLATE_CHAIN_KIND,
         "chain_operator": operator,
+        "execution_mode": execution_mode,
+        "condition_strategy": condition_strategy,
         "chain_items": normalized_items,
         "source_request": str(raw.get("source_request") or "").strip(),
         "refined_request": str(raw.get("refined_request") or "").strip(),
@@ -346,6 +369,9 @@ def _task_template_chain_data(template_data: dict | str | None = None) -> dict:
 def _task_chain_item_label(item: dict) -> str:
     item_key = str(item.get("template_key") or "").strip()
     item_data = _task_inline_object(item.get("template_data"))
+    name = str(item.get("name") or "").strip()
+    if name:
+        return name
     if item_data.get("template_kind") == WEATHER_TEMPLATE_KIND:
         return f"Weather: {_task_weather_city_label(str(item_data.get('weather_location') or WEATHER_DEFAULT_LOCATION))}"
     if item_data.get("template_kind") == DISTANCE_TEMPLATE_KIND:
@@ -355,6 +381,8 @@ def _task_chain_item_label(item: dict) -> str:
             + " → "
             + _task_distance_location_label(str(item_data.get("to_location") or DISTANCE_DEFAULT_TO_LOCATION))
         )
+    if item_key == TASK_CHAIN_CUSTOM_KEY:
+        return "Custom workflow step"
     return _task_template_label(item_key)
 
 
@@ -363,8 +391,9 @@ def _task_chain_executor_prompt(chain_data: dict) -> str:
     if not items:
         return "Run the configured template chain and return structured output."
     operator = str(chain_data.get("chain_operator") or "AND").upper()
+    execution_mode = str(chain_data.get("execution_mode") or "serial").lower()
     lines = [
-        f"Run the following template chain with operator {operator}:",
+        f"Run the following template chain with operator {operator} in {execution_mode} execution mode:",
     ]
     for idx, item in enumerate(items, start=1):
         lines.append(f"{idx}. {_task_chain_item_label(item)}")
@@ -945,6 +974,190 @@ TASK_TEMPLATE_LIVE_DOC_SPECS = [
         "target": "C1b",
         "expect_alert": "none",
         "desc": "combo template · negative NOR chain where at least one component condition should be true, so the combined NOR alert should not fire",
+    },
+    {
+        "trace": "TRACE-801",
+        "task_id": "task_trace_801",
+        "template_key": TEMPLATE_CHAIN_KEY,
+        "name": "TRACE-801 · Custom Weather Distance Aggregate Trigger",
+        "template_data": {
+            "template_kind": TEMPLATE_CHAIN_KIND,
+            "chain_operator": "AND",
+            "execution_mode": "parallel",
+            "condition_strategy": "aggregate-only",
+            "chain_items": [
+                {
+                    "id": "chain_item_1",
+                    "name": "Weather: New York",
+                    "template_key": "weather-dublin",
+                    "condition_role": "support",
+                    "template_data": {
+                        "template_kind": WEATHER_TEMPLATE_KIND,
+                        "weather_location": "New York, United States",
+                        "temperature_threshold_c": 10.0,
+                    },
+                },
+                {
+                    "id": "chain_item_2",
+                    "name": "Weather: London",
+                    "template_key": "weather-dublin",
+                    "condition_role": "support",
+                    "template_data": {
+                        "template_kind": WEATHER_TEMPLATE_KIND,
+                        "weather_location": "London, United Kingdom",
+                        "temperature_threshold_c": 10.0,
+                    },
+                },
+                {
+                    "id": "chain_item_3",
+                    "name": "Distance: LA to San Francisco",
+                    "template_key": "distance-between-cities",
+                    "condition_role": "support",
+                    "template_data": {
+                        "template_kind": DISTANCE_TEMPLATE_KIND,
+                        "from_location": "Los Angeles, United States",
+                        "to_location": "San Francisco, United States",
+                        "distance_threshold_km": 100.0,
+                        "distance_comparator": "lt",
+                    },
+                },
+                {
+                    "id": "chain_item_4",
+                    "name": "Distance: LA to Manhattan",
+                    "template_key": "distance-between-cities",
+                    "condition_role": "support",
+                    "template_data": {
+                        "template_kind": DISTANCE_TEMPLATE_KIND,
+                        "from_location": "Los Angeles, United States",
+                        "to_location": "Manhattan, New York, United States",
+                        "distance_threshold_km": 100.0,
+                        "distance_comparator": "lt",
+                    },
+                },
+                {
+                    "id": "chain_item_5",
+                    "name": "Aggregate averages and ranges",
+                    "template_key": TASK_CHAIN_CUSTOM_KEY,
+                    "mode": "chat",
+                    "agent_id": "c6-kilocode",
+                    "condition_role": "aggregate",
+                    "include_context": True,
+                    "template_data": {"template_kind": "custom-aggregate"},
+                    "executor_prompt": (
+                        "Use the prior Tasked step context JSON to compute a final aggregate report for the user's request. "
+                        "Extract all numeric weather details.temperature_c values and all numeric distance details.distance_km values. "
+                        "Return valid JSON only with this schema: "
+                        '{"triggered": boolean, "trigger": "custom multi-scenario aggregate", "title": string, "summary": string, '
+                        '"details": {"temperatures_c": array, "distances_km": array, "average_temperature_c": number|null, '
+                        '"min_temperature_c": number|null, "max_temperature_c": number|null, "average_distance_km": number|null, '
+                        '"source_request": string}}. Do not use markdown fences. '
+                        "Set triggered to true when at least one temperature and one distance value are available. "
+                        "Preserve the city and route labels in the summary. Source request: check current weather in New York, current weather in London, distance between LA to San Francisco, and distance LA to Manhattan. Provide average distance and average temperature, plus min and max temperature."
+                    ),
+                },
+            ],
+            "source_request": "check current weather in New York, current weather in London, distance between LA to San Francisco, and distance LA to Manhattan. Provide average distance and average temperature, plus min and max temperature.",
+            "refined_request": "Run two weather template lanes and two distance template lanes in parallel, pass their JSON outputs into a custom aggregate lane, then alert when the aggregate has both temperature and distance values.",
+        },
+        "type": "combined",
+        "type_cls": "combined",
+        "type_color": "#f87171",
+        "target": "C1b",
+        "expect_alert": "required",
+        "trigger_text": "custom workflow aggregate",
+        "desc": "custom combo template · positive TRACE-8xx path that preserves multi-scenario outputs and fires from the aggregate result",
+    },
+    {
+        "trace": "TRACE-802",
+        "task_id": "task_trace_802",
+        "template_key": TEMPLATE_CHAIN_KEY,
+        "name": "TRACE-802 · Custom Weather Distance Aggregate No Trigger",
+        "template_data": {
+            "template_kind": TEMPLATE_CHAIN_KIND,
+            "chain_operator": "AND",
+            "execution_mode": "parallel",
+            "condition_strategy": "aggregate-only",
+            "chain_items": [
+                {
+                    "id": "chain_item_1",
+                    "name": "Weather: New York",
+                    "template_key": "weather-dublin",
+                    "condition_role": "support",
+                    "template_data": {
+                        "template_kind": WEATHER_TEMPLATE_KIND,
+                        "weather_location": "New York, United States",
+                        "temperature_threshold_c": 10.0,
+                    },
+                },
+                {
+                    "id": "chain_item_2",
+                    "name": "Weather: London",
+                    "template_key": "weather-dublin",
+                    "condition_role": "support",
+                    "template_data": {
+                        "template_kind": WEATHER_TEMPLATE_KIND,
+                        "weather_location": "London, United Kingdom",
+                        "temperature_threshold_c": 10.0,
+                    },
+                },
+                {
+                    "id": "chain_item_3",
+                    "name": "Distance: LA to San Francisco",
+                    "template_key": "distance-between-cities",
+                    "condition_role": "support",
+                    "template_data": {
+                        "template_kind": DISTANCE_TEMPLATE_KIND,
+                        "from_location": "Los Angeles, United States",
+                        "to_location": "San Francisco, United States",
+                        "distance_threshold_km": 100.0,
+                        "distance_comparator": "lt",
+                    },
+                },
+                {
+                    "id": "chain_item_4",
+                    "name": "Distance: LA to Manhattan",
+                    "template_key": "distance-between-cities",
+                    "condition_role": "support",
+                    "template_data": {
+                        "template_kind": DISTANCE_TEMPLATE_KIND,
+                        "from_location": "Los Angeles, United States",
+                        "to_location": "Manhattan, New York, United States",
+                        "distance_threshold_km": 100.0,
+                        "distance_comparator": "lt",
+                    },
+                },
+                {
+                    "id": "chain_item_5",
+                    "name": "Aggregate averages and ranges",
+                    "template_key": TASK_CHAIN_CUSTOM_KEY,
+                    "mode": "chat",
+                    "agent_id": "c6-kilocode",
+                    "condition_role": "aggregate",
+                    "include_context": True,
+                    "template_data": {"template_kind": "custom-aggregate"},
+                    "executor_prompt": (
+                        "Use the prior Tasked step context JSON to compute a final aggregate report for the user's request. "
+                        "Extract all numeric weather details.temperature_c values and all numeric distance details.distance_km values. "
+                        "Return valid JSON only with this schema: "
+                        '{"triggered": boolean, "trigger": "custom multi-scenario aggregate", "title": string, "summary": string, '
+                        '"details": {"temperatures_c": array, "distances_km": array, "average_temperature_c": number|null, '
+                        '"min_temperature_c": number|null, "max_temperature_c": number|null, "average_distance_km": number|null, '
+                        '"source_request": string}}. Do not use markdown fences. '
+                        "Set triggered to true only when average_distance_km is less than 100. "
+                        "Preserve the city and route labels in the summary. Source request: check current weather in New York, current weather in London, distance between LA to San Francisco, and distance LA to Manhattan. Provide average distance and average temperature, plus min and max temperature."
+                    ),
+                },
+            ],
+            "source_request": "check current weather in New York, current weather in London, distance between LA to San Francisco, and distance LA to Manhattan. Provide average distance and average temperature, plus min and max temperature.",
+            "refined_request": "Run the same four data-gathering lanes, then complete without alert unless the aggregate average distance is below 100 km.",
+        },
+        "type": "combined",
+        "type_cls": "combined",
+        "type_color": "#f87171",
+        "target": "C1b",
+        "expect_alert": "none",
+        "trigger_text": "custom workflow aggregate",
+        "desc": "custom combo template · negative TRACE-8xx path that keeps the aggregate output but should complete without alert",
     },
 ]
 
@@ -3911,13 +4124,22 @@ def _task_build_default_steps(task: dict) -> list[dict]:
         chain_data = _task_template_chain_data(template_data)
         chain_items = chain_data.get("chain_items") if isinstance(chain_data.get("chain_items"), list) else []
         chain_step_ids: list[str] = []
+        condition_step_ids: list[str] = []
+        aggregate_step_ids: list[str] = []
         template_catalog = {item.get("key") or "": item for item in _task_templates_payload(active_only=False)}
         for idx, item in enumerate(chain_items, start=1):
             item_key = str(item.get("template_key") or "").strip()
             template_row = template_catalog.get(item_key) or {}
-            item_mode = str(template_row.get("mode") or "chat").strip().lower() or "chat"
+            item_mode = str(item.get("mode") or template_row.get("mode") or "chat").strip().lower() or "chat"
+            if item_mode not in TASK_CHAIN_ITEM_MODES:
+                item_mode = "chat"
             item_id = f"{task_id}_chain_{idx}"
             chain_step_ids.append(item_id)
+            condition_role = str(item.get("condition_role") or "signal").strip().lower()
+            if condition_role == "aggregate":
+                aggregate_step_ids.append(item_id)
+            elif condition_role != "support":
+                condition_step_ids.append(item_id)
             item_name = str(item.get("name") or "").strip() or _task_chain_item_label(item)
             item_prompt = str(item.get("executor_prompt") or template_row.get("executor_prompt") or "").strip()
             if item_mode == "sandbox":
@@ -3928,11 +4150,12 @@ def _task_build_default_steps(task: dict) -> list[dict]:
                     "name": item_name,
                     "kind": "sandbox",
                     "config": {
-                        "executor_target": template_row.get("executor_target") or "c12b",
-                        "workspace_dir": template_row.get("workspace_dir") or "/workspace",
+                        "executor_target": item.get("executor_target") or template_row.get("executor_target") or "c12b",
+                        "workspace_dir": item.get("workspace_dir") or template_row.get("workspace_dir") or "/workspace",
                         "command": item_prompt,
-                        "validation_command": template_row.get("validation_command") or "",
-                        "test_command": template_row.get("test_command") or "",
+                        "validation_command": item.get("validation_command") or template_row.get("validation_command") or "",
+                        "test_command": item.get("test_command") or template_row.get("test_command") or "",
+                        "include_context": bool(item.get("include_context")),
                     },
                     "active": True,
                     "on_success_step_id": "",
@@ -3947,7 +4170,8 @@ def _task_build_default_steps(task: dict) -> list[dict]:
                     "kind": item_mode if item_mode in {"chat", "agent", "multi-agent", "multi-agento"} else "chat",
                     "config": {
                         "prompt": item_prompt,
-                        "agent_id": "c6-kilocode",
+                        "agent_id": str(item.get("agent_id") or "c6-kilocode"),
+                        "include_context": bool(item.get("include_context")),
                         "sandbox_assist": False,
                         "sandbox_assist_target": "c12b",
                         "sandbox_assist_workspace_dir": "/workspace",
@@ -3960,6 +4184,7 @@ def _task_build_default_steps(task: dict) -> list[dict]:
                     "on_failure_step_id": "",
                 })
         if len(chain_step_ids) > 1:
+            rule_step_ids = aggregate_step_ids if chain_data.get("condition_strategy") == "aggregate-only" and aggregate_step_ids else condition_step_ids or chain_step_ids
             steps.append({
                 "id": f"{task_id}_condition",
                 "task_id": task_id,
@@ -3975,8 +4200,10 @@ def _task_build_default_steps(task: dict) -> list[dict]:
                             "comparator": "eq",
                             "value": True,
                         }
-                        for step_id in chain_step_ids
+                        for step_id in rule_step_ids
                     ],
+                    "execution_mode": str(chain_data.get("execution_mode") or "serial").lower(),
+                    "condition_strategy": str(chain_data.get("condition_strategy") or "all").lower(),
                 },
                 "active": True,
                 "on_success_step_id": "",
@@ -4460,7 +4687,7 @@ def _tasked_live_doc_seed_task_payload(template: dict, spec: dict) -> dict:
         "sandbox_assist_test_command": assist["sandbox_assist_test_command"],
         "context_handoff": template.get("context_handoff") or "",
         "trigger_mode": template.get("trigger_mode") or ("always" if mode == "sandbox" else "json"),
-        "trigger_text": template.get("trigger_text") or "",
+        "trigger_text": str(spec.get("trigger_text") or template.get("trigger_text") or "").strip(),
         "notes": (
             f"Tasked Live Docs seeded template trace {trace}. "
             f"Template key={template.get('key') or spec['template_key']}."
@@ -4899,6 +5126,8 @@ def _task_executor_target_label(target: str) -> str:
 def _task_template_label(template_key: str) -> str:
     if (template_key or "") == TEMPLATE_CHAIN_KEY:
         return "Combo / Multiple Templates"
+    if (template_key or "") == TASK_CHAIN_CUSTOM_KEY:
+        return "Custom workflow step"
     return next((item["name"] for item in _task_templates_payload(active_only=False) if item["key"] == template_key), template_key or "custom")
 
 
@@ -5583,6 +5812,47 @@ def _tasked_authoring_prompt_markdown() -> str:
         )
 
 
+def _tasked_author_reference_context() -> str:
+    """Reference material sent to the authoring agent for prompt1 -> prompt2 refinement."""
+    parts: list[str] = []
+    docuz_path = BASE_DIR / "templates" / "docuz_tasked.html"
+    tasked_path = BASE_DIR / "templates" / "tasked.html"
+    try:
+        parts.append("DOCUZ-TASKED FULL PAGE TEMPLATE:\n" + docuz_path.read_text(encoding="utf-8"))
+    except Exception:
+        parts.append("DOCUZ-TASKED FULL PAGE TEMPLATE: unavailable")
+    try:
+        tasked_text = tasked_path.read_text(encoding="utf-8")
+        anchors = [
+            "Tasked Orchestrator",
+            "Tasked Chat Planner",
+            "Tasked Builder",
+            "Editable Templates",
+            "Traceability",
+            "Workflow steps",
+            "Run Again keeps the same Trace ID",
+        ]
+        excerpts: list[str] = []
+        for anchor in anchors:
+            idx = tasked_text.find(anchor)
+            if idx >= 0:
+                excerpts.append(tasked_text[max(0, idx - 500):idx + 1600])
+        parts.append("TASKED PAGE OPERATIONAL EXCERPTS:\n" + "\n\n---\n\n".join(excerpts))
+    except Exception:
+        parts.append("TASKED PAGE OPERATIONAL EXCERPTS: unavailable")
+    parts.append(
+        "AUTHORING REQUIREMENTS FOR CUSTOM WORKFLOWS:\n"
+        "- prompt1 is the user's raw request.\n"
+        "- prompt2 must be a refined detailed request that can become a Tasked custom template.\n"
+        "- Break prompt2 into multiple chain_items when the request has multiple weather, distance, sandbox, agent, multi-agent, or multi-Agento subtasks.\n"
+        "- Use template-chain for mixed custom workflows; set execution_mode to serial or parallel.\n"
+        "- Use condition_strategy=aggregate-only when a final aggregate step decides whether the alert fires.\n"
+        "- Support chain item mode values chat, sandbox, agent, multi-agent, and multi-agento.\n"
+        "- Keep outputs visible across Tasked, Pipeline, Alerts, Completed, Preview, and Live Docs."
+    )
+    return "\n\n".join(parts)
+
+
 def _tasked_author_template_catalog() -> list[dict]:
     catalog: list[dict] = []
     for item in _task_templates_payload():
@@ -5719,19 +5989,67 @@ def _tasked_author_guess_market_cap_threshold(prompt: str) -> float | None:
     return value * multiplier
 
 
-def _tasked_author_normalize_city(value: str) -> str:
+def _tasked_author_location_alias(value: str) -> str:
     text = str(value or "").strip(" .,:;")
+    text = re.sub(r"\s+", " ", text)
     if not text:
         return ""
-    if "," not in text and "ireland" not in text.lower():
-        return text + ", Ireland"
+    key = re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
+    aliases = {
+        "dublin": "Dublin, Ireland",
+        "cork": "Cork, Ireland",
+        "newyork": "New York, United States",
+        "new york": "New York, United States",
+        "nyc": "New York, United States",
+        "london": "London, United Kingdom",
+        "la": "Los Angeles, United States",
+        "l a": "Los Angeles, United States",
+        "los angeles": "Los Angeles, United States",
+        "sanfrancisco": "San Francisco, United States",
+        "san francisco": "San Francisco, United States",
+        "sf": "San Francisco, United States",
+        "manhattan": "Manhattan, New York, United States",
+    }
+    if key in aliases:
+        return aliases[key]
+    if "," in text:
+        return text
     return text
+
+
+def _tasked_author_normalize_city(value: str) -> str:
+    return _tasked_author_location_alias(value)
+
+
+def _tasked_author_prompt_clauses(prompt: str) -> list[str]:
+    text = re.sub(r"\s+", " ", str(prompt or "").strip())
+    if not text:
+        return []
+    text = re.sub(
+        r"\.\s*(?=(?:and\s+)?(?:current\s+)?(?:weather|temperature|distance)\b)",
+        ", ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"\band\s+(?=(?:current\s+)?(?:weather|temperature|distance)\b)",
+        ", ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    parts = re.split(r"\s*[,;]\s*", text)
+    clauses: list[str] = []
+    for part in parts:
+        clause = re.sub(r"^(?:and\s+|also\s+|check\s+)+", "", part.strip(), flags=re.IGNORECASE)
+        if clause:
+            clauses.append(clause)
+    return clauses
 
 
 def _tasked_author_guess_weather_location(prompt: str) -> str:
     text = re.sub(r"\s+", " ", str(prompt or "").strip())
     match = re.search(
-        r"(?:weather|temperature)(?:\s+(?:in|for))\s+(.+?)(?:\s+(?:is|above|below|over|under)|[,.]| and | or | nor |$)",
+        r"(?:weather|temperature)(?:\s+(?:in|for))\s+(.+?)(?:\s+(?:is|above|below|over|under|less|greater|if)\b|[,.]| and | or | nor |$)",
         text,
         re.IGNORECASE,
     )
@@ -5740,6 +6058,96 @@ def _tasked_author_guess_weather_location(prompt: str) -> str:
     if re.search(r"\bdublin\b", text, re.IGNORECASE):
         return WEATHER_DEFAULT_LOCATION
     return ""
+
+
+def _tasked_author_weather_item(location: str, threshold: float | None, *, condition_role: str = "signal") -> dict:
+    data = _task_weather_template_data({
+        "weather_location": _tasked_author_normalize_city(location) or WEATHER_DEFAULT_LOCATION,
+        "temperature_threshold_c": threshold if threshold is not None else WEATHER_DEFAULT_THRESHOLD_C,
+    })
+    return {
+        "template_key": "weather-dublin",
+        "name": _task_chain_item_label({"template_key": "weather-dublin", "template_data": data}),
+        "condition_role": condition_role,
+        "template_data": data,
+        "executor_prompt": _task_weather_prompt(
+            str(data.get("weather_location") or WEATHER_DEFAULT_LOCATION),
+            data.get("temperature_threshold_c"),
+        ),
+    }
+
+
+def _tasked_author_guess_weather_items(prompt: str) -> list[dict]:
+    items: list[dict] = []
+    seen: set[str] = set()
+    global_threshold = _tasked_author_guess_temperature_threshold(prompt)
+    for clause in _tasked_author_prompt_clauses(prompt):
+        lowered = clause.lower()
+        if "weather" not in lowered and "temperature" not in lowered:
+            continue
+        location = _tasked_author_guess_weather_location(clause)
+        if not location:
+            continue
+        normalized = _tasked_author_normalize_city(location)
+        key = normalized.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        threshold = _tasked_author_guess_temperature_threshold(clause)
+        items.append(_tasked_author_weather_item(
+            normalized,
+            threshold if threshold is not None else global_threshold,
+            condition_role="support" if _tasked_author_needs_aggregate(prompt) else "signal",
+        ))
+    if not items:
+        single = _tasked_author_guess_weather_item(prompt)
+        if single:
+            if _tasked_author_needs_aggregate(prompt):
+                single["condition_role"] = "support"
+            items.append(single)
+    return items
+
+
+def _tasked_author_guess_distance_threshold(prompt: str) -> float | None:
+    data = _task_distance_template_data({}, executor_prompt=prompt)
+    if "less than" in prompt.lower() or "below" in prompt.lower() or "under" in prompt.lower() or "greater than" in prompt.lower() or "above" in prompt.lower() or "more than" in prompt.lower() or "over " in prompt.lower():
+        return float(data.get("distance_threshold_km") or DISTANCE_DEFAULT_THRESHOLD_KM)
+    return None
+
+
+def _tasked_author_distance_pair_from_clause(clause: str) -> tuple[str, str] | None:
+    text = re.sub(r"^\s*(?:what\s+is\s+)?(?:km\s+)?", "", str(clause or "").strip(), flags=re.IGNORECASE)
+    if "distance" not in text.lower():
+        return None
+    match = re.search(
+        r"distance\s+(?:between\s+)?(.+?)\s+(?:to|and)\s+(.+?)(?:[.;,]|\s+(?:if|is|less|greater|above|below|under|over|more|create|return|provide|preovide|average|also)\b|$)",
+        text,
+        re.IGNORECASE,
+    )
+    if not match:
+        return None
+    return _tasked_author_location_alias(match.group(1)), _tasked_author_location_alias(match.group(2))
+
+
+def _tasked_author_distance_item(from_location: str, to_location: str, threshold: float | None, comparator: str | None, *, condition_role: str = "signal") -> dict:
+    data = _task_distance_template_data({
+        "from_location": _tasked_author_location_alias(from_location) or DISTANCE_DEFAULT_FROM_LOCATION,
+        "to_location": _tasked_author_location_alias(to_location) or DISTANCE_DEFAULT_TO_LOCATION,
+        "distance_threshold_km": threshold if threshold is not None else DISTANCE_DEFAULT_THRESHOLD_KM,
+        "distance_comparator": comparator or DISTANCE_DEFAULT_COMPARATOR,
+    })
+    return {
+        "template_key": "distance-between-cities",
+        "name": _task_chain_item_label({"template_key": "distance-between-cities", "template_data": data}),
+        "condition_role": condition_role,
+        "template_data": data,
+        "executor_prompt": _task_distance_prompt(
+            str(data.get("from_location") or DISTANCE_DEFAULT_FROM_LOCATION),
+            str(data.get("to_location") or DISTANCE_DEFAULT_TO_LOCATION),
+            data.get("distance_threshold_km"),
+            str(data.get("distance_comparator") or DISTANCE_DEFAULT_COMPARATOR),
+        ),
+    }
 
 
 def _tasked_author_guess_distance_item(prompt: str) -> dict | None:
@@ -5759,22 +6167,79 @@ def _tasked_author_guess_distance_item(prompt: str) -> dict | None:
     }
 
 
+def _tasked_author_guess_distance_items(prompt: str) -> list[dict]:
+    items: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    global_threshold = _tasked_author_guess_distance_threshold(prompt)
+    global_comparator = str(_task_distance_template_data({}, executor_prompt=prompt).get("distance_comparator") or DISTANCE_DEFAULT_COMPARATOR)
+    for clause in _tasked_author_prompt_clauses(prompt):
+        pair = _tasked_author_distance_pair_from_clause(clause)
+        if not pair:
+            continue
+        from_location, to_location = pair
+        if not from_location or not to_location:
+            continue
+        key = (from_location.lower(), to_location.lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        threshold = _tasked_author_guess_distance_threshold(clause)
+        comparator = str(_task_distance_template_data({}, executor_prompt=clause).get("distance_comparator") or global_comparator)
+        items.append(_tasked_author_distance_item(
+            from_location,
+            to_location,
+            threshold if threshold is not None else global_threshold,
+            comparator,
+            condition_role="support" if _tasked_author_needs_aggregate(prompt) else "signal",
+        ))
+    if not items:
+        single = _tasked_author_guess_distance_item(prompt)
+        if single:
+            if _tasked_author_needs_aggregate(prompt):
+                single["condition_role"] = "support"
+            items.append(single)
+    return items
+
+
 def _tasked_author_guess_weather_item(prompt: str) -> dict | None:
     text = str(prompt or "")
     if "weather" not in text.lower() and "temperature" not in text.lower():
         return None
     location = _tasked_author_guess_weather_location(text) or WEATHER_DEFAULT_LOCATION
     threshold = _tasked_author_guess_temperature_threshold(text)
-    data = _task_weather_template_data({
-        "weather_location": location,
-        "temperature_threshold_c": threshold if threshold is not None else WEATHER_DEFAULT_THRESHOLD_C,
-    })
+    return _tasked_author_weather_item(location, threshold)
+
+
+def _tasked_author_needs_aggregate(prompt: str) -> bool:
+    text = str(prompt or "").lower()
+    return any(term in text for term in ("average", "avg", "minimum", "maximum", "min ", "max ", "provide average", "final result", "final results"))
+
+
+def _tasked_author_aggregate_item(prompt: str, *, negative: bool = False) -> dict:
+    trigger_instruction = (
+        "Set triggered to true only when average_distance_km is less than 100."
+        if negative
+        else "Set triggered to true when at least one temperature and one distance value are available."
+    )
     return {
-        "template_key": "weather-dublin",
-        "template_data": data,
-        "executor_prompt": _task_weather_prompt(
-            str(data.get("weather_location") or WEATHER_DEFAULT_LOCATION),
-            data.get("temperature_threshold_c"),
+        "template_key": TASK_CHAIN_CUSTOM_KEY,
+        "name": "Aggregate averages and ranges",
+        "mode": "chat",
+        "agent_id": "c6-kilocode",
+        "condition_role": "aggregate",
+        "include_context": True,
+        "template_data": {"template_kind": "custom-aggregate"},
+        "executor_prompt": (
+            "Use the prior Tasked step context JSON to compute a final aggregate report for the user's request. "
+            "Extract all numeric weather details.temperature_c values and all numeric distance details.distance_km values. "
+            "Return valid JSON only with this schema: "
+            '{"triggered": boolean, "trigger": "custom multi-scenario aggregate", "title": string, "summary": string, '
+            '"details": {"temperatures_c": array, "distances_km": array, "average_temperature_c": number|null, '
+            '"min_temperature_c": number|null, "max_temperature_c": number|null, "average_distance_km": number|null, '
+            '"source_request": string}}. Do not use markdown fences. '
+            + trigger_instruction
+            + " Preserve the city and route labels in the summary. Source request: "
+            + str(prompt or "").strip()
         ),
     }
 
@@ -5795,16 +6260,62 @@ def _tasked_author_guess_combo_items(prompt: str) -> list[dict]:
     lowered = text.lower()
     items: list[dict] = []
     seen: set[str] = set()
+    needs_aggregate = _tasked_author_needs_aggregate(text)
 
-    distance_item = _tasked_author_guess_distance_item(text)
-    if distance_item:
-        items.append(distance_item)
-        seen.add("distance-between-cities")
+    # Preserve the user's clause order for custom workflows. The workflow diagram,
+    # pipeline trace, and aggregate context become easier to audit when lanes appear
+    # in the same order the user requested them.
+    global_distance_threshold = _tasked_author_guess_distance_threshold(text)
+    global_distance_comparator = str(_task_distance_template_data({}, executor_prompt=text).get("distance_comparator") or DISTANCE_DEFAULT_COMPARATOR)
+    global_temperature_threshold = _tasked_author_guess_temperature_threshold(text)
+    for clause in _tasked_author_prompt_clauses(text):
+        pair = _tasked_author_distance_pair_from_clause(clause)
+        if pair:
+            from_location, to_location = pair
+            threshold = _tasked_author_guess_distance_threshold(clause)
+            comparator = str(_task_distance_template_data({}, executor_prompt=clause).get("distance_comparator") or global_distance_comparator)
+            distance_item = _tasked_author_distance_item(
+                from_location,
+                to_location,
+                threshold if threshold is not None else global_distance_threshold,
+                comparator,
+                condition_role="support" if needs_aggregate else "signal",
+            )
+            sig = "distance:" + json.dumps(distance_item.get("template_data") or {}, sort_keys=True)
+            if sig not in seen:
+                items.append(distance_item)
+                seen.add(sig)
+            continue
 
-    weather_item = _tasked_author_guess_weather_item(text)
-    if weather_item:
-        items.append(weather_item)
-        seen.add("weather-dublin")
+        if "weather" in clause.lower() or "temperature" in clause.lower():
+            location = _tasked_author_guess_weather_location(clause)
+            if location:
+                threshold = _tasked_author_guess_temperature_threshold(clause)
+                weather_item = _tasked_author_weather_item(
+                    location,
+                    threshold if threshold is not None else global_temperature_threshold,
+                    condition_role="support" if needs_aggregate else "signal",
+                )
+                sig = "weather:" + json.dumps(weather_item.get("template_data") or {}, sort_keys=True)
+                if sig not in seen:
+                    items.append(weather_item)
+                    seen.add(sig)
+
+    if not items:
+        for distance_item in _tasked_author_guess_distance_items(text):
+            sig = "distance:" + json.dumps(distance_item.get("template_data") or {}, sort_keys=True)
+            if sig not in seen:
+                items.append(distance_item)
+                seen.add(sig)
+
+        for weather_item in _tasked_author_guess_weather_items(text):
+            sig = "weather:" + json.dumps(weather_item.get("template_data") or {}, sort_keys=True)
+            if sig not in seen:
+                items.append(weather_item)
+                seen.add(sig)
+
+    if items and needs_aggregate:
+        items.append(_tasked_author_aggregate_item(text))
 
     if "sharepoint" in lowered and any(term in lowered for term in ("email", "outlook", "attachment", "document link", "linked file")):
         if "outlook-sharepoint-linked" not in seen:
@@ -5888,8 +6399,12 @@ def _tasked_author_template_seed_draft(template: dict) -> dict:
 
 
 def _tasked_author_combo_draft(prompt: str, items: list[dict], *, mode_hint: str = "") -> dict:
+    has_aggregate = any(str(item.get("condition_role") or "").lower() == "aggregate" for item in items)
+    execution_mode = "parallel" if len(items) > 2 and any(str(item.get("condition_role") or "").lower() == "support" for item in items) else "serial"
     chain_data = _task_template_chain_data({
         "chain_operator": _tasked_author_guess_chain_operator(prompt, len(items)),
+        "execution_mode": execution_mode,
+        "condition_strategy": "aggregate-only" if has_aggregate else "all",
         "chain_items": items,
         "source_request": prompt,
         "refined_request": prompt,
@@ -5931,7 +6446,10 @@ def _tasked_author_combo_draft(prompt: str, items: list[dict], *, mode_hint: str
         "interval_minutes": interval_minutes,
         "tabs_required": tabs_required,
         "active": True,
-        "planner_prompt": f"Planner: run {len(normalized_items)} template checks, apply {chain_data.get('chain_operator')}, then create the alert only when the combined condition matches.",
+        "planner_prompt": (
+            f"Planner: run {len(normalized_items)} custom workflow item(s) in {chain_data.get('execution_mode')} mode, "
+            f"apply {chain_data.get('chain_operator')}, and keep the aggregate output visible in Pipeline, Alerts, Completed, and Live Docs."
+        ),
         "executor_prompt": _task_chain_executor_prompt(chain_data),
         "executor_target": "",
         "workspace_dir": "",
@@ -5943,10 +6461,10 @@ def _tasked_author_combo_draft(prompt: str, items: list[dict], *, mode_hint: str
         "sandbox_assist_command": "",
         "sandbox_assist_validation_command": "",
         "sandbox_assist_test_command": "",
-        "context_handoff": "Run each template item in order, pass forward the structured result when needed, then evaluate the combined operator before creating the alert.",
+        "context_handoff": "Run each template item, preserve each structured result, pass all results into aggregate steps when requested, then evaluate the final chain operator before alert/completion.",
         "trigger_mode": "json",
-        "trigger_text": "combined template chain",
-        "notes": "Generated from a custom request and expanded into a chained Tasked workflow.",
+        "trigger_text": "custom workflow aggregate" if has_aggregate else "combined template chain",
+        "notes": "Generated from a custom request and expanded into a chained Tasked workflow with serial/parallel metadata and explicit aggregate output when requested.",
         "alert_policy": _task_default_alert_policy(),
         "completion_policy": _task_default_completion_policy(),
     }
@@ -6404,6 +6922,8 @@ async def _tasked_author_draft_from_text(prompt: str, *, strategy: str = "auto",
         preferred_template_key = matched_template.get("key") if matched_template else ""
         prompt_text = (
             _tasked_authoring_prompt_markdown()
+            + "\n\nTasked app reference material:\n"
+            + _tasked_author_reference_context()
             + "\n\nActive Tasked templates:\n"
             + json.dumps(_tasked_author_template_catalog(), ensure_ascii=False, indent=2)
             + "\n\nRequested strategy: "
@@ -7051,6 +7571,19 @@ def _task_step_alert_payload(task_row: dict, step: dict, context: dict) -> dict:
     return alert
 
 
+def _task_context_prompt_block(context: dict, *, limit: int = 12000) -> str:
+    """Compact prior step outputs for aggregate chat/sandbox steps."""
+    payload = {
+        "steps": context.get("steps") or {},
+        "last_text": context.get("last_text") or "",
+        "condition_passed": context.get("condition_passed"),
+    }
+    text = json.dumps(payload, ensure_ascii=False, indent=2)
+    if len(text) > limit:
+        text = text[:limit] + "\n...<truncated>"
+    return text
+
+
 def _task_update_run_tracking(run_id: str, **fields: object) -> None:
     if not fields:
         return
@@ -7169,6 +7702,12 @@ async def _task_execute_chat_step(task_row: dict, step: dict, context: dict, *, 
     agent_id = str(config.get("agent_id") or "c6-kilocode")
     if not prompt:
         return {"ok": False, "error": "chat prompt required", "text": ""}
+    if config.get("include_context"):
+        prompt = (
+            prompt
+            + "\n\nPrior Tasked step context JSON. Use only these step outputs for aggregation and calculations:\n"
+            + _task_context_prompt_block(context)
+        )
     return await _chat_one(
         agent_id,
         prompt,
@@ -7260,6 +7799,15 @@ async def _task_resume_workflow(
             idx = step_index.get(next_step_id, idx + 1) if next_step_id else idx + 1
             continue
         if kind == "sandbox":
+            sandbox_command = str(cfg.get("command") or task_row.get("executor_prompt") or "").strip()
+            if cfg.get("include_context"):
+                context_json = json.dumps(context, ensure_ascii=False)
+                sandbox_command = (
+                    "cat > tasked_context.json <<'TASKED_CONTEXT_JSON'\n"
+                    + context_json
+                    + "\nTASKED_CONTEXT_JSON\n"
+                    + sandbox_command
+                )
             sandbox_result = await _task_execute_sandbox_plan(
                 task_id=str(task_row.get("id") or ""),
                 run_id=run_id,
@@ -7267,7 +7815,7 @@ async def _task_resume_workflow(
                 step_id=current_step_id,
                 target=_task_sandbox_target(cfg.get("executor_target") or task_row.get("executor_target") or "c12b"),
                 workspace_dir=_task_sandbox_workspace(cfg.get("workspace_dir"), "c12b"),
-                command=str(cfg.get("command") or task_row.get("executor_prompt") or "").strip(),
+                command=sandbox_command,
                 validation_command=str(cfg.get("validation_command") or task_row.get("validation_command") or "").strip(),
                 test_command=str(cfg.get("test_command") or task_row.get("test_command") or "").strip(),
                 task_name=task_row.get("name") or "Sandbox task",
