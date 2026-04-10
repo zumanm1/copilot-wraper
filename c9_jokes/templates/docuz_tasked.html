@@ -1,0 +1,547 @@
+{% extends "base.html" %}
+{% block title %}Docuz-tasked{% endblock %}
+{% block content %}
+<style>
+  .docuz-shell {
+    --docuz-accent: #0a84ff;
+    --docuz-green: #30d158;
+    --docuz-warn: #ffd60a;
+    --docuz-red: #ff453a;
+    --docuz-line: rgba(245,245,247,0.12);
+    --docuz-panel: rgba(28,28,30,0.78);
+    --docuz-panel-2: rgba(44,44,46,0.58);
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 0.25rem 0 2rem;
+  }
+  .docuz-hero {
+    border: 1px solid var(--docuz-line);
+    border-radius: 20px;
+    padding: 1.25rem;
+    background:
+      radial-gradient(circle at 12% 20%, rgba(10,132,255,0.24), transparent 30%),
+      radial-gradient(circle at 82% 10%, rgba(48,209,88,0.16), transparent 32%),
+      linear-gradient(135deg, rgba(44,44,46,0.92), rgba(14,14,16,0.94));
+    box-shadow: 0 20px 70px rgba(0,0,0,0.28);
+  }
+  .docuz-hero-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+  }
+  .docuz-kicker {
+    color: var(--docuz-green);
+    font-size: 0.72rem;
+    letter-spacing: .12em;
+    text-transform: uppercase;
+    font-weight: 800;
+  }
+  .docuz-title {
+    margin: .25rem 0 .4rem;
+    font-size: clamp(2rem, 5vw, 4.4rem);
+    line-height: .92;
+    letter-spacing: -0.06em;
+    color: #f5f5f7;
+  }
+  .docuz-subtitle {
+    max-width: 860px;
+    color: var(--muted);
+    font-size: 0.96rem;
+    line-height: 1.55;
+  }
+  .docuz-quicklinks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .45rem;
+    margin-top: 1rem;
+  }
+  .docuz-link-pill,
+  .docuz-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: .35rem;
+    border: 1px solid var(--docuz-line);
+    border-radius: 999px;
+    padding: .42rem .7rem;
+    background: rgba(255,255,255,0.05);
+    color: #f5f5f7;
+    text-decoration: none;
+    font-size: .78rem;
+  }
+  .docuz-link-pill:hover {
+    border-color: rgba(10,132,255,0.7);
+    background: rgba(10,132,255,0.14);
+  }
+  .docuz-grid {
+    display: grid;
+    grid-template-columns: 280px minmax(0, 1fr);
+    gap: 1rem;
+    margin-top: 1rem;
+  }
+  .docuz-toc {
+    position: sticky;
+    top: 72px;
+    align-self: start;
+    border: 1px solid var(--docuz-line);
+    border-radius: 18px;
+    background: var(--docuz-panel);
+    padding: .9rem;
+  }
+  .docuz-toc-title {
+    font-size: .72rem;
+    text-transform: uppercase;
+    letter-spacing: .12em;
+    color: var(--muted);
+    margin-bottom: .55rem;
+  }
+  .docuz-toc a {
+    display: block;
+    padding: .45rem .55rem;
+    border-radius: 10px;
+    color: #d8d8dc;
+    text-decoration: none;
+    font-size: .82rem;
+  }
+  .docuz-toc a:hover {
+    color: white;
+    background: rgba(10,132,255,0.12);
+  }
+  .docuz-content {
+    min-width: 0;
+    display: grid;
+    gap: 1rem;
+  }
+  .docuz-card {
+    border: 1px solid var(--docuz-line);
+    border-radius: 18px;
+    background: var(--docuz-panel);
+    padding: 1rem;
+  }
+  .docuz-card.alt {
+    background: linear-gradient(135deg, rgba(10,132,255,0.12), rgba(44,44,46,0.58));
+  }
+  .docuz-section-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: .7rem;
+    flex-wrap: wrap;
+    margin-bottom: .65rem;
+  }
+  .docuz-section-title h2,
+  .docuz-section-title h3 {
+    margin: 0;
+    color: #f5f5f7;
+    letter-spacing: -0.025em;
+  }
+  .docuz-section-title h2 { font-size: 1.35rem; }
+  .docuz-section-title h3 { font-size: 1.05rem; }
+  .docuz-muted {
+    color: var(--muted);
+    line-height: 1.55;
+    font-size: .9rem;
+  }
+  .docuz-kv {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .65rem;
+  }
+  .docuz-kv div,
+  .docuz-mini {
+    border: 1px solid var(--docuz-line);
+    border-radius: 14px;
+    padding: .7rem;
+    background: rgba(255,255,255,0.035);
+  }
+  .docuz-kv strong,
+  .docuz-mini strong {
+    display: block;
+    color: #fff;
+    margin-bottom: .28rem;
+    font-size: .84rem;
+  }
+  .docuz-kv span,
+  .docuz-mini span {
+    display: block;
+    color: var(--muted);
+    font-size: .82rem;
+    line-height: 1.45;
+  }
+  .docuz-flow {
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: .55rem;
+    margin-top: .8rem;
+  }
+  .docuz-flow-step {
+    border: 1px solid var(--docuz-line);
+    border-radius: 16px;
+    padding: .75rem;
+    background: rgba(255,255,255,0.04);
+    position: relative;
+  }
+  .docuz-flow-step strong {
+    display: block;
+    color: #fff;
+    margin-bottom: .3rem;
+  }
+  .docuz-flow-step span {
+    color: var(--muted);
+    font-size: .78rem;
+    line-height: 1.4;
+  }
+  .docuz-page {
+    border-left: 4px solid var(--docuz-accent);
+  }
+  .docuz-page.alerts { border-left-color: var(--docuz-warn); }
+  .docuz-page.tasked { border-left-color: var(--docuz-green); }
+  .docuz-page.pipeline { border-left-color: #64d2ff; }
+  .docuz-page.completed { border-left-color: #bf5af2; }
+  .docuz-page.live { border-left-color: #ff9f0a; }
+  .docuz-subgrid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: .75rem;
+    margin-top: .75rem;
+  }
+  .docuz-list {
+    margin: .35rem 0 0;
+    padding-left: 1.05rem;
+    color: var(--muted);
+    line-height: 1.5;
+    font-size: .84rem;
+  }
+  .docuz-list li { margin: .28rem 0; }
+  .docuz-table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--docuz-line);
+    border-radius: 14px;
+  }
+  .docuz-table {
+    width: 100%;
+    border-collapse: collapse;
+    min-width: 760px;
+  }
+  .docuz-table th,
+  .docuz-table td {
+    border-bottom: 1px solid var(--docuz-line);
+    padding: .68rem .72rem;
+    text-align: left;
+    vertical-align: top;
+    font-size: .82rem;
+  }
+  .docuz-table th {
+    color: #fff;
+    background: rgba(255,255,255,0.06);
+    font-size: .72rem;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .docuz-table td {
+    color: var(--muted);
+    line-height: 1.45;
+  }
+  .docuz-code {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .78rem;
+    color: #f5f5f7;
+    background: rgba(0,0,0,0.28);
+    border: 1px solid var(--docuz-line);
+    border-radius: 10px;
+    padding: .15rem .35rem;
+  }
+  .docuz-callout {
+    border: 1px solid rgba(255,214,10,0.35);
+    background: rgba(255,214,10,0.08);
+    border-radius: 16px;
+    padding: .85rem;
+    color: #f5f5f7;
+    font-size: .88rem;
+    line-height: 1.5;
+  }
+  .docuz-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: .4rem;
+    margin-top: .65rem;
+  }
+  .docuz-links a {
+    color: #9fd0ff;
+    text-decoration: none;
+  }
+  .docuz-links a:hover { text-decoration: underline; }
+  @media(max-width: 980px) {
+    .docuz-grid { grid-template-columns: 1fr; }
+    .docuz-toc { position: static; }
+    .docuz-flow { grid-template-columns: 1fr; }
+    .docuz-kv, .docuz-subgrid { grid-template-columns: 1fr; }
+  }
+</style>
+
+<div class="docuz-shell">
+  <section class="docuz-hero">
+    <div class="docuz-hero-top">
+      <div>
+        <div class="docuz-kicker">Docuz-tasked</div>
+        <h1 class="docuz-title">Tasked operations manual</h1>
+        <p class="docuz-subtitle">
+          A practical guide to the Tasked family of C9 pages: how alerts, task definitions, run pipelines,
+          completed runs, and Live Docs fit together. This page is for operators who need to understand
+          what each control does, which API and database rows it touches, and how one page hands context to another.
+        </p>
+      </div>
+      <div class="docuz-chip">Scope: APP C9 port 6090</div>
+    </div>
+    <div class="docuz-quicklinks">
+      <a class="docuz-link-pill" href="/alerts">Open Alerts</a>
+      <a class="docuz-link-pill" href="/tasked">Open Tasked</a>
+      <a class="docuz-link-pill" href="/piplinetask">Open Pipeline</a>
+      <a class="docuz-link-pill" href="/task-completed">Open Completed</a>
+      <a class="docuz-link-pill" href="/tasked-live-doc">Open Live Docs</a>
+      <a class="docuz-link-pill" href="/api">Open API Reference</a>
+      <a class="docuz-link-pill" href="/c3-auth">Check C3 Auth</a>
+    </div>
+  </section>
+
+  <div class="docuz-grid">
+    <aside class="docuz-toc">
+      <div class="docuz-toc-title">On this page</div>
+      <a href="#mental-model">Mental Model</a>
+      <a href="#acronyms">Acronyms</a>
+      <a href="#shared-architecture">Shared Architecture</a>
+      <a href="#tasked">Tasked</a>
+      <a href="#alerts">Alerts</a>
+      <a href="#pipeline">Pipeline</a>
+      <a href="#completed">Completed</a>
+      <a href="#live-docs">Live Docs</a>
+      <a href="#db-api-map">DB and API Map</a>
+      <a href="#operating-playbooks">Operating Playbooks</a>
+      <a href="#runtime-dependencies">Runtime Dependencies</a>
+    </aside>
+
+    <main class="docuz-content">
+      <section id="mental-model" class="docuz-card alt">
+        <div class="docuz-section-title">
+          <h2>Mental Model</h2>
+          <span class="docuz-chip">Task definition → run → step results → alert/completion</span>
+        </div>
+        <p class="docuz-muted">
+          The Tasked pages are one orchestration surface split across five views. Tasked is where a user creates,
+          edits, clones, and starts a task. Pipeline follows an execution as it moves through workflow steps.
+          Alerts shows operational signals created by matching conditions. Completed lists terminal runs for review.
+          Live Docs keeps seeded trace examples that prove the system can reproduce known positive and negative paths.
+        </p>
+        <div class="docuz-flow">
+          <div class="docuz-flow-step"><strong>1. Author</strong><span>Create or load a template in Tasked. Store task fields, template data, and steps.</span></div>
+          <div class="docuz-flow-step"><strong>2. Execute</strong><span>Start a manual, recurring, or continuous run. Each run gets a new run ID.</span></div>
+          <div class="docuz-flow-step"><strong>3. Trace</strong><span>Pipeline reads the run, step results, events, feedback, and alerts as one trace.</span></div>
+          <div class="docuz-flow-step"><strong>4. Alert</strong><span>Alert steps create task_alerts only when the trigger logic matches.</span></div>
+          <div class="docuz-flow-step"><strong>5. Close</strong><span>Completed reviews terminal runs and gives redo, clone, archive, and preview links.</span></div>
+        </div>
+      </section>
+
+      <section id="acronyms" class="docuz-card">
+        <div class="docuz-section-title"><h2>Acronyms and Terms</h2></div>
+        <div class="docuz-table-wrap">
+          <table class="docuz-table">
+            <thead><tr><th>Term</th><th>Meaning</th><th>Why it matters</th></tr></thead>
+            <tbody>
+              <tr><td><span class="docuz-code">C9</span></td><td>The APP C9 web UI on port 6090.</td><td>Owns Tasked, Alerts, Pipeline, Completed, Live Docs, and this documentation page.</td></tr>
+              <tr><td><span class="docuz-code">C1</span></td><td>Copilot API gateway on port 8000.</td><td>Chat mode tasks send prompts through C1 before they reach Copilot or C3.</td></tr>
+              <tr><td><span class="docuz-code">C3</span></td><td>Browser-auth/M365 proxy, with noVNC on port 6080.</td><td>M365 session health controls whether chat-backed Tasked runs can use the authenticated portal.</td></tr>
+              <tr><td><span class="docuz-code">C12b</span></td><td>Lean sandbox on port 8210.</td><td>Sandbox Tasked templates run commands, validation, and tests here.</td></tr>
+              <tr><td><span class="docuz-code">Task ID</span></td><td>Stable task definition ID.</td><td>Reruns keep the same Task ID and trace identity.</td></tr>
+              <tr><td><span class="docuz-code">Run ID</span></td><td>One execution ID (e.g. <span class="docuz-code">trun_...</span>).</td><td>Every rerun creates a new run and execution number.</td></tr>
+              <tr><td><span class="docuz-code">Trace ID</span></td><td>Operator-facing identity, usually the Task ID.</td><td>Used to link Tasked, Pipeline, Alerts, Completed, and Preview.</td></tr>
+              <tr><td><span class="docuz-code">Template data</span></td><td>Structured parameters such as city, threshold, distance, or chain operator.</td><td>Prevents prompt drift: UI knobs, saved task, steps, and runtime all use the same values.</td></tr>
+              <tr><td><span class="docuz-code">Chain operator</span></td><td><span class="docuz-code">AND</span>, <span class="docuz-code">OR</span>, or <span class="docuz-code">NOR</span>.</td><td>Combines multiple template outputs into one final alert decision.</td></tr>
+              <tr><td><span class="docuz-code">AIO assist</span></td><td>Optional sandbox assistance for a non-sandbox task.</td><td>Lets C12b help a chat task with local command execution when enabled.</td></tr>
+              <tr><td><span class="docuz-code">Session manager</span></td><td>Recovery metadata for upstream calls.</td><td>Shows retry/recovery state when C1, C3, or sandbox work is slow or failing.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="shared-architecture" class="docuz-card">
+        <div class="docuz-section-title"><h2>Shared Architecture</h2></div>
+        <div class="docuz-kv">
+          <div><strong>Frontend</strong><span>Each page extends <span class="docuz-code">base.html</span>, uses the shared navbar, and fetches JSON APIs with page-local JavaScript.</span></div>
+          <div><strong>Backend</strong><span>FastAPI routes render templates and expose JSON endpoints under <span class="docuz-code">/api/*</span>.</span></div>
+          <div><strong>Database</strong><span>SQLite stores task definitions, templates, workflow steps, runs, step results, alerts, events, feedback, and recovery sessions.</span></div>
+          <div><strong>Interaction</strong><span>Tasked creates or runs data. Pipeline and Completed read run history. Alerts reads alert rows. Live Docs seeds and validates known tasks.</span></div>
+        </div>
+        <div class="docuz-callout" style="margin-top:.85rem;">
+          Important rule: a saved Tasked row is the source of truth. Templates are only starting points. After a template is loaded, edited, and saved, the saved row controls future runs.
+        </div>
+      </section>
+
+      <section id="tasked" class="docuz-card docuz-page tasked">
+        <div class="docuz-section-title">
+          <h2>Tasked — Builder and Orchestrator</h2>
+          <a class="docuz-link-pill" href="/tasked">Open /tasked</a>
+        </div>
+        <p class="docuz-muted">
+          Tasked is the doer and source of truth. It stores the task definition, schedule, workflow steps, template parameters,
+          prompt/command text, alert policy, completion policy, and runtime launch path.
+        </p>
+        <div class="docuz-subgrid">
+          <div class="docuz-mini">
+            <strong>Primary UI knobs</strong>
+            <ul class="docuz-list">
+              <li>Editable Templates: load, save, clone, or archive DB-backed templates.</li>
+              <li>Tasked Chat Planner: type a plain-English request, refine with the M365 agent, then apply the draft.</li>
+              <li>Template parameters: weather city/temperature, distance from/to/threshold, and combo chain items.</li>
+              <li>Core fields: name, mode, output type, schedule, interval minutes, tabs required, and active state.</li>
+              <li>Workflow steps: trigger, condition, chat, sandbox, agent, multi-agent, multi-agento, alert, complete.</li>
+              <li>Actions: Save Tasked, Start Task, Run Again, Clone/Edit, Pause, Resume, Restart, Archive, bulk actions.</li>
+            </ul>
+          </div>
+          <div class="docuz-mini">
+            <strong>How to operate</strong>
+            <ul class="docuz-list">
+              <li>Load a template when the use case matches an existing pattern.</li>
+              <li>Edit structured knobs before editing raw prompts to keep steps and prompts synced.</li>
+              <li>Use combo mode for multiple templates; choose AND, OR, or NOR before saving.</li>
+              <li>Click Save Tasked to persist the row, then Start Task or Run Again to create a new run.</li>
+              <li>Use the trace panel links to jump into Pipeline, Alerts, Completed, or Preview.</li>
+            </ul>
+          </div>
+          <div class="docuz-mini">
+            <strong>Backend and APIs</strong>
+            <ul class="docuz-list">
+              <li><span class="docuz-code">GET /tasked</span> renders the builder.</li>
+              <li><span class="docuz-code">GET/POST /api/tasks</span> lists and saves task definitions.</li>
+              <li><span class="docuz-code">POST /api/tasks/{id}/run</span> executes a task.</li>
+              <li><span class="docuz-code">POST /api/tasks/draft-from-text</span> creates a draft from plain English.</li>
+              <li><span class="docuz-code">GET/POST /api/task-templates</span> manages editable templates.</li>
+              <li><span class="docuz-code">GET /api/task-runs</span> feeds recent run history.</li>
+            </ul>
+          </div>
+          <div class="docuz-mini">
+            <strong>Database touchpoints</strong>
+            <ul class="docuz-list">
+              <li><span class="docuz-code">task_definitions</span>: saved Tasked rows.</li>
+              <li><span class="docuz-code">task_templates</span>: editable template catalog.</li>
+              <li><span class="docuz-code">task_workflow_steps</span>: ordered workflow steps.</li>
+              <li><span class="docuz-code">task_runs</span>: execution records.</li>
+              <li><span class="docuz-code">task_step_results</span>: per-step output and parsed JSON.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section id="alerts" class="docuz-card docuz-page alerts">
+        <div class="docuz-section-title">
+          <h2>Alerts — Operational Signal Board</h2>
+          <a class="docuz-link-pill" href="/alerts">Open /alerts</a>
+        </div>
+        <p class="docuz-muted">
+          Alerts shows signals created by Tasked alert steps. An alert is not a task itself; it is evidence that a run met a trigger condition.
+        </p>
+        <div class="docuz-subgrid">
+          <div class="docuz-mini"><strong>UI knobs</strong><span>Status filter (open/acknowledged/resolved/snoozed), severity filter (info/warning/error/critical), run-status filter, search, refresh interval, card/table/grouped view, bulk actions.</span></div>
+          <div class="docuz-mini"><strong>Actions</strong><span>Acknowledge, resolve, snooze (configurable minutes), reopen, bulk acknowledge, bulk resolve, open Tasked, open Pipeline, and open Preview.</span></div>
+          <div class="docuz-mini"><strong>APIs</strong><span><span class="docuz-code">GET /api/alerts?limit=250</span>, <span class="docuz-code">POST /api/alerts/{id}/status</span> (with optional snooze_minutes), and <span class="docuz-code">POST /api/alerts/{id}/ack</span>.</span></div>
+          <div class="docuz-mini"><strong>DB and joins</strong><span>Reads <span class="docuz-code">task_alerts</span> (severity, repeat_key, snoozed_until, closed_by_run_id) and LEFT JOINs task/run context from <span class="docuz-code">task_definitions</span> and <span class="docuz-code">task_runs</span>.</span></div>
+        </div>
+      </section>
+
+      <section id="pipeline" class="docuz-card docuz-page pipeline">
+        <div class="docuz-section-title">
+          <h2>Pipeline — Run Trace Monitor</h2>
+          <a class="docuz-link-pill" href="/piplinetask">Open /piplinetask</a>
+        </div>
+        <p class="docuz-muted">
+          Pipeline is run-centric. It assembles one view from task definition, selected run, all runs for that task,
+          alerts, events, step results, feedback, recovery sessions, and synthesized timeline data.
+        </p>
+        <div class="docuz-subgrid">
+          <div class="docuz-mini"><strong>UI knobs</strong><span>Task ID filter, run/status filtering, refresh controls, live pulse animation, step flow strip, timeline, feedback panels, and recovery pills.</span></div>
+          <div class="docuz-mini"><strong>When to use it</strong><span>Use Pipeline when a task is running, failed, skipped an alert, or produced a surprising result. It shows the step that made the decision.</span></div>
+          <div class="docuz-mini"><strong>APIs</strong><span><span class="docuz-code">GET /api/task-pipelines?task_id=...</span>, optionally with <span class="docuz-code">?run_id=...</span> or <span class="docuz-code">?status=...</span> filters.</span></div>
+          <div class="docuz-mini"><strong>DB and backend</strong><span>Composes a payload from <span class="docuz-code">task_runs</span>, <span class="docuz-code">task_step_results</span>, <span class="docuz-code">task_alerts</span>, <span class="docuz-code">task_events</span>, feedback rows, and recovery sessions.</span></div>
+        </div>
+      </section>
+
+      <section id="completed" class="docuz-card docuz-page completed">
+        <div class="docuz-section-title">
+          <h2>Completed — Terminal Run Review</h2>
+          <a class="docuz-link-pill" href="/task-completed">Open /task-completed</a>
+        </div>
+        <p class="docuz-muted">
+          Completed lists terminal runs only: completed, failed, and cancelled. It is for review, exporting, and choosing what to do next with the task definition.
+        </p>
+        <div class="docuz-subgrid">
+          <div class="docuz-mini"><strong>UI knobs</strong><span>Status selector, task ID filter (URL-synced), refresh interval selector, summary stats bar, duration distribution chart, JSON/CSV export, and per-run action buttons.</span></div>
+          <div class="docuz-mini"><strong>Actions</strong><span>Redo creates another run on the same trace. Clone Task creates a new editable task. Archive hides the saved task from normal lists.</span></div>
+          <div class="docuz-mini"><strong>APIs</strong><span><span class="docuz-code">GET /api/task-completed</span>, plus task lifecycle APIs: <span class="docuz-code">/api/tasks/{id}/redo</span>, <span class="docuz-code">/clone</span>, and <span class="docuz-code">/archive</span>.</span></div>
+          <div class="docuz-mini"><strong>DB and meaning</strong><span>Reads terminal rows from <span class="docuz-code">task_runs</span>, enriches each with task metadata, step results, latest alert, feedback summary, and recovery context.</span></div>
+        </div>
+      </section>
+
+      <section id="live-docs" class="docuz-card docuz-page live">
+        <div class="docuz-section-title">
+          <h2>Live Docs — Seeded Regression Lab</h2>
+          <a class="docuz-link-pill" href="/tasked-live-doc">Open /tasked-live-doc</a>
+        </div>
+        <p class="docuz-muted">
+          Live Docs is both documentation and a controlled test bench. It renders legacy examples plus DB-backed template trace tasks.
+          These known traces prove the system can reproduce positive and negative execution paths.
+        </p>
+        <div class="docuz-subgrid">
+          <div class="docuz-mini"><strong>UI knobs</strong><span>Docs tab, Live tab, Run, Run All, Validate, Validate All, auto-refresh toggle, trace cards, and right-side detail panel.</span></div>
+          <div class="docuz-mini"><strong>How it works</strong><span>On load it seeds stable Tasked rows for template traces, then reads those same task IDs and run IDs back into the page.</span></div>
+          <div class="docuz-mini"><strong>APIs</strong><span><span class="docuz-code">GET /api/tasked-live-doc/traces</span>, task run APIs, task preview API, Pipeline API, Alerts API, and Completed API.</span></div>
+          <div class="docuz-mini"><strong>DB role</strong><span>Uses normal Tasked tables. Live Docs is not a separate engine; it proves the regular Tasked engine through known trace rows.</span></div>
+        </div>
+      </section>
+
+      <section id="db-api-map" class="docuz-card">
+        <div class="docuz-section-title"><h2>DB and API Map</h2></div>
+        <div class="docuz-table-wrap">
+          <table class="docuz-table">
+            <thead><tr><th>Page</th><th>Main APIs</th><th>Main DB tables</th><th>Primary output</th></tr></thead>
+            <tbody>
+              <tr><td><a href="/tasked">Tasked</a></td><td><span class="docuz-code">/api/tasks</span>, <span class="docuz-code">/api/task-templates</span>, <span class="docuz-code">/api/tasks/draft-from-text</span></td><td>task_definitions, task_templates, task_workflow_steps, task_runs</td><td>Saved task definitions and new runs.</td></tr>
+              <tr><td><a href="/alerts">Alerts</a></td><td><span class="docuz-code">/api/alerts</span>, <span class="docuz-code">/api/alerts/{id}/status</span></td><td>task_alerts joined to task_definitions and task_runs</td><td>Operational alert cards and status transitions.</td></tr>
+              <tr><td><a href="/piplinetask">Pipeline</a></td><td><span class="docuz-code">/api/task-pipelines</span></td><td>task_runs, task_step_results, task_alerts, task_events, task_feedback_events</td><td>Full trace of one or more runs.</td></tr>
+              <tr><td><a href="/task-completed">Completed</a></td><td><span class="docuz-code">/api/task-completed</span></td><td>terminal task_runs plus task_step_results and task_alerts</td><td>Review cards for completed, failed, or cancelled runs.</td></tr>
+              <tr><td><a href="/tasked-live-doc">Live Docs</a></td><td><span class="docuz-code">/api/tasked-live-doc/traces</span>, <span class="docuz-code">/api/task-preview</span></td><td>normal Tasked tables seeded with stable trace tasks</td><td>Known examples and validation paths.</td></tr>
+              <tr><td><a href="/session-manager">Session Mgr</a></td><td><span class="docuz-code">/api/session-manager</span>, <span class="docuz-code">/api/session-manager/{id}/resume</span></td><td>session_manager_sessions, session_manager_metrics</td><td>Recovery session list, retry state, and resume controls.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="operating-playbooks" class="docuz-card">
+        <div class="docuz-section-title"><h2>Operating Playbooks</h2></div>
+        <div class="docuz-kv">
+          <div><strong>Create and run a task</strong><span>Open Tasked, load a template or draft from text, edit structured knobs, save, start, then use Pipeline to monitor.</span></div>
+          <div><strong>Investigate an unexpected result</strong><span>Open Pipeline for the task ID, inspect step results and parsed JSON, then open Preview or Completed for the terminal summary.</span></div>
+          <div><strong>Handle an alert</strong><span>Open Alerts, filter by open/critical/run status, inspect the detail panel, then acknowledge, snooze, resolve, or jump back to Tasked/Pipeline.</span></div>
+          <div><strong>Repeat without changing trace</strong><span>Use Run Again or Redo. The Task ID stays the same, but the run ID and execution number change.</span></div>
+          <div><strong>Edit safely</strong><span>Use Clone/Edit when you need a new trace. Use structured template controls before editing raw prompts directly.</span></div>
+          <div><strong>Validate examples</strong><span>Use Live Docs to run positive and negative template traces before trusting a new template pattern.</span></div>
+        </div>
+      </section>
+
+      <section id="runtime-dependencies" class="docuz-card">
+        <div class="docuz-section-title"><h2>Runtime Dependencies and Port 6080</h2></div>
+        <p class="docuz-muted">
+          Chat-backed Tasked runs depend on the C1 and C3 path. C3 browser-auth exposes the noVNC/sign-in surface on port 6080,
+          while the C9 status and auth pages summarize session state inside port 6090. If M365 is expired or C3 has no ready tabs,
+          Tasked chat runs can fail, stall, or require re-authentication.
+        </p>
+        <div class="docuz-links">
+          <a href="/c3-auth">C3 Auth validator</a>
+          <a href="/health">Health page</a>
+          <a href="/api/session-health">Session health API</a>
+          <a href="http://localhost:6080" target="_blank" rel="noreferrer">Open noVNC on 6080</a>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+{% endblock %}

@@ -5039,7 +5039,8 @@ def _task_alert_from_result(task_row: dict, response_text: str) -> dict | None:
 def _insert_task_alert(task_id: str, run_id: str, alert: dict) -> int | None:
     try:
         now = _iso_now()
-        severity = (alert.get("severity") or "info").strip().lower() or "info"
+        _sev_raw = (alert.get("severity") or "info").strip().lower()
+        severity = _sev_raw if _sev_raw in ("info", "warning", "error", "critical") else "info"
         repeat_key = (alert.get("repeat_key") or "").strip()
         repeat_minutes = max(0, int(alert.get("repeat_every_minutes") or 0))
         with _db() as conn:
@@ -6500,6 +6501,18 @@ async def page_api_reference(request: Request):
 async def api_docs_alias():
     """Docs and older bookmarks use `/api/docs`; the canonical page is `/api`."""
     return RedirectResponse(url="/api", status_code=307)
+
+
+@app.get("/docuz-tasked", response_class=HTMLResponse, name="page_docuz_tasked")
+async def page_docuz_tasked(request: Request):
+    """Tasked operations manual — full documentation hub for the Tasked family of pages."""
+    return templates.TemplateResponse(request, "docuz_tasked.html", {})
+
+
+@app.get("/session-manager", response_class=HTMLResponse, name="page_session_manager")
+async def page_session_manager(request: Request):
+    """Session Manager — view and resume upstream recovery sessions."""
+    return templates.TemplateResponse(request, "session_manager.html", {})
 
 
 @app.get("/agent", response_class=HTMLResponse, name="page_agent")
@@ -9359,13 +9372,29 @@ _CORE_CONTAINERS = {"C1b_copilot-api", "C3b_browser-auth", "C6b_kilocode", "C9b_
 
 @app.get("/api/containers", name="api_containers")
 async def api_containers():
-    """Return status of all Docker containers with toggleable flag."""
+    """Return status of all Docker containers with toggleable flag and live resource stats."""
     import subprocess
     try:
         r = subprocess.run(
             ["docker", "ps", "-a", "--format", "{{.Names}}\t{{.Status}}\t{{.State}}"],
             capture_output=True, text=True, timeout=10,
         )
+        
+        stats_map = {}
+        try:
+            stats_r = subprocess.run(
+                ["docker", "stats", "--no-stream", "--format", "{{.Name}}\t{{.CPUPerc}}\t{{.MemPerc}}"],
+                capture_output=True, text=True, timeout=10,
+            )
+            if stats_r.returncode == 0:
+                for line in stats_r.stdout.strip().split("\n"):
+                    if not line: continue
+                    parts = line.split("\t")
+                    if len(parts) >= 3:
+                        stats_map[parts[0]] = {"cpu": parts[1], "mem": parts[2]}
+        except Exception:
+            pass
+            
         containers = []
         for line in r.stdout.strip().split("\n"):
             if not line.strip():
@@ -9373,10 +9402,13 @@ async def api_containers():
             parts = line.split("\t")
             if len(parts) >= 3:
                 name, status, state = parts[0], parts[1], parts[2]
+                st = stats_map.get(name, {"cpu": "0.00%", "mem": "0.00%"})
                 containers.append({
                     "name": name,
                     "status": status,
                     "state": state,
+                    "cpu_percent": st["cpu"],
+                    "mem_percent": st["mem"],
                     "toggleable": name in _OPTIONAL_CONTAINERS,
                     "core": name in _CORE_CONTAINERS,
                 })
@@ -9709,6 +9741,44 @@ async def _ma_role_loop(
 
     _q("pane_done", {"step": max_steps, "summary": f"Reached {max_steps} step limit.", "files": files_created})
     return {"role": role, "pane_id": pane_id, "done": False, "summary": "step limit reached", "files": files_created, "steps": max_steps}
+
+
+@app.get("/api/workspace/diff", name="api_workspace_diff")
+async def api_workspace_diff():
+    import subprocess
+    try:
+        # Initialize an ephemeral git repo for diff tracking
+        subprocess.run(["git", "init"], cwd="/workspace", capture_output=True)
+        r = subprocess.run(["git", "diff", "--no-color", "HEAD"], cwd="/workspace", capture_output=True, text=True)
+        # If there's no HEAD yet (empty repo), let's just diff against empty tree
+        if r.returncode != 0 and "ambiguous argument 'HEAD'" in r.stderr:
+            r = subprocess.run(["git", "diff", "--no-color", "4b825dc642cb6eb9a060e54bf8d69288fbee4904"], cwd="/workspace", capture_output=True, text=True)
+        return JSONResponse({"status": "ok", "diff": r.stdout})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)})
+
+@app.post("/api/workspace/snapshot", name="api_workspace_snapshot")
+async def api_workspace_snapshot():
+    import subprocess
+    try:
+        subprocess.run(["git", "init"], cwd="/workspace", capture_output=True)
+        subprocess.run(["git", "config", "user.name", "system"], cwd="/workspace", capture_output=True)
+        subprocess.run(["git", "config", "user.email", "sys@local"], cwd="/workspace", capture_output=True)
+        subprocess.run(["git", "add", "-A"], cwd="/workspace", capture_output=True)
+        subprocess.run(["git", "commit", "-m", "snapshot"], cwd="/workspace", capture_output=True)
+        return JSONResponse({"status": "ok", "message": "Snapshot created (git commit)"})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)})
+
+@app.post("/api/workspace/rollback", name="api_workspace_rollback")
+async def api_workspace_rollback():
+    import subprocess
+    try:
+        subprocess.run(["git", "reset", "--hard", "HEAD"], cwd="/workspace", capture_output=True)
+        subprocess.run(["git", "clean", "-fd"], cwd="/workspace", capture_output=True)
+        return JSONResponse({"status": "ok", "message": "Rolled back to latest snapshot"})
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)})
 
 
 @app.get("/multi-agent", response_class=HTMLResponse, name="page_multi_agent")

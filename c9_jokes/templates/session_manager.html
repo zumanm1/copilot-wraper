@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+{% block title %}Session Manager{% endblock %}
+{% block content %}
+<style>
+.sm-shell{display:grid;gap:1rem}
+.sm-card{background:var(--card,rgba(255,255,255,0.04));border:1px solid var(--border,rgba(255,255,255,0.08));border-radius:16px;padding:1rem 1.1rem}
+.sm-hero h1{margin:0 0 .4rem;font-size:1.18rem}
+.sm-note{font-size:.82rem;color:var(--muted);line-height:1.55}
+.sm-toolbar{display:flex;gap:.65rem;flex-wrap:wrap;align-items:flex-end;margin-top:.85rem}
+.sm-toolbar label{display:grid;gap:.35rem;font-size:.8rem;color:var(--muted)}
+.sm-toolbar input,.sm-toolbar select{background:#111;border:1px solid var(--border,#333);border-radius:10px;color:var(--fg,#f5f5f7);padding:.58rem .7rem;font:inherit;min-width:160px}
+.sm-btn{background:var(--accent,#0a84ff);color:#fff;border:none;border-radius:9px;padding:.5rem .85rem;cursor:pointer;font:inherit}
+.sm-btn.sec{background:transparent;border:1px solid var(--border,#333);color:var(--fg,#f5f5f7)}
+.sm-btn:hover{filter:brightness(1.1)}
+.sm-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:.65rem;margin-top:.85rem;padding:.8rem;background:#0d0d0d;border:1px solid var(--border,#333);border-radius:14px}
+.sm-stat{text-align:center;padding:.4rem}
+.sm-stat strong{display:block;font-size:1.3rem;color:var(--fg)}
+.sm-stat span{font-size:.72rem;color:var(--muted)}
+.sm-stat.running strong{color:#0a84ff}
+.sm-stat.waiting strong{color:#ffa000}
+.sm-stat.recovered strong{color:#30d158}
+.sm-stat.failed strong{color:#ff453a}
+.sm-list{display:grid;gap:.75rem}
+.sm-item{background:#111;border:1px solid var(--border,#333);border-radius:14px;padding:.85rem 1rem;display:grid;gap:.7rem}
+.sm-item-head{display:flex;justify-content:space-between;gap:.8rem;align-items:flex-start;flex-wrap:wrap}
+.sm-item-title strong{display:block;font-size:.92rem;font-family:monospace}
+.sm-item-meta{font-size:.75rem;color:var(--muted);line-height:1.45;margin-top:.2rem}
+.sm-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.6rem}
+.sm-cell{background:#151515;border:1px solid var(--border,#333);border-radius:10px;padding:.55rem .7rem}
+.sm-cell strong{display:block;font-size:.82rem;color:var(--fg);margin-bottom:.12rem}
+.sm-cell span{font-size:.74rem;color:var(--muted)}
+.sm-pre{font-size:.75rem;color:var(--fg);line-height:1.5;white-space:pre-wrap;word-break:break-word;background:#0a0a0a;border:1px solid var(--border,#333);border-radius:10px;padding:.6rem}
+.sm-actions{display:flex;gap:.4rem;flex-wrap:wrap}
+.sm-empty{text-align:center;padding:2rem;color:var(--muted);font-size:.85rem}
+.sm-empty-icon{font-size:2.2rem;opacity:.4;margin-bottom:.5rem}
+.status-badge{display:inline-flex;align-items:center;gap:.3rem;padding:.15rem .55rem;border-radius:999px;font-size:.7rem;font-weight:500;border:1px solid}
+.status-badge.running{color:#0a84ff;border-color:rgba(10,132,255,.3);background:rgba(10,132,255,.08)}
+.status-badge.waiting-retry{color:#ffa000;border-color:rgba(255,160,0,.3);background:rgba(255,160,0,.08)}
+.status-badge.recovered{color:#30d158;border-color:rgba(48,209,88,.3);background:rgba(48,209,88,.08)}
+.status-badge.failed{color:#ff453a;border-color:rgba(255,69,58,.3);background:rgba(255,69,58,.08)}
+.status-badge.completed{color:#30d158;border-color:rgba(48,209,88,.3);background:rgba(48,209,88,.08)}
+.status-badge.cancelled{color:#ffa000;border-color:rgba(255,160,0,.3);background:rgba(255,160,0,.08)}
+.scope-badge{display:inline-flex;align-items:center;border-radius:6px;padding:.1rem .45rem;font-size:.7rem;border:1px solid rgba(100,210,255,.3);color:#64d2ff;background:rgba(100,210,255,.08)}
+@keyframes fade-in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.sm-item{animation:fade-in .2s ease}
+</style>
+
+<div class="sm-shell">
+  <section class="sm-card sm-hero">
+    <h1>Session Manager</h1>
+    <p class="sm-note">
+      Tracks upstream recovery sessions across task runs, agent calls, and sandbox operations.
+      Use this page to inspect retry state, review last errors, and manually resume stalled sessions.
+    </p>
+    <div class="sm-toolbar">
+      <label>Scope
+        <select id="sm-scope">
+          <option value="">All scopes</option>
+          <option value="task" selected>Task</option>
+          <option value="agent">Agent</option>
+          <option value="chat">Chat</option>
+        </select>
+      </label>
+      <label>Status
+        <select id="sm-status">
+          <option value="">All statuses</option>
+          <option value="running">Running</option>
+          <option value="waiting-retry">Waiting Retry</option>
+          <option value="recovered">Recovered</option>
+          <option value="failed">Failed</option>
+          <option value="completed">Completed</option>
+        </select>
+      </label>
+      <label>Task ID (optional)
+        <input id="sm-task-id" placeholder="Filter by task_id…">
+      </label>
+      <label>Limit
+        <select id="sm-limit">
+          <option value="25">25</option>
+          <option value="50" selected>50</option>
+          <option value="100">100</option>
+        </select>
+      </label>
+      <button class="sm-btn" id="sm-refresh">Refresh</button>
+    </div>
+    <div class="sm-stats" id="sm-stats" style="display:none"></div>
+  </section>
+
+  <section class="sm-card">
+    <div class="sm-list" id="sm-list">
+      <div class="sm-empty"><div class="sm-empty-icon">⏳</div>Loading sessions…</div>
+    </div>
+  </section>
+</div>
+
+<script>
+(function(){
+  var listEl  = document.getElementById('sm-list');
+  var statsEl = document.getElementById('sm-stats');
+  var scopeEl = document.getElementById('sm-scope');
+  var statusEl = document.getElementById('sm-status');
+  var taskIdEl = document.getElementById('sm-task-id');
+  var limitEl  = document.getElementById('sm-limit');
+  var isLoading = false;
+  var refreshTimer = null;
+
+  function esc(v){ return String(v == null ? '' : v).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  function fmtTs(ts){ if(!ts) return '—'; try{return new Date(ts).toLocaleString();}catch(_){return ts;} }
+  function fmtMs(ms){ if(!ms) return '—'; if(ms<1000) return ms+'ms'; if(ms<60000) return (ms/1000).toFixed(1)+'s'; return Math.floor(ms/60000)+'m '+(Math.round(ms/1000)%60)+'s'; }
+
+  function renderStats(rows){
+    var counts = {running:0,'waiting-retry':0,recovered:0,failed:0,completed:0,other:0};
+    rows.forEach(function(r){
+      var s = r.status||'other';
+      counts[s] = (counts[s]||0)+1;
+    });
+    statsEl.style.display = '';
+    statsEl.innerHTML =
+      '<div class="sm-stat"><strong>'+rows.length+'</strong><span>Total</span></div>'+
+      '<div class="sm-stat running"><strong>'+(counts.running||0)+'</strong><span>Running</span></div>'+
+      '<div class="sm-stat waiting"><strong>'+(counts['waiting-retry']||0)+'</strong><span>Waiting Retry</span></div>'+
+      '<div class="sm-stat recovered"><strong>'+(counts.recovered||0)+'</strong><span>Recovered</span></div>'+
+      '<div class="sm-stat failed"><strong>'+(counts.failed||0)+'</strong><span>Failed</span></div>'+
+      '<div class="sm-stat"><strong>'+(counts.completed||0)+'</strong><span>Completed</span></div>';
+  }
+
+  function renderItem(r){
+    var sc = (r.status||'').toLowerCase().replace(/[^a-z-]/g,'');
+    var retryBadge = r.retry_count > 0
+      ? '<span style="margin-left:.4rem;font-size:.7rem;color:#ffa000;">'+r.retry_count+' retries</span>'
+      : '';
+    return '<article class="sm-item">'+
+      '<div class="sm-item-head">'+
+        '<div class="sm-item-title">'+
+          '<strong>'+esc(r.id||'—')+'</strong>'+
+          '<div class="sm-item-meta">'+
+            '<span class="scope-badge">'+esc(r.scope||'—')+'</span> '+
+            'Task: '+esc(r.task_id||'—')+' · Run: '+esc(r.run_id||'—')+'<br>'+
+            'Page: '+esc(r.page||'—')+' · Op: '+esc(r.operation||'—')+' · Upstream: '+esc(r.upstream||'—')
+          +'</div>'+
+        '</div>'+
+        '<div class="sm-actions">'+
+          '<span class="status-badge '+sc+'">'+esc(r.status||'—')+'</span>'+
+          retryBadge+
+          (r.status==='waiting-retry'
+            ? '<button class="sm-btn" data-resume="'+esc(r.id)+'">Resume</button>'
+            : '')+
+          (r.task_id ? '<a class="sm-btn sec" href="/tasked?task_id='+esc(r.task_id)+'">Open Tasked</a>' : '')+
+          (r.task_id ? '<a class="sm-btn sec" href="/piplinetask?task_id='+esc(r.task_id)+'">Pipeline</a>' : '')+
+        '</div>'+
+      '</div>'+
+      '<div class="sm-grid">'+
+        '<div class="sm-cell"><strong>'+fmtTs(r.created_at)+'</strong><span>Created</span></div>'+
+        '<div class="sm-cell"><strong>'+fmtTs(r.updated_at)+'</strong><span>Updated</span></div>'+
+        '<div class="sm-cell"><strong>'+fmtTs(r.next_retry_at)+'</strong><span>Next retry</span></div>'+
+        '<div class="sm-cell"><strong>'+fmtTs(r.recovered_at)+'</strong><span>Recovered</span></div>'+
+        '<div class="sm-cell"><strong>'+fmtMs(r.last_elapsed_ms)+'</strong><span>Last elapsed</span></div>'+
+        '<div class="sm-cell"><strong>'+fmtMs(r.adaptive_timeout_ms)+'</strong><span>Adaptive timeout</span></div>'+
+        '<div class="sm-cell"><strong>'+esc(r.retry_count||0)+' / '+esc(r.max_retries||2)+'</strong><span>Retries</span></div>'+
+        '<div class="sm-cell"><strong>'+esc(r.external_session_id||'—')+'</strong><span>External session</span></div>'+
+      '</div>'+
+      (r.last_error ? '<div class="sm-pre">Error: '+esc(r.last_error)+'</div>' : '')+
+    '</article>';
+  }
+
+  async function load(){
+    if (isLoading) return;
+    isLoading = true;
+    listEl.innerHTML = '<div class="sm-empty"><div class="sm-empty-icon">⏳</div>Loading…</div>';
+    var url = new URL('/api/session-manager', window.location.origin);
+    var scope  = scopeEl.value.trim();
+    var status = statusEl.value.trim();
+    var taskId = taskIdEl.value.trim();
+    var limit  = parseInt(limitEl.value, 10) || 50;
+    if (scope)  url.searchParams.set('scope', scope);
+    if (status) url.searchParams.set('status', status);
+    if (taskId) url.searchParams.set('task_id', taskId);
+    url.searchParams.set('limit', limit);
+    try {
+      var res = await fetch(url.toString(), {cache:'no-store'});
+      var data = await res.json();
+      var rows = data.items || [];
+      renderStats(rows);
+      if (!rows.length) {
+        listEl.innerHTML = '<div class="sm-empty"><div class="sm-empty-icon">✅</div>No sessions match the current filter.</div>';
+      } else {
+        listEl.innerHTML = rows.map(renderItem).join('');
+        listEl.querySelectorAll('button[data-resume]').forEach(function(btn){
+          btn.addEventListener('click', async function(){
+            btn.disabled = true;
+            btn.textContent = 'Resuming…';
+            try {
+              var r = await fetch('/api/session-manager/'+encodeURIComponent(btn.dataset.resume)+'/resume', {method:'POST'});
+              var d = await r.json();
+              if (d.ok) { await load(); }
+              else { btn.textContent = d.error || 'Error'; btn.disabled = false; }
+            } catch(e) { btn.textContent = 'Failed'; btn.disabled = false; }
+          });
+        });
+      }
+    } catch(e){
+      listEl.innerHTML = '<div class="sm-empty"><div class="sm-empty-icon">⚠️</div>Failed to load sessions: '+esc(e.message)+'</div>';
+      statsEl.style.display = 'none';
+    } finally { isLoading = false; }
+  }
+
+  document.getElementById('sm-refresh').addEventListener('click', load);
+  scopeEl.addEventListener('change', load);
+  statusEl.addEventListener('change', load);
+  limitEl.addEventListener('change', load);
+  taskIdEl.addEventListener('keydown', function(e){ if(e.key==='Enter'){e.preventDefault();load();} });
+
+  /* auto-refresh every 30s */
+  refreshTimer = setInterval(function(){ if(!document.hidden) load(); }, 30000);
+
+  load();
+})();
+</script>
+{% endblock %}

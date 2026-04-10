@@ -193,12 +193,6 @@
         <label>Agent
           <select id="filter-agent" onchange="loadHistory()">
             <option value="">All</option>
-            <option value="c2-aider">C2b Aider</option>
-            <option value="c5-claude-code">C5b Claude Code</option>
-            <option value="c6-kilocode">C6b KiloCode</option>
-            <option value="c7-openclaw">C7bb OpenClaw</option>
-            <option value="c8-hermes">C8b Hermes</option>
-            <option value="c9-jokes">C9b (chat)</option>
           </select>
         </label>
         <label>Page
@@ -318,6 +312,21 @@
           if (!sparkMap[r.agent_id]) sparkMap[r.agent_id] = [];
           sparkMap[r.agent_id].push(r.tokens);
         });
+
+        // Populate agent filter dropdown dynamically (preserves current selection)
+        var agentSel = document.getElementById('filter-agent');
+        var prevVal = agentSel.value;
+        var knownIds = new Set(Array.from(agentSel.options).map(function(o){ return o.value; }));
+        agents.forEach(function(r) {
+          if (r.agent_id && !knownIds.has(r.agent_id)) {
+            var opt = document.createElement('option');
+            opt.value = r.agent_id;
+            opt.textContent = r.agent_id;
+            agentSel.appendChild(opt);
+            knownIds.add(r.agent_id);
+          }
+        });
+        if (prevVal) agentSel.value = prevVal;
 
         // Agent table
         var tbody = document.getElementById('agent-tbody');
