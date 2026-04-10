@@ -542,12 +542,13 @@ services:
       - C7B_URL=http://openclaw-cli:8080
       - C8_URL=http://hermes-agent:8080
       - DATABASE_PATH=/app/data/c9.db
-      # Legacy aliases — overridden by docker-compose.c3test.yml in c3btest project
-      # c3test active values: C10B→c10b-sandbox:8210, C11B→c11b-sandbox:8200, C12B→c12b-sandbox:8210
-      - C10_URL=http://c10b-sandbox:8210
-      - C11_URL=http://c11b-sandbox:8200
+      # Base compose service aliases. docker-compose.c3test.yml overrides these
+      # to the c10b/c11b service aliases when that override stack is active.
+      - C10_URL=http://c10-sandbox:8100
+      - C11_URL=http://c11-sandbox:8200
       - C12B_URL=http://c12b-sandbox:8210
-      - C10B_URL=http://c10b-sandbox:8210
+      - C10B_URL=http://c10-sandbox:8100
+      - C11B_URL=http://c11-sandbox:8200
     volumes:
       - ./c9_jokes:/app/c9_jokes
       - c9-data:/app/data
