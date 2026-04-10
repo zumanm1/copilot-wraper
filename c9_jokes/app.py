@@ -5462,6 +5462,297 @@ def _task_template_summary(template_key: str, template_data: dict | None = None)
     return _task_template_label(template_key)
 
 
+def _task_summary_clip(text: object, limit: int = 500) -> str:
+    value = re.sub(r"\s+", " ", str(text or "").strip())
+    if len(value) <= limit:
+        return value
+    return value[: max(0, limit - 1)].rstrip() + "..."
+
+
+def _task_live_doc_trace_for_task_id(task_id: str, task_name: str = "") -> str:
+    task_id = str(task_id or "")
+    for spec in TASK_TEMPLATE_LIVE_DOC_SPECS:
+        if spec.get("task_id") == task_id:
+            return str(spec.get("trace") or "")
+    match = re.search(r"\bTRACE-\d+\b", str(task_name or ""))
+    return match.group(0) if match else ""
+
+
+def _task_summary_value(value: object) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return "null"
+    if isinstance(value, (int, float)):
+        return str(value)
+    if isinstance(value, list):
+        shown = [_task_summary_value(item) for item in value[:5]]
+        suffix = ", ..." if len(value) > 5 else ""
+        return "[" + ", ".join(shown) + suffix + "]"
+    if isinstance(value, dict):
+        return "object"
+    return _task_summary_clip(value, 180)
+
+
+def _task_summary_from_object(payload: dict | None, fallback: str = "") -> str:
+    obj = payload or {}
+    summary = _task_summary_clip(obj.get("summary") or obj.get("title") or fallback, 650)
+    details = obj.get("details") if isinstance(obj.get("details"), dict) else {}
+    if details:
+        preferred = [
+            "location",
+            "temperature_c",
+            "condition",
+            "from_location",
+            "to_location",
+            "distance_km",
+            "average_temperature_c",
+            "min_temperature_c",
+            "max_temperature_c",
+            "average_distance_km",
+            "comparison",
+            "source_request",
+        ]
+        detail_bits = []
+        for key in preferred:
+            if key in details:
+                detail_bits.append(f"{key.replace('_', ' ')}={_task_summary_value(details.get(key))}")
+        for key, value in details.items():
+            if key in preferred or isinstance(value, dict):
+                continue
+            detail_bits.append(f"{key.replace('_', ' ')}={_task_summary_value(value)}")
+            if len(detail_bits) >= 8:
+                break
+        if detail_bits:
+            detail_text = "; ".join(detail_bits[:8])
+            summary = (summary + f" ({detail_text})").strip() if summary else detail_text
+    if obj.get("triggered") is not None:
+        triggered = "triggered" if obj.get("triggered") is True else "not triggered"
+        summary = f"{summary} Result: {triggered}.".strip() if summary else f"Result: {triggered}."
+    return _task_summary_clip(summary or fallback or "No result summary captured.", 900)
+
+
+def _task_result_object_from_output(output: dict | None) -> dict:
+    data = output or {}
+    for key in ("result", "parsed"):
+        value = data.get(key)
+        if isinstance(value, dict) and value:
+            return value
+    for key in ("text", "summary"):
+        text = str(data.get(key) or "").strip()
+        if not text:
+            continue
+        try:
+            parsed = _task_parse_json_payload(text)
+        except Exception:
+            parsed = None
+        if isinstance(parsed, dict) and parsed:
+            return parsed
+    return {}
+
+
+def _task_step_summary_payload(step: dict) -> dict:
+    kind = str(step.get("step_kind") or step.get("kind") or "step")
+    name = str(step.get("step_name") or step.get("name") or step.get("step_id") or "Step")
+    status = str(step.get("status") or "")
+    output = step.get("output") or {}
+    if not isinstance(output, dict):
+        output = {}
+    result = _task_result_object_from_output(output)
+    summary = ""
+    if kind == "trigger":
+        schedule = output.get("schedule_kind") or "manual"
+        summary = f"Trigger recorded a {schedule} run."
+    elif kind == "condition":
+        matched = bool(output.get("matched"))
+        details = output.get("details") if isinstance(output.get("details"), list) else []
+        failed = [item for item in details if isinstance(item, dict) and not item.get("passed")]
+        if matched:
+            summary = f"Condition matched using {output.get('operator') or 'AND'}."
+        elif failed:
+            first = failed[0]
+            summary = (
+                f"Condition did not match: {first.get('source') or 'source'} "
+                f"{first.get('field') or ''} expected {_task_summary_value(first.get('expected'))}, "
+                f"actual {_task_summary_value(first.get('actual'))}."
+            )
+        else:
+            summary = f"Condition did not match using {output.get('operator') or 'AND'}."
+    elif kind == "alert":
+        if output.get("skipped"):
+            summary = f"Alert skipped: {output.get('reason') or 'trigger not matched'}."
+            if result:
+                summary += " " + _task_summary_from_object(result)
+        else:
+            alert_id = output.get("alert_id")
+            title = output.get("title") or (result.get("title") if result else "")
+            summary = f"Alert created" + (f" #{alert_id}" if alert_id else "") + (f": {title}" if title else ".")
+            if result:
+                summary += " " + _task_summary_from_object(result)
+    elif kind == "complete":
+        summary = _task_summary_from_object(result, str(output.get("summary") or "Workflow completed."))
+    elif kind == "sandbox":
+        summary = _task_summary_clip(output.get("text") or output.get("stdout") or step.get("error_text") or "Sandbox step finished.", 900)
+        extras = []
+        if output.get("validation_status"):
+            extras.append(f"validation={output.get('validation_status')}")
+        if output.get("test_status"):
+            extras.append(f"test={output.get('test_status')}")
+        if extras:
+            summary = f"{summary} ({'; '.join(extras)})"
+    elif kind in {"agent", "multi-agent", "multi-agento"}:
+        summary = "Agent launch recorded."
+        if output.get("launch_url"):
+            summary += f" Launch URL: {output.get('launch_url')}"
+    elif result:
+        summary = _task_summary_from_object(result)
+    else:
+        summary = _task_summary_clip(output.get("text") or output.get("summary") or step.get("error_text") or "Step finished.", 900)
+    return {
+        "step_id": step.get("step_id") or step.get("id") or "",
+        "name": name,
+        "kind": kind,
+        "status": status,
+        "duration": step.get("duration_label") or "",
+        "summary": _task_summary_clip(summary, 1200),
+    }
+
+
+def _task_terminal_command_summaries(
+    *,
+    task_mode: str,
+    executor_prompt: str = "",
+    validation_command: str = "",
+    test_command: str = "",
+    run: dict | None = None,
+    steps: list[dict] | None = None,
+) -> list[dict]:
+    if (task_mode or "").strip().lower() != "sandbox":
+        return []
+    run = run or {}
+    sandbox_step = next((step for step in (steps or []) if (step.get("step_kind") or "") == "sandbox"), {})
+    step_output = sandbox_step.get("output") or {}
+    commands: list[dict] = []
+    if executor_prompt:
+        commands.append({
+            "label": "Executor command",
+            "command": executor_prompt,
+            "status": sandbox_step.get("status") or run.get("status") or "",
+            "result": _task_summary_clip(step_output.get("text") or run.get("output_excerpt") or run.get("error_text") or "", 700),
+        })
+    if validation_command:
+        commands.append({
+            "label": "Validation command",
+            "command": validation_command,
+            "status": run.get("validation_status") or step_output.get("validation_status") or "skipped",
+            "result": _task_summary_clip(run.get("validation_excerpt") or "", 700),
+        })
+    if test_command:
+        commands.append({
+            "label": "Test command",
+            "command": test_command,
+            "status": run.get("test_status") or step_output.get("test_status") or "skipped",
+            "result": _task_summary_clip(run.get("test_excerpt") or "", 700),
+        })
+    return commands
+
+
+def _task_completed_summary_payload(
+    *,
+    run: dict,
+    task_name: str,
+    task_mode: str,
+    task_template_summary: str,
+    task_template_data: dict | None = None,
+    planner_prompt: str = "",
+    executor_prompt: str = "",
+    validation_command: str = "",
+    test_command: str = "",
+    latest_alert: dict | None = None,
+    steps: list[dict] | None = None,
+    feedback: list[dict] | None = None,
+) -> dict:
+    steps = steps or []
+    feedback = feedback or []
+    latest_alert = latest_alert or {}
+    task_id = str(run.get("task_id") or "")
+    trace = _task_live_doc_trace_for_task_id(task_id, task_name)
+    summary_name = trace or task_name or task_id or "Tasked"
+    template_data = _task_inline_object(task_template_data)
+    request_text = (
+        str(template_data.get("source_request") or template_data.get("refined_request") or "").strip()
+        or _task_summary_clip(executor_prompt or planner_prompt or task_template_summary or task_name, 900)
+    )
+    complete_step = next((step for step in reversed(steps) if (step.get("step_kind") or "") == "complete"), {})
+    result = _task_result_object_from_output(complete_step.get("output") or {})
+    if not result:
+        for step in reversed(steps):
+            result = _task_result_object_from_output(step.get("output") or {})
+            if result:
+                break
+    result_text = _task_summary_from_object(
+        result,
+        str((complete_step.get("output") or {}).get("summary") or run.get("output_excerpt") or run.get("error_text") or ""),
+    )
+    condition_step = next((step for step in reversed(steps) if (step.get("step_kind") or "") == "condition"), {})
+    condition_text = ""
+    if condition_step:
+        condition_text = _task_step_summary_payload(condition_step)["summary"]
+    if latest_alert:
+        alert_text = (
+            f"Alert #{latest_alert.get('id')} is {latest_alert.get('status') or 'open'}: "
+            f"{latest_alert.get('title') or 'Task alert'}."
+        )
+        if latest_alert.get("summary"):
+            alert_text += " " + _task_summary_clip(latest_alert.get("summary"), 650)
+    else:
+        alert_step = next((step for step in reversed(steps) if (step.get("step_kind") or "") == "alert"), {})
+        if alert_step and (alert_step.get("output") or {}).get("skipped"):
+            alert_text = "No alert was created because the trigger condition was not met."
+        else:
+            alert_text = "No alert is attached to this run."
+    status = str(run.get("status") or "unknown")
+    if status == "completed":
+        status_text = "completed"
+    elif status == "failed":
+        status_text = "failed"
+    elif status == "cancelled":
+        status_text = "was cancelled"
+    else:
+        status_text = status
+    headline = f"{summary_name} {status_text}. {result_text}"
+    if condition_text:
+        headline = f"{headline} {condition_text}"
+    step_summaries = [_task_step_summary_payload(step) for step in steps]
+    terminal_commands = _task_terminal_command_summaries(
+        task_mode=task_mode,
+        executor_prompt=executor_prompt,
+        validation_command=validation_command,
+        test_command=test_command,
+        run=run,
+        steps=steps,
+    )
+    feedback_text = [
+        _task_summary_clip(item.get("summary") or item.get("status") or "", 500)
+        for item in feedback
+        if _task_summary_clip(item.get("summary") or item.get("status") or "", 500)
+    ]
+    return {
+        "title": f"{summary_name} Tasked summary",
+        "trace": trace,
+        "headline": _task_summary_clip(headline, 1400),
+        "request": _task_summary_clip(request_text, 1200),
+        "template": _task_summary_clip(task_template_summary, 700),
+        "result": result_text,
+        "condition": condition_text,
+        "alert": _task_summary_clip(alert_text, 900),
+        "steps": step_summaries,
+        "terminal_commands": terminal_commands,
+        "feedback": feedback_text,
+        "generated_from": "Task definition, submitted prompt/template, workflow step outputs, alert state, terminal command metadata, and agent-produced result summaries.",
+    }
+
+
 def _compile_task_output_text(steps: list[dict], run: dict | None = None) -> str:
     """Extract and compile readable output text from task step results."""
     parts: list[str] = []
@@ -8301,7 +8592,26 @@ async def _task_resume_workflow(
                 latest_alerts = [_task_alert_to_dict(r) for r in rows]
             except sqlite3.Error:
                 latest_alerts = []
-            return _task_mark_terminal(task_row, run_id, status="completed", text=context.get("last_text") or "Workflow completed", alert_id=(latest_alerts[0]["id"] if latest_alerts else None), current_step_id=current_step_id, terminal_reason="workflow-complete", next_run_at=next_run_at)
+            step_items = _task_fetch_step_results(run_id)
+            latest_alert = latest_alerts[0] if latest_alerts else None
+            tasked_summary = _task_completed_summary_payload(
+                run={"id": run_id, "task_id": task_row.get("id") or "", "status": "completed", "output_excerpt": context.get("last_text") or ""},
+                task_name=task_row.get("name") or str(task_row.get("id") or "Tasked"),
+                task_mode=task_row.get("mode") or "chat",
+                task_template_summary=_task_template_summary(task_row.get("template_key") or "", _task_inline_object(task_row.get("template_data_json"))),
+                task_template_data=_task_inline_object(task_row.get("template_data_json")),
+                planner_prompt=task_row.get("planner_prompt") or "",
+                executor_prompt=task_row.get("executor_prompt") or "",
+                validation_command=task_row.get("validation_command") or "",
+                test_command=task_row.get("test_command") or "",
+                latest_alert=latest_alert,
+                steps=step_items,
+                feedback=_task_fetch_feedback(run_id),
+            )
+            out["summary"] = tasked_summary["headline"]
+            out["tasked_summary"] = tasked_summary
+            _task_finish_step_result(result_id, status="completed", output=out)
+            return _task_mark_terminal(task_row, run_id, status="completed", text=tasked_summary["headline"] or context.get("last_text") or "Workflow completed", alert_id=(latest_alerts[0]["id"] if latest_alerts else None), current_step_id=current_step_id, terminal_reason="workflow-complete", next_run_at=next_run_at)
         _task_finish_step_result(result_id, status="failed", output={}, error_text=f"Unsupported step kind: {kind}")
         return _task_mark_terminal(task_row, run_id, status="failed", error_text=f"Unsupported step kind: {kind}", current_step_id=current_step_id, terminal_reason="unsupported-step", next_run_at=next_run_at)
     return _task_mark_terminal(task_row, run_id, status="completed", text=context.get("last_text") or "Workflow completed", current_step_id=steps[-1]["id"], terminal_reason="workflow-complete", next_run_at=next_run_at)
@@ -9857,7 +10167,10 @@ async def api_task_completed(task_id: str = "", status: str = "completed,failed,
             rows = conn.execute(
                 "SELECT r.*, t.name AS task_name, t.mode AS task_mode, t.template_key AS task_template_key, "
                 "t.template_data_json AS task_template_data_json, t.executor_target AS task_executor_target, "
-                "t.archived_at AS task_archived_at, t.alert_policy_json AS task_alert_policy_json "
+                "t.archived_at AS task_archived_at, t.alert_policy_json AS task_alert_policy_json, "
+                "t.planner_prompt AS task_planner_prompt, t.executor_prompt AS task_executor_prompt, "
+                "t.validation_command AS task_validation_command, t.test_command AS task_test_command, "
+                "t.trigger_mode AS task_trigger_mode, t.trigger_text AS task_trigger_text, t.context_handoff AS task_context_handoff "
                 "FROM task_runs r LEFT JOIN task_definitions t ON t.id=r.task_id "
                 f"WHERE {' AND '.join(where)} ORDER BY COALESCE(r.completed_at, r.finished_at, r.created_at) DESC LIMIT ?",
                 (*params, limit),
@@ -9883,19 +10196,47 @@ async def api_task_completed(task_id: str = "", status: str = "completed,failed,
                     (run["id"],),
                 ).fetchall()
                 recovery_sessions = _session_manager_list(task_id=str(run.get("task_id") or ""), run_id=str(run.get("id") or ""), limit=4)
+                latest_alert = _task_alert_to_dict(latest_alert_row) if latest_alert_row else None
+                steps = [_task_step_result_to_dict(item) for item in step_rows]
+                feedback = [_task_feedback_to_dict(item) for item in feedback_rows]
+                template_data = _task_inline_object(row["task_template_data_json"])
+                template_summary = _task_template_summary(row["task_template_key"] or "", template_data)
+                task_name = row["task_name"] or run.get("task_id") or "Tasked"
+                task_mode = row["task_mode"] or run.get("mode") or "chat"
                 items.append({
                     "run": run,
-                    "task_name": row["task_name"] or run.get("task_id") or "Tasked",
-                    "task_mode": row["task_mode"] or run.get("mode") or "chat",
+                    "task_name": task_name,
+                    "task_mode": task_mode,
                     "task_template_key": row["task_template_key"] or "",
-                    "task_template_data": _task_inline_object(row["task_template_data_json"]),
+                    "task_template_data": template_data,
                     "task_template_label": _task_template_label(row["task_template_key"] or ""),
-                    "task_template_summary": _task_template_summary(row["task_template_key"] or "", _task_inline_object(row["task_template_data_json"])),
+                    "task_template_summary": template_summary,
                     "task_executor_target": _task_sandbox_target(row["task_executor_target"]) if row["task_executor_target"] else "",
+                    "task_planner_prompt": row["task_planner_prompt"] or "",
+                    "task_executor_prompt": row["task_executor_prompt"] or "",
+                    "task_validation_command": row["task_validation_command"] or "",
+                    "task_test_command": row["task_test_command"] or "",
+                    "task_trigger_mode": row["task_trigger_mode"] or "",
+                    "task_trigger_text": row["task_trigger_text"] or "",
+                    "task_context_handoff": row["task_context_handoff"] or "",
                     "task_archived": bool(row["task_archived_at"]),
-                    "latest_alert": _task_alert_to_dict(latest_alert_row) if latest_alert_row else None,
-                    "feedback": [_task_feedback_to_dict(item) for item in feedback_rows],
-                    "steps": [_task_step_result_to_dict(item) for item in step_rows],
+                    "latest_alert": latest_alert,
+                    "feedback": feedback,
+                    "steps": steps,
+                    "tasked_summary": _task_completed_summary_payload(
+                        run=run,
+                        task_name=task_name,
+                        task_mode=task_mode,
+                        task_template_summary=template_summary,
+                        task_template_data=template_data,
+                        planner_prompt=row["task_planner_prompt"] or "",
+                        executor_prompt=row["task_executor_prompt"] or "",
+                        validation_command=row["task_validation_command"] or "",
+                        test_command=row["task_test_command"] or "",
+                        latest_alert=latest_alert,
+                        steps=steps,
+                        feedback=feedback,
+                    ),
                     "recovery_sessions": recovery_sessions,
                     "latest_recovery_session": recovery_sessions[0] if recovery_sessions else None,
                     "completed_url": f"/task-completed?task_id={quote(str(run.get('task_id') or ''))}",

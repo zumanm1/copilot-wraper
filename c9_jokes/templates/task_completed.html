@@ -25,7 +25,17 @@
 .tc-actions{display:flex;gap:.45rem;flex-wrap:wrap}
 .tc-detail{border:1px solid var(--border,#333);border-radius:14px;background:#151515;padding:.8rem}
 .tc-detail h3{margin:0 0 .55rem 0;font-size:.88rem}
+.tc-detail h4{margin:.7rem 0 .35rem 0;font-size:.78rem;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}
 .tc-pre{font-size:.76rem;color:var(--fg);line-height:1.5;white-space:pre-wrap;word-break:break-word}
+.tc-agent-summary{background:linear-gradient(135deg,rgba(10,132,255,.1),rgba(48,209,88,.06));border-color:rgba(10,132,255,.28)}
+.tc-summary-headline{font-size:.84rem;line-height:1.55;color:var(--fg);margin-bottom:.55rem}
+.tc-summary-row{display:grid;gap:.2rem;margin-top:.55rem}
+.tc-summary-label{font-size:.68rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.tc-summary-value{font-size:.78rem;color:var(--fg);line-height:1.5;white-space:pre-wrap;word-break:break-word}
+.tc-step-list{display:grid;gap:.4rem;margin-top:.35rem}
+.tc-step-line{display:grid;grid-template-columns:minmax(120px,220px) 1fr;gap:.55rem;background:rgba(0,0,0,.22);border:1px solid rgba(255,255,255,.06);border-radius:10px;padding:.48rem .55rem}
+.tc-step-name{font-size:.74rem;color:var(--fg)}
+.tc-step-result{font-size:.74rem;color:var(--muted);line-height:1.45}
 .tc-empty{font-size:.82rem;color:var(--muted);padding:.8rem;text-align:center}
 .tc-empty-icon{font-size:2.5rem;margin-bottom:.5rem;opacity:.5}
 .tc-empty-text{font-size:.88rem}
@@ -221,16 +231,18 @@
     if (format === 'json') {
       content = JSON.stringify(lastExportData.map(function(r) {
         var run = r.run || {};
-        return { task_name: r.task_name, task_id: run.task_id, run_id: run.id, status: run.status, duration: run.duration_label, completed_at: run.completed_at, executor_target: r.task_executor_target, terminal_reason: run.terminal_reason };
+        var summary = r.tasked_summary || {};
+        return { task_name: r.task_name, task_id: run.task_id, run_id: run.id, status: run.status, duration: run.duration_label, completed_at: run.completed_at, executor_target: r.task_executor_target, terminal_reason: run.terminal_reason, tasked_summary: summary.headline || summary.result || '' };
       }), null, 2);
       filename = 'task-completed-' + new Date().toISOString().slice(0,10) + '.json';
       type = 'application/json';
     } else {
-      var headers = ['Task Name', 'Task ID', 'Run ID', 'Status', 'Duration', 'Completed At', 'Executor', 'Terminal Reason'];
+      var headers = ['Task Name', 'Task ID', 'Run ID', 'Status', 'Duration', 'Completed At', 'Executor', 'Terminal Reason', 'Tasked Summary'];
       var csvRows = [headers.join(',')];
       lastExportData.forEach(function(r) {
         var run = r.run || {};
-        csvRows.push([r.task_name, run.task_id, run.id, run.status, run.duration_label, run.completed_at, r.task_executor_target, (run.terminal_reason || '').replace(/,/g, ';')].join(','));
+        var summary = r.tasked_summary || {};
+        csvRows.push([r.task_name, run.task_id, run.id, run.status, run.duration_label, run.completed_at, r.task_executor_target, (run.terminal_reason || '').replace(/,/g, ';'), (summary.headline || summary.result || '').replace(/,/g, ';')].join(','));
       });
       content = csvRows.join('\n');
       filename = 'task-completed-' + new Date().toISOString().slice(0,10) + '.csv';
@@ -249,18 +261,29 @@
     if (!res.ok || data.ok === false) throw new Error(data.error || ('Task action failed (' + res.status + ')'));
     return data;
   }
-  function finalResultText(item) {
-    var steps = item.steps || [];
-    var complete = steps.find(function(step){ return step.step_kind === 'complete'; }) || {};
-    var aggregate = steps.slice().reverse().find(function(step){
-      var out = step.output || {};
-      return out.parsed && out.parsed.details && (out.parsed.details.average_distance_km !== undefined || out.parsed.details.average_temperature_c !== undefined);
-    }) || {};
-    var output = complete.output || {};
-    var result = output.result || ((aggregate.output || {}).parsed) || {};
-    if (result && Object.keys(result).length) return JSON.stringify(result, null, 2);
-    if (output.summary) return output.summary;
-    return '';
+  function renderTaskedSummary(item) {
+    var summary = item.tasked_summary || {};
+    var run = item.run || {};
+    if (!summary.headline && !summary.result && !summary.request) return '';
+    var stepLines = (summary.steps || []).map(function(step, idx) {
+      var name = (idx + 1) + '. ' + (step.name || step.step_id || 'Step') + ' · ' + (step.kind || 'step') + ' · ' + (step.status || '—');
+      return '<div class="tc-step-line"><div class="tc-step-name">' + esc(name) + '</div><div class="tc-step-result">' + esc(step.summary || 'No result summary captured.') + '</div></div>';
+    }).join('');
+    var commandLines = (summary.terminal_commands || []).map(function(cmd) {
+      return '<div class="tc-step-line"><div class="tc-step-name">' + esc((cmd.label || 'Command') + ' · ' + (cmd.status || '—')) + '</div><div class="tc-step-result"><strong>' + esc(cmd.command || '—') + '</strong>' + (cmd.result ? '<br>' + esc(cmd.result) : '') + '</div></div>';
+    }).join('');
+    return '<div class="tc-detail tc-agent-summary">' +
+      '<h3>' + esc(summary.title || 'Tasked summary') + '</h3>' +
+      '<div class="tc-summary-headline">' + esc(summary.headline || summary.result || 'Summary pending.') + '</div>' +
+      '<div class="tc-summary-row"><div class="tc-summary-label">Tasked ID / run</div><div class="tc-summary-value">Task ID: ' + esc(run.task_id || '—') + '\nRun ID: ' + esc(run.id || '—') + '\nStatus: ' + esc(run.status || '—') + '</div></div>' +
+      (summary.request ? '<div class="tc-summary-row"><div class="tc-summary-label">Input request / prompt</div><div class="tc-summary-value">' + esc(summary.request) + '</div></div>' : '') +
+      (summary.template ? '<div class="tc-summary-row"><div class="tc-summary-label">Template</div><div class="tc-summary-value">' + esc(summary.template) + '</div></div>' : '') +
+      (summary.alert ? '<div class="tc-summary-row"><div class="tc-summary-label">Alert outcome</div><div class="tc-summary-value">' + esc(summary.alert) + '</div></div>' : '') +
+      (summary.condition ? '<div class="tc-summary-row"><div class="tc-summary-label">Condition outcome</div><div class="tc-summary-value">' + esc(summary.condition) + '</div></div>' : '') +
+      (stepLines ? '<h4>Sub-task results</h4><div class="tc-step-list">' + stepLines + '</div>' : '') +
+      (commandLines ? '<h4>Terminal commands</h4><div class="tc-step-list">' + commandLines + '</div>' : '') +
+      '<div class="tc-summary-row"><div class="tc-summary-label">Summary source</div><div class="tc-summary-value">' + esc(summary.generated_from || 'Tasked run context.') + '</div></div>' +
+    '</div>';
   }
   function renderItem(item) {
     var run = item.run || {};
@@ -272,7 +295,8 @@
     var statusCls = runStatus.toLowerCase().replace(/[^a-z-]/g, '');
     var alertStatus = latestAlert.status || '—';
     var alertCls = alertStatus.toLowerCase().replace(/[^a-z-]/g, '');
-    var finalResult = finalResultText(item);
+    var taskedSummary = renderTaskedSummary(item);
+    var summaryHeadline = ((item.tasked_summary || {}).headline || (item.tasked_summary || {}).result || 'See Tasked summary section above.');
     return '<article class="tc-item">' +
       '<div class="tc-item-header">' +
         '<div class="tc-item-title"><strong>' + esc(item.task_name || run.task_id || 'Tasked') + '</strong><div class="tc-item-meta">Task ID: ' + esc(run.task_id || '—') + ' · Run ID: ' + esc(run.id || '—') + ' · Trace: ' + esc(run.trace_id || run.task_id || '—') + '</div><div class="tc-item-meta">Template: ' + esc(templateLabel) + ' · ' + esc(templateSummary) + '</div></div>' +
@@ -294,8 +318,8 @@
         '<div class="tc-stat"><strong><span class="alerts-badge ' + esc(alertCls) + '">' + esc(alertStatus) + '</span></strong><span>Latest alert</span></div>' +
         '<div class="tc-stat"><strong>' + esc(item.task_archived ? 'yes' : 'no') + '</strong><span>Definition archived</span></div>' +
       '</div>' +
-      '<div class="tc-detail"><h3>Completion trace</h3><div class="tc-pre">Finished: ' + esc(fmtTs(run.completed_at || run.finished_at)) + '\nReason: ' + esc(run.terminal_reason || '—') + '\nTemplate: ' + esc(templateLabel) + '\nTemplate summary: ' + esc(templateSummary) + '\nAlert ID: ' + esc(latestAlert.id || '—') + '\nAlert status: ' + esc(latestAlert.status || '—') + '\nRecovery: ' + esc(((item.latest_recovery_session || {}).status) || 'steady') + '\nRecovery error: ' + esc(((item.latest_recovery_session || {}).last_error) || '—') + '\n\nFeedback summary:\n' + esc(feedbackSummary || 'No agent feedback on this run.') + '</div></div>' +
-      (finalResult ? '<div class="tc-detail"><h3>Final result</h3><div class="tc-pre">' + esc(finalResult) + '</div></div>' : '') +
+      taskedSummary +
+      '<div class="tc-detail"><h3>Completion trace</h3><div class="tc-pre">Finished: ' + esc(fmtTs(run.completed_at || run.finished_at)) + '\nReason: ' + esc(run.terminal_reason || '—') + '\nTemplate: ' + esc(templateLabel) + '\nTemplate summary: ' + esc(templateSummary) + '\nTasked summary: ' + esc(summaryHeadline) + '\nAlert ID: ' + esc(latestAlert.id || '—') + '\nAlert status: ' + esc(latestAlert.status || '—') + '\nRecovery: ' + esc(((item.latest_recovery_session || {}).status) || 'steady') + '\nRecovery error: ' + esc(((item.latest_recovery_session || {}).last_error) || '—') + '\n\nFeedback summary:\n' + esc(feedbackSummary || 'No agent feedback on this run.') + '</div></div>' +
     '</article>';
   }
   async function loadCompleted() {

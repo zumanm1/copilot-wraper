@@ -413,6 +413,8 @@ class TestC9PageRoutes:
         r = c9_app.get("/task-completed")
         assert r.status_code == 200
         assert "/api/task-completed" in r.text
+        assert "Tasked summary" in r.text
+        assert "Final result" not in r.text
 
     def test_live_docs_page_returns_200(self, c9_app):
         r = c9_app.get("/tasked-live-doc")
@@ -554,6 +556,17 @@ class TestC9PageRoutes:
             completed_item = completed_resp.json()["items"][0]
             assert completed_item["run"]["status"] == "completed"
             assert len(completed_item["steps"]) == 8
+            tasked_summary = completed_item["tasked_summary"]
+            assert f"TRACE-{801 if expect_alert else 802}" in tasked_summary["title"]
+            assert "check current weather in New York" in tasked_summary["request"]
+            assert "average distance 2252.0" in tasked_summary["headline"]
+            assert "LA to San Francisco" in tasked_summary["headline"]
+            assert len(tasked_summary["steps"]) == 8
+            assert not tasked_summary["headline"].lstrip().startswith("{")
+            if expect_alert:
+                assert "Alert #" in tasked_summary["alert"]
+            else:
+                assert "No alert was created" in tasked_summary["alert"]
 
         alerts = c9_app.get("/api/alerts?limit=500").json()["alerts"]
         assert any(alert["task_id"] == "task_trace_801" for alert in alerts)
@@ -1658,6 +1671,12 @@ class TestC9TaskedWorkflow:
         assert len(items) == 1
         assert items[0]["run"]["status"] == "completed"
         assert items[0]["latest_alert"] is None
+        tasked_summary = items[0]["tasked_summary"]
+        assert "Check weather and return JSON" in tasked_summary["request"]
+        assert "Temperature is 8C" in tasked_summary["headline"]
+        assert "No alert was created" in tasked_summary["alert"]
+        assert any(step["kind"] == "complete" for step in tasked_summary["steps"])
+        assert not tasked_summary["headline"].lstrip().startswith("{")
 
     def test_task_stop_releases_claim_and_allows_rerun(self, c9_app):
         import c9_jokes.app as c9_mod
@@ -1771,6 +1790,11 @@ class TestC9TaskedWorkflow:
         assert len(items) == 1
         assert items[0]["run"]["status"] == "completed"
         assert items[0]["latest_alert"] is None
+        tasked_summary = items[0]["tasked_summary"]
+        commands = tasked_summary["terminal_commands"]
+        assert any(item["label"] == "Executor command" and item["command"] == "python3 smoke.py" for item in commands)
+        assert any(item["label"] == "Validation command" and item["command"] == "python3 -m py_compile smoke.py" for item in commands)
+        assert any(item["label"] == "Test command" and item["command"] == "python3 smoke.py" for item in commands)
 
     def test_builtin_weather_template_migrates_legacy_prompt(self, c9_app):
         import c9_jokes.app as c9_mod
